@@ -1,0 +1,25 @@
+{
+	"name": "@sqlnest/frontend",
+	"private": true,
+	"version": "0.0.1",
+	"type": "module",
+	"scripts": {
+		"dev": "vite",
+		"preview": "vite preview"
+	},
+	"dependencies": {
+		"@sqlnest/design-system": "workspace:*",
+		"react": "^19.1.1",
+		"react-dom": "^19.1.1"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "catalog:",
+		"@types/react": "^19.1.13",
+		"@types/react-dom": "^19.1.9",
+		"@vitejs/plugin-react": "^5.0.3",
+		"globals": "^16.4.0",
+		"typescript": "catalog:",
+		"typescript-eslint": "^8.44.0",
+		"vite": "npm:rolldown-vite@7.1.12"
+	}
+}
