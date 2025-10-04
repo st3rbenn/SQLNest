@@ -1,0 +1,15 @@
+{
+	"extends": "fastify-tsconfig",
+	"compilerOptions": {
+		"outDir": "dist",
+		"rootDir": "src",
+		"sourceMap": true,
+		"typeRoots": ["./node_modules/@types", "./src/types"],
+		"module": "esnext",
+		"moduleResolution": "bundler",
+		"target": "ES2022",
+		"esModuleInterop": true,
+		"strict": true
+	},
+	"include": ["src/**/*.ts", "src/types/**/*.d.ts", "./globals.d.ts"]
+}

@@ -1,13 +1,11 @@
 {
 	"name": "sqlnest",
-	"version": "1.0.0",
-	"description": "",
+	"version": "0.0.1",
 	"scripts": {
 		"preinstall": "npx only-allow pnpm",
 		"check": "biome check --write ."
 	},
 	"author": "Anthonin COLAS <anthonincolaspro@gmail.com>",
-	"license": "ISC",
 	"packageManager": "pnpm@10.17.1",
 	"devDependencies": {
 		"@biomejs/biome": "catalog:",
