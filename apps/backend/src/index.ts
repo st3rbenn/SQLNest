@@ -20,7 +20,7 @@ const fastify = Fastify({
 
 // register plugins
 fastify.register(cors, {
-	origin: [process.env.FRONTEND_URL as string],
+	origin: ["http://localhost:3000"],
 	methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
 });
 

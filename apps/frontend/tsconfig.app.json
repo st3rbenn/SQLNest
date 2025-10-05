@@ -19,7 +19,6 @@
 
 		/* Monorepo paths */
 		"paths": {
-			"@/*": ["./src/*"],
 			"@sqlnest/design-system": ["../../packages/design-system/src/index.ts"],
 			"@sqlnest/design-system/*": ["../../packages/design-system/src/*"]
 		},

@@ -12,13 +12,9 @@ export default function healthRoute(fastify: FastifyInstance) {
 			schema: {
 				response: {
 					200: GetHealthResponseSchema,
-					503: {
-						...GetHealthResponseSchema,
-						status: { const: "ERROR" },
-					},
 				},
 			},
 		},
-		async (request, reply) => getHealth(),
+		async () => getHealth(),
 	);
 }

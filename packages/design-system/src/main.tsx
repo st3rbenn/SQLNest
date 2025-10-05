@@ -1,6 +1,8 @@
 import "@mantine/core/styles.css";
+import "@mantine/notifications/styles.css";
 
 import { MantineProvider } from "@mantine/core";
+import { Notifications } from "@mantine/notifications";
 import { theme } from "./theme";
 
 export const DesignSystemProvider = ({
@@ -8,5 +10,10 @@ export const DesignSystemProvider = ({
 }: {
 	children: React.ReactNode;
 }) => {
-	return <MantineProvider theme={theme}>{children}</MantineProvider>;
+	return (
+		<MantineProvider theme={theme}>
+			<Notifications />
+			{children}
+		</MantineProvider>
+	);
 };
