@@ -2,7 +2,7 @@
 	"extends": "fastify-tsconfig",
 	"compilerOptions": {
 		"outDir": "dist",
-		"rootDir": "src",
+		"rootDir": ".",
 		"sourceMap": true,
 		"typeRoots": ["./node_modules/@types", "./src/types"],
 		"module": "esnext",
@@ -11,5 +11,10 @@
 		"esModuleInterop": true,
 		"strict": true
 	},
-	"include": ["src/**/*.ts", "src/types/**/*.d.ts", "./globals.d.ts"]
+	"include": [
+		"src/**/*.ts",
+		"src/types/**/*.d.ts",
+		"./globals.d.ts",
+		"vitest.config.ts"
+	]
 }

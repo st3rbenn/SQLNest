@@ -1,10 +1,10 @@
 packages:
-  - "apps/*"
-  - "packages/*"
+  - apps/*
+  - packages/*
 
 catalog:
-  "@biomejs/biome": ^2.2.4
-  "typescript": ^5.8.3
-  "zod": ^4.1.11
-  "vitest": ^3.2.4
-  "@tanstack/react-router": ^1.132.37
+  '@biomejs/biome': ^2.2.5
+  '@tanstack/react-router': ^1.132.37
+  typescript: ^5.9.3
+  vitest: ^3.2.4
+  zod: ^4.1.11
