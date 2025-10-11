@@ -1,8 +1,14 @@
-import Parser, { SqlMode, MySQLQueryType } from "ts-mysql-parser";
+import MySQLParser, {
+	MySQLQueryType,
+	ParseResult,
+	SqlMode,
+} from "ts-mysql-parser";
+const ParserMod = await import("ts-mysql-parser");
+const Parser = ParserMod.default;
 import { logger } from "..";
 
 export class MySQLParserWrapper {
-	private parser: Parser;
+	private parser: MySQLParser;
 
 	public static _instance: MySQLParserWrapper | null = null;
 	public static instance(): MySQLParserWrapper {
@@ -24,10 +30,20 @@ export class MySQLParserWrapper {
 
 		switch (queryType) {
 			case MySQLQueryType.QtSelect:
-				logger.info("Parsed a SELECT query");
+				this.parseSelectQuery(result);
 				break;
 			default:
 				logger.warn("Unknown query type: " + queryType);
 		}
+	}
+
+	public parseSelectQuery(result: ParseResult) {
+		logger.info("Parsed a SELECT query");
+
+		console.log(result);
+		// const tableRef = this.parser.getNodeAtOffset(result, 18);
+		// console.log(tableRef); // table 'users'
+		// const columnRef = this.parser.getNodeAtOffset(result, 7);
+		// console.log(columnRef); // column 'id'
 	}
 }
