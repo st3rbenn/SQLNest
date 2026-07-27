@@ -94,8 +94,10 @@ export type {
 	PlanExpr,
 	PlanProjectField,
 	PlanSortKey,
+	SqlDecimal,
 	SqlValue
 } from "./ir/plan";
+export { isSqlDecimal } from "./ir/plan";
 export type { OperationKind } from "./lexer/dictionary";
 // --- API publique bas niveau (chaque étage du pipeline) ---
 export { tokenize } from "./lexer/lexer";
@@ -107,6 +109,9 @@ export type {
 	DeleteStatement,
 	Expr,
 	FieldSelection,
+	InsertField,
+	InsertRow,
+	InsertStatement,
 	LiteralValue,
 	Query,
 	SortKey,

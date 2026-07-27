@@ -5,6 +5,7 @@ import type {
 	PlanProjectField,
 	PlanSortKey
 } from "../ir/plan";
+import { isSqlDecimal } from "../ir/plan";
 import type { CompensationOp } from "../planner/planner";
 
 /** Une ligne de résultat, engine-agnostique. */
@@ -308,6 +309,10 @@ function numericOf(value: unknown): number | bigint | null {
 	}
 	if (typeof value === "bigint") {
 		return value;
+	}
+	// Décimal exact → number pour la comparaison en mémoire (JS n'a pas de BigDecimal).
+	if (isSqlDecimal(value)) {
+		return Number(value.raw);
 	}
 	return numericString(value);
 }

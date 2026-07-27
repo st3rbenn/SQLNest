@@ -4,6 +4,7 @@ import type {
 	DeleteStatement,
 	Expr,
 	FieldSelection,
+	InsertStatement,
 	LiteralValue,
 	Query,
 	SortKey,
@@ -53,10 +54,13 @@ export function lower(query: Query): LogicalPlan {
 	return plan;
 }
 
-/** Abaisse une mutation (update / delete) en [[MutationPlan]]. Réutilise `lowerExpr`. */
+/** Abaisse une mutation (insert / update / delete) en [[MutationPlan]]. */
 export function lowerMutation(
-	statement: UpdateStatement | DeleteStatement
+	statement: InsertStatement | UpdateStatement | DeleteStatement
 ): MutationPlan {
+	if (statement.operation === "insert") {
+		return lowerInsert(statement);
+	}
 	if (statement.operation === "update") {
 		assertUniqueAssignments(statement.assignments);
 		const assignments = statement.assignments.map((assignment) => ({
@@ -79,6 +83,68 @@ export function lowerMutation(
 				predicate: lowerExpr(statement.predicate)
 			}
 		: { op: "delete", collection: statement.collection };
+}
+
+/**
+ * Abaisse un `insert`. Toutes les lignes doivent partager le MÊME jeu de colonnes
+ * (un INSERT multi-lignes a une liste de colonnes unique). Les valeurs doivent
+ * être des littéraux. Colonnes absentes d'un document = document hétérogène → erreur.
+ */
+function lowerInsert(statement: InsertStatement): MutationPlan {
+	const firstRow = statement.rows[0];
+	if (firstRow === undefined) {
+		throw new SnqlError("'add' sans document", "lower_insert_empty");
+	}
+	const columns = firstRow.fields.map((field) => field.column);
+	const columnSet = new Set(columns);
+	if (columnSet.size !== columns.length) {
+		throw new SnqlError(
+			"Clé dupliquée dans un document d'insertion",
+			"lower_insert_duplicate_key"
+		);
+	}
+
+	const rows = statement.rows.map((row) => {
+		const byColumn = new Map<string, Expr>();
+		for (const field of row.fields) {
+			if (byColumn.has(field.column)) {
+				throw new SnqlError(
+					`Clé '${field.column}' dupliquée dans un document d'insertion`,
+					"lower_insert_duplicate_key"
+				);
+			}
+			byColumn.set(field.column, field.value);
+		}
+		if (byColumn.size !== columnSet.size) {
+			throw new SnqlError(
+				"Documents d'insertion à colonnes hétérogènes (colonnes identiques requises)",
+				"lower_insert_heterogeneous"
+			);
+		}
+		return columns.map((column) => {
+			const value = byColumn.get(column);
+			if (value === undefined) {
+				throw new SnqlError(
+					`Colonne '${column}' absente d'un document d'insertion`,
+					"lower_insert_heterogeneous"
+				);
+			}
+			return literalOf(value, column);
+		});
+	});
+
+	return { op: "insert", collection: statement.collection, columns, rows };
+}
+
+/** Une valeur d'insertion doit être un littéral (nombre, chaîne, booléen, null). */
+function literalOf(value: Expr, column: string): SqlValue {
+	if (value.type !== "literal") {
+		throw new SnqlError(
+			`La valeur de '${column}' doit être un littéral (nombre, chaîne, booléen, null)`,
+			"lower_insert_non_literal"
+		);
+	}
+	return literalToValue(value.value);
 }
 
 /**
@@ -353,10 +419,13 @@ function literalToValue(lit: LiteralValue): SqlValue {
 	}
 }
 
-/** Préserve la précision : entier hors plage sûre → bigint ; sinon number. */
-function numberRawToValue(raw: string): number | bigint {
+/**
+ * Préserve la précision : décimal → `SqlDecimal` (texte brut exact) ; entier hors
+ * plage sûre → bigint ; sinon number. On ne passe JAMAIS un décimal par `Number()`.
+ */
+function numberRawToValue(raw: string): SqlValue {
 	if (FLOAT_HINT.test(raw)) {
-		return Number(raw);
+		return { kind: "decimal", raw };
 	}
 	const asNumber = Number(raw);
 	return Number.isSafeInteger(asNumber) ? asNumber : BigInt(raw);

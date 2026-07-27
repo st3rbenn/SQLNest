@@ -6,6 +6,9 @@ import type {
 	DeleteStatement,
 	Expr,
 	FieldSelection,
+	InsertField,
+	InsertRow,
+	InsertStatement,
 	Query,
 	SortKey,
 	Source,
@@ -51,12 +54,98 @@ function parseStatement(cursor: TokenCursor): Statement {
 		case "delete":
 			return parseDelete(cursor, verbTok);
 		case "insert":
-			throw new SnqlError(
-				"L'insertion (add / create) arrive dans la slice suivante (4b).",
-				"parse_unsupported_operation",
-				verbTok.span
-			);
+			return parseInsert(cursor, verbTok);
 	}
+}
+
+function parseInsert(cursor: TokenCursor, verbTok: Token): InsertStatement {
+	const rows: InsertRow[] = [];
+	const opener = cursor.peek();
+	if (opener.kind === "lbracket") {
+		cursor.next();
+		rows.push(parseDocument(cursor));
+		while (cursor.peek().kind === "comma") {
+			cursor.next();
+			rows.push(parseDocument(cursor));
+		}
+		cursor.expect("rbracket", "']' pour fermer la liste de documents");
+	} else if (opener.kind === "lbrace") {
+		rows.push(parseDocument(cursor));
+	} else {
+		throw new SnqlError(
+			"'add' attend un document { … } ou une liste [ { … }, … ]",
+			"parse_insert_expected_doc",
+			opener.span
+		);
+	}
+
+	const into = cursor.peek();
+	if (!(into.kind === "keyword" && into.value === "into")) {
+		throw new SnqlError(
+			"'add' attend 'into <collection>'",
+			"parse_insert_missing_into",
+			into.span
+		);
+	}
+	cursor.next();
+	const nameTok = cursor.expect("ident", "un nom de collection après 'into'");
+
+	return {
+		operation: "insert",
+		verb: verbTok.value,
+		collection: nameTok.value,
+		rows,
+		span: { start: verbTok.span.start, end: nameTok.span.end }
+	};
+}
+
+function parseDocument(cursor: TokenCursor): InsertRow {
+	const open = cursor.expect("lbrace", "'{' pour ouvrir un document");
+	const fields: InsertField[] = [];
+	if (cursor.peek().kind !== "rbrace") {
+		fields.push(parseInsertField(cursor));
+		while (cursor.peek().kind === "comma") {
+			cursor.next();
+			fields.push(parseInsertField(cursor));
+		}
+	}
+	const close = cursor.expect("rbrace", "'}' pour fermer le document");
+	const span = { start: open.span.start, end: close.span.end };
+	if (fields.length === 0) {
+		throw new SnqlError(
+			"Document vide : 'add' attend au moins un champ",
+			"parse_insert_empty_doc",
+			span
+		);
+	}
+	return { fields, span };
+}
+
+function parseInsertField(cursor: TokenCursor): InsertField {
+	const key = cursor.peek();
+	if (key.kind !== "ident" && key.kind !== "string") {
+		throw new SnqlError(
+			"Clé de document attendue (identifiant ou chaîne)",
+			"parse_insert_key",
+			key.span
+		);
+	}
+	cursor.next();
+	const colon = cursor.peek();
+	if (colon.kind !== "colon") {
+		throw new SnqlError(
+			"':' attendu après la clé du document",
+			"parse_insert_colon",
+			colon.span
+		);
+	}
+	cursor.next();
+	const value = parseExpression(cursor);
+	return {
+		column: key.value,
+		value,
+		span: { start: key.span.start, end: value.span.end }
+	};
 }
 
 function parseSelect(cursor: TokenCursor, verbTok: Token): Query {

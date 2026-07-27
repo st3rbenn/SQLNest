@@ -70,6 +70,46 @@ describe("mutations → Postgres", () => {
 		expect(text).toBe('DELETE FROM "users" RETURNING *');
 		expect(params).toEqual([]);
 	});
+
+	it("insert simple → INSERT … RETURNING *", () => {
+		const { text, params } = sql(
+			'add {email: "a@b.c", display_name: "Bob", is_active: true} into users'
+		);
+		expect(text).toBe(
+			'INSERT INTO "users" ("email", "display_name", "is_active") VALUES ($1, $2, $3) RETURNING *'
+		);
+		expect(params).toEqual(["a@b.c", "Bob", true]);
+	});
+
+	it("insert multi-lignes (liste de documents)", () => {
+		const { text, params } = sql("add [{a: 1}, {a: 2}] into t");
+		expect(text).toBe('INSERT INTO "t" ("a") VALUES ($1), ($2) RETURNING *');
+		expect(params).toEqual([1, 2]);
+	});
+
+	it("insert avec null (NULL en clair, pas paramétré)", () => {
+		const { text, params } = sql("add {display_name: null} into users");
+		expect(text).toBe(
+			'INSERT INTO "users" ("display_name") VALUES (NULL) RETURNING *'
+		);
+		expect(params).toEqual([]);
+	});
+
+	it("clé de document entre guillemets acceptée", () => {
+		const { text } = sql('add {"email": "a@b.c"} into users');
+		expect(text).toBe('INSERT INTO "users" ("email") VALUES ($1) RETURNING *');
+	});
+
+	it("préserve la précision d'un décimal (pas de double lossy)", () => {
+		const { text, params } = sql(
+			"add {balance: 1.123456789012345678} into accounts"
+		);
+		expect(text).toBe(
+			'INSERT INTO "accounts" ("balance") VALUES ($1) RETURNING *'
+		);
+		// Le texte brut exact est bindé — Postgres caste vers NUMERIC sans perte.
+		expect(params).toEqual(["1.123456789012345678"]);
+	});
 });
 
 describe("mutations — règles de correction", () => {
@@ -89,8 +129,20 @@ describe("mutations — règles de correction", () => {
 		expect(() => lowerMutation(statement)).toThrow(SnqlError);
 	});
 
-	it("l'insertion n'est pas encore supportée (Slice 4b)", () => {
+	it("refuse 'add' sans document { … }", () => {
 		expect(() => parse(tokenize("add users"))).toThrow(SnqlError);
+	});
+
+	it("refuse un document vide", () => {
+		expect(() => parse(tokenize("add {} into t"))).toThrow(SnqlError);
+	});
+
+	it("refuse une valeur d'insertion non littérale", () => {
+		expect(() => sql("add {a: b} into t")).toThrow(SnqlError);
+	});
+
+	it("refuse des documents hétérogènes en insert multiple", () => {
+		expect(() => sql("add [{a: 1}, {b: 2}] into t")).toThrow(SnqlError);
 	});
 
 	it("le codegen de mutation MongoDB n'est pas encore supporté", () => {

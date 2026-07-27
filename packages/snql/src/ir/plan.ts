@@ -16,10 +16,32 @@ export type Capability =
 	| "graph";
 
 /**
- * Valeur scalaire canonique. `bigint` sert à préserver la précision des entiers
- * dépassant Number.MAX_SAFE_INTEGER (clés bigint Postgres, IDs Snowflake).
+ * Décimal **exact** : on garde le texte brut. Les colonnes NUMERIC/DECIMAL de
+ * Postgres sont à précision arbitraire, hors de portée d'un double JS — un
+ * littéral fractionnaire ne doit JAMAIS passer par `Number()` avant le codegen
+ * (sinon corruption silencieuse). Le codegen PG binde le raw (cast exact) ;
+ * Mongo / runtime le ramènent à un `number` (limite intrinsèque de JS/BSON).
  */
-export type SqlValue = string | number | bigint | boolean | null;
+export interface SqlDecimal {
+	readonly kind: "decimal";
+	readonly raw: string;
+}
+
+/**
+ * Valeur scalaire canonique. `bigint` préserve les entiers > 2^53 (clés bigint
+ * Postgres, IDs Snowflake) ; `SqlDecimal` préserve les décimaux exacts.
+ */
+export type SqlValue = string | number | bigint | boolean | null | SqlDecimal;
+
+/** Garde-type sûr, y compris sur un `unknown` arbitraire (row values). */
+export function isSqlDecimal(value: unknown): value is SqlDecimal {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		(value as { kind?: unknown }).kind === "decimal" &&
+		typeof (value as { raw?: unknown }).raw === "string"
+	);
+}
 
 export type CompareOp = "eq" | "ne" | "lt" | "gt" | "le" | "ge" | "like";
 
@@ -107,6 +129,13 @@ export interface PlanColumnValue {
  * son prédicat, ses valeurs. Exige la capacité `mutate`.
  */
 export type MutationPlan =
+	| {
+			readonly op: "insert";
+			readonly collection: string;
+			readonly columns: readonly string[];
+			// Une ligne = un tuple de valeurs aligné sur `columns`.
+			readonly rows: readonly (readonly SqlValue[])[];
+	  }
 	| {
 			readonly op: "update";
 			readonly collection: string;

@@ -8,7 +8,7 @@ import type {
 	PlanSortKey,
 	SqlValue
 } from "../ir/plan";
-import { linearize } from "../ir/plan";
+import { isSqlDecimal, linearize } from "../ir/plan";
 import type { Mapper, NativeQuery } from "./mapper";
 
 /**
@@ -43,6 +43,16 @@ export const postgresMapper: Mapper = {
  */
 function renderMutation(plan: MutationPlan, params: ParamList): string {
 	switch (plan.op) {
+		case "insert": {
+			const cols = plan.columns.map(quoteIdent).join(", ");
+			const rows = plan.rows
+				.map(
+					(row) =>
+						`(${row.map((value) => renderValue(value, params)).join(", ")})`
+				)
+				.join(", ");
+			return `INSERT INTO ${quoteIdent(plan.collection)} (${cols}) VALUES ${rows} RETURNING *`;
+		}
 		case "update": {
 			const set = plan.assignments
 				.map((a) => `${quoteIdent(a.column)} = ${renderExpr(a.value, params)}`)
@@ -65,6 +75,11 @@ function renderWhere(
 	return predicate === undefined
 		? ""
 		: ` WHERE ${renderExpr(predicate, params)}`;
+}
+
+/** Valeur littérale d'un INSERT : NULL en clair, le reste paramétré. */
+function renderValue(value: SqlValue, params: ParamList): string {
+	return value === null ? "NULL" : params.add(value);
 }
 
 // Phases = ordre d'évaluation logique d'un SELECT. Une étape ne peut rejoindre le
@@ -262,7 +277,9 @@ class ParamList {
 	private readonly values: unknown[] = [];
 
 	add(value: SqlValue): string {
-		this.values.push(value);
+		// Un décimal exact est bindé comme texte : Postgres le caste vers le type
+		// de la colonne (NUMERIC…) sans perte, contrairement à un double JS.
+		this.values.push(isSqlDecimal(value) ? value.raw : value);
 		return `$${this.values.length}`;
 	}
 

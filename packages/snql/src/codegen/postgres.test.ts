@@ -120,6 +120,11 @@ describe("codegen postgres — littéraux numériques (bugs D, E)", () => {
 	it("garde les petits entiers en number", () => {
 		expect(sql("get users | where age = 30").params).toEqual([30]);
 	});
+	it("préserve un décimal exact en prédicat (texte brut, pas un double)", () => {
+		const { text, params } = sql("get t | where balance = 19.999999999999999");
+		expect(text).toBe(`SELECT * FROM "t" WHERE "balance" = $1`);
+		expect(params).toEqual(["19.999999999999999"]);
+	});
 });
 
 describe("codegen postgres — liste IN vide (bug B)", () => {

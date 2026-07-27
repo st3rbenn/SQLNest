@@ -127,5 +127,31 @@ export interface DeleteStatement {
 	readonly span: Span;
 }
 
+/** Un champ d'un document d'insertion : `column: value`. */
+export interface InsertField {
+	readonly column: string;
+	readonly value: Expr;
+	readonly span: Span;
+}
+
+/** Un document d'insertion `{ … }`. */
+export interface InsertRow {
+	readonly fields: readonly InsertField[];
+	readonly span: Span;
+}
+
+/** `add {doc} into <coll>` ou `add [{…}, {…}] into <coll>`. */
+export interface InsertStatement {
+	readonly operation: "insert";
+	readonly verb: string;
+	readonly collection: string;
+	readonly rows: readonly InsertRow[];
+	readonly span: Span;
+}
+
 /** Racine de l'AST : lecture (`Query`) ou mutation. */
-export type Statement = Query | UpdateStatement | DeleteStatement;
+export type Statement =
+	| Query
+	| InsertStatement
+	| UpdateStatement
+	| DeleteStatement;
