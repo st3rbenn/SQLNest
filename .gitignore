@@ -9,5 +9,10 @@ package-lock.json
 build
 dist
 
+# secrets / local env (garder .env.example)
+.env
+.env.local
+!.env.example
+
 # mac files
 .DS_Store

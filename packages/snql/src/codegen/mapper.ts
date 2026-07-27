@@ -1,4 +1,4 @@
-import type { LogicalPlan } from "../ir/plan";
+import type { LogicalPlan, MutationPlan } from "../ir/plan";
 
 /** Une étape de pipeline d'agrégation MongoDB (ex. `{ $match: … }`). */
 export type MongoStage = Record<string, unknown>;
@@ -22,8 +22,11 @@ export interface MongoQuery {
 /** Requête native produite pour un moteur donné. */
 export type NativeQuery = SqlQuery | MongoQuery;
 
-/** Contrat de codegen par moteur : Logical Plan → requête native. Pur, sans I/O. */
+/** Contrat de codegen par moteur : plan → requête native. Pur, sans I/O. */
 export interface Mapper {
 	readonly engine: string;
+	/** Lecture : Logical Plan → requête native. */
 	map(plan: LogicalPlan): NativeQuery;
+	/** Écriture : Mutation Plan → requête native. */
+	mapMutation(plan: MutationPlan): NativeQuery;
 }

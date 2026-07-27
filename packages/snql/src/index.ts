@@ -40,10 +40,16 @@ export function compile(
 	source: string,
 	options: CompileOptions
 ): CompileResult {
-	const query = parse(tokenize(source));
-	const logicalPlan = lower(query);
+	const statement = parse(tokenize(source));
+	if (statement.operation !== "select") {
+		throw new SnqlError(
+			`compile() est en lecture seule ; '${statement.operation}' est une mutation.`,
+			"compile_read_only"
+		);
+	}
+	const logicalPlan = lower(statement);
 	const native = getMapper(options.engine).map(logicalPlan);
-	return { query, plan: logicalPlan, native };
+	return { query: statement, plan: logicalPlan, native };
 }
 
 /**
@@ -59,7 +65,14 @@ export function planFor(
 	if (capabilities === undefined) {
 		throw new SnqlError(`Moteur inconnu '${engine}'`, "unknown_engine");
 	}
-	return plan(lower(parse(tokenize(source))), capabilities, options);
+	const statement = parse(tokenize(source));
+	if (statement.operation !== "select") {
+		throw new SnqlError(
+			`planFor() est en lecture seule ; '${statement.operation}' est une mutation.`,
+			"plan_read_only"
+		);
+	}
+	return plan(lower(statement), capabilities, options);
 }
 
 export type {
@@ -70,30 +83,42 @@ export type {
 	SqlQuery
 } from "./codegen/mapper";
 export { SnqlError } from "./diagnostics";
-export { lower } from "./ir/lower";
+export { lower, lowerMutation } from "./ir/lower";
 export type {
 	Capability,
 	CompareOp,
 	LogicalPlan,
+	MutationPlan,
+	Plan,
+	PlanColumnValue,
 	PlanExpr,
 	PlanProjectField,
 	PlanSortKey,
+	SqlDecimal,
 	SqlValue
 } from "./ir/plan";
+export { isSqlDecimal } from "./ir/plan";
 export type { OperationKind } from "./lexer/dictionary";
 // --- API publique bas niveau (chaque étage du pipeline) ---
 export { tokenize } from "./lexer/lexer";
 // --- Types publics ---
 export type { Position, Span, Token, TokenKind } from "./lexer/token";
 export type {
+	Assignment,
 	CompareOperator,
+	DeleteStatement,
 	Expr,
 	FieldSelection,
+	InsertField,
+	InsertRow,
+	InsertStatement,
 	LiteralValue,
 	Query,
 	SortKey,
 	Source,
-	Stage
+	Stage,
+	Statement,
+	UpdateStatement
 } from "./parser/ast";
 export { parse } from "./parser/parser";
 export type { Capabilities } from "./planner/capabilities";
@@ -110,5 +135,6 @@ export type {
 	PlanOptions
 } from "./planner/planner";
 export { plan } from "./planner/planner";
-export type { Row } from "./runtime/compensate";
+export type { JoinSources, Row } from "./runtime/compensate";
 export { compensate } from "./runtime/compensate";
+export type { ResultColumn, ResultSet } from "./runtime/result";

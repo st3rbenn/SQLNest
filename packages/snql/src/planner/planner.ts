@@ -12,13 +12,20 @@ import type { Capabilities } from "./capabilities";
 /**
  * Opérateur de compensation : à appliquer dans le runtime SNQL, au-dessus du
  * résultat du pushdown. Sans `input` : chaque op s'applique aux rows de la précédente.
- * (`join` sera ajouté avec l'opérateur `with` — il exige la couche connexion.)
+ * Le `join` a besoin des données de la collection droite (fournies au runtime).
  */
 export type CompensationOp =
 	| { readonly op: "filter"; readonly predicate: PlanExpr }
 	| { readonly op: "project"; readonly fields: readonly PlanProjectField[] }
 	| { readonly op: "sort"; readonly keys: readonly PlanSortKey[] }
-	| { readonly op: "limit"; readonly count: number; readonly offset?: number };
+	| { readonly op: "limit"; readonly count: number; readonly offset?: number }
+	| {
+			readonly op: "join";
+			readonly collection: string;
+			readonly as: string;
+			readonly localField: readonly string[];
+			readonly foreignField: readonly string[];
+	  };
 
 /**
  * Plan physique = découpe capability-aware d'un Logical Plan pour un moteur :
@@ -119,6 +126,14 @@ function toCompensationOp(op: LogicalPlan): CompensationOp {
 			return op.offset !== undefined
 				? { op: "limit", count: op.count, offset: op.offset }
 				: { op: "limit", count: op.count };
+		case "join":
+			return {
+				op: "join",
+				collection: op.collection,
+				as: op.as,
+				localField: op.localField,
+				foreignField: op.foreignField
+			};
 		case "scan":
 			throw new SnqlError(
 				"Un 'scan' ne peut pas être compensé",

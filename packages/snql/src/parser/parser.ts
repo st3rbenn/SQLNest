@@ -1,19 +1,33 @@
 import { SnqlError } from "../diagnostics";
 import { verbOperation } from "../lexer/dictionary";
 import type { Token } from "../lexer/token";
-import type { FieldSelection, Query, SortKey, Source, Stage } from "./ast";
+import type {
+	Assignment,
+	DeleteStatement,
+	Expr,
+	FieldSelection,
+	InsertField,
+	InsertRow,
+	InsertStatement,
+	Query,
+	SortKey,
+	Source,
+	Stage,
+	Statement,
+	UpdateStatement
+} from "./ast";
 import { TokenCursor } from "./cursor";
 import { parseExpression, parseFieldPath } from "./expression";
 
-/** Parse un flux de tokens en un AST [[Query]]. */
-export function parse(tokens: readonly Token[]): Query {
+/** Parse un flux de tokens en un AST [[Statement]] (lecture ou mutation). */
+export function parse(tokens: readonly Token[]): Statement {
 	const cursor = new TokenCursor(tokens);
-	const query = parseQuery(cursor);
+	const statement = parseStatement(cursor);
 	cursor.expect("eof", "la fin de la requête");
-	return query;
+	return statement;
 }
 
-function parseQuery(cursor: TokenCursor): Query {
+function parseStatement(cursor: TokenCursor): Statement {
 	const verbTok = cursor.peek();
 	if (verbTok.kind !== "verb") {
 		throw new SnqlError(
@@ -32,14 +46,109 @@ function parseQuery(cursor: TokenCursor): Query {
 			verbTok.span
 		);
 	}
-	if (operation !== "select") {
+	switch (operation) {
+		case "select":
+			return parseSelect(cursor, verbTok);
+		case "update":
+			return parseUpdate(cursor, verbTok);
+		case "delete":
+			return parseDelete(cursor, verbTok);
+		case "insert":
+			return parseInsert(cursor, verbTok);
+	}
+}
+
+function parseInsert(cursor: TokenCursor, verbTok: Token): InsertStatement {
+	const rows: InsertRow[] = [];
+	const opener = cursor.peek();
+	if (opener.kind === "lbracket") {
+		cursor.next();
+		rows.push(parseDocument(cursor));
+		while (cursor.peek().kind === "comma") {
+			cursor.next();
+			rows.push(parseDocument(cursor));
+		}
+		cursor.expect("rbracket", "']' pour fermer la liste de documents");
+	} else if (opener.kind === "lbrace") {
+		rows.push(parseDocument(cursor));
+	} else {
 		throw new SnqlError(
-			`Slice 1 ne supporte que la lecture (get / find / show / fetch). '${verbTok.value}' arrivera dans une slice ultérieure.`,
-			"parse_unsupported_operation",
-			verbTok.span
+			"'add' attend un document { … } ou une liste [ { … }, … ]",
+			"parse_insert_expected_doc",
+			opener.span
 		);
 	}
 
+	const into = cursor.peek();
+	if (!(into.kind === "keyword" && into.value === "into")) {
+		throw new SnqlError(
+			"'add' attend 'into <collection>'",
+			"parse_insert_missing_into",
+			into.span
+		);
+	}
+	cursor.next();
+	const nameTok = cursor.expect("ident", "un nom de collection après 'into'");
+
+	return {
+		operation: "insert",
+		verb: verbTok.value,
+		collection: nameTok.value,
+		rows,
+		span: { start: verbTok.span.start, end: nameTok.span.end }
+	};
+}
+
+function parseDocument(cursor: TokenCursor): InsertRow {
+	const open = cursor.expect("lbrace", "'{' pour ouvrir un document");
+	const fields: InsertField[] = [];
+	if (cursor.peek().kind !== "rbrace") {
+		fields.push(parseInsertField(cursor));
+		while (cursor.peek().kind === "comma") {
+			cursor.next();
+			fields.push(parseInsertField(cursor));
+		}
+	}
+	const close = cursor.expect("rbrace", "'}' pour fermer le document");
+	const span = { start: open.span.start, end: close.span.end };
+	if (fields.length === 0) {
+		throw new SnqlError(
+			"Document vide : 'add' attend au moins un champ",
+			"parse_insert_empty_doc",
+			span
+		);
+	}
+	return { fields, span };
+}
+
+function parseInsertField(cursor: TokenCursor): InsertField {
+	const key = cursor.peek();
+	if (key.kind !== "ident" && key.kind !== "string") {
+		throw new SnqlError(
+			"Clé de document attendue (identifiant ou chaîne)",
+			"parse_insert_key",
+			key.span
+		);
+	}
+	cursor.next();
+	const colon = cursor.peek();
+	if (colon.kind !== "colon") {
+		throw new SnqlError(
+			"':' attendu après la clé du document",
+			"parse_insert_colon",
+			colon.span
+		);
+	}
+	cursor.next();
+	const value = parseExpression(cursor);
+	return {
+		column: key.value,
+		value,
+		span: { start: key.span.start, end: value.span.end }
+	};
+}
+
+function parseSelect(cursor: TokenCursor, verbTok: Token): Query {
 	const source = parseSource(cursor);
 
 	const stages: Stage[] = [];
@@ -51,12 +160,170 @@ function parseQuery(cursor: TokenCursor): Query {
 	const lastStage = stages[stages.length - 1];
 	const endSpan = lastStage ? lastStage.span : source.span;
 	return {
-		operation,
+		operation: "select",
 		verb: verbTok.value,
 		source,
 		stages,
 		span: { start: verbTok.span.start, end: endSpan.end }
 	};
+}
+
+function parseUpdate(cursor: TokenCursor, verbTok: Token): UpdateStatement {
+	const nameTok = cursor.expect("ident", "un nom de collection après 'update'");
+	const predicates: Expr[] = [];
+	const assignments: Assignment[] = [];
+	let end = nameTok.span.end;
+
+	while (cursor.peek().kind === "pipe") {
+		cursor.next();
+		const kw = cursor.peek();
+		if (kw.kind === "keyword" && kw.value === "where") {
+			cursor.next();
+			const predicate = parseExpression(cursor);
+			predicates.push(predicate);
+			end = predicate.span.end;
+		} else if (kw.kind === "keyword" && kw.value === "set") {
+			cursor.next();
+			const parsed = parseAssignments(cursor);
+			assignments.push(...parsed);
+			const last = parsed[parsed.length - 1];
+			if (last !== undefined) {
+				end = last.span.end;
+			}
+		} else {
+			throw new SnqlError(
+				`Étape '${kw.value}' invalide dans un 'update' (attendu where, set)`,
+				"parse_unsupported_stage",
+				kw.span
+			);
+		}
+	}
+
+	if (assignments.length === 0) {
+		throw new SnqlError(
+			"'update' exige au moins un 'set <colonne> = <valeur>'",
+			"parse_update_no_set",
+			verbTok.span
+		);
+	}
+
+	// `where` optionnel : sans lui, l'update porte sur toutes les lignes (assumé).
+	const span = { start: verbTok.span.start, end };
+	return predicates.length > 0
+		? {
+				operation: "update",
+				verb: verbTok.value,
+				collection: nameTok.value,
+				predicate: andAll(predicates),
+				assignments,
+				span
+			}
+		: {
+				operation: "update",
+				verb: verbTok.value,
+				collection: nameTok.value,
+				assignments,
+				span
+			};
+}
+
+function parseDelete(cursor: TokenCursor, verbTok: Token): DeleteStatement {
+	const fromTok = cursor.peek();
+	if (!(fromTok.kind === "keyword" && fromTok.value === "from")) {
+		throw new SnqlError(
+			"'remove' attend 'from <collection>'",
+			"parse_delete_missing_from",
+			fromTok.span
+		);
+	}
+	cursor.next();
+	const nameTok = cursor.expect("ident", "un nom de collection après 'from'");
+
+	const predicates: Expr[] = [];
+	let end = nameTok.span.end;
+	while (cursor.peek().kind === "pipe") {
+		cursor.next();
+		const kw = cursor.peek();
+		if (kw.kind === "keyword" && kw.value === "where") {
+			cursor.next();
+			const predicate = parseExpression(cursor);
+			predicates.push(predicate);
+			end = predicate.span.end;
+		} else {
+			throw new SnqlError(
+				`Étape '${kw.value}' invalide dans un 'remove' (attendu where)`,
+				"parse_unsupported_stage",
+				kw.span
+			);
+		}
+	}
+
+	// `where` optionnel : sans lui, le remove porte sur toutes les lignes (assumé).
+	const span = { start: verbTok.span.start, end };
+	return predicates.length > 0
+		? {
+				operation: "delete",
+				verb: verbTok.value,
+				collection: nameTok.value,
+				predicate: andAll(predicates),
+				span
+			}
+		: {
+				operation: "delete",
+				verb: verbTok.value,
+				collection: nameTok.value,
+				span
+			};
+}
+
+function parseAssignments(cursor: TokenCursor): Assignment[] {
+	const assignments: Assignment[] = [parseAssignment(cursor)];
+	while (cursor.peek().kind === "comma") {
+		cursor.next();
+		assignments.push(parseAssignment(cursor));
+	}
+	return assignments;
+}
+
+function parseAssignment(cursor: TokenCursor): Assignment {
+	const col = cursor.expect("ident", "un nom de colonne");
+	const eq = cursor.peek();
+	if (!(eq.kind === "op" && eq.value === "=")) {
+		throw new SnqlError(
+			"Affectation attendue : <colonne> = <valeur>",
+			"parse_assignment",
+			eq.span
+		);
+	}
+	cursor.next();
+	const value = parseExpression(cursor);
+	return {
+		column: col.value,
+		value,
+		span: { start: col.span.start, end: value.span.end }
+	};
+}
+
+/** Combine plusieurs prédicats en une conjonction `and`. */
+function andAll(predicates: readonly Expr[]): Expr {
+	let combined = predicates[0];
+	if (combined === undefined) {
+		throw new SnqlError("Prédicat manquant", "parse_missing_predicate");
+	}
+	for (let i = 1; i < predicates.length; i += 1) {
+		const next = predicates[i];
+		if (next === undefined) {
+			continue;
+		}
+		combined = {
+			type: "logical",
+			operator: "and",
+			left: combined,
+			right: next,
+			span: { start: combined.span.start, end: next.span.end }
+		};
+	}
+	return combined;
 }
 
 function parseSource(cursor: TokenCursor): Source {
@@ -93,13 +360,64 @@ function parseStage(cursor: TokenCursor): Stage {
 			return parseSort(cursor);
 		case "limit":
 			return parseLimit(cursor);
+		case "with":
+			return parseWith(cursor);
 		default:
 			throw new SnqlError(
-				`Étape '${tok.value}' non supportée en Slice 1 (attendu where, pick, sort, limit)`,
+				`Étape '${tok.value}' inconnue (attendu where, with, pick, sort, limit)`,
 				"parse_unsupported_stage",
 				tok.span
 			);
 	}
+}
+
+function parseWith(cursor: TokenCursor): Stage {
+	const kw = cursor.next(); // 'with'
+	const collection = cursor.expect(
+		"ident",
+		"un nom de collection après 'with'"
+	);
+	let alias: string | undefined;
+	if (cursor.peek().kind === "keyword" && cursor.peek().value === "as") {
+		cursor.next();
+		alias = cursor.expect("ident", "un alias après 'as'").value;
+	}
+	if (!(cursor.peek().kind === "keyword" && cursor.peek().value === "on")) {
+		throw new SnqlError(
+			"'with' attend une condition : on <champ local> = <champ distant>",
+			"parse_with_missing_on",
+			cursor.peek().span
+		);
+	}
+	cursor.next(); // 'on'
+	const { path: localField } = parseFieldPath(cursor);
+	const eq = cursor.peek();
+	if (!(eq.kind === "op" && eq.value === "=")) {
+		throw new SnqlError(
+			"Condition de join attendue : <champ local> = <champ distant>",
+			"parse_with_condition",
+			eq.span
+		);
+	}
+	cursor.next(); // '='
+	const foreign = parseFieldPath(cursor);
+	const span = { start: kw.span.start, end: foreign.span.end };
+	return alias !== undefined
+		? {
+				type: "with",
+				collection: collection.value,
+				alias,
+				localField,
+				foreignField: foreign.path,
+				span
+			}
+		: {
+				type: "with",
+				collection: collection.value,
+				localField,
+				foreignField: foreign.path,
+				span
+			};
 }
 
 function parseWhere(cursor: TokenCursor): Stage {

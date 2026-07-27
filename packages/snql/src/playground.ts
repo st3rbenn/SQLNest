@@ -9,7 +9,8 @@ const stringify = (value: unknown): string =>
 console.log("=== Codegen : 1 SNQL → 2 moteurs natifs ===\n");
 const reads = [
 	`get users | where age > 30 and status = "active" | sort -created_at | limit 10 offset 20 | pick name, email`,
-	`get users | limit 5 | where age > 30`
+	`get users | limit 5 | where age > 30`,
+	`get users | with orders on id = user_id | pick name, orders`
 ];
 for (const source of reads) {
 	console.log("SNQL :", source);

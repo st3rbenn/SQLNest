@@ -1,16 +1,20 @@
 import { SnqlError } from "../diagnostics";
 import type {
 	CompareOperator,
+	DeleteStatement,
 	Expr,
 	FieldSelection,
+	InsertStatement,
 	LiteralValue,
 	Query,
 	SortKey,
-	Stage
+	Stage,
+	UpdateStatement
 } from "../parser/ast";
 import type {
 	CompareOp,
 	LogicalPlan,
+	MutationPlan,
 	PlanExpr,
 	PlanProjectField,
 	PlanSortKey,
@@ -39,12 +43,128 @@ export function lower(query: Query): LogicalPlan {
 	let available: ReadonlySet<string> | null = null;
 	for (const stage of query.stages) {
 		checkColumnsAvailable(stage, available);
-		plan = lowerStage(plan, stage);
+		plan = lowerStage(plan, stage, query.source.alias);
 		if (stage.type === "pick") {
 			available = projectionKeys(stage.fields);
+		} else if (stage.type === "with" && available !== null) {
+			// le join ajoute un champ imbriqué (`as`) aux colonnes disponibles
+			available = new Set([...available, stage.alias ?? stage.collection]);
 		}
 	}
 	return plan;
+}
+
+/** Abaisse une mutation (insert / update / delete) en [[MutationPlan]]. */
+export function lowerMutation(
+	statement: InsertStatement | UpdateStatement | DeleteStatement
+): MutationPlan {
+	if (statement.operation === "insert") {
+		return lowerInsert(statement);
+	}
+	if (statement.operation === "update") {
+		assertUniqueAssignments(statement.assignments);
+		const assignments = statement.assignments.map((assignment) => ({
+			column: assignment.column,
+			value: lowerExpr(assignment.value)
+		}));
+		return statement.predicate !== undefined
+			? {
+					op: "update",
+					collection: statement.collection,
+					assignments,
+					predicate: lowerExpr(statement.predicate)
+				}
+			: { op: "update", collection: statement.collection, assignments };
+	}
+	return statement.predicate !== undefined
+		? {
+				op: "delete",
+				collection: statement.collection,
+				predicate: lowerExpr(statement.predicate)
+			}
+		: { op: "delete", collection: statement.collection };
+}
+
+/**
+ * Abaisse un `insert`. Toutes les lignes doivent partager le MÊME jeu de colonnes
+ * (un INSERT multi-lignes a une liste de colonnes unique). Les valeurs doivent
+ * être des littéraux. Colonnes absentes d'un document = document hétérogène → erreur.
+ */
+function lowerInsert(statement: InsertStatement): MutationPlan {
+	const firstRow = statement.rows[0];
+	if (firstRow === undefined) {
+		throw new SnqlError("'add' sans document", "lower_insert_empty");
+	}
+	const columns = firstRow.fields.map((field) => field.column);
+	const columnSet = new Set(columns);
+	if (columnSet.size !== columns.length) {
+		throw new SnqlError(
+			"Clé dupliquée dans un document d'insertion",
+			"lower_insert_duplicate_key"
+		);
+	}
+
+	const rows = statement.rows.map((row) => {
+		const byColumn = new Map<string, Expr>();
+		for (const field of row.fields) {
+			if (byColumn.has(field.column)) {
+				throw new SnqlError(
+					`Clé '${field.column}' dupliquée dans un document d'insertion`,
+					"lower_insert_duplicate_key"
+				);
+			}
+			byColumn.set(field.column, field.value);
+		}
+		if (byColumn.size !== columnSet.size) {
+			throw new SnqlError(
+				"Documents d'insertion à colonnes hétérogènes (colonnes identiques requises)",
+				"lower_insert_heterogeneous"
+			);
+		}
+		return columns.map((column) => {
+			const value = byColumn.get(column);
+			if (value === undefined) {
+				throw new SnqlError(
+					`Colonne '${column}' absente d'un document d'insertion`,
+					"lower_insert_heterogeneous"
+				);
+			}
+			return literalOf(value, column);
+		});
+	});
+
+	return { op: "insert", collection: statement.collection, columns, rows };
+}
+
+/** Une valeur d'insertion doit être un littéral (nombre, chaîne, booléen, null). */
+function literalOf(value: Expr, column: string): SqlValue {
+	if (value.type !== "literal") {
+		throw new SnqlError(
+			`La valeur de '${column}' doit être un littéral (nombre, chaîne, booléen, null)`,
+			"lower_insert_non_literal"
+		);
+	}
+	return literalToValue(value.value);
+}
+
+/**
+ * Une même colonne ne peut être affectée qu'une fois dans un `set` (Postgres
+ * rejette `SET x = 1, x = 2`). On lève une erreur claire à la compilation plutôt
+ * que de laisser le moteur échouer — cohérent avec le chemin de lecture.
+ */
+function assertUniqueAssignments(
+	assignments: readonly { readonly column: string }[]
+): void {
+	const seen = new Set<string>();
+	for (const assignment of assignments) {
+		if (seen.has(assignment.column)) {
+			throw new SnqlError(
+				`Colonne '${assignment.column}' affectée plusieurs fois dans un 'set'`,
+				"lower_duplicate_assignment"
+			);
+		}
+		seen.add(assignment.column);
+	}
 }
 
 /** Noms de sortie d'un `pick` = alias, sinon dernier segment du chemin. */
@@ -84,6 +204,9 @@ function checkColumnsAvailable(
 				referenced.push(field.path);
 			}
 			break;
+		case "with":
+			referenced.push(stage.localField); // le champ distant vient de la collection jointe
+			break;
 		case "limit":
 			return;
 	}
@@ -122,7 +245,21 @@ function collectExprFields(expr: Expr, out: (readonly string[])[]): void {
 	}
 }
 
-function lowerStage(input: LogicalPlan, stage: Stage): LogicalPlan {
+/** Retire l'alias de tête d'un chemin (`u.id` → `id`) quand il correspond. */
+function stripAlias(
+	path: readonly string[],
+	alias: string | undefined
+): readonly string[] {
+	return alias !== undefined && path.length > 1 && path[0] === alias
+		? path.slice(1)
+		: path;
+}
+
+function lowerStage(
+	input: LogicalPlan,
+	stage: Stage,
+	sourceAlias: string | undefined
+): LogicalPlan {
 	switch (stage.type) {
 		case "where":
 			return { op: "filter", input, predicate: lowerExpr(stage.predicate) };
@@ -137,6 +274,19 @@ function lowerStage(input: LogicalPlan, stage: Stage): LogicalPlan {
 			return stage.offset !== undefined
 				? { op: "limit", input, count: stage.count, offset: stage.offset }
 				: { op: "limit", input, count: stage.count };
+		case "with":
+			return {
+				op: "join",
+				input,
+				collection: stage.collection,
+				as: stage.alias ?? stage.collection,
+				// localField vient de la source (strip son alias), foreignField de la collection jointe.
+				localField: stripAlias(stage.localField, sourceAlias),
+				foreignField: stripAlias(
+					stage.foreignField,
+					stage.alias ?? stage.collection
+				)
+			};
 	}
 }
 
@@ -269,10 +419,13 @@ function literalToValue(lit: LiteralValue): SqlValue {
 	}
 }
 
-/** Préserve la précision : entier hors plage sûre → bigint ; sinon number. */
-function numberRawToValue(raw: string): number | bigint {
+/**
+ * Préserve la précision : décimal → `SqlDecimal` (texte brut exact) ; entier hors
+ * plage sûre → bigint ; sinon number. On ne passe JAMAIS un décimal par `Number()`.
+ */
+function numberRawToValue(raw: string): SqlValue {
 	if (FLOAT_HINT.test(raw)) {
-		return Number(raw);
+		return { kind: "decimal", raw };
 	}
 	const asNumber = Number(raw);
 	return Number.isSafeInteger(asNumber) ? asNumber : BigInt(raw);

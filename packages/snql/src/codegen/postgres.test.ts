@@ -75,8 +75,10 @@ describe("codegen postgres — clauses de base", () => {
 		expect(params).toEqual(["'; DROP TABLE users; --"]);
 	});
 
-	it("rejette les verbes d'écriture en Slice 1", () => {
-		expect(() => sql("update users")).toThrow(/Slice 1/);
+	it("compile() est en lecture seule : refuse une mutation", () => {
+		expect(() => sql("update users | where id = 1 | set x = 1")).toThrow(
+			/lecture seule/i
+		);
 	});
 
 	it("rejette une projection à colonnes dupliquées sans alias", () => {
@@ -117,6 +119,11 @@ describe("codegen postgres — littéraux numériques (bugs D, E)", () => {
 	});
 	it("garde les petits entiers en number", () => {
 		expect(sql("get users | where age = 30").params).toEqual([30]);
+	});
+	it("préserve un décimal exact en prédicat (texte brut, pas un double)", () => {
+		const { text, params } = sql("get t | where balance = 19.999999999999999");
+		expect(text).toBe(`SELECT * FROM "t" WHERE "balance" = $1`);
+		expect(params).toEqual(["19.999999999999999"]);
 	});
 });
 

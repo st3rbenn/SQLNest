@@ -16,6 +16,9 @@ const SINGLE: Readonly<Record<string, TokenKind>> = {
 	")": "rparen",
 	"[": "lbracket",
 	"]": "rbracket",
+	"{": "lbrace",
+	"}": "rbrace",
+	":": "colon",
 	"+": "plus",
 	"-": "minus",
 	"=": "op"

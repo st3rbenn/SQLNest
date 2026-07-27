@@ -29,6 +29,9 @@ export type TokenKind =
 	| "rparen" // )
 	| "lbracket" // [
 	| "rbracket" // ]
+	| "lbrace" // {
+	| "rbrace" // }
+	| "colon" // :
 	| "eof";
 
 export interface Token {

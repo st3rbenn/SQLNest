@@ -7,7 +7,7 @@ import type {
 	PlanSortKey,
 	SqlValue
 } from "../ir/plan";
-import { linearize } from "../ir/plan";
+import { isSqlDecimal, linearize } from "../ir/plan";
 import type { Mapper, MongoStage, NativeQuery } from "./mapper";
 
 /**
@@ -45,6 +45,12 @@ export const mongoMapper: Mapper = {
 			collection: scan.collection,
 			pipeline
 		};
+	},
+	mapMutation(): NativeQuery {
+		throw new SnqlError(
+			"Les mutations MongoDB arrivent dans une slice ultérieure",
+			"codegen_mongo_mutation_unsupported"
+		);
 	}
 };
 
@@ -71,6 +77,17 @@ function appendStage(
 				pipeline.push({ $skip: op.offset });
 			}
 			pipeline.push({ $limit: op.count });
+			return;
+		case "join":
+			// Embed natif : $lookup imbrique les documents matchés dans le champ `as`.
+			pipeline.push({
+				$lookup: {
+					from: op.collection,
+					localField: mongoField(op.localField, alias),
+					foreignField: op.foreignField.join("."),
+					as: op.as
+				}
+			});
 			return;
 	}
 }
@@ -179,7 +196,9 @@ function renderCompare(
 	}
 	// Forme idiomatique : `{ champ: { $op: valeur } }`.
 	if (left.kind === "field" && right.kind === "literal") {
-		return { [mongoField(left.path, alias)]: { [MONGO_OP[op]]: right.value } };
+		return {
+			[mongoField(left.path, alias)]: { [MONGO_OP[op]]: bsonValue(right.value) }
+		};
 	}
 	// Repli $expr pour champ↔champ ou littéral à gauche.
 	return {
@@ -209,12 +228,17 @@ function renderLike(
 	};
 }
 
+/** Valeur littérale → BSON : un décimal exact devient un double (limite de BSON/JS). */
+function bsonValue(value: SqlValue): unknown {
+	return isSqlDecimal(value) ? Number(value.raw) : value;
+}
+
 function toExprOperand(expr: PlanExpr, alias: string | undefined): unknown {
 	if (expr.kind === "field") {
 		return `$${mongoField(expr.path, alias)}`;
 	}
 	if (expr.kind === "literal") {
-		return expr.value;
+		return bsonValue(expr.value);
 	}
 	throw new SnqlError(
 		"Opérande non supporté dans une comparaison $expr Mongo",
@@ -222,14 +246,14 @@ function toExprOperand(expr: PlanExpr, alias: string | undefined): unknown {
 	);
 }
 
-function literalValue(expr: PlanExpr): SqlValue {
+function literalValue(expr: PlanExpr): unknown {
 	if (expr.kind !== "literal") {
 		throw new SnqlError(
 			"Valeur littérale attendue dans une liste 'in'",
 			"codegen_mongo_in_value"
 		);
 	}
-	return expr.value;
+	return bsonValue(expr.value);
 }
 
 /**

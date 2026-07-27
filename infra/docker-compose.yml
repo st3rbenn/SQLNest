@@ -1,0 +1,48 @@
+# Environnements de dev locaux pour SQLNest.
+#   docker compose -f infra/docker-compose.yml up -d
+# Postgres est le moteur de référence de la Slice 5 (connexion). Mongo est
+# présent pour les slices suivantes (introspection/exécution cross-db).
+# Identifiants de DEV uniquement — ne jamais réutiliser en prod.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: sqlnest-postgres
+    environment:
+      POSTGRES_USER: sqlnest
+      POSTGRES_PASSWORD: sqlnest
+      POSTGRES_DB: sqlnest_demo
+    # Hôte 5433 (pas 5432) pour cohabiter avec un PostgreSQL installé
+    # nativement, qui occupe fréquemment 5432 sur les postes de dev.
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres/seed:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sqlnest -d sqlnest_demo"]
+      interval: 3s
+      timeout: 3s
+      retries: 15
+
+  mongo:
+    image: mongo:7
+    container_name: sqlnest-mongo
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: sqlnest
+      MONGO_INITDB_ROOT_PASSWORD: sqlnest
+      MONGO_INITDB_DATABASE: sqlnest_demo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodata:/data/db
+      - ./mongo/seed:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 3s
+      timeout: 3s
+      retries: 15
+
+volumes:
+  pgdata:
+  mongodata:

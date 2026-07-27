@@ -16,10 +16,32 @@ export type Capability =
 	| "graph";
 
 /**
- * Valeur scalaire canonique. `bigint` sert à préserver la précision des entiers
- * dépassant Number.MAX_SAFE_INTEGER (clés bigint Postgres, IDs Snowflake).
+ * Décimal **exact** : on garde le texte brut. Les colonnes NUMERIC/DECIMAL de
+ * Postgres sont à précision arbitraire, hors de portée d'un double JS — un
+ * littéral fractionnaire ne doit JAMAIS passer par `Number()` avant le codegen
+ * (sinon corruption silencieuse). Le codegen PG binde le raw (cast exact) ;
+ * Mongo / runtime le ramènent à un `number` (limite intrinsèque de JS/BSON).
  */
-export type SqlValue = string | number | bigint | boolean | null;
+export interface SqlDecimal {
+	readonly kind: "decimal";
+	readonly raw: string;
+}
+
+/**
+ * Valeur scalaire canonique. `bigint` préserve les entiers > 2^53 (clés bigint
+ * Postgres, IDs Snowflake) ; `SqlDecimal` préserve les décimaux exacts.
+ */
+export type SqlValue = string | number | bigint | boolean | null | SqlDecimal;
+
+/** Garde-type sûr, y compris sur un `unknown` arbitraire (row values). */
+export function isSqlDecimal(value: unknown): value is SqlDecimal {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		(value as { kind?: unknown }).kind === "decimal" &&
+		typeof (value as { raw?: unknown }).raw === "string"
+	);
+}
 
 export type CompareOp = "eq" | "ne" | "lt" | "gt" | "le" | "ge" | "like";
 
@@ -83,7 +105,52 @@ export type LogicalPlan =
 			readonly input: LogicalPlan;
 			readonly count: number;
 			readonly offset?: number;
+	  }
+	// Join embed (imbriqué) : chaque ligne gauche reçoit un tableau des lignes
+	// droites matchées, sous le champ `as`. → ADR-008.
+	| {
+			readonly op: "join";
+			readonly input: LogicalPlan;
+			readonly collection: string;
+			readonly as: string;
+			readonly localField: readonly string[];
+			readonly foreignField: readonly string[];
 	  };
+
+/** Une affectation de colonne dans un `update` : `column = value`. */
+export interface PlanColumnValue {
+	readonly column: string;
+	readonly value: PlanExpr;
+}
+
+/**
+ * Plan de **mutation** (écriture). Contrairement au [[LogicalPlan]] de lecture,
+ * ce n'est pas une chaîne d'opérateurs linéaire : chaque mutation porte sa cible,
+ * son prédicat, ses valeurs. Exige la capacité `mutate`.
+ */
+export type MutationPlan =
+	| {
+			readonly op: "insert";
+			readonly collection: string;
+			readonly columns: readonly string[];
+			// Une ligne = un tuple de valeurs aligné sur `columns`.
+			readonly rows: readonly (readonly SqlValue[])[];
+	  }
+	| {
+			readonly op: "update";
+			readonly collection: string;
+			readonly assignments: readonly PlanColumnValue[];
+			// Absent = toutes les lignes (write non filtré, assumé).
+			readonly predicate?: PlanExpr;
+	  }
+	| {
+			readonly op: "delete";
+			readonly collection: string;
+			readonly predicate?: PlanExpr;
+	  };
+
+/** Un plan complet : lecture ou mutation. */
+export type Plan = LogicalPlan | MutationPlan;
 
 export type PlanOp = LogicalPlan["op"];
 
@@ -93,7 +160,8 @@ export const REQUIRED_CAPABILITY: Readonly<Record<PlanOp, Capability>> = {
 	filter: "filter",
 	project: "project",
 	sort: "sort",
-	limit: "paginate"
+	limit: "paginate",
+	join: "join"
 };
 
 export function requiredCapability(plan: LogicalPlan): Capability {

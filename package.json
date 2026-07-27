@@ -3,7 +3,11 @@
 	"version": "0.0.1",
 	"scripts": {
 		"preinstall": "npx only-allow pnpm",
-		"check": "biome check --write ."
+		"check": "biome check --write .",
+		"db:up": "docker compose -f infra/docker-compose.yml up -d",
+		"db:down": "docker compose -f infra/docker-compose.yml down",
+		"db:reset": "docker compose -f infra/docker-compose.yml down -v && docker compose -f infra/docker-compose.yml up -d",
+		"db:logs": "docker compose -f infra/docker-compose.yml logs -f"
 	},
 	"author": "Anthonin COLAS <anthonincolaspro@gmail.com>",
 	"packageManager": "pnpm@10.17.1",

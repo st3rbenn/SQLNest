@@ -1,22 +1,29 @@
+import { SnqlError } from "../diagnostics";
 import type {
 	CompareOp,
 	PlanExpr,
 	PlanProjectField,
 	PlanSortKey
 } from "../ir/plan";
+import { isSqlDecimal } from "../ir/plan";
 import type { CompensationOp } from "../planner/planner";
 
 /** Une ligne de résultat, engine-agnostique. */
 export type Row = Record<string, unknown>;
 
+/** Données des collections jointes, fournies au runtime pour compenser un `join`. */
+export type JoinSources = Readonly<Record<string, readonly Row[]>>;
+
 /**
  * Exécute les opérateurs de compensation en mémoire, au-dessus des rows renvoyées
  * par le pushdown. Pur (aucune I/O) : c'est la **référence sémantique** de SNQL —
  * l'évaluateur applique la logique à 3 valeurs (3VL) de SQL, indépendamment du moteur.
+ * `sources` fournit les données des collections jointes (embed du `join`).
  */
 export function compensate(
 	ops: readonly CompensationOp[],
-	rows: readonly Row[]
+	rows: readonly Row[],
+	sources: JoinSources = {}
 ): Row[] {
 	let out: Row[] = [...rows];
 	for (const op of ops) {
@@ -35,9 +42,61 @@ export function compensate(
 				out = out.slice(start, start + op.count);
 				break;
 			}
+			case "join":
+				out = joinRows(out, op, sources);
+				break;
 		}
 	}
 	return out;
+}
+
+interface JoinOp {
+	readonly collection: string;
+	readonly as: string;
+	readonly localField: readonly string[];
+	readonly foreignField: readonly string[];
+}
+
+/** Embed : indexe la collection droite par foreignField, attache les matchs sous `as`. */
+function joinRows(
+	left: readonly Row[],
+	op: JoinOp,
+	sources: JoinSources
+): Row[] {
+	const right = sources[op.collection];
+	if (right === undefined) {
+		throw new SnqlError(
+			`Compensation de 'join' : aucune donnée fournie pour la collection '${op.collection}' (nécessite la couche connexion)`,
+			"runtime_join_no_source"
+		);
+	}
+	const index = new Map<string, Row[]>();
+	for (const row of right) {
+		const key = joinKey(getPath(row, op.foreignField));
+		if (key === null) {
+			continue; // une clé NULL ne matche jamais (parité SQL)
+		}
+		const bucket = index.get(key);
+		if (bucket === undefined) {
+			index.set(key, [row]);
+		} else {
+			bucket.push(row);
+		}
+	}
+	return left.map((row) => {
+		const key = joinKey(getPath(row, op.localField));
+		const matched = key !== null ? (index.get(key) ?? []) : [];
+		return { ...row, [op.as]: matched };
+	});
+}
+
+/** Clé de jointure : numérique (matche cross-type) ou chaîne ; null si NULL. */
+function joinKey(value: unknown): string | null {
+	if (isNullish(value)) {
+		return null;
+	}
+	const numeric = numericOf(value);
+	return numeric !== null ? `n:${numeric}` : `s:${String(value)}`;
 }
 
 // --- Évaluation (3VL : true / false / null=unknown) ---
@@ -221,22 +280,39 @@ function isUnknownOperand(value: unknown): boolean {
 	return isNullish(value) || (typeof value === "number" && Number.isNaN(value));
 }
 
-/** Chaîne représentant un nombre → sa valeur, sinon null. */
-function numericString(value: unknown): number | null {
-	if (typeof value !== "string" || value.trim() === "") {
+const INTEGER_STRING = /^-?\d+$/;
+
+/** Chaîne numérique → valeur : entier exact en bigint, flottant en number ; sinon null. */
+function numericString(value: unknown): number | bigint | null {
+	if (typeof value !== "string") {
 		return null;
 	}
-	const n = Number(value);
+	const trimmed = value.trim();
+	if (trimmed === "") {
+		return null;
+	}
+	if (INTEGER_STRING.test(trimmed)) {
+		return BigInt(trimmed); // entier exact, sans perte de précision
+	}
+	const n = Number(trimmed);
 	return Number.isNaN(n) ? null : n;
 }
 
-/** Valeur numérique (nombre, bigint, ou chaîne numérique), sinon null. */
-function numericOf(value: unknown): number | null {
+/**
+ * Valeur numérique (number, bigint, ou chaîne numérique), sinon null.
+ * On NE convertit PAS le bigint en Number (perte > 2^53) : les opérateurs `<`/`>`
+ * de JS comparent number et bigint de façon exacte, y compris en cross-type.
+ */
+function numericOf(value: unknown): number | bigint | null {
 	if (typeof value === "number") {
 		return Number.isNaN(value) ? null : value;
 	}
 	if (typeof value === "bigint") {
-		return Number(value);
+		return value;
+	}
+	// Décimal exact → number pour la comparaison en mémoire (JS n'a pas de BigDecimal).
+	if (isSqlDecimal(value)) {
+		return Number(value.raw);
 	}
 	return numericString(value);
 }

@@ -76,6 +76,14 @@ export type Stage =
 			readonly count: number;
 			readonly offset?: number;
 			readonly span: Span;
+	  }
+	| {
+			readonly type: "with";
+			readonly collection: string;
+			readonly alias?: string;
+			readonly localField: readonly string[];
+			readonly foreignField: readonly string[];
+			readonly span: Span;
 	  };
 
 export interface Source {
@@ -84,11 +92,66 @@ export interface Source {
 	readonly span: Span;
 }
 
-/** Racine de l'AST d'une requête SNQL. */
+/** Racine de l'AST d'une requête de **lecture** SNQL. */
 export interface Query {
-	readonly operation: OperationKind;
+	readonly operation: "select";
 	readonly verb: string;
 	readonly source: Source;
 	readonly stages: readonly Stage[];
 	readonly span: Span;
 }
+
+/** Une affectation d'un `set` : `<colonne> = <valeur>`. */
+export interface Assignment {
+	readonly column: string;
+	readonly value: Expr;
+	readonly span: Span;
+}
+
+/** `update <coll> [| where <pred>] | set <affectations>`. `where` optionnel : sans lui, toutes les lignes. */
+export interface UpdateStatement {
+	readonly operation: "update";
+	readonly verb: string;
+	readonly collection: string;
+	readonly predicate?: Expr;
+	readonly assignments: readonly Assignment[];
+	readonly span: Span;
+}
+
+/** `remove from <coll> [| where <pred>]`. `where` optionnel : sans lui, toutes les lignes. */
+export interface DeleteStatement {
+	readonly operation: "delete";
+	readonly verb: string;
+	readonly collection: string;
+	readonly predicate?: Expr;
+	readonly span: Span;
+}
+
+/** Un champ d'un document d'insertion : `column: value`. */
+export interface InsertField {
+	readonly column: string;
+	readonly value: Expr;
+	readonly span: Span;
+}
+
+/** Un document d'insertion `{ … }`. */
+export interface InsertRow {
+	readonly fields: readonly InsertField[];
+	readonly span: Span;
+}
+
+/** `add {doc} into <coll>` ou `add [{…}, {…}] into <coll>`. */
+export interface InsertStatement {
+	readonly operation: "insert";
+	readonly verb: string;
+	readonly collection: string;
+	readonly rows: readonly InsertRow[];
+	readonly span: Span;
+}
+
+/** Racine de l'AST : lecture (`Query`) ou mutation. */
+export type Statement =
+	| Query
+	| InsertStatement
+	| UpdateStatement
+	| DeleteStatement;
