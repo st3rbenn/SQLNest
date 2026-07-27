@@ -138,3 +138,14 @@ export { plan } from "./planner/planner";
 export type { JoinSources, Row } from "./runtime/compensate";
 export { compensate } from "./runtime/compensate";
 export type { ResultColumn, ResultSet } from "./runtime/result";
+export type {
+	Collection,
+	Field,
+	FieldRef,
+	Relation,
+	RelationKind,
+	RelationOrigin,
+	SchemaModel,
+	SchemaSource,
+	SnqlType
+} from "./schema/model";
