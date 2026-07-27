@@ -13,16 +13,14 @@ import type { Mapper, NativeQuery } from "./mapper";
 /**
  * Mapper Postgres — pur, génère SQL + paramètres bindés ($1, $2…).
  *
- * Fidèle à l'ordre du pipeline : l'IR est une chaîne d'opérateurs
- * (scan → … → sort/limit) où l'ORDRE est sémantique. On l'émet en un seul SELECT
- * tant que l'ordre des étapes reste compatible avec l'ordre d'évaluation SQL
- * (WHERE → SELECT → ORDER BY → LIMIT). Dès qu'une étape « recule » de phase
- * (ex. un `where` après un `limit`, ou un 2e `sort`), on matérialise le SELECT
- * courant en **sous-requête** et on repart d'une nouvelle enveloppe. Ainsi
- * `limit 5 | where x` et `where x | limit 5` ne produisent PAS le même SQL.
+ * Fidèle à l'ordre du pipeline : l'IR est une chaîne d'opérateurs où l'ORDRE est
+ * sémantique. On l'émet en un seul SELECT tant que l'ordre reste compatible avec
+ * l'évaluation SQL ; sinon on matérialise le SELECT courant en sous-requête.
  *
- * Sûreté : les valeurs sont TOUJOURS paramétrées ; les identifiants sont validés
- * puis quotés (anti-injection by design).
+ * Le `join` (with) est **embed** : chaque ligne reçoit un tableau JSON des lignes
+ * droites matchées, via une sous-requête corrélée `json_agg` (→ ADR-008).
+ *
+ * Sûreté : valeurs TOUJOURS paramétrées ; identifiants validés puis quotés.
  */
 export const postgresMapper: Mapper = {
 	engine: "postgres",
@@ -35,11 +33,21 @@ export const postgresMapper: Mapper = {
 
 // Phases = ordre d'évaluation logique d'un SELECT. Une étape ne peut rejoindre le
 // SELECT courant que si sa phase ne « recule » pas (et si son slot est libre).
-const PHASE = { filter: 1, project: 2, sort: 3, limit: 4 } as const;
+const PHASE = { filter: 1, join: 2, project: 3, sort: 4, limit: 5 } as const;
+
+interface JoinSpec {
+	readonly collection: string;
+	readonly as: string;
+	readonly localField: readonly string[];
+	readonly foreignField: readonly string[];
+	readonly innerAlias: string; // alias de la table interne (évite le shadowing en self-join)
+}
 
 interface Select {
 	from: string;
+	base: string; // référence pour qualifier les champs (alias ou nom de collection)
 	where: PlanExpr[];
+	joins: JoinSpec[];
 	project: readonly PlanProjectField[] | null;
 	order: readonly PlanSortKey[] | null;
 	limit: number | null;
@@ -57,7 +65,10 @@ function renderPlan(plan: LogicalPlan, params: ParamList): string {
 		);
 	}
 
-	let current = emptySelect(renderFrom(scan.collection, scan.alias));
+	let current = emptySelect(
+		renderFrom(scan.collection, scan.alias),
+		scan.alias ?? scan.collection
+	);
 	let depth = 0;
 	for (let i = 1; i < ops.length; i += 1) {
 		const op = ops[i];
@@ -66,7 +77,8 @@ function renderPlan(plan: LogicalPlan, params: ParamList): string {
 		}
 		if (!canAbsorb(current, op)) {
 			const inner = renderSelect(current, params);
-			current = emptySelect(`(${inner}) AS ${quoteIdent(`t${depth}`)}`);
+			const alias = `t${depth}`;
+			current = emptySelect(`(${inner}) AS ${quoteIdent(alias)}`, alias);
 			depth += 1;
 		}
 		absorb(current, op);
@@ -74,10 +86,12 @@ function renderPlan(plan: LogicalPlan, params: ParamList): string {
 	return renderSelect(current, params);
 }
 
-function emptySelect(from: string): Select {
+function emptySelect(from: string, base: string): Select {
 	return {
 		from,
+		base,
 		where: [],
+		joins: [],
 		project: null,
 		order: null,
 		limit: null,
@@ -92,11 +106,11 @@ function canAbsorb(sel: Select, op: LogicalPlan): boolean {
 			return false;
 		case "filter":
 			return sel.maxPhase <= PHASE.filter;
+		case "join":
+			return sel.maxPhase <= PHASE.join;
 		case "project":
 			// La SELECT-list est indépendante de WHERE/ORDER BY/LIMIT : un `project`
-			// peut rejoindre le SELECT courant tant que son slot est libre (même après
-			// un sort/limit). Le pipeline strict garantit que les colonnes triées/filtrées
-			// existent encore (sinon erreur au lowering).
+			// peut rejoindre le SELECT courant tant que son slot est libre.
 			return sel.project === null;
 		case "sort":
 			return sel.order === null && sel.maxPhase <= PHASE.sort;
@@ -112,6 +126,16 @@ function absorb(sel: Select, op: LogicalPlan): void {
 		case "filter":
 			sel.where.push(op.predicate);
 			sel.maxPhase = Math.max(sel.maxPhase, PHASE.filter);
+			return;
+		case "join":
+			sel.joins.push({
+				collection: op.collection,
+				as: op.as,
+				localField: op.localField,
+				foreignField: op.foreignField,
+				innerAlias: `__j${sel.joins.length}`
+			});
+			sel.maxPhase = Math.max(sel.maxPhase, PHASE.join);
 			return;
 		case "project":
 			sel.project = op.fields;
@@ -130,10 +154,10 @@ function absorb(sel: Select, op: LogicalPlan): void {
 }
 
 function renderSelect(sel: Select, params: ParamList): string {
-	const selectList = sel.project
-		? sel.project.map(renderProjection).join(", ")
-		: "*";
-	const parts: string[] = [`SELECT ${selectList}`, `FROM ${sel.from}`];
+	const parts: string[] = [
+		`SELECT ${renderSelectList(sel)}`,
+		`FROM ${sel.from}`
+	];
 
 	if (sel.where.length > 0) {
 		parts.push(
@@ -150,6 +174,52 @@ function renderSelect(sel: Select, params: ParamList): string {
 		parts.push(`OFFSET ${params.add(sel.offset)}`);
 	}
 	return parts.join(" ");
+}
+
+function renderSelectList(sel: Select): string {
+	if (sel.project) {
+		return sel.project
+			.map((field) => renderProjectField(field, sel))
+			.join(", ");
+	}
+	if (sel.joins.length > 0) {
+		const columns = [`${quoteIdent(sel.base)}.*`];
+		for (const join of sel.joins) {
+			columns.push(
+				`${renderJoinSubquery(join, sel.base)} AS ${quoteIdent(join.as)}`
+			);
+		}
+		return columns.join(", ");
+	}
+	return "*";
+}
+
+/** Un champ projeté qui correspond à un join devient sa sous-requête json_agg. */
+function renderProjectField(field: PlanProjectField, sel: Select): string {
+	if (field.path.length === 1) {
+		const join = sel.joins.find((candidate) => candidate.as === field.path[0]);
+		if (join !== undefined) {
+			return `${renderJoinSubquery(join, sel.base)} AS ${quoteIdent(field.alias ?? join.as)}`;
+		}
+	}
+	return renderProjection(field);
+}
+
+function renderJoinSubquery(join: JoinSpec, base: string): string {
+	// Self-join : le nom de la table interne masquerait la base → on l'aliase.
+	const selfJoin = join.collection === base;
+	const innerRef = selfJoin ? join.innerAlias : join.collection;
+	const inner = quoteIdent(innerRef);
+	const fromClause = selfJoin
+		? `${quoteIdent(join.collection)} AS ${inner}`
+		: inner;
+	const foreign = qualify(innerRef, join.foreignField);
+	const local = qualify(base, join.localField);
+	return `(SELECT COALESCE(json_agg(${inner}.*), '[]'::json) FROM ${fromClause} WHERE ${foreign} = ${local})`;
+}
+
+function qualify(ref: string, path: readonly string[]): string {
+	return `${quoteIdent(ref)}.${path.map(quoteIdent).join(".")}`;
 }
 
 class ParamList {

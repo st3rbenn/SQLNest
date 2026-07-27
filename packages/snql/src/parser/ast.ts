@@ -76,6 +76,14 @@ export type Stage =
 			readonly count: number;
 			readonly offset?: number;
 			readonly span: Span;
+	  }
+	| {
+			readonly type: "with";
+			readonly collection: string;
+			readonly alias?: string;
+			readonly localField: readonly string[];
+			readonly foreignField: readonly string[];
+			readonly span: Span;
 	  };
 
 export interface Source {

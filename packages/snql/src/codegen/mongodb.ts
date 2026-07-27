@@ -72,6 +72,17 @@ function appendStage(
 			}
 			pipeline.push({ $limit: op.count });
 			return;
+		case "join":
+			// Embed natif : $lookup imbrique les documents matchés dans le champ `as`.
+			pipeline.push({
+				$lookup: {
+					from: op.collection,
+					localField: mongoField(op.localField, alias),
+					foreignField: op.foreignField.join("."),
+					as: op.as
+				}
+			});
+			return;
 	}
 }
 

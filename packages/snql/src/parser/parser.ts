@@ -93,13 +93,64 @@ function parseStage(cursor: TokenCursor): Stage {
 			return parseSort(cursor);
 		case "limit":
 			return parseLimit(cursor);
+		case "with":
+			return parseWith(cursor);
 		default:
 			throw new SnqlError(
-				`Étape '${tok.value}' non supportée en Slice 1 (attendu where, pick, sort, limit)`,
+				`Étape '${tok.value}' inconnue (attendu where, with, pick, sort, limit)`,
 				"parse_unsupported_stage",
 				tok.span
 			);
 	}
+}
+
+function parseWith(cursor: TokenCursor): Stage {
+	const kw = cursor.next(); // 'with'
+	const collection = cursor.expect(
+		"ident",
+		"un nom de collection après 'with'"
+	);
+	let alias: string | undefined;
+	if (cursor.peek().kind === "keyword" && cursor.peek().value === "as") {
+		cursor.next();
+		alias = cursor.expect("ident", "un alias après 'as'").value;
+	}
+	if (!(cursor.peek().kind === "keyword" && cursor.peek().value === "on")) {
+		throw new SnqlError(
+			"'with' attend une condition : on <champ local> = <champ distant>",
+			"parse_with_missing_on",
+			cursor.peek().span
+		);
+	}
+	cursor.next(); // 'on'
+	const { path: localField } = parseFieldPath(cursor);
+	const eq = cursor.peek();
+	if (!(eq.kind === "op" && eq.value === "=")) {
+		throw new SnqlError(
+			"Condition de join attendue : <champ local> = <champ distant>",
+			"parse_with_condition",
+			eq.span
+		);
+	}
+	cursor.next(); // '='
+	const foreign = parseFieldPath(cursor);
+	const span = { start: kw.span.start, end: foreign.span.end };
+	return alias !== undefined
+		? {
+				type: "with",
+				collection: collection.value,
+				alias,
+				localField,
+				foreignField: foreign.path,
+				span
+			}
+		: {
+				type: "with",
+				collection: collection.value,
+				localField,
+				foreignField: foreign.path,
+				span
+			};
 }
 
 function parseWhere(cursor: TokenCursor): Stage {

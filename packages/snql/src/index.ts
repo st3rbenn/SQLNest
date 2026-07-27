@@ -110,5 +110,5 @@ export type {
 	PlanOptions
 } from "./planner/planner";
 export { plan } from "./planner/planner";
-export type { Row } from "./runtime/compensate";
+export type { JoinSources, Row } from "./runtime/compensate";
 export { compensate } from "./runtime/compensate";

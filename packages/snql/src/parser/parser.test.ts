@@ -92,4 +92,24 @@ describe("parser", () => {
 			}
 		});
 	});
+
+	it("parse un join 'with … on … = …'", () => {
+		const q = ast("get users | with orders on id = user_id");
+		expect(q.stages[0]).toMatchObject({
+			type: "with",
+			collection: "orders",
+			localField: ["id"],
+			foreignField: ["user_id"]
+		});
+	});
+
+	it("parse un join avec alias", () => {
+		expect(
+			ast("get users | with orders as cmds on id = user_id").stages[0]
+		).toMatchObject({ type: "with", collection: "orders", alias: "cmds" });
+	});
+
+	it("rejette un 'with' sans 'on'", () => {
+		expect(() => ast("get users | with orders")).toThrow(/on/i);
+	});
 });

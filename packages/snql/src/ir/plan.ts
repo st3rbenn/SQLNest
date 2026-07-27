@@ -83,6 +83,16 @@ export type LogicalPlan =
 			readonly input: LogicalPlan;
 			readonly count: number;
 			readonly offset?: number;
+	  }
+	// Join embed (imbriqué) : chaque ligne gauche reçoit un tableau des lignes
+	// droites matchées, sous le champ `as`. → ADR-008.
+	| {
+			readonly op: "join";
+			readonly input: LogicalPlan;
+			readonly collection: string;
+			readonly as: string;
+			readonly localField: readonly string[];
+			readonly foreignField: readonly string[];
 	  };
 
 export type PlanOp = LogicalPlan["op"];
@@ -93,7 +103,8 @@ export const REQUIRED_CAPABILITY: Readonly<Record<PlanOp, Capability>> = {
 	filter: "filter",
 	project: "project",
 	sort: "sort",
-	limit: "paginate"
+	limit: "paginate",
+	join: "join"
 };
 
 export function requiredCapability(plan: LogicalPlan): Capability {

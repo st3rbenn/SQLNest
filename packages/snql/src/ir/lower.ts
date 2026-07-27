@@ -39,9 +39,12 @@ export function lower(query: Query): LogicalPlan {
 	let available: ReadonlySet<string> | null = null;
 	for (const stage of query.stages) {
 		checkColumnsAvailable(stage, available);
-		plan = lowerStage(plan, stage);
+		plan = lowerStage(plan, stage, query.source.alias);
 		if (stage.type === "pick") {
 			available = projectionKeys(stage.fields);
+		} else if (stage.type === "with" && available !== null) {
+			// le join ajoute un champ imbriqué (`as`) aux colonnes disponibles
+			available = new Set([...available, stage.alias ?? stage.collection]);
 		}
 	}
 	return plan;
@@ -84,6 +87,9 @@ function checkColumnsAvailable(
 				referenced.push(field.path);
 			}
 			break;
+		case "with":
+			referenced.push(stage.localField); // le champ distant vient de la collection jointe
+			break;
 		case "limit":
 			return;
 	}
@@ -122,7 +128,21 @@ function collectExprFields(expr: Expr, out: (readonly string[])[]): void {
 	}
 }
 
-function lowerStage(input: LogicalPlan, stage: Stage): LogicalPlan {
+/** Retire l'alias de tête d'un chemin (`u.id` → `id`) quand il correspond. */
+function stripAlias(
+	path: readonly string[],
+	alias: string | undefined
+): readonly string[] {
+	return alias !== undefined && path.length > 1 && path[0] === alias
+		? path.slice(1)
+		: path;
+}
+
+function lowerStage(
+	input: LogicalPlan,
+	stage: Stage,
+	sourceAlias: string | undefined
+): LogicalPlan {
 	switch (stage.type) {
 		case "where":
 			return { op: "filter", input, predicate: lowerExpr(stage.predicate) };
@@ -137,6 +157,19 @@ function lowerStage(input: LogicalPlan, stage: Stage): LogicalPlan {
 			return stage.offset !== undefined
 				? { op: "limit", input, count: stage.count, offset: stage.offset }
 				: { op: "limit", input, count: stage.count };
+		case "with":
+			return {
+				op: "join",
+				input,
+				collection: stage.collection,
+				as: stage.alias ?? stage.collection,
+				// localField vient de la source (strip son alias), foreignField de la collection jointe.
+				localField: stripAlias(stage.localField, sourceAlias),
+				foreignField: stripAlias(
+					stage.foreignField,
+					stage.alias ?? stage.collection
+				)
+			};
 	}
 }
 
