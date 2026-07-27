@@ -62,4 +62,22 @@ describe("runQuery", () => {
 			UnknownEngineError
 		);
 	});
+
+	it("dispatche une mutation vers execute (UPDATE … RETURNING)", async () => {
+		const fake = new FakeConnection("postgres", {
+			columns: [{ name: "id" }],
+			rows: [{ id: 1 }],
+			rowCount: 1
+		});
+		const rs = await runQuery(
+			fake,
+			"update users | where id = 1 | set is_active = false"
+		);
+		expect(fake.lastQuery?.kind).toBe("sql");
+		if (fake.lastQuery?.kind === "sql") {
+			expect(fake.lastQuery.text).toContain("UPDATE");
+			expect(fake.lastQuery.text).toContain("RETURNING");
+		}
+		expect(rs.rowCount).toBe(1);
+	});
 });

@@ -1,9 +1,10 @@
-import type { ResultColumn, ResultSet, Row } from "@sqlnest/snql";
+import type { ResultColumn, ResultSet, Row, Statement } from "@sqlnest/snql";
 import {
 	capabilitiesFor,
 	compensate,
 	getMapper,
 	lower,
+	lowerMutation,
 	parse,
 	plan,
 	type SupportedEngine,
@@ -13,10 +14,9 @@ import type { Connection } from "./adapter";
 import { EngineExecutionError, UnknownEngineError } from "./errors";
 
 /**
- * Chemin de lecture de bout en bout : compile le SNQL pour le moteur de la
- * connexion, exécute le **pushdown** natif, puis applique la **compensation**
- * runtime sur les lignes. C'est le moment où SNQL renvoie de vraies lignes
- * depuis une vraie base.
+ * Exécute un statement SNQL (lecture **ou** mutation) de bout en bout et renvoie
+ * un ResultSet. Pour une mutation, `rowCount` = lignes affectées et `rows` = les
+ * lignes renvoyées (RETURNING). C'est le moment où SNQL touche vraiment la base.
  */
 export async function runQuery(
 	connection: Connection,
@@ -27,9 +27,6 @@ export async function runQuery(
 	if (capabilities === undefined) {
 		throw new UnknownEngineError(engine);
 	}
-
-	const logical = lower(parse(tokenize(source)));
-	const physical = plan(logical, capabilities);
 	// Le cast est un mensonge de type : un moteur peut avoir des capacités sans
 	// codegen (ex. un futur adapter "kv"). getMapper renvoie alors undefined à
 	// l'exécution — on le rattrape en erreur typée plutôt qu'un TypeError brut.
@@ -39,6 +36,20 @@ export async function runQuery(
 	if (mapper === undefined) {
 		throw new EngineExecutionError(`Aucun codegen pour le moteur '${engine}'`);
 	}
+
+	const statement: Statement = parse(tokenize(source));
+
+	if (statement.operation !== "select") {
+		if (!capabilities.supports.has("mutate")) {
+			throw new EngineExecutionError(
+				`Le moteur '${engine}' ne supporte pas l'écriture (capacité 'mutate')`
+			);
+		}
+		const native = mapper.mapMutation(lowerMutation(statement));
+		return connection.execute(native);
+	}
+
+	const physical = plan(lower(statement), capabilities);
 	const native = mapper.map(physical.pushdown);
 
 	const pushed = await connection.execute(native);

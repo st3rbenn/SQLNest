@@ -88,4 +88,36 @@ describe.skipIf(!hasPg)("postgres adapter (intégration)", () => {
 			await conn.close();
 		}
 	}, 20_000);
+
+	it("update : mutation réelle réversible (rowCount + RETURNING)", async () => {
+		const conn = await postgresAdapter.connect(loadConfig());
+		try {
+			const activated = await runQuery(
+				conn,
+				'update users | where email = "grace@example.com" | set is_active = true'
+			);
+			expect(activated.rowCount).toBe(1);
+			expect(activated.rows[0]?.is_active).toBe(true);
+		} finally {
+			// Restaure l'état initial (grace inactive) → runs idempotents.
+			await runQuery(
+				conn,
+				'update users | where email = "grace@example.com" | set is_active = false'
+			);
+			await conn.close();
+		}
+	}, 20_000);
+
+	it("delete : chemin d'exécution sans détruire le seed (0 ligne)", async () => {
+		const conn = await postgresAdapter.connect(loadConfig());
+		try {
+			const removed = await runQuery(
+				conn,
+				'remove from users | where email = "nobody@example.invalid"'
+			);
+			expect(removed.rowCount).toBe(0);
+		} finally {
+			await conn.close();
+		}
+	}, 20_000);
 });
