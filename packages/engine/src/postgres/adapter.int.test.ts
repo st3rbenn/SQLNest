@@ -120,4 +120,23 @@ describe.skipIf(!hasPg)("postgres adapter (intégration)", () => {
 			await conn.close();
 		}
 	}, 20_000);
+
+	it("insert : ligne réelle (RETURNING) puis nettoyage", async () => {
+		const conn = await postgresAdapter.connect(loadConfig());
+		const cleanup = 'remove from users | where email = "temp@example.invalid"';
+		try {
+			// Nettoie une éventuelle ligne laissée par un run précédent.
+			await runQuery(conn, cleanup);
+			const inserted = await runQuery(
+				conn,
+				'add {email: "temp@example.invalid", display_name: "Temp", is_active: true} into users'
+			);
+			expect(inserted.rowCount).toBe(1);
+			expect(inserted.rows[0]?.email).toBe("temp@example.invalid");
+			expect(inserted.rows[0]?.id).toBeDefined();
+		} finally {
+			await runQuery(conn, cleanup);
+			await conn.close();
+		}
+	}, 20_000);
 });
