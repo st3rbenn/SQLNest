@@ -47,14 +47,24 @@ function renderMutation(plan: MutationPlan, params: ParamList): string {
 			const set = plan.assignments
 				.map((a) => `${quoteIdent(a.column)} = ${renderExpr(a.value, params)}`)
 				.join(", ");
-			const where = renderExpr(plan.predicate, params);
-			return `UPDATE ${quoteIdent(plan.collection)} SET ${set} WHERE ${where} RETURNING *`;
+			const where = renderWhere(plan.predicate, params);
+			return `UPDATE ${quoteIdent(plan.collection)} SET ${set}${where} RETURNING *`;
 		}
 		case "delete": {
-			const where = renderExpr(plan.predicate, params);
-			return `DELETE FROM ${quoteIdent(plan.collection)} WHERE ${where} RETURNING *`;
+			const where = renderWhere(plan.predicate, params);
+			return `DELETE FROM ${quoteIdent(plan.collection)}${where} RETURNING *`;
 		}
 	}
+}
+
+/** Clause WHERE d'une mutation, ou chaîne vide si le prédicat est absent (toutes les lignes). */
+function renderWhere(
+	predicate: PlanExpr | undefined,
+	params: ParamList
+): string {
+	return predicate === undefined
+		? ""
+		: ` WHERE ${renderExpr(predicate, params)}`;
 }
 
 // Phases = ordre d'évaluation logique d'un SELECT. Une étape ne peut rejoindre le

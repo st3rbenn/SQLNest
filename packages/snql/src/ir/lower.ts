@@ -59,21 +59,26 @@ export function lowerMutation(
 ): MutationPlan {
 	if (statement.operation === "update") {
 		assertUniqueAssignments(statement.assignments);
-		return {
-			op: "update",
-			collection: statement.collection,
-			assignments: statement.assignments.map((assignment) => ({
-				column: assignment.column,
-				value: lowerExpr(assignment.value)
-			})),
-			predicate: lowerExpr(statement.predicate)
-		};
+		const assignments = statement.assignments.map((assignment) => ({
+			column: assignment.column,
+			value: lowerExpr(assignment.value)
+		}));
+		return statement.predicate !== undefined
+			? {
+					op: "update",
+					collection: statement.collection,
+					assignments,
+					predicate: lowerExpr(statement.predicate)
+				}
+			: { op: "update", collection: statement.collection, assignments };
 	}
-	return {
-		op: "delete",
-		collection: statement.collection,
-		predicate: lowerExpr(statement.predicate)
-	};
+	return statement.predicate !== undefined
+		? {
+				op: "delete",
+				collection: statement.collection,
+				predicate: lowerExpr(statement.predicate)
+			}
+		: { op: "delete", collection: statement.collection };
 }
 
 /**

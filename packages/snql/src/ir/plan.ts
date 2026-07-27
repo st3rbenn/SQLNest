@@ -111,12 +111,13 @@ export type MutationPlan =
 			readonly op: "update";
 			readonly collection: string;
 			readonly assignments: readonly PlanColumnValue[];
-			readonly predicate: PlanExpr;
+			// Absent = toutes les lignes (write non filtré, assumé).
+			readonly predicate?: PlanExpr;
 	  }
 	| {
 			readonly op: "delete";
 			readonly collection: string;
-			readonly predicate: PlanExpr;
+			readonly predicate?: PlanExpr;
 	  };
 
 /** Un plan complet : lecture ou mutation. */

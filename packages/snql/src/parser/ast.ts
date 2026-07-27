@@ -108,22 +108,22 @@ export interface Assignment {
 	readonly span: Span;
 }
 
-/** `update <coll> | where <pred> | set <affectations>`. Le `where` est requis (write filtré). */
+/** `update <coll> [| where <pred>] | set <affectations>`. `where` optionnel : sans lui, toutes les lignes. */
 export interface UpdateStatement {
 	readonly operation: "update";
 	readonly verb: string;
 	readonly collection: string;
-	readonly predicate: Expr;
+	readonly predicate?: Expr;
 	readonly assignments: readonly Assignment[];
 	readonly span: Span;
 }
 
-/** `remove from <coll> | where <pred>`. Le `where` est requis (delete filtré). */
+/** `remove from <coll> [| where <pred>]`. `where` optionnel : sans lui, toutes les lignes. */
 export interface DeleteStatement {
 	readonly operation: "delete";
 	readonly verb: string;
 	readonly collection: string;
-	readonly predicate: Expr;
+	readonly predicate?: Expr;
 	readonly span: Span;
 }
 

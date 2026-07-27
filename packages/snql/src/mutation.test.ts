@@ -58,23 +58,25 @@ describe("mutations → Postgres", () => {
 		);
 		expect(params).toEqual([9223372036854775807n]);
 	});
-});
 
-describe("mutations — garde-fous", () => {
-	it("refuse un update sans where (write non filtré)", () => {
-		expect(() => parse(tokenize('update users | set status = "x"'))).toThrow(
-			SnqlError
-		);
+	it("update sans where affecte toutes les lignes (assumé)", () => {
+		const { text, params } = sql("update users | set is_active = false");
+		expect(text).toBe('UPDATE "users" SET "is_active" = $1 RETURNING *');
+		expect(params).toEqual([false]);
 	});
 
-	it("refuse un update sans set", () => {
+	it("remove sans where supprime toutes les lignes (assumé)", () => {
+		const { text, params } = sql("remove from users");
+		expect(text).toBe('DELETE FROM "users" RETURNING *');
+		expect(params).toEqual([]);
+	});
+});
+
+describe("mutations — règles de correction", () => {
+	it("refuse un update sans set (rien à écrire)", () => {
 		expect(() => parse(tokenize("update users | where id = 1"))).toThrow(
 			SnqlError
 		);
-	});
-
-	it("refuse un remove sans where (delete non filtré)", () => {
-		expect(() => parse(tokenize("remove from users"))).toThrow(SnqlError);
 	});
 
 	it("refuse une colonne affectée deux fois dans un set", () => {

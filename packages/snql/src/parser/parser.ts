@@ -117,22 +117,25 @@ function parseUpdate(cursor: TokenCursor, verbTok: Token): UpdateStatement {
 			verbTok.span
 		);
 	}
-	if (predicates.length === 0) {
-		throw new SnqlError(
-			"'update' exige un 'where' — un write non filtré est refusé. Ajoutez une condition.",
-			"parse_mutation_no_filter",
-			verbTok.span
-		);
-	}
 
-	return {
-		operation: "update",
-		verb: verbTok.value,
-		collection: nameTok.value,
-		predicate: andAll(predicates),
-		assignments,
-		span: { start: verbTok.span.start, end }
-	};
+	// `where` optionnel : sans lui, l'update porte sur toutes les lignes (assumé).
+	const span = { start: verbTok.span.start, end };
+	return predicates.length > 0
+		? {
+				operation: "update",
+				verb: verbTok.value,
+				collection: nameTok.value,
+				predicate: andAll(predicates),
+				assignments,
+				span
+			}
+		: {
+				operation: "update",
+				verb: verbTok.value,
+				collection: nameTok.value,
+				assignments,
+				span
+			};
 }
 
 function parseDelete(cursor: TokenCursor, verbTok: Token): DeleteStatement {
@@ -166,21 +169,22 @@ function parseDelete(cursor: TokenCursor, verbTok: Token): DeleteStatement {
 		}
 	}
 
-	if (predicates.length === 0) {
-		throw new SnqlError(
-			"'remove' exige un 'where' — un delete non filtré est refusé. Ajoutez une condition.",
-			"parse_mutation_no_filter",
-			verbTok.span
-		);
-	}
-
-	return {
-		operation: "delete",
-		verb: verbTok.value,
-		collection: nameTok.value,
-		predicate: andAll(predicates),
-		span: { start: verbTok.span.start, end }
-	};
+	// `where` optionnel : sans lui, le remove porte sur toutes les lignes (assumé).
+	const span = { start: verbTok.span.start, end };
+	return predicates.length > 0
+		? {
+				operation: "delete",
+				verb: verbTok.value,
+				collection: nameTok.value,
+				predicate: andAll(predicates),
+				span
+			}
+		: {
+				operation: "delete",
+				verb: verbTok.value,
+				collection: nameTok.value,
+				span
+			};
 }
 
 function parseAssignments(cursor: TokenCursor): Assignment[] {
