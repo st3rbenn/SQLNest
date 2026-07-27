@@ -1,4 +1,4 @@
-import type { NativeQuery, ResultSet, Row } from "@sqlnest/snql";
+import type { NativeQuery, ResultSet, Row, SchemaModel } from "@sqlnest/snql";
 import { POSTGRES_CAPABILITIES } from "@sqlnest/snql";
 import type { Pool as PgPool, PoolClient, PoolConfig } from "pg";
 import pg from "pg";
@@ -16,6 +16,7 @@ import {
 	EngineConnectionError,
 	EngineExecutionError
 } from "../errors";
+import { introspectPostgres } from "./introspect";
 
 const { Pool } = pg;
 
@@ -77,6 +78,12 @@ class PostgresConnection implements Connection {
 		} finally {
 			client.release();
 		}
+	}
+
+	async introspect(): Promise<SchemaModel> {
+		// `async` pour que `#requirePool()` (connexion fermée) rejette la promesse
+		// au lieu de lever de façon synchrone — contrat uniforme avec ping/execute.
+		return introspectPostgres(this.#requirePool());
 	}
 
 	async execute(query: NativeQuery): Promise<ResultSet> {

@@ -8,7 +8,8 @@ export type EngineErrorCode =
 	| "invalid_config"
 	| "connection_failed"
 	| "connection_closed"
-	| "execution_failed";
+	| "execution_failed"
+	| "introspection_failed";
 
 export class EngineError extends Error {
 	readonly code: EngineErrorCode;
@@ -64,5 +65,13 @@ export class EngineExecutionError extends EngineError {
 	constructor(message: string, options?: { readonly cause?: unknown }) {
 		super(message, "execution_failed", options);
 		this.name = "EngineExecutionError";
+	}
+}
+
+/** Échec de la lecture du schéma (introspection). */
+export class EngineIntrospectionError extends EngineError {
+	constructor(message: string, options?: { readonly cause?: unknown }) {
+		super(message, "introspection_failed", options);
+		this.name = "EngineIntrospectionError";
 	}
 }

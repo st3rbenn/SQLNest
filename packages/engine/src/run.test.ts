@@ -1,4 +1,9 @@
-import type { NativeQuery, PingResult, ResultSet } from "@sqlnest/snql";
+import type {
+	NativeQuery,
+	PingResult,
+	ResultSet,
+	SchemaModel
+} from "@sqlnest/snql";
 import { describe, expect, it } from "vitest";
 import type { Connection } from "./adapter";
 import { UnknownEngineError } from "./errors";
@@ -17,6 +22,14 @@ class FakeConnection implements Connection {
 
 	ping(): Promise<PingResult> {
 		return Promise.resolve({ latencyMs: 0 });
+	}
+
+	introspect(): Promise<SchemaModel> {
+		return Promise.resolve({
+			engine: this.engine,
+			collections: [],
+			relations: []
+		});
 	}
 
 	execute(query: NativeQuery): Promise<ResultSet> {

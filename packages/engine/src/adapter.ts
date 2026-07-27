@@ -1,4 +1,9 @@
-import type { Capabilities, NativeQuery, ResultSet } from "@sqlnest/snql";
+import type {
+	Capabilities,
+	NativeQuery,
+	ResultSet,
+	SchemaModel
+} from "@sqlnest/snql";
 import type { PostgresConnectionConfig } from "./config";
 
 /**
@@ -16,13 +21,14 @@ export interface PingResult {
 
 /**
  * Une connexion ouverte à un moteur. Enveloppe un pool sous-jacent ;
- * `close()` libère toutes les ressources. L'introspection (→ SchemaModel)
- * se greffera à la Slice 6.
+ * `close()` libère toutes les ressources.
  */
 export interface Connection {
 	readonly engine: string;
 	/** Vérifie que le moteur répond (aller-retour réseau). Lève si injoignable. */
 	ping(): Promise<PingResult>;
+	/** Lit la structure de la base → SchemaModel unifié. */
+	introspect(): Promise<SchemaModel>;
 	/** Exécute une requête native (le pushdown) et renvoie un ResultSet normalisé. */
 	execute(query: NativeQuery): Promise<ResultSet>;
 	/** Ferme le pool et libère les ressources. Idempotent. */

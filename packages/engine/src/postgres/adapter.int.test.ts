@@ -121,6 +121,38 @@ describe.skipIf(!hasPg)("postgres adapter (intégration)", () => {
 		}
 	}, 20_000);
 
+	it("introspect : lit le schéma réel (collections, types, PK, FK)", async () => {
+		const conn = await postgresAdapter.connect(loadConfig());
+		try {
+			const schema = await conn.introspect();
+			expect(schema.engine).toBe("postgres");
+
+			const names = schema.collections.map((c) => c.name);
+			expect(names).toContain("users");
+			expect(names).toContain("orders");
+
+			const users = schema.collections.find((c) => c.name === "users");
+			expect(users?.primaryKey).toEqual(["id"]);
+			expect(users?.fields.find((f) => f.name === "id")?.type).toBe("bigint");
+			expect(users?.fields.find((f) => f.name === "email")?.type).toBe(
+				"string"
+			);
+			expect(users?.fields.find((f) => f.name === "is_active")?.type).toBe(
+				"bool"
+			);
+
+			// FK réelle orders.user_id -> users.id
+			const rel = schema.relations.find(
+				(r) => r.from.collection === "orders" && r.from.fields[0] === "user_id"
+			);
+			expect(rel?.to).toEqual({ collection: "users", fields: ["id"] });
+			expect(rel?.origin).toBe("foreign-key");
+			expect(rel?.confidence).toBe(1);
+		} finally {
+			await conn.close();
+		}
+	}, 20_000);
+
 	it("insert : ligne réelle (RETURNING) puis nettoyage", async () => {
 		const conn = await postgresAdapter.connect(loadConfig());
 		const cleanup = 'remove from users | where email = "temp@example.invalid"';
