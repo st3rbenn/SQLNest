@@ -1,13 +1,12 @@
 {
-	"$schema": "https://biomejs.dev/schemas/2.2.4/schema.json",
-	"plugins": ["@biomejs/plugin-typescript"],
+	"$schema": "https://biomejs.dev/schemas/2.2.5/schema.json",
 	"vcs": {
 		"enabled": false,
 		"clientKind": "git",
 		"useIgnoreFile": false
 	},
 	"files": {
-		"includes": ["apps/**/*", "packages/**/*"],
+		"includes": ["apps/**/*", "packages/**/*", "!**/*.gen.ts", "!**/generated/**"],
 		"experimentalScannerIgnores": ["**/node_modules/**", "**/dist/**"]
 	},
 	"formatter": {
@@ -17,7 +16,10 @@
 	"linter": {
 		"enabled": true,
 		"rules": {
-			"performance": "error",
+			"performance": {
+				"noBarrelFile": "off",
+				"useTopLevelRegex": "error"
+			},
 			"a11y": "info"
 		}
 	},
@@ -34,5 +36,11 @@
 				"organizeImports": "on"
 			}
 		}
-	}
+	},
+	"overrides": [
+		{
+			"includes": ["**/*.test.ts"],
+			"linter": { "rules": { "performance": { "useTopLevelRegex": "off" } } }
+		}
+	]
 }

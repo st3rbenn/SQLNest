@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { ZodTypeProvider } from "fastify-type-provider-zod";
+import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { getHealth } from "../../domains/health/get";
 import { GetHealthResponseSchema } from "../../domains/health/get.schema";
 
@@ -11,10 +11,10 @@ export default function healthRoute(fastify: FastifyInstance) {
 		{
 			schema: {
 				response: {
-					200: GetHealthResponseSchema,
-				},
-			},
+					200: GetHealthResponseSchema
+				}
+			}
 		},
-		async () => getHealth(),
+		async () => getHealth()
 	);
 }

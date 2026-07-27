@@ -1,16 +1,16 @@
 import "@mantine/core/styles.css";
 
 import { MantineProvider } from "@mantine/core";
-import addonTest from "@storybook/addon-vitest";
-import addonDocs from "@storybook/addon-docs";
 import addonA11y from "@storybook/addon-a11y";
-
-import { theme } from "../src/theme";
+import addonDocs from "@storybook/addon-docs";
+import addonTest from "@storybook/addon-vitest";
 import { definePreview } from "@storybook/react-vite";
+import type { ReactNode } from "react";
 import { themes } from "storybook/theming";
+import { theme } from "../src/theme";
 
 const decorators = [
-	(renderStory: any) => (
+	(renderStory: () => ReactNode) => (
 		<MantineProvider theme={theme}>{renderStory()}</MantineProvider>
 	),
 ];

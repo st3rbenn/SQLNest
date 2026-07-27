@@ -1,7 +1,7 @@
 import "@sqlnest/design-system/dist/design-system.css";
-import { useHealthCheck } from "./features/healthcheck/useHealthCheck";
-import { useEffect } from "react";
 import { showNotification, updateNotification } from "@sqlnest/design-system";
+import { useEffect } from "react";
+import { useHealthCheck } from "./features/healthcheck/useHealthCheck";
 
 function App() {
 	const { data, error, isLoading } = useHealthCheck();
@@ -15,7 +15,7 @@ function App() {
 				color: "blue",
 				loading: true,
 				autoClose: false,
-				closeButtonProps: { style: { display: "none" } },
+				closeButtonProps: { style: { display: "none" } }
 			});
 		} else if (error) {
 			updateNotification({
@@ -24,7 +24,7 @@ function App() {
 				message: `Impossible de joindre l'API à ${new Date().toLocaleTimeString()}`,
 				color: "red",
 				autoClose: 5000,
-				loading: false,
+				loading: false
 			});
 		} else if (data) {
 			updateNotification({
@@ -33,16 +33,12 @@ function App() {
 				message: `Connexion à l'API réussie à ${new Date().toLocaleTimeString()}`,
 				color: "green",
 				autoClose: 5000,
-				loading: false,
+				loading: false
 			});
 		}
 	}, [isLoading, error, data]);
 
-	return (
-		<>
-			<h1>SQLNest</h1>
-		</>
-	);
+	return <h1>SQLNest</h1>;
 }
 
 export default App;
