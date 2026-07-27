@@ -3,7 +3,7 @@ import fastifyScalar from "@scalar/fastify-api-reference";
 import fp from "fastify-plugin";
 import {
 	jsonSchemaTransform,
-	jsonSchemaTransformObject,
+	jsonSchemaTransformObject
 } from "fastify-type-provider-zod";
 import packageJson from "../../package.json";
 
@@ -18,15 +18,15 @@ export default fp((fastify) => {
 		openapi: {
 			info: {
 				title: "SQLNest API",
-				version: packageJson.version,
-			},
+				version: packageJson.version
+			}
 		},
 		transform: jsonSchemaTransform,
-		transformObject: jsonSchemaTransformObject,
+		transformObject: jsonSchemaTransformObject
 	});
 
 	// Serve the OpenAPI documentation
 	fastify.register(fastifyScalar, {
-		routePrefix: "/reference",
+		routePrefix: "/reference"
 	});
 });

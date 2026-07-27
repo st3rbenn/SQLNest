@@ -7,15 +7,21 @@ export default defineConfig({
 		coverage: {
 			// enabled: env.CI === "true",
 			provider: "v8",
-			exclude: ["dist/**", "src/plugins/**", "*.config.ts", "src/index.ts", "src/app.ts"],
+			exclude: [
+				"dist/**",
+				"src/plugins/**",
+				"*.config.ts",
+				"src/index.ts",
+				"src/app.ts"
+			],
 			thresholds: {
 				"src/domains/**/*.ts": {
-					lines: 0,
+					lines: 0
 				},
 				"src/routes/**/*.ts": {
-					lines: 0,
-				},
-			},
-		},
-	},
+					lines: 0
+				}
+			}
+		}
+	}
 });

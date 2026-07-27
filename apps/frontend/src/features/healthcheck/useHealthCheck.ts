@@ -7,7 +7,7 @@ export const useHealthCheck = () => {
 	const { data, error, isLoading } = useQuery({
 		...GetUseHealthCheckQueryOptions(),
 		refetchInterval: 10_000,
-		refetchOnWindowFocus: false,
+		refetchOnWindowFocus: false
 	});
 
 	return { data, error, isLoading };

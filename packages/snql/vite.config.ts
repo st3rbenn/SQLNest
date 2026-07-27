@@ -9,17 +9,7 @@ export default defineConfig({
 		lib: {
 			entry: resolve(__dirname, "src/index.ts"),
 			name: "snql",
-			// the proper extensions will be added
-			fileName: "snql",
-		},
-		rollupOptions: {
-			external: ["pino", "ts-mysql-parser"],
-			output: {
-				globals: {
-					pino: "pino",
-					"ts-mysql-parser": "tsMysqlParser",
-				},
-			},
-		},
-	},
+			fileName: "snql"
+		}
+	}
 });

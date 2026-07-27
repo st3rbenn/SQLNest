@@ -1,8 +1,8 @@
-export * from "./components";
 export {
+	hideNotification,
 	showNotification,
 	updateNotification,
-	hideNotification,
 } from "@mantine/notifications";
+export * from "./components";
 export { DesignSystemProvider } from "./main";
 export { theme } from "./theme";

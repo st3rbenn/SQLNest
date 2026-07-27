@@ -1,6 +1,6 @@
-import { FastifyInstance } from "fastify";
+import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
-import { GetHealthQuery } from "../../domains/health/get.schema";
+import type { GetHealthQuery } from "../../domains/health/get.schema";
 import { createTestApp } from "../../utils/testapp";
 import healthRoute from "./root";
 
@@ -21,7 +21,7 @@ describe("GET /health", () => {
 	test("should return positive response if API is usable", async () => {
 		const response = await app.inject({
 			method: "GET",
-			url: "/health",
+			url: "/health"
 		});
 
 		const data = (await response.json()) as GetHealthQuery;
@@ -35,7 +35,7 @@ describe("GET /health", () => {
 	test("should return 404 for unknown route", async () => {
 		const response = await app.inject({
 			method: "GET",
-			url: "/unknown-route",
+			url: "/unknown-route"
 		});
 
 		expect(response.statusCode).toBe(404);

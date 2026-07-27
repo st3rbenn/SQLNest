@@ -15,12 +15,17 @@ declare module "@tanstack/react-router" {
 
 const queryClient = new QueryClient();
 
-createRoot(document.getElementById("root")!).render(
+const rootElement = document.getElementById("root");
+if (!rootElement) {
+	throw new Error("Élément racine #root introuvable");
+}
+
+createRoot(rootElement).render(
 	<StrictMode>
 		<QueryClientProvider client={queryClient}>
 			<DesignSystemProvider>
 				<RouterProvider router={router} />
 			</DesignSystemProvider>
 		</QueryClientProvider>
-	</StrictMode>,
+	</StrictMode>
 );

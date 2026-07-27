@@ -1,5 +1,6 @@
 {
 	"$schema": "../../biome.json",
+	"root": false,
 	"linter": { "rules": { "recommended": false }, "includes": ["**", "!dist"] },
 	"overrides": [
 		{

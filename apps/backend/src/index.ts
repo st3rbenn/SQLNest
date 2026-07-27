@@ -1,27 +1,27 @@
 import cors from "@fastify/cors";
+import defaultRequestContext from "@fastify/request-context";
 import Fastify from "fastify";
-import { app } from "./app";
 import {
 	serializerCompiler,
-	validatorCompiler,
+	validatorCompiler
 } from "fastify-type-provider-zod";
-import defaultRequestContext from "@fastify/request-context";
+import { app } from "./app";
 
 const fastify = Fastify({
 	logger: {
 		transport: {
 			target: "pino-pretty",
 			options: {
-				colorize: true,
-			},
-		},
-	},
+				colorize: true
+			}
+		}
+	}
 });
 
 // register plugins
 fastify.register(cors, {
 	origin: ["http://localhost:3000"],
-	methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+	methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
 });
 
 fastify.register(defaultRequestContext);
