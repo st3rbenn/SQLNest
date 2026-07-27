@@ -1,19 +1,30 @@
 import { SnqlError } from "../diagnostics";
 import { verbOperation } from "../lexer/dictionary";
 import type { Token } from "../lexer/token";
-import type { FieldSelection, Query, SortKey, Source, Stage } from "./ast";
+import type {
+	Assignment,
+	DeleteStatement,
+	Expr,
+	FieldSelection,
+	Query,
+	SortKey,
+	Source,
+	Stage,
+	Statement,
+	UpdateStatement
+} from "./ast";
 import { TokenCursor } from "./cursor";
 import { parseExpression, parseFieldPath } from "./expression";
 
-/** Parse un flux de tokens en un AST [[Query]]. */
-export function parse(tokens: readonly Token[]): Query {
+/** Parse un flux de tokens en un AST [[Statement]] (lecture ou mutation). */
+export function parse(tokens: readonly Token[]): Statement {
 	const cursor = new TokenCursor(tokens);
-	const query = parseQuery(cursor);
+	const statement = parseStatement(cursor);
 	cursor.expect("eof", "la fin de la requête");
-	return query;
+	return statement;
 }
 
-function parseQuery(cursor: TokenCursor): Query {
+function parseStatement(cursor: TokenCursor): Statement {
 	const verbTok = cursor.peek();
 	if (verbTok.kind !== "verb") {
 		throw new SnqlError(
@@ -32,14 +43,23 @@ function parseQuery(cursor: TokenCursor): Query {
 			verbTok.span
 		);
 	}
-	if (operation !== "select") {
-		throw new SnqlError(
-			`Slice 1 ne supporte que la lecture (get / find / show / fetch). '${verbTok.value}' arrivera dans une slice ultérieure.`,
-			"parse_unsupported_operation",
-			verbTok.span
-		);
+	switch (operation) {
+		case "select":
+			return parseSelect(cursor, verbTok);
+		case "update":
+			return parseUpdate(cursor, verbTok);
+		case "delete":
+			return parseDelete(cursor, verbTok);
+		case "insert":
+			throw new SnqlError(
+				"L'insertion (add / create) arrive dans la slice suivante (4b).",
+				"parse_unsupported_operation",
+				verbTok.span
+			);
 	}
+}
 
+function parseSelect(cursor: TokenCursor, verbTok: Token): Query {
 	const source = parseSource(cursor);
 
 	const stages: Stage[] = [];
@@ -51,12 +71,166 @@ function parseQuery(cursor: TokenCursor): Query {
 	const lastStage = stages[stages.length - 1];
 	const endSpan = lastStage ? lastStage.span : source.span;
 	return {
-		operation,
+		operation: "select",
 		verb: verbTok.value,
 		source,
 		stages,
 		span: { start: verbTok.span.start, end: endSpan.end }
 	};
+}
+
+function parseUpdate(cursor: TokenCursor, verbTok: Token): UpdateStatement {
+	const nameTok = cursor.expect("ident", "un nom de collection après 'update'");
+	const predicates: Expr[] = [];
+	const assignments: Assignment[] = [];
+	let end = nameTok.span.end;
+
+	while (cursor.peek().kind === "pipe") {
+		cursor.next();
+		const kw = cursor.peek();
+		if (kw.kind === "keyword" && kw.value === "where") {
+			cursor.next();
+			const predicate = parseExpression(cursor);
+			predicates.push(predicate);
+			end = predicate.span.end;
+		} else if (kw.kind === "keyword" && kw.value === "set") {
+			cursor.next();
+			const parsed = parseAssignments(cursor);
+			assignments.push(...parsed);
+			const last = parsed[parsed.length - 1];
+			if (last !== undefined) {
+				end = last.span.end;
+			}
+		} else {
+			throw new SnqlError(
+				`Étape '${kw.value}' invalide dans un 'update' (attendu where, set)`,
+				"parse_unsupported_stage",
+				kw.span
+			);
+		}
+	}
+
+	if (assignments.length === 0) {
+		throw new SnqlError(
+			"'update' exige au moins un 'set <colonne> = <valeur>'",
+			"parse_update_no_set",
+			verbTok.span
+		);
+	}
+	if (predicates.length === 0) {
+		throw new SnqlError(
+			"'update' exige un 'where' — un write non filtré est refusé. Ajoutez une condition.",
+			"parse_mutation_no_filter",
+			verbTok.span
+		);
+	}
+
+	return {
+		operation: "update",
+		verb: verbTok.value,
+		collection: nameTok.value,
+		predicate: andAll(predicates),
+		assignments,
+		span: { start: verbTok.span.start, end }
+	};
+}
+
+function parseDelete(cursor: TokenCursor, verbTok: Token): DeleteStatement {
+	const fromTok = cursor.peek();
+	if (!(fromTok.kind === "keyword" && fromTok.value === "from")) {
+		throw new SnqlError(
+			"'remove' attend 'from <collection>'",
+			"parse_delete_missing_from",
+			fromTok.span
+		);
+	}
+	cursor.next();
+	const nameTok = cursor.expect("ident", "un nom de collection après 'from'");
+
+	const predicates: Expr[] = [];
+	let end = nameTok.span.end;
+	while (cursor.peek().kind === "pipe") {
+		cursor.next();
+		const kw = cursor.peek();
+		if (kw.kind === "keyword" && kw.value === "where") {
+			cursor.next();
+			const predicate = parseExpression(cursor);
+			predicates.push(predicate);
+			end = predicate.span.end;
+		} else {
+			throw new SnqlError(
+				`Étape '${kw.value}' invalide dans un 'remove' (attendu where)`,
+				"parse_unsupported_stage",
+				kw.span
+			);
+		}
+	}
+
+	if (predicates.length === 0) {
+		throw new SnqlError(
+			"'remove' exige un 'where' — un delete non filtré est refusé. Ajoutez une condition.",
+			"parse_mutation_no_filter",
+			verbTok.span
+		);
+	}
+
+	return {
+		operation: "delete",
+		verb: verbTok.value,
+		collection: nameTok.value,
+		predicate: andAll(predicates),
+		span: { start: verbTok.span.start, end }
+	};
+}
+
+function parseAssignments(cursor: TokenCursor): Assignment[] {
+	const assignments: Assignment[] = [parseAssignment(cursor)];
+	while (cursor.peek().kind === "comma") {
+		cursor.next();
+		assignments.push(parseAssignment(cursor));
+	}
+	return assignments;
+}
+
+function parseAssignment(cursor: TokenCursor): Assignment {
+	const col = cursor.expect("ident", "un nom de colonne");
+	const eq = cursor.peek();
+	if (!(eq.kind === "op" && eq.value === "=")) {
+		throw new SnqlError(
+			"Affectation attendue : <colonne> = <valeur>",
+			"parse_assignment",
+			eq.span
+		);
+	}
+	cursor.next();
+	const value = parseExpression(cursor);
+	return {
+		column: col.value,
+		value,
+		span: { start: col.span.start, end: value.span.end }
+	};
+}
+
+/** Combine plusieurs prédicats en une conjonction `and`. */
+function andAll(predicates: readonly Expr[]): Expr {
+	let combined = predicates[0];
+	if (combined === undefined) {
+		throw new SnqlError("Prédicat manquant", "parse_missing_predicate");
+	}
+	for (let i = 1; i < predicates.length; i += 1) {
+		const next = predicates[i];
+		if (next === undefined) {
+			continue;
+		}
+		combined = {
+			type: "logical",
+			operator: "and",
+			left: combined,
+			right: next,
+			span: { start: combined.span.start, end: next.span.end }
+		};
+	}
+	return combined;
 }
 
 function parseSource(cursor: TokenCursor): Source {

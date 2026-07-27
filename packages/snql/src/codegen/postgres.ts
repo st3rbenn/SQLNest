@@ -2,6 +2,7 @@ import { SnqlError } from "../diagnostics";
 import type {
 	CompareOp,
 	LogicalPlan,
+	MutationPlan,
 	PlanExpr,
 	PlanProjectField,
 	PlanSortKey,
@@ -28,8 +29,33 @@ export const postgresMapper: Mapper = {
 		const params = new ParamList();
 		const text = renderPlan(plan, params);
 		return { engine: "postgres", kind: "sql", text, params: params.all() };
+	},
+	mapMutation(plan: MutationPlan): NativeQuery {
+		const params = new ParamList();
+		const text = renderMutation(plan, params);
+		return { engine: "postgres", kind: "sql", text, params: params.all() };
 	}
 };
+
+/**
+ * Codegen des mutations. Valeurs TOUJOURS paramétrées, identifiants quotés.
+ * `RETURNING *` : `execute` récupère les lignes affectées (et leur nombre).
+ */
+function renderMutation(plan: MutationPlan, params: ParamList): string {
+	switch (plan.op) {
+		case "update": {
+			const set = plan.assignments
+				.map((a) => `${quoteIdent(a.column)} = ${renderExpr(a.value, params)}`)
+				.join(", ");
+			const where = renderExpr(plan.predicate, params);
+			return `UPDATE ${quoteIdent(plan.collection)} SET ${set} WHERE ${where} RETURNING *`;
+		}
+		case "delete": {
+			const where = renderExpr(plan.predicate, params);
+			return `DELETE FROM ${quoteIdent(plan.collection)} WHERE ${where} RETURNING *`;
+		}
+	}
+}
 
 // Phases = ordre d'évaluation logique d'un SELECT. Une étape ne peut rejoindre le
 // SELECT courant que si sa phase ne « recule » pas (et si son slot est libre).

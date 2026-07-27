@@ -95,6 +95,33 @@ export type LogicalPlan =
 			readonly foreignField: readonly string[];
 	  };
 
+/** Une affectation de colonne dans un `update` : `column = value`. */
+export interface PlanColumnValue {
+	readonly column: string;
+	readonly value: PlanExpr;
+}
+
+/**
+ * Plan de **mutation** (écriture). Contrairement au [[LogicalPlan]] de lecture,
+ * ce n'est pas une chaîne d'opérateurs linéaire : chaque mutation porte sa cible,
+ * son prédicat, ses valeurs. Exige la capacité `mutate`.
+ */
+export type MutationPlan =
+	| {
+			readonly op: "update";
+			readonly collection: string;
+			readonly assignments: readonly PlanColumnValue[];
+			readonly predicate: PlanExpr;
+	  }
+	| {
+			readonly op: "delete";
+			readonly collection: string;
+			readonly predicate: PlanExpr;
+	  };
+
+/** Un plan complet : lecture ou mutation. */
+export type Plan = LogicalPlan | MutationPlan;
+
 export type PlanOp = LogicalPlan["op"];
 
 /** Capacité exigée par chaque opérateur — consommé par le planner (Slice 3). */

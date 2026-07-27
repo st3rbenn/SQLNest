@@ -75,8 +75,10 @@ describe("codegen postgres — clauses de base", () => {
 		expect(params).toEqual(["'; DROP TABLE users; --"]);
 	});
 
-	it("rejette les verbes d'écriture en Slice 1", () => {
-		expect(() => sql("update users")).toThrow(/Slice 1/);
+	it("compile() est en lecture seule : refuse une mutation", () => {
+		expect(() => sql("update users | where id = 1 | set x = 1")).toThrow(
+			/lecture seule/i
+		);
 	});
 
 	it("rejette une projection à colonnes dupliquées sans alias", () => {

@@ -92,11 +92,40 @@ export interface Source {
 	readonly span: Span;
 }
 
-/** Racine de l'AST d'une requête SNQL. */
+/** Racine de l'AST d'une requête de **lecture** SNQL. */
 export interface Query {
-	readonly operation: OperationKind;
+	readonly operation: "select";
 	readonly verb: string;
 	readonly source: Source;
 	readonly stages: readonly Stage[];
 	readonly span: Span;
 }
+
+/** Une affectation d'un `set` : `<colonne> = <valeur>`. */
+export interface Assignment {
+	readonly column: string;
+	readonly value: Expr;
+	readonly span: Span;
+}
+
+/** `update <coll> | where <pred> | set <affectations>`. Le `where` est requis (write filtré). */
+export interface UpdateStatement {
+	readonly operation: "update";
+	readonly verb: string;
+	readonly collection: string;
+	readonly predicate: Expr;
+	readonly assignments: readonly Assignment[];
+	readonly span: Span;
+}
+
+/** `remove from <coll> | where <pred>`. Le `where` est requis (delete filtré). */
+export interface DeleteStatement {
+	readonly operation: "delete";
+	readonly verb: string;
+	readonly collection: string;
+	readonly predicate: Expr;
+	readonly span: Span;
+}
+
+/** Racine de l'AST : lecture (`Query`) ou mutation. */
+export type Statement = Query | UpdateStatement | DeleteStatement;

@@ -45,6 +45,12 @@ export const mongoMapper: Mapper = {
 			collection: scan.collection,
 			pipeline
 		};
+	},
+	mapMutation(): NativeQuery {
+		throw new SnqlError(
+			"Les mutations MongoDB arrivent dans une slice ultérieure",
+			"codegen_mongo_mutation_unsupported"
+		);
 	}
 };
 

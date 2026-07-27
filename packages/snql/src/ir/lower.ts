@@ -1,16 +1,19 @@
 import { SnqlError } from "../diagnostics";
 import type {
 	CompareOperator,
+	DeleteStatement,
 	Expr,
 	FieldSelection,
 	LiteralValue,
 	Query,
 	SortKey,
-	Stage
+	Stage,
+	UpdateStatement
 } from "../parser/ast";
 import type {
 	CompareOp,
 	LogicalPlan,
+	MutationPlan,
 	PlanExpr,
 	PlanProjectField,
 	PlanSortKey,
@@ -48,6 +51,49 @@ export function lower(query: Query): LogicalPlan {
 		}
 	}
 	return plan;
+}
+
+/** Abaisse une mutation (update / delete) en [[MutationPlan]]. Réutilise `lowerExpr`. */
+export function lowerMutation(
+	statement: UpdateStatement | DeleteStatement
+): MutationPlan {
+	if (statement.operation === "update") {
+		assertUniqueAssignments(statement.assignments);
+		return {
+			op: "update",
+			collection: statement.collection,
+			assignments: statement.assignments.map((assignment) => ({
+				column: assignment.column,
+				value: lowerExpr(assignment.value)
+			})),
+			predicate: lowerExpr(statement.predicate)
+		};
+	}
+	return {
+		op: "delete",
+		collection: statement.collection,
+		predicate: lowerExpr(statement.predicate)
+	};
+}
+
+/**
+ * Une même colonne ne peut être affectée qu'une fois dans un `set` (Postgres
+ * rejette `SET x = 1, x = 2`). On lève une erreur claire à la compilation plutôt
+ * que de laisser le moteur échouer — cohérent avec le chemin de lecture.
+ */
+function assertUniqueAssignments(
+	assignments: readonly { readonly column: string }[]
+): void {
+	const seen = new Set<string>();
+	for (const assignment of assignments) {
+		if (seen.has(assignment.column)) {
+			throw new SnqlError(
+				`Colonne '${assignment.column}' affectée plusieurs fois dans un 'set'`,
+				"lower_duplicate_assignment"
+			);
+		}
+		seen.add(assignment.column);
+	}
 }
 
 /** Noms de sortie d'un `pick` = alias, sinon dernier segment du chemin. */
