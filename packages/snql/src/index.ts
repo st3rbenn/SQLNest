@@ -112,3 +112,4 @@ export type {
 export { plan } from "./planner/planner";
 export type { JoinSources, Row } from "./runtime/compensate";
 export { compensate } from "./runtime/compensate";
+export type { ResultColumn, ResultSet } from "./runtime/result";
