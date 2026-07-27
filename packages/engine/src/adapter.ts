@@ -1,4 +1,4 @@
-import type { Capabilities } from "@sqlnest/snql";
+import type { Capabilities, NativeQuery, ResultSet } from "@sqlnest/snql";
 import type { PostgresConnectionConfig } from "./config";
 
 /**
@@ -16,13 +16,15 @@ export interface PingResult {
 
 /**
  * Une connexion ouverte à un moteur. Enveloppe un pool sous-jacent ;
- * `close()` libère toutes les ressources. Les capacités d'exécution et
- * d'introspection s'y grefferont aux slices suivantes (7 & 6).
+ * `close()` libère toutes les ressources. L'introspection (→ SchemaModel)
+ * se greffera à la Slice 6.
  */
 export interface Connection {
 	readonly engine: string;
 	/** Vérifie que le moteur répond (aller-retour réseau). Lève si injoignable. */
 	ping(): Promise<PingResult>;
+	/** Exécute une requête native (le pushdown) et renvoie un ResultSet normalisé. */
+	execute(query: NativeQuery): Promise<ResultSet>;
 	/** Ferme le pool et libère les ressources. Idempotent. */
 	close(): Promise<void>;
 }

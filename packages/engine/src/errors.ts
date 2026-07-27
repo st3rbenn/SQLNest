@@ -7,7 +7,8 @@ export type EngineErrorCode =
 	| "unknown_engine"
 	| "invalid_config"
 	| "connection_failed"
-	| "connection_closed";
+	| "connection_closed"
+	| "execution_failed";
 
 export class EngineError extends Error {
 	readonly code: EngineErrorCode;
@@ -55,5 +56,13 @@ export class ConnectionClosedError extends EngineError {
 	constructor(engine: string) {
 		super(`Connexion ${engine} déjà fermée`, "connection_closed");
 		this.name = "ConnectionClosedError";
+	}
+}
+
+/** Échec de l'exécution d'une requête native (SQL invalide, contrainte…). */
+export class EngineExecutionError extends EngineError {
+	constructor(message: string, options?: { readonly cause?: unknown }) {
+		super(message, "execution_failed", options);
+		this.name = "EngineExecutionError";
 	}
 }

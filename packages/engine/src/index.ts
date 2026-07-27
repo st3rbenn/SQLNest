@@ -17,6 +17,7 @@ export function connect(config: ResolvedEngineConfig): Promise<Connection> {
 	return requireAdapter(config.engine).connect(config);
 }
 
+export type { ResultColumn, ResultSet } from "@sqlnest/snql";
 export type {
 	Connection,
 	EngineAdapter,
@@ -36,7 +37,9 @@ export {
 	EngineConnectionError,
 	EngineError,
 	type EngineErrorCode,
+	EngineExecutionError,
 	UnknownEngineError
 } from "./errors";
 export { postgresAdapter } from "./postgres/adapter";
 export { getAdapter, registeredEngines, requireAdapter } from "./registry";
+export { runQuery } from "./run";

@@ -1,3 +1,4 @@
+import type { NativeQuery, ResultSet, Row } from "@sqlnest/snql";
 import { POSTGRES_CAPABILITIES } from "@sqlnest/snql";
 import type { Pool as PgPool, PoolClient, PoolConfig } from "pg";
 import pg from "pg";
@@ -12,7 +13,8 @@ import { describePostgresConfig } from "../config";
 import {
 	ConnectionClosedError,
 	EngineConfigError,
-	EngineConnectionError
+	EngineConnectionError,
+	EngineExecutionError
 } from "../errors";
 
 const { Pool } = pg;
@@ -72,6 +74,38 @@ class PostgresConnection implements Connection {
 			throw new EngineConnectionError("Ping Postgres : requête échouée", {
 				cause
 			});
+		} finally {
+			client.release();
+		}
+	}
+
+	async execute(query: NativeQuery): Promise<ResultSet> {
+		if (query.kind !== "sql") {
+			throw new EngineExecutionError(
+				`Adapter Postgres : requête native '${query.kind}' non supportée (SQL attendu)`
+			);
+		}
+		const pool = this.#requirePool();
+
+		let client: PoolClient;
+		try {
+			client = await pool.connect();
+		} catch (cause) {
+			throw new EngineConnectionError(
+				"Exécution Postgres : acquisition d'une connexion échouée",
+				{ cause }
+			);
+		}
+
+		try {
+			const result = await client.query(query.text, Array.from(query.params));
+			return {
+				columns: result.fields.map((field) => ({ name: field.name })),
+				rows: result.rows as Row[],
+				rowCount: result.rowCount ?? result.rows.length
+			};
+		} catch (cause) {
+			throw new EngineExecutionError("Exécution Postgres échouée", { cause });
 		} finally {
 			client.release();
 		}
