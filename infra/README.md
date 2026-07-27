@@ -10,12 +10,14 @@ docker compose -f infra/docker-compose.yml up -d
 
 Ou via les scripts racine : `pnpm db:up` / `pnpm db:down` / `pnpm db:reset`.
 
-| Service  | Port  | Identifiants (dev)              | Base           |
-| -------- | ----- | ------------------------------- | -------------- |
-| postgres | 5432  | `sqlnest` / `sqlnest`           | `sqlnest_demo` |
-| mongo    | 27017 | `sqlnest` / `sqlnest`           | `sqlnest_demo` |
+| Service  | Port hôte | Identifiants (dev)      | Base           |
+| -------- | --------- | ----------------------- | -------------- |
+| postgres | **5433**  | `sqlnest` / `sqlnest`   | `sqlnest_demo` |
+| mongo    | 27017     | `sqlnest` / `sqlnest`   | `sqlnest_demo` |
 
 > Identifiants de **développement uniquement**. Ne jamais les réutiliser ailleurs.
+> Postgres est exposé sur **5433** (et non 5432) pour cohabiter avec un
+> PostgreSQL installé nativement, qui occupe souvent 5432 sur un poste de dev.
 
 ## Données de démo
 
@@ -37,6 +39,13 @@ Les tests `*.int.test.ts` du package `@sqlnest/engine` sont **sautés** tant que
 `SNQL_TEST_PG_URL` n'est pas défini (voir `.env.example`). Avec les bases lancées :
 
 ```bash
-export SNQL_TEST_PG_URL="postgres://sqlnest:sqlnest@localhost:5432/sqlnest_demo"
+export SNQL_TEST_PG_URL="postgres://sqlnest:sqlnest@localhost:5433/sqlnest_demo"
+pnpm --filter @sqlnest/engine test
+```
+
+En PowerShell :
+
+```powershell
+$env:SNQL_TEST_PG_URL = "postgres://sqlnest:sqlnest@localhost:5433/sqlnest_demo"
 pnpm --filter @sqlnest/engine test
 ```

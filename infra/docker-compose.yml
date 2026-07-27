@@ -12,8 +12,10 @@ services:
       POSTGRES_USER: sqlnest
       POSTGRES_PASSWORD: sqlnest
       POSTGRES_DB: sqlnest_demo
+    # Hôte 5433 (pas 5432) pour cohabiter avec un PostgreSQL installé
+    # nativement, qui occupe fréquemment 5432 sur les postes de dev.
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./postgres/seed:/docker-entrypoint-initdb.d:ro
