@@ -1,18 +1,6 @@
-import {
-	connect,
-	resolveMongoConfig,
-	resolvePostgresConfig,
-	type SchemaModel
-} from "@sqlnest/engine";
+import { connect, type SchemaModel } from "@sqlnest/engine";
+import { resolveConnection } from "../connections";
 import type { GetSchemaQuery } from "./get.schema";
-
-// Connexions cibles (démo par défaut ; surchargeables par variables d'env).
-const PG_URL =
-	process.env.SCHEMA_PG_URL ??
-	"postgres://sqlnest:sqlnest@localhost:5433/sqlnest_demo";
-const MONGO_URL =
-	process.env.SCHEMA_MONGO_URL ??
-	"mongodb://sqlnest:sqlnest@localhost:27017/sqlnest_demo?authSource=admin";
 
 /**
  * Connecte le moteur demandé, introspecte son schéma, ferme la connexion.
@@ -21,12 +9,7 @@ const MONGO_URL =
 export async function getSchema(
 	engine: GetSchemaQuery["engine"]
 ): Promise<SchemaModel> {
-	const config =
-		engine === "postgres"
-			? resolvePostgresConfig({ url: PG_URL })
-			: resolveMongoConfig({ url: MONGO_URL });
-
-	const connection = await connect(config);
+	const connection = await connect(resolveConnection(engine));
 	try {
 		return await connection.introspect();
 	} finally {
