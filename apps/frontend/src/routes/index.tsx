@@ -5,12 +5,21 @@ import {
 	SAMPLE_MONGODB,
 	SAMPLE_POSTGRES
 } from "../features/schema/schema-model";
+import { useSchema } from "../features/schema/useSchema";
 
 export const Route = createFileRoute("/")({
 	component: SchemaPage
 });
 
 type Engine = "postgres" | "mongodb";
+
+const bannerStyle: CSSProperties = {
+	display: "inline-block",
+	fontSize: 13,
+	padding: "6px 12px",
+	borderRadius: 8,
+	marginBottom: 16
+};
 
 const pageStyle: CSSProperties = {
 	padding: "32px 28px 64px",
@@ -33,7 +42,9 @@ function tabStyle(active: boolean): CSSProperties {
 
 function SchemaPage() {
 	const [engine, setEngine] = useState<Engine>("postgres");
-	const schema = engine === "postgres" ? SAMPLE_POSTGRES : SAMPLE_MONGODB;
+	const { data, error, isLoading } = useSchema(engine);
+	const fallback = engine === "postgres" ? SAMPLE_POSTGRES : SAMPLE_MONGODB;
+	const schema = data ?? fallback;
 
 	return (
 		<div style={pageStyle}>
@@ -71,6 +82,27 @@ function SchemaPage() {
 					MongoDB
 				</button>
 			</div>
+
+			{isLoading ? (
+				<div
+					style={{ ...bannerStyle, background: "#eff6ff", color: "#1d4ed8" }}
+				>
+					Introspection en cours…
+				</div>
+			) : error ? (
+				<div
+					style={{ ...bannerStyle, background: "#fef2f2", color: "#b91c1c" }}
+				>
+					Base injoignable — exemple affiché. Lancez <code>pnpm db:up</code> et
+					le backend.
+				</div>
+			) : (
+				<div
+					style={{ ...bannerStyle, background: "#ecfdf5", color: "#047857" }}
+				>
+					● Live — schéma introspecté depuis la base
+				</div>
+			)}
 
 			<div style={{ overflowX: "auto" }}>
 				<SchemaVisualizer schema={schema} />

@@ -15,6 +15,7 @@
 		"check": "biome check --write"
 	},
 	"dependencies": {
+		"@sqlnest/engine": "workspace:*",
 		"@fastify/autoload": "^6.3.1",
 		"@fastify/compress": "^8.1.0",
 		"@fastify/cors": "^11.1.0",
