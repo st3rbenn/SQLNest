@@ -10,13 +10,20 @@
 	},
 	"dependencies": {
 		"@sqlnest/design-system": "workspace:*",
+		"@sqlnest/snql": "workspace:*",
 		"react": "^19.1.1",
 		"react-dom": "^19.1.1",
 		"openapi-fetch": "^0.14.1",
 		"@tanstack/react-query": "^5.90.2",
 		"@tanstack/react-router-devtools": "^1.132.37",
 		"@tanstack/react-router": "catalog:",
-		"openapi-react-query": "^0.5.0"
+		"openapi-react-query": "^0.5.0",
+		"@codemirror/autocomplete": "^6.20.3",
+		"@codemirror/commands": "^6.10.4",
+		"@codemirror/language": "^6.12.4",
+		"@codemirror/state": "^6.7.1",
+		"@codemirror/view": "^6.43.7",
+		"@lezer/highlight": "^1.2.3"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "catalog:",

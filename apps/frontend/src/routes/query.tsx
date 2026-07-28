@@ -1,6 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { type CSSProperties, type KeyboardEvent, useState } from "react";
+import { type CSSProperties, useState } from "react";
+import { SnqlEditor } from "../features/query/SnqlEditor";
 import { useRunQuery } from "../features/query/useRunQuery";
+import { useSchema } from "../features/schema/useSchema";
 
 export const Route = createFileRoute("/query")({
 	component: QueryPage
@@ -33,16 +35,6 @@ function tabStyle(active: boolean): CSSProperties {
 	};
 }
 
-const schemaInputStyle: CSSProperties = {
-	padding: "7px 10px",
-	borderRadius: 8,
-	border: "1px solid #e2e8f0",
-	fontSize: 13,
-	fontFamily: "ui-monospace, SFMono-Regular, monospace",
-	color: "#0f172a",
-	width: 130
-};
-
 function renderCell(value: unknown) {
 	if (value === null || value === undefined) {
 		return <span style={{ color: "#cbd5e1" }}>NULL</span>;
@@ -57,20 +49,19 @@ function QueryPage() {
 	const [engine, setEngine] = useState<Engine>("postgres");
 	const [source, setSource] = useState(EXAMPLES.postgres);
 	const [pgSchema, setPgSchema] = useState("");
+	// Le schéma cible ne concerne que Postgres ; vide → défaut `public`.
+	const targetSchema =
+		engine === "postgres" ? pgSchema.trim() || undefined : undefined;
+	// Introspection du moteur/schéma courant → candidats de complétion de l'éditeur.
+	const schemaQuery = useSchema(engine, targetSchema);
 	const run = useRunQuery();
 
 	const execute = () => {
-		// Le schéma cible ne concerne que Postgres ; omis si vide (→ `public`).
-		const schema =
-			engine === "postgres" ? pgSchema.trim() || undefined : undefined;
-		run.mutate({ engine, source, ...(schema ? { schema } : {}) });
-	};
-
-	const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-		if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
-			event.preventDefault();
-			execute();
-		}
+		run.mutate({
+			engine,
+			source,
+			...(targetSchema ? { schema: targetSchema } : {})
+		});
 	};
 
 	const selectEngine = (next: Engine) => {
@@ -82,6 +73,18 @@ function QueryPage() {
 	};
 
 	const result = run.data;
+
+	// Défini dans le composant : le code-splitting de route (autoCodeSplitting)
+	// n'embarque pas un const module référencé uniquement dans un JSX conditionnel.
+	const schemaInputStyle: CSSProperties = {
+		padding: "7px 10px",
+		borderRadius: 8,
+		border: "1px solid #e2e8f0",
+		fontSize: 13,
+		fontFamily: "ui-monospace, SFMono-Regular, monospace",
+		color: "#0f172a",
+		width: 130
+	};
 
 	return (
 		<div style={pageStyle}>
@@ -136,24 +139,12 @@ function QueryPage() {
 				) : null}
 			</div>
 
-			<textarea
+			<SnqlEditor
 				value={source}
-				onChange={(e) => setSource(e.target.value)}
-				onKeyDown={onKeyDown}
-				spellCheck={false}
-				rows={4}
-				style={{
-					width: "100%",
-					boxSizing: "border-box",
-					padding: 14,
-					borderRadius: 10,
-					border: "1px solid #e2e8f0",
-					fontFamily: "ui-monospace, SFMono-Regular, monospace",
-					fontSize: 14,
-					lineHeight: 1.5,
-					resize: "vertical",
-					color: "#0f172a"
-				}}
+				onChange={setSource}
+				onRun={execute}
+				schema={schemaQuery.data}
+				placeholder="get users | where is_active = true | pick email"
 			/>
 
 			<div
@@ -181,7 +172,9 @@ function QueryPage() {
 				>
 					{run.isPending ? "Exécution…" : "Exécuter"}
 				</button>
-				<span style={{ fontSize: 12, color: "#94a3b8" }}>Ctrl/⌘ + Entrée</span>
+				<span style={{ fontSize: 12, color: "#94a3b8" }}>
+					Ctrl/⌘ + Entrée pour exécuter · Ctrl + Espace pour compléter
+				</span>
 			</div>
 
 			{run.error ? (
