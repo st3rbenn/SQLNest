@@ -32,6 +32,12 @@ importers:
       '@biomejs/biome':
         specifier: 'catalog:'
         version: 2.2.5
+      mongodb:
+        specifier: ^6.10.0
+        version: 6.21.0
+      pg:
+        specifier: ^8.13.1
+        version: 8.22.0
       typescript:
         specifier: 'catalog:'
         version: 5.9.3

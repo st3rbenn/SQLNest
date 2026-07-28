@@ -4,13 +4,15 @@ import {
 	resolvePostgresConfig
 } from "@sqlnest/engine";
 
-// Connexions cibles (démo par défaut ; surchargeables par variables d'env).
+// Connexions cibles. Défaut = `sqlnest_shop` (dataset e-commerce, `pnpm
+// db:seed:shop`) ; surchargeables par variables d'env. `sqlnest_demo` (3 lignes)
+// reste réservée aux tests d'intégration.
 const PG_URL =
 	process.env.SCHEMA_PG_URL ??
-	"postgres://sqlnest:sqlnest@localhost:5433/sqlnest_demo";
+	"postgres://sqlnest:sqlnest@localhost:5433/sqlnest_shop";
 const MONGO_URL =
 	process.env.SCHEMA_MONGO_URL ??
-	"mongodb://sqlnest:sqlnest@localhost:27017/sqlnest_demo?authSource=admin";
+	"mongodb://sqlnest:sqlnest@localhost:27017/sqlnest_shop?authSource=admin";
 
 export type TargetEngine = "postgres" | "mongodb";
 
