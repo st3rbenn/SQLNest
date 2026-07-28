@@ -98,7 +98,17 @@ export type {
 	SqlValue
 } from "./ir/plan";
 export { isSqlDecimal } from "./ir/plan";
+// --- Language service (éditeur : complétion schema-aware) ---
+export type {
+	SnqlCompletion,
+	SnqlCompletionResult,
+	SnqlCompletionType
+} from "./language/complete";
+export { completeSnql } from "./language/complete";
 export type { OperationKind } from "./lexer/dictionary";
+// Token Dictionary : source de vérité du vocabulaire de surface, exposée pour
+// l'outillage éditeur (coloration/complétion) — pas de redéfinition côté front.
+export { KEYWORDS, verbOperation } from "./lexer/dictionary";
 // --- API publique bas niveau (chaque étage du pipeline) ---
 export { tokenize } from "./lexer/lexer";
 // --- Types publics ---
