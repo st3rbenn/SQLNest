@@ -40,16 +40,6 @@ function tabStyle(active: boolean): CSSProperties {
 	};
 }
 
-const schemaInputStyle: CSSProperties = {
-	padding: "7px 10px",
-	borderRadius: 8,
-	border: "1px solid #e2e8f0",
-	fontSize: 13,
-	fontFamily: "ui-monospace, SFMono-Regular, monospace",
-	color: "#0f172a",
-	width: 130
-};
-
 function SchemaPage() {
 	const [engine, setEngine] = useState<Engine>("postgres");
 	const [pgSchema, setPgSchema] = useState("");
@@ -68,6 +58,18 @@ function SchemaPage() {
 	// Base atteinte mais schéma sans table : à signaler distinctement du vert « Live »
 	// (sinon une faute de frappe ressemble à un schéma légitimement vide).
 	const liveButEmpty = data !== undefined && data.collections.length === 0;
+
+	// Défini dans le composant : le code-splitting de route (autoCodeSplitting)
+	// n'embarque pas un const module référencé uniquement dans un JSX conditionnel.
+	const schemaInputStyle: CSSProperties = {
+		padding: "7px 10px",
+		borderRadius: 8,
+		border: "1px solid #e2e8f0",
+		fontSize: 13,
+		fontFamily: "ui-monospace, SFMono-Regular, monospace",
+		color: "#0f172a",
+		width: 130
+	};
 
 	return (
 		<div style={pageStyle}>
