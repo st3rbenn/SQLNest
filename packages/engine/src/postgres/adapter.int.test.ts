@@ -153,6 +153,47 @@ describe.skipIf(!hasPg)("postgres adapter (intégration)", () => {
 		}
 	}, 20_000);
 
+	it("schéma cible configurable : introspection + requête hors 'public'", async () => {
+		// Prépare un schéma isolé via une connexion 'public' (DDL qualifiée).
+		const setup = await postgresAdapter.connect(loadConfig());
+		const exec = (text: string) =>
+			setup.execute({ engine: "postgres", kind: "sql", text, params: [] });
+		try {
+			await exec("DROP SCHEMA IF EXISTS sqlnest_probe CASCADE");
+			await exec("CREATE SCHEMA sqlnest_probe");
+			await exec(
+				"CREATE TABLE sqlnest_probe.gadgets (id BIGINT PRIMARY KEY, label TEXT NOT NULL)"
+			);
+			await exec(
+				"INSERT INTO sqlnest_probe.gadgets (id, label) VALUES (1, 'probe')"
+			);
+
+			// Connexion épinglée sur le schéma cible.
+			const probe = await postgresAdapter.connect(
+				resolvePostgresConfig({ url: PG_URL, schema: "sqlnest_probe" })
+			);
+			try {
+				const schema = await probe.introspect();
+				const names = schema.collections.map((c) => c.name);
+				// Voit la table du schéma cible, PAS celles de 'public' (isolation).
+				expect(names).toContain("gadgets");
+				expect(names).not.toContain("users");
+				expect(
+					schema.collections.find((c) => c.name === "gadgets")?.primaryKey
+				).toEqual(["id"]);
+
+				// `get gadgets` (non qualifié) résout via search_path → schéma cible.
+				const rs = await runQuery(probe, "get gadgets | pick label");
+				expect(rs.rows.map((row) => row.label)).toEqual(["probe"]);
+			} finally {
+				await probe.close();
+			}
+		} finally {
+			await exec("DROP SCHEMA IF EXISTS sqlnest_probe CASCADE").catch(() => {});
+			await setup.close();
+		}
+	}, 20_000);
+
 	it("insert : ligne réelle (RETURNING) puis nettoyage", async () => {
 		const conn = await postgresAdapter.connect(loadConfig());
 		const cleanup = 'remove from users | where email = "temp@example.invalid"';

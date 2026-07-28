@@ -18,6 +18,7 @@ describe("resolvePostgresConfig — entrée par champs", () => {
 			user: "sqlnest",
 			password: "",
 			ssl: false,
+			schema: "public",
 			poolMax: 10,
 			connectionTimeoutMillis: 10_000
 		});
@@ -124,6 +125,77 @@ describe("describePostgresConfig", () => {
 		const described = describePostgresConfig(cfg);
 		expect(described).toBe("postgres://sqlnest:***@localhost:5432/demo");
 		expect(described).not.toContain("supersecret");
+	});
+
+	it("annexe le schéma cible seulement s'il diffère du défaut", () => {
+		const isolated = resolvePostgresConfig({
+			url: "postgres://u:p@host:5432/db?schema=rnacen"
+		});
+		expect(describePostgresConfig(isolated)).toBe(
+			"postgres://u:***@host:5432/db?schema=rnacen"
+		);
+		const publicSchema = resolvePostgresConfig({
+			url: "postgres://u:p@host:5432/db"
+		});
+		expect(describePostgresConfig(publicSchema)).not.toContain("schema");
+	});
+});
+
+describe("resolvePostgresConfig — schéma cible", () => {
+	it("défaut = public", () => {
+		expect(resolvePostgresConfig({ url: "postgres://u@h/db" }).schema).toBe(
+			"public"
+		);
+		expect(
+			resolvePostgresConfig({ host: "h", database: "db", user: "u" }).schema
+		).toBe("public");
+	});
+
+	it("lit `?schema=` de l'URL", () => {
+		expect(
+			resolvePostgresConfig({ url: "postgres://u@h/db?schema=rnacen" }).schema
+		).toBe("rnacen");
+	});
+
+	it("`?schema=` vide retombe sur le défaut", () => {
+		expect(
+			resolvePostgresConfig({ url: "postgres://u@h/db?schema=" }).schema
+		).toBe("public");
+	});
+
+	it("la surcharge explicite l'emporte sur l'URL", () => {
+		expect(
+			resolvePostgresConfig({
+				url: "postgres://u@h/db?schema=fromurl",
+				schema: "override"
+			}).schema
+		).toBe("override");
+	});
+
+	it("accepte aussi le schéma en entrée par champs", () => {
+		expect(
+			resolvePostgresConfig({
+				host: "h",
+				database: "db",
+				user: "u",
+				schema: "analytics"
+			}).schema
+		).toBe("analytics");
+	});
+
+	it("rejette un schéma non identifiant (injection dans search_path)", () => {
+		for (const bad of [
+			"public; DROP",
+			"a b",
+			"foo=bar",
+			"Public",
+			'"quoted"',
+			"1schema"
+		]) {
+			expect(() =>
+				resolvePostgresConfig({ url: "postgres://u@h/db", schema: bad })
+			).toThrow(EngineConfigError);
+		}
 	});
 });
 

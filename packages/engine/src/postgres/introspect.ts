@@ -32,16 +32,19 @@ interface FkRow {
 	readonly to_column: string;
 }
 
+// Le schéma cible est un paramètre bindé ($1) — jamais interpolé. Introspection
+// et exécution partagent le même schéma (voir `search_path` de l'adapter), donc
+// ce que `get <table>` résout est exactement ce qui est introspecté ici.
 const TABLES_SQL = `
 	SELECT table_name
 	FROM information_schema.tables
-	WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+	WHERE table_schema = $1 AND table_type = 'BASE TABLE'
 	ORDER BY table_name`;
 
 const COLUMNS_SQL = `
 	SELECT table_name, column_name, data_type, is_nullable
 	FROM information_schema.columns
-	WHERE table_schema = 'public'
+	WHERE table_schema = $1
 	ORDER BY table_name, ordinal_position`;
 
 const PK_SQL = `
@@ -51,14 +54,14 @@ const PK_SQL = `
 		ON tc.constraint_name = kcu.constraint_name
 		AND tc.table_schema = kcu.table_schema
 		AND tc.table_name = kcu.table_name
-	WHERE tc.table_schema = 'public' AND tc.constraint_type = 'PRIMARY KEY'
+	WHERE tc.table_schema = $1 AND tc.constraint_type = 'PRIMARY KEY'
 	ORDER BY tc.table_name, kcu.ordinal_position`;
 
 // FK via pg_catalog : `unnest ... WITH ORDINALITY` aligne correctement les
 // colonnes d'une FK composite (l'information_schema ne préserve pas cet ordre).
-// On groupe par OID (identité stable) et on borne LES DEUX côtés au schéma
-// public (une FK cross-schema donnerait une relation pendante vers une table
-// non introspectée).
+// On groupe par OID (identité stable) et on borne LES DEUX côtés au schéma cible
+// ($1) : une FK cross-schema donnerait une relation pendante vers une table non
+// introspectée (le multi-schéma est une évolution, cf. Questions ouvertes).
 const FK_SQL = `
 	SELECT
 		con.oid::text AS constraint_oid,
@@ -78,8 +81,8 @@ const FK_SQL = `
 	JOIN pg_attribute tocol
 		ON tocol.attrelid = con.confrelid AND tocol.attnum = cols.to_attnum
 	WHERE con.contype = 'f'
-		AND fromns.nspname = 'public'
-		AND tons.nspname = 'public'
+		AND fromns.nspname = $1
+		AND tons.nspname = $1
 	ORDER BY con.oid, cols.ord`;
 
 /** Type Postgres (`information_schema.data_type`) → type unifié SNQL. */
@@ -198,17 +201,22 @@ function buildRelations(fks: readonly FkRow[]): Relation[] {
 }
 
 /**
- * Introspecte une base Postgres et produit le SchemaModel. Les 4 requêtes
- * catalogue tournent en parallèle via `pool.query` (un client par appel — un
- * même client ne peut pas exécuter de requêtes concurrentes).
+ * Introspecte une base Postgres et produit le SchemaModel pour le `schema` cible
+ * (bindé en $1). Les 4 requêtes catalogue tournent en parallèle via `pool.query`
+ * (un client par appel — un même client ne peut pas exécuter de requêtes
+ * concurrentes).
  */
-export async function introspectPostgres(pool: PgPool): Promise<SchemaModel> {
+export async function introspectPostgres(
+	pool: PgPool,
+	schema: string
+): Promise<SchemaModel> {
 	try {
+		const params = [schema];
 		const [tables, columns, pks, fks] = await Promise.all([
-			pool.query<{ table_name: string }>(TABLES_SQL),
-			pool.query<ColumnRow>(COLUMNS_SQL),
-			pool.query<PkRow>(PK_SQL),
-			pool.query<FkRow>(FK_SQL)
+			pool.query<{ table_name: string }>(TABLES_SQL, params),
+			pool.query<ColumnRow>(COLUMNS_SQL, params),
+			pool.query<PkRow>(PK_SQL, params),
+			pool.query<FkRow>(FK_SQL, params)
 		]);
 		return buildSchemaModel(
 			tables.rows.map((row) => row.table_name),

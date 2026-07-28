@@ -29,7 +29,14 @@ function createPool(config: PostgresConnectionConfig): PgPool {
 		password: config.password,
 		max: config.poolMax,
 		connectionTimeoutMillis: config.connectionTimeoutMillis,
-		ssl: config.ssl
+		ssl: config.ssl,
+		// `search_path` épinglé sur le schéma cible, appliqué par le serveur à
+		// l'établissement de CHAQUE connexion (paramètre de démarrage, avant toute
+		// requête → pas de course, contrairement à un `SET` post-connexion).
+		// `config.schema` est validé comme identifiant simple (config.ts), donc sûr
+		// dans cette chaîne non paramétrable. `get <table>` résout ainsi le même
+		// espace de noms que l'introspection.
+		options: `-c search_path=${config.schema}`
 	};
 	const pool = new Pool(options);
 	// Une connexion *idle* qui tombe émet 'error' sur le pool ; sans handler,
@@ -43,9 +50,11 @@ function createPool(config: PostgresConnectionConfig): PgPool {
 class PostgresConnection implements Connection {
 	readonly engine = "postgres";
 	#pool: PgPool | undefined;
+	readonly #schema: string;
 
-	constructor(pool: PgPool) {
+	constructor(pool: PgPool, schema: string) {
 		this.#pool = pool;
+		this.#schema = schema;
 	}
 
 	async ping(): Promise<PingResult> {
@@ -83,7 +92,7 @@ class PostgresConnection implements Connection {
 	async introspect(): Promise<SchemaModel> {
 		// `async` pour que `#requirePool()` (connexion fermée) rejette la promesse
 		// au lieu de lever de façon synchrone — contrat uniforme avec ping/execute.
-		return introspectPostgres(this.#requirePool());
+		return introspectPostgres(this.#requirePool(), this.#schema);
 	}
 
 	async execute(query: NativeQuery): Promise<ResultSet> {
@@ -148,7 +157,7 @@ export const postgresAdapter: EngineAdapter = {
 		}
 
 		const pool = createPool(config);
-		const connection = new PostgresConnection(pool);
+		const connection = new PostgresConnection(pool, config.schema);
 
 		// Fail-fast : on vérifie tout de suite (mauvais host/credentials → throw
 		// ici, pas à la première requête). En cas d'échec, on ferme le pool.
