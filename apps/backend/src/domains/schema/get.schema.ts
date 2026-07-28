@@ -16,6 +16,11 @@ const SnqlType = z.enum([
 
 const Source = z.enum(["declared", "inferred"]);
 
+// Identifiant de schéma simple (miroir de la règle engine `SCHEMA_NAME_RE`) :
+// rejette en 400 tout ce qui n'est pas `[a-z_][a-z0-9_]*` ≤63. Passer le param
+// vide n'est pas supporté — omettre `schema` pour le défaut `public`.
+const SchemaName = /^[a-z_][a-z0-9_]{0,62}$/;
+
 const FieldSchema = z.object({
 	name: z.string(),
 	type: SnqlType,
@@ -51,7 +56,9 @@ export const GetSchemaResponseSchema = z.object({
 });
 
 export const GetSchemaQuerySchema = z.object({
-	engine: z.enum(["postgres", "mongodb"]).default("postgres")
+	engine: z.enum(["postgres", "mongodb"]).default("postgres"),
+	// Schéma cible Postgres (défaut `public`). Ignoré pour Mongo.
+	schema: z.string().regex(SchemaName).optional()
 });
 
 export type GetSchemaResponse = z.infer<typeof GetSchemaResponseSchema>;

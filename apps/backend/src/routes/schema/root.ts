@@ -19,6 +19,9 @@ export default function schemaRoute(fastify: FastifyInstance) {
 				}
 			}
 		},
-		async (request) => getSchema(request.query.engine)
+		// Un nom de schéma malformé est rejeté en amont par le querystring Zod
+		// (400). Le handler reste une expression simple : ajouter un `reply` 400
+		// entrerait en conflit avec le `response.200` typé (SchemaModel).
+		async (request) => getSchema(request.query.engine, request.query.schema)
 	);
 }

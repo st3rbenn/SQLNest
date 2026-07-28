@@ -32,9 +32,10 @@ function jsonSafe(value: unknown): unknown {
  */
 export async function runUserQuery(
 	engine: RunQueryBody["engine"],
-	source: string
+	source: string,
+	schema?: string
 ): Promise<QueryResult> {
-	const connection = await connect(resolveConnection(engine));
+	const connection = await connect(resolveConnection(engine, schema));
 	try {
 		const result = await runQuery(connection, source);
 		return {

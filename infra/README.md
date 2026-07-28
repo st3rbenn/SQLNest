@@ -52,6 +52,15 @@ donnent les 7 mêmes relations**. Le générateur est déterministe
 `sqlnest_demo` (réservée aux tests d'intégration). Surcharger la cible de l'app :
 `SCHEMA_PG_URL` / `SCHEMA_MONGO_URL`.
 
+### Schéma cible Postgres
+
+Par défaut l'app lit le schéma `public`. Pour viser un autre schéma (ex. une
+base distante qui range ses tables ailleurs), ajouter `?schema=` à l'URL —
+`SCHEMA_PG_URL="postgres://…/db?schema=rnacen"` — ou le saisir dans le champ
+**schéma** de l'UI (pages Schéma et Requête, Postgres uniquement). L'introspection
+et l'exécution (`get <table>`) visent alors ce schéma. Le nom doit être un
+identifiant simple (`[a-z_][a-z0-9_]*`). Mongo n'a pas de schéma → champ ignoré.
+
 ## Tests d'intégration
 
 Les tests `*.int.test.ts` du package `@sqlnest/engine` sont **sautés** tant que

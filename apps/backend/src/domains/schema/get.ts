@@ -7,9 +7,10 @@ import type { GetSchemaQuery } from "./get.schema";
  * Connexion par requête (simple) — un cache viendra si besoin de performance.
  */
 export async function getSchema(
-	engine: GetSchemaQuery["engine"]
+	engine: GetSchemaQuery["engine"],
+	schema?: string
 ): Promise<SchemaModel> {
-	const connection = await connect(resolveConnection(engine));
+	const connection = await connect(resolveConnection(engine, schema));
 	try {
 		return await connection.introspect();
 	} finally {

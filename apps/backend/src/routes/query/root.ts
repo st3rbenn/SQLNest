@@ -15,7 +15,11 @@ export default function queryRoute(fastify: FastifyInstance) {
 		},
 		async (request, reply) => {
 			try {
-				return await runUserQuery(request.body.engine, request.body.source);
+				return await runUserQuery(
+					request.body.engine,
+					request.body.source,
+					request.body.schema
+				);
 			} catch (err) {
 				// Erreur de requête (SNQL invalide) ou de base : message sûr (les
 				// erreurs typées du cœur/engine masquent déjà les secrets).

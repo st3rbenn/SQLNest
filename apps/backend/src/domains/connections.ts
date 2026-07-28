@@ -16,9 +16,21 @@ const MONGO_URL =
 
 export type TargetEngine = "postgres" | "mongodb";
 
-/** Config de connexion résolue pour le moteur demandé. */
-export function resolveConnection(engine: TargetEngine): ResolvedEngineConfig {
-	return engine === "postgres"
-		? resolvePostgresConfig({ url: PG_URL })
-		: resolveMongoConfig({ url: MONGO_URL });
+/**
+ * Config de connexion résolue pour le moteur demandé. `schema` (Postgres
+ * uniquement) surcharge le schéma cible par requête — vide/absent ⇒ défaut de
+ * l'URL (`public`). Ignoré pour Mongo (pas de notion de schéma). La validation
+ * du nom incombe à `resolvePostgresConfig` (identifiant simple).
+ */
+export function resolveConnection(
+	engine: TargetEngine,
+	schema?: string
+): ResolvedEngineConfig {
+	if (engine === "mongodb") {
+		return resolveMongoConfig({ url: MONGO_URL });
+	}
+	const trimmed = schema?.trim();
+	return resolvePostgresConfig(
+		trimmed ? { url: PG_URL, schema: trimmed } : { url: PG_URL }
+	);
 }

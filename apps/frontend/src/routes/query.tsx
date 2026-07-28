@@ -33,6 +33,16 @@ function tabStyle(active: boolean): CSSProperties {
 	};
 }
 
+const schemaInputStyle: CSSProperties = {
+	padding: "7px 10px",
+	borderRadius: 8,
+	border: "1px solid #e2e8f0",
+	fontSize: 13,
+	fontFamily: "ui-monospace, SFMono-Regular, monospace",
+	color: "#0f172a",
+	width: 130
+};
+
 function renderCell(value: unknown) {
 	if (value === null || value === undefined) {
 		return <span style={{ color: "#cbd5e1" }}>NULL</span>;
@@ -46,9 +56,15 @@ function renderCell(value: unknown) {
 function QueryPage() {
 	const [engine, setEngine] = useState<Engine>("postgres");
 	const [source, setSource] = useState(EXAMPLES.postgres);
+	const [pgSchema, setPgSchema] = useState("");
 	const run = useRunQuery();
 
-	const execute = () => run.mutate({ engine, source });
+	const execute = () => {
+		// Le schéma cible ne concerne que Postgres ; omis si vide (→ `public`).
+		const schema =
+			engine === "postgres" ? pgSchema.trim() || undefined : undefined;
+		run.mutate({ engine, source, ...(schema ? { schema } : {}) });
+	};
 
 	const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
 		if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
@@ -75,7 +91,14 @@ function QueryPage() {
 				vraie base (Postgres ou MongoDB) et vois les lignes.
 			</p>
 
-			<div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+			<div
+				style={{
+					display: "flex",
+					alignItems: "center",
+					gap: 8,
+					marginBottom: 12
+				}}
+			>
 				<button
 					type="button"
 					style={tabStyle(engine === "postgres")}
@@ -90,6 +113,27 @@ function QueryPage() {
 				>
 					MongoDB
 				</button>
+				{engine === "postgres" ? (
+					<label
+						style={{
+							display: "flex",
+							alignItems: "center",
+							gap: 6,
+							marginLeft: 8,
+							fontSize: 13,
+							color: "#64748b"
+						}}
+					>
+						schéma
+						<input
+							value={pgSchema}
+							onChange={(e) => setPgSchema(e.target.value)}
+							placeholder="public"
+							spellCheck={false}
+							style={schemaInputStyle}
+						/>
+					</label>
+				) : null}
 			</div>
 
 			<textarea
