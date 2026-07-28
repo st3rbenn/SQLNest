@@ -1,5 +1,6 @@
 import "@sqlnest/design-system/dist/design-system.css";
 import { showNotification, updateNotification } from "@sqlnest/design-system";
+import { Outlet } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { useHealthCheck } from "./features/healthcheck/useHealthCheck";
 
@@ -38,7 +39,7 @@ function App() {
 		}
 	}, [isLoading, error, data]);
 
-	return <h1>SQLNest</h1>;
+	return <Outlet />;
 }
 
 export default App;
