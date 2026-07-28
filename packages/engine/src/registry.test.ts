@@ -18,7 +18,15 @@ describe("registry", () => {
 		expect(() => requireAdapter("oracle")).toThrow(UnknownEngineError);
 	});
 
+	it("résout aussi l'adapter MongoDB", () => {
+		const adapter = requireAdapter("mongodb");
+		expect(adapter.id).toBe("mongodb");
+		expect(adapter.capabilities.engine).toBe("mongodb");
+	});
+
 	it("liste les moteurs enregistrés", () => {
-		expect(registeredEngines()).toContain("postgres");
+		expect(registeredEngines()).toEqual(
+			expect.arrayContaining(["postgres", "mongodb"])
+		);
 	});
 });

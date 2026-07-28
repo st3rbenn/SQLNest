@@ -22,6 +22,7 @@
 	},
 	"dependencies": {
 		"@sqlnest/snql": "workspace:*",
+		"mongodb": "^6.10.0",
 		"pg": "^8.13.1"
 	},
 	"devDependencies": {

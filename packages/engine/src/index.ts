@@ -53,6 +53,15 @@ export {
 	EngineIntrospectionError,
 	UnknownEngineError
 } from "./errors";
+export { mongoAdapter } from "./mongo/adapter";
+export type { MongoConfigInput, MongoConnectionConfig } from "./mongo/config";
+export { describeMongoConfig, resolveMongoConfig } from "./mongo/config";
+export {
+	inferCollection,
+	inferRelations,
+	introspectMongo,
+	snqlTypeOf
+} from "./mongo/introspect";
 export { postgresAdapter } from "./postgres/adapter";
 export {
 	buildSchemaModel,

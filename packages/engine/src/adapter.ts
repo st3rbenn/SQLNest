@@ -5,13 +5,16 @@ import type {
 	SchemaModel
 } from "@sqlnest/snql";
 import type { PostgresConnectionConfig } from "./config";
+import type { MongoConnectionConfig } from "./mongo/config";
 
 /**
  * Config de connexion **résolue**, discriminée par `engine`. C'est ce que
  * consomme {@link EngineAdapter.connect} : le dispatch dynamique se fait sur
- * `config.engine`. S'étend à chaque moteur ajouté (Mongo, etc.).
+ * `config.engine`. S'étend à chaque moteur ajouté.
  */
-export type ResolvedEngineConfig = PostgresConnectionConfig;
+export type ResolvedEngineConfig =
+	| PostgresConnectionConfig
+	| MongoConnectionConfig;
 
 /** Résultat d'un `ping` : latence mesurée + version serveur si disponible. */
 export interface PingResult {
