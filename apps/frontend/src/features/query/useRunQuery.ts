@@ -6,6 +6,8 @@ export interface QueryResult {
 	readonly columns: readonly { readonly name: string }[];
 	readonly rows: readonly Record<string, unknown>[];
 	readonly rowCount: number;
+	/** `true` = écriture (lignes affectées) ; distingue d'une lecture à 0 ligne. */
+	readonly written: boolean;
 }
 
 export interface RunQueryInput {

@@ -6,6 +6,8 @@ export interface QueryResult {
 	readonly columns: readonly { readonly name: string }[];
 	readonly rows: readonly Record<string, unknown>[];
 	readonly rowCount: number;
+	/** `true` = écriture (rowCount = lignes affectées) ; distingue d'une lecture vide. */
+	readonly written: boolean;
 }
 
 /** Rend une valeur JSON-safe : les `bigint` (précision) → chaîne, récursif. */
@@ -41,7 +43,8 @@ export async function runUserQuery(
 		return {
 			columns: result.columns,
 			rows: result.rows.map((row) => jsonSafe(row) as Record<string, unknown>),
-			rowCount: result.rowCount
+			rowCount: result.rowCount,
+			written: result.written
 		};
 	} finally {
 		await connection.close();

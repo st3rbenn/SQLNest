@@ -192,7 +192,21 @@ function QueryPage() {
 				</div>
 			) : null}
 
-			{result ? (
+			{result?.written && result.rows.length === 0 ? (
+				// Écriture dont le moteur ne renvoie pas les lignes (update/delete
+				// MongoDB : pas d'équivalent RETURNING multi-documents). Un tableau
+				// vide passerait pour un bug — on annonce le nombre de lignes touchées.
+				// Discriminant = `written` (pas la forme du résultat) : une LECTURE à
+				// 0 ligne doit rester une table vide, pas « lignes affectées ».
+				<div style={{ fontSize: 13, color: "#475569" }}>
+					<b>{result.rowCount}</b> ligne(s) affectée(s) · moteur <b>{engine}</b>
+					<div style={{ color: "#94a3b8", marginTop: 6 }}>
+						Ce moteur ne renvoie pas les documents modifiés.
+					</div>
+				</div>
+			) : null}
+
+			{result && !(result.written && result.rows.length === 0) ? (
 				<div>
 					<div style={{ fontSize: 13, color: "#475569", margin: "0 0 10px" }}>
 						<b>{result.rowCount}</b> ligne(s) · moteur <b>{engine}</b>
