@@ -9,14 +9,23 @@
 		"generate:types": "openapi-typescript http://localhost:4000/reference/openapi.json -o ./src/generated/api.schema.d.ts"
 	},
 	"dependencies": {
+		"@codemirror/autocomplete": "^6.20.3",
+		"@codemirror/commands": "^6.10.4",
+		"@codemirror/language": "^6.12.4",
+		"@codemirror/state": "^6.7.1",
+		"@codemirror/view": "^6.43.7",
+		"@lezer/highlight": "^1.2.3",
 		"@sqlnest/design-system": "workspace:*",
-		"react": "^19.1.1",
-		"react-dom": "^19.1.1",
-		"openapi-fetch": "^0.14.1",
+		"@sqlnest/snql": "workspace:*",
 		"@tanstack/react-query": "^5.90.2",
-		"@tanstack/react-router-devtools": "^1.132.37",
 		"@tanstack/react-router": "catalog:",
-		"openapi-react-query": "^0.5.0"
+		"@tanstack/react-router-devtools": "^1.132.37",
+		"@xyflow/react": "^12.11.2",
+		"elkjs": "^0.12.0",
+		"openapi-fetch": "^0.14.1",
+		"openapi-react-query": "^0.5.0",
+		"react": "^19.1.1",
+		"react-dom": "^19.1.1"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "catalog:",
@@ -25,10 +34,10 @@
 		"@types/react-dom": "^19.1.9",
 		"@vitejs/plugin-react": "^5.0.3",
 		"globals": "^16.4.0",
+		"openapi-typescript": "^7.9.1",
 		"typescript": "catalog:",
 		"typescript-eslint": "^8.44.0",
-		"openapi-typescript": "^7.9.1",
-		"vitest": "catalog:",
-		"vite": "npm:rolldown-vite@7.1.12"
+		"vite": "npm:rolldown-vite@7.1.12",
+		"vitest": "catalog:"
 	}
 }

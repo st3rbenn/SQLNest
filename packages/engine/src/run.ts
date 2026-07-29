@@ -13,15 +13,26 @@ import {
 import type { Connection } from "./adapter";
 import { EngineExecutionError, UnknownEngineError } from "./errors";
 
+/** ResultSet enrichi d'un drapeau `written` : distingue une écriture d'une lecture. */
+export type QueryOutcome = ResultSet & {
+	/**
+	 * `true` si le statement était une mutation. Nécessaire car une écriture Mongo
+	 * (update/delete) et une lecture vide ont toutes deux `columns: []` — l'UI ne
+	 * peut pas les distinguer sur la seule forme du résultat.
+	 */
+	readonly written: boolean;
+};
+
 /**
  * Exécute un statement SNQL (lecture **ou** mutation) de bout en bout et renvoie
- * un ResultSet. Pour une mutation, `rowCount` = lignes affectées et `rows` = les
- * lignes renvoyées (RETURNING). C'est le moment où SNQL touche vraiment la base.
+ * un ResultSet + `written`. Pour une mutation, `rowCount` = lignes affectées et
+ * `rows` = les lignes renvoyées (RETURNING). C'est le moment où SNQL touche
+ * vraiment la base.
  */
 export async function runQuery(
 	connection: Connection,
 	source: string
-): Promise<ResultSet> {
+): Promise<QueryOutcome> {
 	const engine = connection.engine;
 	const capabilities = capabilitiesFor(engine);
 	if (capabilities === undefined) {
@@ -46,7 +57,7 @@ export async function runQuery(
 			);
 		}
 		const native = mapper.mapMutation(lowerMutation(statement));
-		return connection.execute(native);
+		return { ...(await connection.execute(native)), written: true };
 	}
 
 	const physical = plan(lower(statement), capabilities);
@@ -54,7 +65,7 @@ export async function runQuery(
 
 	const pushed = await connection.execute(native);
 	if (physical.compensation.length === 0) {
-		return pushed;
+		return { ...pushed, written: false };
 	}
 
 	// La compensation d'un join a besoin des données de la collection droite ;
@@ -70,7 +81,8 @@ export async function runQuery(
 	return {
 		columns: columnsFromRows(rows, pushed.columns),
 		rows,
-		rowCount: rows.length
+		rowCount: rows.length,
+		written: false
 	};
 }
 

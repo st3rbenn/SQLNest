@@ -17,7 +17,19 @@ export function connect(config: ResolvedEngineConfig): Promise<Connection> {
 	return requireAdapter(config.engine).connect(config);
 }
 
-export type { ResultColumn, ResultSet } from "@sqlnest/snql";
+export type {
+	Collection,
+	Field,
+	FieldRef,
+	Relation,
+	RelationKind,
+	RelationOrigin,
+	ResultColumn,
+	ResultSet,
+	SchemaModel,
+	SchemaSource,
+	SnqlType
+} from "@sqlnest/snql";
 export type {
 	Connection,
 	EngineAdapter,
@@ -38,8 +50,23 @@ export {
 	EngineError,
 	type EngineErrorCode,
 	EngineExecutionError,
+	EngineIntrospectionError,
 	UnknownEngineError
 } from "./errors";
+export { mongoAdapter } from "./mongo/adapter";
+export type { MongoConfigInput, MongoConnectionConfig } from "./mongo/config";
+export { describeMongoConfig, resolveMongoConfig } from "./mongo/config";
+export {
+	inferCollection,
+	inferRelations,
+	introspectMongo,
+	snqlTypeOf
+} from "./mongo/introspect";
 export { postgresAdapter } from "./postgres/adapter";
+export {
+	buildSchemaModel,
+	introspectPostgres,
+	mapPgType
+} from "./postgres/introspect";
 export { getAdapter, registeredEngines, requireAdapter } from "./registry";
 export { runQuery } from "./run";

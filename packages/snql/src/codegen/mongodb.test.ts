@@ -111,9 +111,28 @@ describe("codegen mongodb — expressions", () => {
 		]);
 	});
 
+	it("$expr : une chaîne littérale `$…` n'est pas prise pour un champ", () => {
+		// Dans une expression d'agrégation, "$name" désignerait le champ `name`.
+		expect(mongo('get users | where "$name" = "$name"').pipeline).toEqual([
+			{
+				$match: {
+					$expr: { $eq: [{ $literal: "$name" }, { $literal: "$name" }] }
+				}
+			}
+		]);
+	});
+
 	it("préserve la précision bigint", () => {
 		expect(mongo("get users | where id = 9007199254740993").pipeline).toEqual([
 			{ $match: { id: { $eq: 9007199254740993n } } }
+		]);
+	});
+
+	it("un décimal dans un filtre de LECTURE est un double (matche les doubles stockés)", () => {
+		// Contraste avec l'écriture de valeurs (Decimal128 exact) : un filtre reste
+		// en double, sinon `where price = 1.5` ne matcherait plus les données double.
+		expect(mongo("get products | where price = 1.5").pipeline).toEqual([
+			{ $match: { price: { $eq: 1.5 } } }
 		]);
 	});
 
