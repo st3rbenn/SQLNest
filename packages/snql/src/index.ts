@@ -79,6 +79,7 @@ export type {
 	Mapper,
 	MongoQuery,
 	MongoStage,
+	MongoWriteQuery,
 	NativeQuery,
 	SqlQuery
 } from "./codegen/mapper";
