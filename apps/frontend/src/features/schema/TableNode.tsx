@@ -1,5 +1,6 @@
 import { Handle, type Node, type NodeProps, Position } from "@xyflow/react";
 import type { CSSProperties } from "react";
+import { colorFor } from "./colors";
 import type { Collection } from "./schema-model";
 
 /** Nombre de champs affichés avant repli (garde des nœuds de hauteur bornée). */
@@ -47,6 +48,9 @@ export function TableNode({ data }: NodeProps<TableNodeType>) {
 	const pk = new Set(collection.primaryKey ?? []);
 	const shown = collection.fields.slice(0, MAX_FIELDS);
 	const hidden = collection.fields.length - shown.length;
+	// Couleur stable dérivée du nom : distingue les groupes visuellement (les
+	// préfixes contribuent le plus au hash, donc `xref_p*` sont teintes proches).
+	const color = colorFor(collection.name);
 
 	return (
 		<div
@@ -54,12 +58,14 @@ export function TableNode({ data }: NodeProps<TableNodeType>) {
 				width: NODE_WIDTH,
 				borderRadius: 10,
 				background: "#fff",
-				border: `1px solid ${matched ? "#f59e0b" : focused ? "#2563eb" : "#e2e8f0"}`,
+				// La border reprend la teinte de la table ; focus/match la surchargent
+				// avec les couleurs de sélection (bleu/ambre) pour rester lisibles.
+				border: `2px solid ${matched ? "#f59e0b" : focused ? "#2563eb" : color.border}`,
 				boxShadow: focused
 					? "0 0 0 3px rgba(37,99,235,0.25), 0 8px 24px rgba(15,23,42,0.12)"
 					: matched
 						? "0 0 0 3px rgba(245,158,11,0.3)"
-						: "0 1px 2px rgba(15,23,42,0.06)",
+						: "0 1px 3px rgba(15,23,42,0.08)",
 				opacity: dimmed ? 0.28 : 1,
 				transition: "opacity 120ms, box-shadow 120ms",
 				overflow: "hidden",
@@ -74,15 +80,15 @@ export function TableNode({ data }: NodeProps<TableNodeType>) {
 					justifyContent: "space-between",
 					gap: 8,
 					padding: "10px 12px",
-					borderBottom: "1px solid #f1f5f9",
-					background: "#f8fafc"
+					borderBottom: `1px solid ${color.border}`,
+					background: color.header
 				}}
 			>
 				<span
 					style={{
-						fontWeight: 650,
+						fontWeight: 700,
 						fontSize: 13,
-						color: "#0f172a",
+						color: color.text,
 						whiteSpace: "nowrap",
 						overflow: "hidden",
 						textOverflow: "ellipsis"
