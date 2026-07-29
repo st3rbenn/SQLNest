@@ -11,8 +11,8 @@ import {
 	useReactFlow
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { useMemo, useState } from "react";
-import { buildLayout } from "./layout";
+import { useEffect, useMemo, useState } from "react";
+import { buildLayout, type LayoutResult } from "./layout";
 import { SchemaTree } from "./SchemaTree";
 import type { SchemaModel } from "./schema-model";
 import { TableDetails } from "./TableDetails";
@@ -63,24 +63,38 @@ function makeEdge(rel: SchemaModel["relations"][number], i: number): Edge {
 }
 
 function CanvasInner({ schema }: { schema: SchemaModel }) {
-	const base = useMemo(
-		() => buildLayout(schema, makeNode(schema), makeEdge),
-		[schema]
-	);
-	const [nodes, , onNodesChange] = useNodesState(base.nodes);
+	// Layout ELK — async. Le composant est **remonté** au changement de schéma
+	// (clé sur ReactFlowProvider), donc pas de course entre deux layouts.
+	const [base, setBase] = useState<LayoutResult | null>(null);
+	useEffect(() => {
+		let cancelled = false;
+		buildLayout(schema, makeNode(schema), makeEdge).then((result) => {
+			if (!cancelled) setBase(result);
+		});
+		return () => {
+			cancelled = true;
+		};
+	}, [schema]);
+
+	// nodes reflètent les positions vivantes (drag) ; réinitialisés dès qu'ELK rend.
+	const [nodes, setNodes, onNodesChange] = useNodesState<TableNodeType>([]);
+	useEffect(() => {
+		if (base !== null) setNodes(base.nodes);
+	}, [base, setNodes]);
+
 	const [focusId, setFocusId] = useState<string | null>(null);
 	const { fitView } = useReactFlow();
 
 	// Voisinage FK direct du nœud focalisé (le nœud + ses 1-sauts).
 	const neighbors = useMemo(() => {
-		if (focusId === null) return null;
+		if (focusId === null || base === null) return null;
 		const set = new Set<string>([focusId]);
 		for (const e of base.edges) {
 			if (e.source === focusId) set.add(e.target);
 			if (e.target === focusId) set.add(e.source);
 		}
 		return set;
-	}, [focusId, base.edges]);
+	}, [focusId, base]);
 
 	// Nœuds affichés : positions vivantes (drag) + drapeaux focus.
 	const displayNodes = useMemo(
@@ -102,7 +116,7 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 
 	const displayEdges = useMemo(
 		() =>
-			base.edges.map((e) => {
+			(base?.edges ?? []).map((e) => {
 				const touchesFocus =
 					focusId !== null && (e.source === focusId || e.target === focusId);
 				const dim = focusId !== null && !touchesFocus;
@@ -118,7 +132,7 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 					zIndex: touchesFocus ? 10 : 0
 				};
 			}),
-		[base.edges, focusId]
+		[base, focusId]
 	);
 
 	/** « Walk to » — isole une table et centre la vue dessus. Point d'entrée
@@ -135,6 +149,25 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 
 	return (
 		<div style={{ position: "relative", width: "100%", height: "100%" }}>
+			{base === null ? (
+				// ELK peut mouliner ~1 s sur RNAcentral (186 nœuds). L'overlay évite un
+				// « saut » (canvas vide → canvas plein), et l'arbre reste utilisable.
+				<div
+					style={{
+						position: "absolute",
+						inset: 0,
+						display: "flex",
+						alignItems: "center",
+						justifyContent: "center",
+						fontSize: 13,
+						color: "#64748b",
+						pointerEvents: "none",
+						zIndex: 3
+					}}
+				>
+					Calcul du layout…
+				</div>
+			) : null}
 			<ReactFlow
 				nodes={displayNodes}
 				edges={displayEdges}
