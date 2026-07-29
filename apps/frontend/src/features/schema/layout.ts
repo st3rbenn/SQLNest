@@ -46,13 +46,18 @@ const LAYERED_OPTIONS: Record<string, string> = {
 
 const STRESS_OPTIONS: Record<string, string> = {
 	"elk.algorithm": "stress",
-	// Longueur d'arête cible : détermine l'espacement moyen entre tables.
-	"elk.stress.desiredEdgeLength": "320",
-	// Itérations : plus = layout mieux distribué, mais plus lent.
-	"elk.stress.iterationLimit": "500",
-	"elk.spacing.nodeNode": "60",
+	// Longueur d'arête cible = force de répulsion → distance moyenne inter-table.
+	// Bumpé (320→600) pour aérer le cluster central des schémas denses type
+	// RNAcentral, laisser de la place au regroupement manuel futur (Slice B —
+	// panels nommés). Trade-off : bbox plus grande, mais fitView cadre à l'aise.
+	"elk.stress.desiredEdgeLength": "600",
+	// Itérations : plus = mieux distribué, mais plus lent (~1 s sur 186 nœuds).
+	"elk.stress.iterationLimit": "800",
+	// Distance minimale entre 2 tables : empêche le chevauchement même quand la
+	// force n'écarte pas assez. Bumpé (60→160) pour ce point précis (gap visible).
+	"elk.spacing.nodeNode": "160",
 	"elk.separateConnectedComponents": "true",
-	"elk.spacing.componentComponent": "120"
+	"elk.spacing.componentComponent": "200"
 };
 
 /**
