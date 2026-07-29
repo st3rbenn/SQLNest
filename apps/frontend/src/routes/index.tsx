@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { type CSSProperties, useState } from "react";
-import { SchemaVisualizer } from "../features/schema/SchemaVisualizer";
+import { SchemaCanvas } from "../features/schema/SchemaCanvas";
 import {
 	SAMPLE_MONGODB,
 	SAMPLE_POSTGRES
@@ -184,9 +184,22 @@ function SchemaPage() {
 				</div>
 			)}
 
-			<div style={{ overflowX: "auto" }}>
-				<SchemaVisualizer schema={schema} />
+			<div
+				style={{
+					height: "calc(100vh - 240px)",
+					minHeight: 460,
+					border: "1px solid #e2e8f0",
+					borderRadius: 12,
+					overflow: "hidden",
+					background: "#fafbfc"
+				}}
+			>
+				<SchemaCanvas schema={schema} />
 			</div>
+			<p style={{ fontSize: 12, color: "#94a3b8", marginTop: 10 }}>
+				Molette pour zoomer · glisser le fond pour naviguer · clic sur une table
+				pour isoler ses relations · recherche pour la retrouver.
+			</p>
 		</div>
 	);
 }
