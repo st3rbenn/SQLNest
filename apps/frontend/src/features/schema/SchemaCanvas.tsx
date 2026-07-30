@@ -772,21 +772,23 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 						x: node.position.x + w / 2,
 						y: node.position.y + h / 2
 					};
-					// Membership au drag : on n'ADD que si la table atterrit dans un
-					// frame **différent** de l'actuel (drag-in ou switch). Un drag-out
-					// (release en dehors de tout frame) ne retire PAS — comme Figma,
-					// on laisse l'utilisateur repositionner librement sans casser sa
-					// composition. Retrait explicite : menu contextuel « Retirer de… ».
+					// Membership au drag (comme Figma) :
+					// - drop dans un frame ≠ actuel → add (drag-in ou switch)
+					// - drop en dehors de tout frame → remove (drag-out)
+					// - drop dans le frame actuel → no-op (repositionnement interne)
 					const current = framesApi.frameOfTable(node.id);
+					let dropped: Frame | null = null;
 					for (const f of framesApi.frames) {
 						if (!f.rect) continue;
-						if (
-							rectContainsPoint(f.rect, center) &&
-							(!current || current.key !== f.key)
-						) {
-							framesApi.addTableToFrame(f.key, node.id);
+						if (rectContainsPoint(f.rect, center)) {
+							dropped = f;
 							break;
 						}
+					}
+					if (dropped && (!current || current.key !== dropped.key)) {
+						framesApi.addTableToFrame(dropped.key, node.id);
+					} else if (!dropped && current) {
+						framesApi.removeTableFromFrame(node.id);
 					}
 				}}
 				onPaneClick={() => {
