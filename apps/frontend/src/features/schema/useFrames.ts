@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { FRAME_HUES } from "@sqlnest/design-system";
-import type { Frame } from "./frames";
+import type { Frame, FrameRect } from "./frames";
 import { framesFor } from "./frames";
 import type { SchemaModel } from "./schema-model";
 
@@ -58,10 +58,16 @@ export function nextLabel(frames: readonly Frame[]): string {
 interface FramesApi {
 	readonly frames: readonly Frame[];
 	readonly frameOfTable: (name: string) => Frame | null;
-	readonly createFrame: (tables: readonly string[], label?: string) => Frame;
+	readonly createFrame: (
+		tables: readonly string[],
+		options?: { label?: string; rect?: FrameRect }
+	) => Frame;
 	readonly removeFrame: (key: string) => void;
 	readonly renameFrame: (key: string, label: string) => void;
 	readonly removeTableFromFrame: (tableName: string) => void;
+	readonly addTableToFrame: (frameKey: string, tableName: string) => void;
+	readonly moveFrame: (key: string, dx: number, dy: number) => void;
+	readonly setFrameRect: (key: string, rect: FrameRect) => void;
 }
 
 /**
@@ -114,13 +120,17 @@ export function useFrames(schema: SchemaModel): FramesApi {
 	);
 
 	const createFrame = useCallback(
-		(tables: readonly string[], label?: string): Frame => {
+		(
+			tables: readonly string[],
+			options?: { label?: string; rect?: FrameRect }
+		): Frame => {
 			const uniqueTables = [...new Set(tables)];
 			const newFrame: Frame = {
 				key: `f-${Date.now()}`,
-				label: label ?? nextLabel(frames),
+				label: options?.label ?? nextLabel(frames),
 				hue: nextHue(frames),
-				collections: uniqueTables
+				collections: uniqueTables,
+				...(options?.rect ? { rect: options.rect } : {})
 			};
 			// Détache ces tables de leurs frames précédents (une table ne
 			// peut appartenir qu'à un seul frame — évite l'ambiguïté visuelle).
@@ -157,12 +167,60 @@ export function useFrames(schema: SchemaModel): FramesApi {
 		);
 	}, []);
 
+	const addTableToFrame = useCallback(
+		(frameKey: string, tableName: string) => {
+			setFrames((prev) =>
+				prev.map((f) => {
+					if (f.key === frameKey) {
+						if (f.collections.includes(tableName)) return f;
+						return { ...f, collections: [...f.collections, tableName] };
+					}
+					// Retire de tout autre frame (invariant : une table par frame).
+					if (f.collections.includes(tableName)) {
+						return {
+							...f,
+							collections: f.collections.filter((c) => c !== tableName)
+						};
+					}
+					return f;
+				})
+			);
+		},
+		[]
+	);
+
+	const moveFrame = useCallback((key: string, dx: number, dy: number) => {
+		setFrames((prev) =>
+			prev.map((f) => {
+				if (f.key !== key || !f.rect) return f;
+				return {
+					...f,
+					rect: {
+						x: f.rect.x + dx,
+						y: f.rect.y + dy,
+						width: f.rect.width,
+						height: f.rect.height
+					}
+				};
+			})
+		);
+	}, []);
+
+	const setFrameRect = useCallback((key: string, rect: FrameRect) => {
+		setFrames((prev) =>
+			prev.map((f) => (f.key === key ? { ...f, rect } : f))
+		);
+	}, []);
+
 	return {
 		frames,
 		frameOfTable,
 		createFrame,
 		removeFrame,
 		renameFrame,
-		removeTableFromFrame
+		removeTableFromFrame,
+		addTableToFrame,
+		moveFrame,
+		setFrameRect
 	};
 }

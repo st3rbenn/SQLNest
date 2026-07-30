@@ -1,24 +1,23 @@
 import {
-	EngineTabs,
 	FloatingPanel,
 	StatusPill,
 	type StatusPillVariant
 } from "@sqlnest/design-system";
-import { Group, TextInput } from "@mantine/core";
+import { TextInput } from "@mantine/core";
 import { createFileRoute } from "@tanstack/react-router";
 import { type CSSProperties, useState } from "react";
 import { SchemaCanvas } from "../features/schema/SchemaCanvas";
-import {
-	SAMPLE_MONGODB,
-	SAMPLE_POSTGRES
-} from "../features/schema/schema-model";
+import { SAMPLE_POSTGRES } from "../features/schema/schema-model";
 import { SchemaRequestError, useSchema } from "../features/schema/useSchema";
 
 export const Route = createFileRoute("/")({
 	component: SchemaPage
 });
 
-type Engine = "postgres" | "mongodb";
+// Le toggle Postgres/MongoDB migrera vers la future page « Connexion »
+// (setup + credentials + choix du driver). En attendant, on épingle
+// `postgres` — le canvas Schéma vit sur une seule base à la fois.
+const ENGINE = "postgres" as const;
 
 // Canvas plein écran : viewport moins la nav (~50 px). Les contrôles sont des
 // panels FLOTTANTS par-dessus le canvas — le visualizer n'est plus une carte
@@ -31,13 +30,10 @@ const pageStyle: CSSProperties = {
 };
 
 function SchemaPage() {
-	const [engine, setEngine] = useState<Engine>("postgres");
 	const [pgSchema, setPgSchema] = useState("");
-	const targetSchema =
-		engine === "postgres" ? pgSchema.trim() || undefined : undefined;
-	const { data, error, isLoading } = useSchema(engine, targetSchema);
-	const fallback = engine === "postgres" ? SAMPLE_POSTGRES : SAMPLE_MONGODB;
-	const schema = data ?? fallback;
+	const targetSchema = pgSchema.trim() || undefined;
+	const { data, error, isLoading } = useSchema(ENGINE, targetSchema);
+	const schema = data ?? SAMPLE_POSTGRES;
 	const badSchema =
 		error instanceof SchemaRequestError &&
 		error.status >= 400 &&
@@ -63,48 +59,49 @@ function SchemaPage() {
 	} else if (liveButEmpty) {
 		status = {
 			variant: "warning",
-			text:
-				engine === "postgres" ? (
-					<>
-						Live — aucune table dans <code>{schemaLabel}</code>
-					</>
-				) : (
-					"Live — base vide"
-				)
+			text: (
+				<>
+					Live — aucune table dans <code>{schemaLabel}</code>
+				</>
+			)
 		};
 	} else {
 		status = {
 			variant: "success",
-			text:
-				engine === "postgres" ? (
-					<>
-						Live — schéma <code>{schemaLabel}</code>
-					</>
-				) : (
-					"Live"
-				)
+			text: (
+				<>
+					Live — schéma <code>{schemaLabel}</code>
+				</>
+			)
 		};
 	}
 
 	return (
 		<div style={pageStyle}>
-			{/* Panel flottant : moteur + schéma. Ancré après le drawer docké (300 px). */}
+			{/* Panel flottant : champ schéma (Postgres uniquement pour l'instant).
+			 * Le sélecteur de moteur migrera vers la page de connexion. */}
 			<FloatingPanel position="top-left" offset={{ x: 316, y: 12 }} p="xs">
-				<Group gap="xs" wrap="nowrap">
-					<EngineTabs value={engine} onChange={setEngine} />
-					{engine === "postgres" ? (
-						<TextInput
-							value={pgSchema}
-							onChange={(e) => setPgSchema(e.currentTarget.value)}
-							placeholder="public"
-							size="xs"
-							radius="sm"
-							w={120}
-							spellCheck={false}
-							styles={{ input: { fontFamily: "var(--mantine-font-family-monospace)" } }}
-						/>
-					) : null}
-				</Group>
+				<TextInput
+					value={pgSchema}
+					onChange={(e) => setPgSchema(e.currentTarget.value)}
+					placeholder="public"
+					size="xs"
+					radius="sm"
+					w={140}
+					spellCheck={false}
+					leftSection={
+						<span style={{ fontSize: 10, color: "var(--mantine-color-slate-5)" }}>
+							schéma
+						</span>
+					}
+					leftSectionWidth={52}
+					styles={{
+						input: {
+							fontFamily: "var(--mantine-font-family-monospace)",
+							paddingLeft: 56
+						}
+					}}
+				/>
 			</FloatingPanel>
 
 			{/* Bandeau statut : bottom-left, après le drawer. */}

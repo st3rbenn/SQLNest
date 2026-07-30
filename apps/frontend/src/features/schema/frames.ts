@@ -1,11 +1,34 @@
 import { FRAME_HUES } from "@sqlnest/design-system";
 import type { SchemaModel } from "./schema-model";
 
+export interface FrameRect {
+	readonly x: number;
+	readonly y: number;
+	readonly width: number;
+	readonly height: number;
+}
+
 export interface Frame {
 	readonly key: string;
 	readonly label: string;
 	readonly hue: number;
 	readonly collections: readonly string[];
+	/** Rect ancré (persisté). Si absent, le rect est calculé dynamiquement
+	 *  à partir des positions des tables — cas des frames-seed hérités. */
+	readonly rect?: FrameRect;
+}
+
+/** Un rect contient un point (bounds inclusifs sur les 4 bords). */
+export function rectContainsPoint(
+	rect: FrameRect,
+	point: { x: number; y: number }
+): boolean {
+	return (
+		point.x >= rect.x &&
+		point.x <= rect.x + rect.width &&
+		point.y >= rect.y &&
+		point.y <= rect.y + rect.height
+	);
 }
 
 const SAMPLE_FRAMES: Frame[] = [

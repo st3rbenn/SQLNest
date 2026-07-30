@@ -29,7 +29,7 @@ import { startTransition, useCallback, useEffect, useMemo, useRef, useState } fr
 import { CanvasContextMenu } from "./CanvasContextMenu";
 import { CanvasToolbar } from "./CanvasToolbar";
 import { FrameNode, type FrameNodeType } from "./FrameNode";
-import type { Frame } from "./frames";
+import { type Frame, rectContainsPoint } from "./frames";
 import { buildLayout, type LayoutResult } from "./layout";
 import { SchemaTree } from "./SchemaTree";
 import type { SchemaModel } from "./schema-model";
@@ -262,6 +262,32 @@ export function overviewViewport(
 	};
 }
 
+/**
+ * Bounds initiaux d'un frame à partir des positions des tables sélectionnées.
+ * Sert au `createFrame` (rect stocké dans le frame) — après quoi le rect reste
+ * fixe (drag/ajout/retrait de tables ne le déforme plus).
+ */
+export function boundsOfTables(
+	tables: readonly TableNodeType[],
+	pad: number
+): { x: number; y: number; width: number; height: number } | null {
+	if (tables.length === 0) return null;
+	const minX = Math.min(...tables.map((n) => n.position.x));
+	const minY = Math.min(...tables.map((n) => n.position.y));
+	const maxX = Math.max(
+		...tables.map((n) => n.position.x + (n.width ?? NODE_WIDTH))
+	);
+	const maxY = Math.max(
+		...tables.map((n) => n.position.y + (n.height ?? 200))
+	);
+	return {
+		x: minX - pad,
+		y: minY - pad,
+		width: maxX - minX + pad * 2,
+		height: maxY - minY + pad * 2
+	};
+}
+
 function computeFrameNodes(
 	frames: readonly Frame[],
 	tableNodes: readonly TableNodeType[]
@@ -269,31 +295,31 @@ function computeFrameNodes(
 	if (frames.length === 0) return [];
 	const byId = new Map(tableNodes.map((n) => [n.id, n]));
 	return frames.flatMap((frame) => {
-		const rects = frame.collections
-			.map((c) => byId.get(c))
-			.filter((n): n is TableNodeType => n !== undefined);
-		if (rects.length === 0) return [];
-		const minX = Math.min(...rects.map((n) => n.position.x));
-		const minY = Math.min(...rects.map((n) => n.position.y));
-		const maxX = Math.max(
-			...rects.map((n) => n.position.x + (n.width ?? NODE_WIDTH))
-		);
-		const maxY = Math.max(
-			...rects.map((n) => n.position.y + (n.height ?? 200))
-		);
+		// Rect explicite (user-defined avec `rect` posé) → utilisé tel quel.
+		// Sinon → calcul dynamique à partir des membres (frames-seed hérités).
+		let rect = frame.rect;
+		if (!rect) {
+			const members = frame.collections
+				.map((c) => byId.get(c))
+				.filter((n): n is TableNodeType => n !== undefined);
+			rect = boundsOfTables(members, FRAME_PAD) ?? undefined;
+			if (!rect) return [];
+		}
 		return [
 			{
 				id: `frame:${frame.key}`,
 				type: "frame" as const,
-				position: { x: minX - FRAME_PAD, y: minY - FRAME_PAD },
-				width: maxX - minX + FRAME_PAD * 2,
-				height: maxY - minY + FRAME_PAD * 2,
+				position: { x: rect.x, y: rect.y },
+				width: rect.width,
+				height: rect.height,
 				data: { frame },
-				draggable: false,
-				selectable: false,
+				// Draggable pour permettre de déplacer le frame + ses tables
+				// ensemble (handler `onNodeDrag` dans CanvasInner applique le
+				// delta aux membres).
+				draggable: true,
+				selectable: true,
 				connectable: false,
-				zIndex: -1,
-				style: { pointerEvents: "none" as const }
+				zIndex: -1
 			}
 		];
 	});
@@ -553,14 +579,18 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 	// Aussi appelable depuis le SelectionChip / la palette.
 	const createFrameFromSelection = useCallback(() => {
 		if (selectedTables.length === 0) return;
-		const frame = framesApi.createFrame(selectedTables);
+		const selectedNodes = nodes.filter((n) => selectedTables.includes(n.id));
+		const rect = boundsOfTables(selectedNodes, FRAME_PAD);
+		const frame = framesApi.createFrame(selectedTables, {
+			...(rect ? { rect } : {})
+		});
 		showNotification({
 			title: `Frame « ${frame.label} » créé`,
 			message: `${selectedTables.length} table${selectedTables.length > 1 ? "s" : ""} groupée${selectedTables.length > 1 ? "s" : ""}`,
 			color: "green",
 			autoClose: 2500
 		});
-	}, [selectedTables, framesApi]);
+	}, [selectedTables, nodes, framesApi]);
 
 	const hideSelected = useCallback(() => {
 		if (selectedTables.length === 0) return;
@@ -678,6 +708,61 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 						y: event.clientY,
 						tableName: node.id
 					});
+				}}
+				onNodeDrag={(_, node) => {
+					// Drag d'un frame → applique le delta à ses tables membres,
+					// en direct (frame et tables bougent ensemble sous le curseur).
+					if ((node as { type?: string }).type !== "frame") return;
+					const frameKey = node.id.replace(/^frame:/, "");
+					const frame = framesApi.frames.find((f) => f.key === frameKey);
+					if (!frame || !frame.rect) return;
+					const dx = node.position.x - frame.rect.x;
+					const dy = node.position.y - frame.rect.y;
+					if (dx === 0 && dy === 0) return;
+					const members = new Set(frame.collections);
+					setNodes((ns) =>
+						ns.map((n) =>
+							members.has(n.id)
+								? {
+										...n,
+										position: { x: n.position.x + dx, y: n.position.y + dy }
+									}
+								: n
+						)
+					);
+					framesApi.setFrameRect(frame.key, {
+						x: node.position.x,
+						y: node.position.y,
+						width: frame.rect.width,
+						height: frame.rect.height
+					});
+				}}
+				onNodeDragStop={(_, node) => {
+					if ((node as { type?: string }).type === "frame") return;
+					// Une table posée : recalcule son appartenance à un frame en
+					// testant si son centre est dans un rect. Une seule frame par
+					// table (celui du dessous emporte s'il y a chevauchement, ce
+					// qui est rare avec des frames non-imbriqués).
+					const w = (node as { width?: number }).width ?? NODE_WIDTH;
+					const h = (node as { height?: number }).height ?? 200;
+					const center = {
+						x: node.position.x + w / 2,
+						y: node.position.y + h / 2
+					};
+					const current = framesApi.frameOfTable(node.id);
+					let dropped: Frame | null = null;
+					for (const f of framesApi.frames) {
+						if (!f.rect) continue;
+						if (rectContainsPoint(f.rect, center)) {
+							dropped = f;
+							break;
+						}
+					}
+					if (dropped && (!current || current.key !== dropped.key)) {
+						framesApi.addTableToFrame(dropped.key, node.id);
+					} else if (!dropped && current) {
+						framesApi.removeTableFromFrame(node.id);
+					}
 				}}
 				onPaneClick={() => {
 					setFocusId(null);
@@ -876,20 +961,9 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 					onClose={() => setMenu(null)}
 					onHide={hideTable}
 					onFocus={focusAndZoom}
-					onAddToFrame={(frameKey) => {
-						// Ajoute la table au frame ciblé (createFrame gère aussi la
-						// migration : détache d'un frame précédent). Ici on veut juste
-						// une "translation" — supprime de l'ancien, ajoute au nouveau.
-						framesApi.removeTableFromFrame(menu.tableName);
-						const target = framesApi.frames.find((f) => f.key === frameKey);
-						if (target) {
-							framesApi.createFrame(
-								[...target.collections, menu.tableName],
-								target.label
-							);
-							framesApi.removeFrame(frameKey);
-						}
-					}}
+					onAddToFrame={(frameKey) =>
+						framesApi.addTableToFrame(frameKey, menu.tableName)
+					}
 					onRemoveFromFrame={() =>
 						framesApi.removeTableFromFrame(menu.tableName)
 					}

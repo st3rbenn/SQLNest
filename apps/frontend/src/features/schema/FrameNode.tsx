@@ -10,8 +10,10 @@ export interface FrameNodeData {
 export type FrameNodeType = Node<FrameNodeData, "frame">;
 
 /**
- * Frame de groupage rendu **derrière** les nœuds table (zIndex négatif,
- * pointer-events désactivés). Le badge de label flotte au coin supérieur.
+ * Frame de groupage rendu **derrière** les nœuds table (zIndex négatif).
+ * Le corps du frame ignore les pointer-events (pour que le clic sur une
+ * table passe à travers), mais son **label** (le `FrameBadge` en coin) les
+ * accepte — c'est la poignée de drag/selection du frame.
  */
 export function FrameNode({ data, width, height }: NodeProps<FrameNodeType>) {
 	const { frame } = data;
@@ -28,7 +30,15 @@ export function FrameNode({ data, width, height }: NodeProps<FrameNodeType>) {
 				pointerEvents: "none"
 			}}
 		>
-			<div style={{ position: "absolute", top: -13, left: 12 }}>
+			<div
+				style={{
+					position: "absolute",
+					top: -13,
+					left: 12,
+					pointerEvents: "auto",
+					cursor: "grab"
+				}}
+			>
 				<FrameBadge
 					hue={frame.hue}
 					label={frame.label}
