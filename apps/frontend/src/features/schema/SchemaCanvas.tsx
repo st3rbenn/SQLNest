@@ -382,6 +382,24 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 		}, [])
 	});
 
+	// Fige le rect des frames-seed dès qu'ELK a placé les tables. Sans ça,
+	// `computeFrameNodes` retomberait sur `boundsOfTables(members)` à chaque
+	// render → auto-resize non désiré quand une table membre est déplacée.
+	// Ne s'exécute qu'UNE FOIS par frame (idempotent : si `rect` est déjà là,
+	// on ne le réécrit pas).
+	useEffect(() => {
+		if (nodes.length === 0) return;
+		const byId = new Map(nodes.map((n) => [n.id, n]));
+		for (const frame of framesApi.frames) {
+			if (frame.rect) continue;
+			const members = frame.collections
+				.map((c) => byId.get(c))
+				.filter((n): n is TableNodeType => n !== undefined);
+			const rect = boundsOfTables(members, FRAME_PAD);
+			if (rect) framesApi.setFrameRect(frame.key, rect);
+		}
+	}, [nodes, framesApi]);
+
 	// Voisinage FK direct du nœud focalisé (le nœud + ses 1-sauts).
 	const neighbors = useMemo(() => {
 		if (focusId === null || base === null) return null;
@@ -754,19 +772,21 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 						x: node.position.x + w / 2,
 						y: node.position.y + h / 2
 					};
+					// Membership au drag : on n'ADD que si la table atterrit dans un
+					// frame **différent** de l'actuel (drag-in ou switch). Un drag-out
+					// (release en dehors de tout frame) ne retire PAS — comme Figma,
+					// on laisse l'utilisateur repositionner librement sans casser sa
+					// composition. Retrait explicite : menu contextuel « Retirer de… ».
 					const current = framesApi.frameOfTable(node.id);
-					let dropped: Frame | null = null;
 					for (const f of framesApi.frames) {
 						if (!f.rect) continue;
-						if (rectContainsPoint(f.rect, center)) {
-							dropped = f;
+						if (
+							rectContainsPoint(f.rect, center) &&
+							(!current || current.key !== f.key)
+						) {
+							framesApi.addTableToFrame(f.key, node.id);
 							break;
 						}
-					}
-					if (dropped && (!current || current.key !== dropped.key)) {
-						framesApi.addTableToFrame(dropped.key, node.id);
-					} else if (!dropped && current) {
-						framesApi.removeTableFromFrame(node.id);
 					}
 				}}
 				onPaneClick={() => {
