@@ -23,7 +23,7 @@ import {
 	useReactFlow
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import { CanvasContextMenu } from "./CanvasContextMenu";
 import { CanvasToolbar } from "./CanvasToolbar";
 import { FrameNode, type FrameNodeType } from "./FrameNode";
@@ -77,6 +77,57 @@ function initialZoom(collectionCount: number): number {
 // confortable). Entre les deux → on ne touche pas le zoom, juste pan.
 const FOCUS_ZOOM_MIN = 1;
 const FOCUS_ZOOM_MAX = 1.5;
+const FOCUS_TWEEN_MS = 350;
+
+interface Viewport {
+	readonly x: number;
+	readonly y: number;
+	readonly zoom: number;
+}
+
+/**
+ * Anime le viewport en confiant le tween au moteur CSS via une transition
+ * sur la transform de `.react-flow__viewport` — plutôt que du JS
+ * frame-par-frame. Robuste face au throttling (embedded browsers, onglets
+ * inactifs) car le composeur CSS tourne au niveau du navigateur, pas de
+ * `setInterval`/`requestAnimationFrame`. Un handle `cancel()` retire la
+ * transition prématurément si un nouveau focus arrive avant la fin.
+ */
+export function animateViewport(
+	from: Viewport,
+	to: Viewport,
+	durationMs: number,
+	apply: (v: Viewport) => void
+): { cancel: () => void } {
+	if (typeof document === "undefined") {
+		apply(to);
+		return { cancel: () => {} };
+	}
+	const vp = document.querySelector<HTMLElement>(".react-flow__viewport");
+	// Pas de viewport = pas de canvas rendu → applique direct, pas d'animation.
+	if (vp === null) {
+		apply(to);
+		return { cancel: () => {} };
+	}
+	// Applique la valeur `from` sans transition — sinon la 1ère transform
+	// serait tweenée depuis n'importe quel état résiduel.
+	vp.style.transition = "none";
+	apply(from);
+	// Force un reflow pour que le browser enregistre `from` avant transition.
+	void vp.offsetWidth;
+	vp.style.transition = `transform ${durationMs}ms cubic-bezier(0.22, 1, 0.36, 1)`;
+	apply(to);
+	const cleanup = () => {
+		vp.style.transition = "";
+	};
+	const t = setTimeout(cleanup, durationMs + 50);
+	return {
+		cancel: () => {
+			clearTimeout(t);
+			cleanup();
+		}
+	};
+}
 
 /**
  * Zoom cible d'un focus-table. Pure → testable.
@@ -278,6 +329,8 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 	} | null>(null);
 	const { getViewport, setViewport } = useReactFlow();
 	const containerRef = useRef<HTMLDivElement | null>(null);
+	// Handle du tween en cours — annulé si un nouveau focus arrive.
+	const tweenRef = useRef<{ cancel: () => void } | null>(null);
 
 	// Voisinage FK direct du nœud focalisé (le nœud + ses 1-sauts).
 	const neighbors = useMemo(() => {
@@ -401,36 +454,35 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 	 * dézoome vers le plafond — dans les deux cas, autorisé pour garder
 	 * une lecture correcte de la carte. */
 	const focusAndZoom = (id: string) => {
-		setFocusId(id);
 		const node = nodes.find((n) => n.id === id);
-		if (!node || containerRef.current === null) return;
+		if (!node || containerRef.current === null) {
+			setFocusId(id);
+			return;
+		}
 		const cx = node.position.x + (node.width ?? NODE_WIDTH) / 2;
 		const cy =
 			node.position.y +
 			(node.height ?? nodeHeight(node.data.collection)) / 2;
-		const current = getViewport().zoom;
-		const zoom = focusZoom(current, {
+		const from = getViewport();
+		const zoom = focusZoom(from.zoom, {
 			min: FOCUS_ZOOM_MIN,
 			max: FOCUS_ZOOM_MAX
 		});
-		// Centre la node dans la zone LIBRE (respect du safeArea) — pas au
-		// milieu bête du conteneur, sinon la table passerait sous le drawer
-		// arbre. `setCenter` de RF ignore le safeArea, donc on calcule le
-		// viewport nous-mêmes (même approche que `applyOverview`).
 		const rect = containerRef.current.getBoundingClientRect();
 		const sa = safeAreaRef.current;
 		const freeCenterX = sa.left + (rect.width - sa.left - sa.right) / 2;
 		const freeCenterY = sa.top + (rect.height - sa.top - sa.bottom) / 2;
-		const target = {
+		const to: Viewport = {
 			x: freeCenterX - cx * zoom,
 			y: freeCenterY - cy * zoom,
 			zoom
 		};
-		// Sans options : setViewport applique immédiatement. Avec { duration }
-		// il retourne une Promise qu'il faut attacher — parfois avalée par un
-		// render concurrent. La forme instantanée est plus fiable ; l'animation
-		// est perdue mais on peut y revenir plus tard avec un `useTransition`.
-		setViewport(target);
+		// Annule le tween précédent s'il est encore en cours, puis anime.
+		// `setFocusId` (ring/drawer/estompage) déféré via `startTransition`
+		// pour qu'il n'interrompe pas le tween mid-animation.
+		tweenRef.current?.cancel();
+		tweenRef.current = animateViewport(from, to, FOCUS_TWEEN_MS, setViewport);
+		startTransition(() => setFocusId(id));
 	};
 
 	const applyOverview = () => {

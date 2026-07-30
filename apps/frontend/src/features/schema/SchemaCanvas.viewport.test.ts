@@ -1,5 +1,10 @@
-import { describe, expect, it } from "vitest";
-import { focusZoom, overviewViewport, tablesBounds } from "./SchemaCanvas";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	animateViewport,
+	focusZoom,
+	overviewViewport,
+	tablesBounds
+} from "./SchemaCanvas";
 import type { TableNodeType } from "./TableNode";
 
 function n(id: string, x: number, y: number, w: number, h: number): TableNodeType {
@@ -102,5 +107,50 @@ describe("focusZoom", () => {
 		expect(focusZoom(1, opts)).toBe(1);
 		expect(focusZoom(1.2, opts)).toBe(1.2);
 		expect(focusZoom(1.5, opts)).toBe(1.5);
+	});
+});
+
+describe("animateViewport", () => {
+	beforeEach(() => {
+		document.body.innerHTML = '<div class="react-flow__viewport"></div>';
+	});
+
+	it("applies `from` then `to` on the viewport", () => {
+		const from = { x: 0, y: 0, zoom: 0.5 };
+		const to = { x: 200, y: 100, zoom: 1 };
+		const calls: Array<{ x: number; y: number; zoom: number }> = [];
+		animateViewport(from, to, 200, (v) => calls.push(v));
+		expect(calls[0]).toEqual(from);
+		expect(calls[calls.length - 1]).toEqual(to);
+	});
+
+	it("sets a CSS transition on the viewport so the browser tweens the transform", () => {
+		animateViewport(
+			{ x: 0, y: 0, zoom: 0.5 },
+			{ x: 200, y: 100, zoom: 1 },
+			320,
+			() => {}
+		);
+		const vp = document.querySelector<HTMLElement>(".react-flow__viewport");
+		expect(vp?.style.transition).toContain("transform 320ms");
+	});
+
+	it("cancel() clears the transition and the pending cleanup timer", async () => {
+		const handle = animateViewport(
+			{ x: 0, y: 0, zoom: 0.5 },
+			{ x: 200, y: 100, zoom: 1 },
+			200,
+			() => {}
+		);
+		handle.cancel();
+		const vp = document.querySelector<HTMLElement>(".react-flow__viewport");
+		expect(vp?.style.transition).toBe("");
+	});
+
+	it("falls back to applying `to` immediately when no viewport exists", () => {
+		document.body.innerHTML = "";
+		const apply = vi.fn();
+		animateViewport({ x: 0, y: 0, zoom: 0.5 }, { x: 1, y: 2, zoom: 3 }, 200, apply);
+		expect(apply).toHaveBeenCalledExactlyOnceWith({ x: 1, y: 2, zoom: 3 });
 	});
 });
