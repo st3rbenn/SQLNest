@@ -9,6 +9,7 @@ import {
 	IconEyeOff,
 	IconInfoCircle,
 	IconSquareDashed,
+	IconSquareOff,
 	IconTable
 } from "@tabler/icons-react";
 import { useNavigate } from "@tanstack/react-router";
@@ -21,20 +22,26 @@ interface Props {
 	readonly position: { x: number; y: number };
 	readonly tableName: string;
 	readonly frames: readonly Frame[];
+	readonly frameOfTable?: Frame | null;
 	readonly onClose: () => void;
 	readonly onHide: (tableName: string) => void;
 	readonly onFocus: (tableName: string) => void;
+	readonly onAddToFrame?: (frameKey: string) => void;
+	readonly onRemoveFromFrame?: () => void;
 }
 
-/** Menu contextuel du canvas Schéma (tour 1b) — actions pour une table. */
+/** Menu contextuel du canvas Schéma (tours 1b + 1d) — actions pour une table. */
 export function CanvasContextMenu({
 	open,
 	position,
 	tableName,
 	frames,
+	frameOfTable,
 	onClose,
 	onHide,
 	onFocus,
+	onAddToFrame,
+	onRemoveFromFrame
 }: Props) {
 	const navigate = useNavigate();
 
@@ -64,13 +71,43 @@ export function CanvasContextMenu({
 		}
 	};
 
-	const frameNotAvailable = (frameLabel: string) =>
-		showNotification({
-			title: `Ajouter à « ${frameLabel} »`,
-			message: "Bientôt disponible.",
-			color: "amber",
-			autoClose: 2000,
-		});
+	// Frames disponibles = ceux dont la table N'est PAS déjà membre.
+	const otherFrames = frames.filter(
+		(f) => !frameOfTable || f.key !== frameOfTable.key
+	);
+
+	const frameSubmenuItems = [
+		...otherFrames.map((f) => ({
+			kind: "action" as const,
+			id: `frame:${f.key}`,
+			label: f.label,
+			onClick: () => onAddToFrame?.(f.key)
+		})),
+		...(otherFrames.length > 0 && onRemoveFromFrame && frameOfTable
+			? [{ kind: "divider" as const }]
+			: []),
+		...(frameOfTable && onRemoveFromFrame
+			? [
+					{
+						kind: "action" as const,
+						id: "frame:remove",
+						label: `Retirer de « ${frameOfTable.label} »`,
+						icon: <IconSquareOff {...ICON} />,
+						onClick: onRemoveFromFrame
+					}
+				]
+			: []),
+		...(otherFrames.length === 0 && !frameOfTable
+			? [
+					{
+						kind: "action" as const,
+						id: "frame:none",
+						label: "Aucun frame — sélectionne des tables puis F",
+						onClick: () => {}
+					}
+				]
+			: [])
+	];
 
 	const items: ContextMenuItem[] = [
 		{
@@ -93,29 +130,11 @@ export function CanvasContextMenu({
 		{
 			kind: "submenu",
 			id: "frame",
-			label: "Ajouter à un frame",
+			label: frameOfTable
+				? `Dans « ${frameOfTable.label} »`
+				: "Ajouter à un frame",
 			icon: <IconSquareDashed {...ICON} />,
-			items: [
-				...frames.map((f) => ({
-					kind: "action" as const,
-					id: `frame:${f.key}`,
-					label: f.label,
-					onClick: () => frameNotAvailable(f.label),
-				})),
-				...(frames.length > 0 ? [{ kind: "divider" as const }] : []),
-				{
-					kind: "action",
-					id: "frame:new",
-					label: "Nouveau frame…",
-					onClick: () =>
-						showNotification({
-							title: "Nouveau frame",
-							message: "Bientôt disponible.",
-							color: "amber",
-							autoClose: 2000,
-						}),
-				},
-			],
+			items: frameSubmenuItems
 		},
 		{ kind: "divider" },
 		{

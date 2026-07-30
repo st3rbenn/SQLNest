@@ -1,6 +1,7 @@
 import {
 	HintPill,
 	SearchInput,
+	SelectionChip,
 	showNotification,
 	SidebarDrawer,
 	Spotlight,
@@ -20,14 +21,15 @@ import {
 	ReactFlow,
 	ReactFlowProvider,
 	useNodesState,
+	useOnSelectionChange,
 	useReactFlow
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { startTransition, useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CanvasContextMenu } from "./CanvasContextMenu";
 import { CanvasToolbar } from "./CanvasToolbar";
 import { FrameNode, type FrameNodeType } from "./FrameNode";
-import { framesFor } from "./frames";
+import type { Frame } from "./frames";
 import { buildLayout, type LayoutResult } from "./layout";
 import { SchemaTree } from "./SchemaTree";
 import type { SchemaModel } from "./schema-model";
@@ -38,6 +40,7 @@ import {
 	TableNode,
 	type TableNodeType
 } from "./TableNode";
+import { useFrames } from "./useFrames";
 
 const DECLARED = "#2563eb";
 const INFERRED = "#d97706";
@@ -260,10 +263,9 @@ export function overviewViewport(
 }
 
 function computeFrameNodes(
-	schema: SchemaModel,
+	frames: readonly Frame[],
 	tableNodes: readonly TableNodeType[]
 ): FrameNodeType[] {
-	const frames = framesFor(schema);
 	if (frames.length === 0) return [];
 	const byId = new Map(tableNodes.map((n) => [n.id, n]));
 	return frames.flatMap((frame) => {
@@ -332,6 +334,24 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 	// Handle du tween en cours — annulé si un nouveau focus arrive.
 	const tweenRef = useRef<{ cancel: () => void } | null>(null);
 
+	// Frames user-defined (persistés en localStorage). Remplace le
+	// `framesFor(schema)` statique — l'utilisateur crée/retire ses frames
+	// via lasso + F et le menu contextuel « Retirer du frame ».
+	const framesApi = useFrames(schema);
+
+	// Sélection multi-tables tenue à jour par RF. Alimente le chip bas-centre
+	// et le raccourci `F`. Filtre les frame-nodes (non sélectionnables mais
+	// robuste face à un futur changement).
+	const [selectedTables, setSelectedTables] = useState<readonly string[]>([]);
+	useOnSelectionChange({
+		onChange: useCallback(({ nodes: sel }) => {
+			const ids = sel
+				.filter((n) => (n as { type?: string }).type !== "frame")
+				.map((n) => n.id);
+			setSelectedTables(ids);
+		}, [])
+	});
+
 	// Voisinage FK direct du nœud focalisé (le nœud + ses 1-sauts).
 	const neighbors = useMemo(() => {
 		if (focusId === null || base === null) return null;
@@ -366,10 +386,10 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 	const frameNodes = useMemo(
 		() =>
 			computeFrameNodes(
-				schema,
+				framesApi.frames,
 				nodes.filter((n) => !hiddenIds.has(n.id))
 			),
-		[schema, nodes, hiddenIds]
+		[framesApi.frames, nodes, hiddenIds]
 	);
 
 	const displayNodes = useMemo<SchemaNode[]>(
@@ -528,6 +548,59 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 
 	const unhideAll = () => setHiddenIds(new Set());
 
+	// ─── frames user-defined (tour 1d) ────────────────────────────────────
+	// Shortcut `F` : crée un frame à partir de la sélection courante.
+	// Aussi appelable depuis le SelectionChip / la palette.
+	const createFrameFromSelection = useCallback(() => {
+		if (selectedTables.length === 0) return;
+		const frame = framesApi.createFrame(selectedTables);
+		showNotification({
+			title: `Frame « ${frame.label} » créé`,
+			message: `${selectedTables.length} table${selectedTables.length > 1 ? "s" : ""} groupée${selectedTables.length > 1 ? "s" : ""}`,
+			color: "green",
+			autoClose: 2500
+		});
+	}, [selectedTables, framesApi]);
+
+	const hideSelected = useCallback(() => {
+		if (selectedTables.length === 0) return;
+		setHiddenIds((prev) => {
+			const next = new Set(prev);
+			for (const t of selectedTables) next.add(t);
+			return next;
+		});
+	}, [selectedTables]);
+
+	const { deleteElements } = useReactFlow();
+	const clearSelection = useCallback(() => {
+		void deleteElements({ nodes: [] }); // no-op API access to bind
+		// Le vrai clear : reset selected flag sur tous les nodes.
+		setNodes((ns) => ns.map((n) => ({ ...n, selected: false })));
+	}, [deleteElements, setNodes]);
+
+	useEffect(() => {
+		function onKey(e: KeyboardEvent) {
+			if (e.key !== "f" && e.key !== "F") return;
+			if (e.metaKey || e.ctrlKey || e.altKey) return;
+			const target = e.target as HTMLElement | null;
+			// Ignore quand l'utilisateur tape dans un input.
+			if (
+				target &&
+				(target.tagName === "INPUT" ||
+					target.tagName === "TEXTAREA" ||
+					target.isContentEditable)
+			) {
+				return;
+			}
+			if (selectedTables.length === 0) return;
+			e.preventDefault();
+			createFrameFromSelection();
+			clearSelection();
+		}
+		document.addEventListener("keydown", onKey);
+		return () => document.removeEventListener("keydown", onKey);
+	}, [selectedTables, createFrameFromSelection, clearSelection]);
+
 	// ─── palette Cmd+K (tour 1c) ──────────────────────────────────────────
 	const navigate = useNavigate();
 	useCommandPaletteShortcut(spotlight.open);
@@ -581,6 +654,12 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 				edges={displayEdges}
 				onNodesChange={onNodesChange}
 				nodeTypes={nodeTypes}
+				// Lasso multi-select : glisser dans le vide (bouton gauche) trace
+				// un rectangle, sélectionne les tables intersectées. Shift+click
+				// pour ajouter à la sélection. `panOnDrag` limité au bouton du
+				// milieu — le glisser gauche est réservé au lasso.
+				selectionOnDrag
+				panOnDrag={[1, 2]}
 				// Clic gauche = focus visuel (ring + estompage voisins + drawer) sans
 				// bouger la vue. Double-clic = recadre sur la table (comme Figma).
 				onNodeClick={(_, node) => focusNode(node.id)}
@@ -701,7 +780,7 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 				>
 					<SchemaTree
 						schema={schema}
-						frames={framesFor(schema)}
+						frames={framesApi.frames}
 						focusId={focusId}
 						search={search}
 						onSelect={focusAndZoom}
@@ -717,6 +796,47 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 					onSelect={focusAndZoom}
 					onClose={clearFocus}
 				/>
+			) : null}
+
+			{/* Chip de sélection multi-tables (tour 1d) — visible dès qu'une
+			 * table est sélectionnée (Shift+click ou lasso). Actions : Frame (F)
+			 * → crée un frame ; Masquer → cache les tables sélectionnées ;
+			 * ✕ → clear. Anchored au-dessus de la toolbar horizontale. */}
+			{selectedTables.length > 0 ? (
+				<Box
+					style={{
+						position: "absolute",
+						left: "50%",
+						transform: "translateX(-50%)",
+						bottom: 90,
+						zIndex: 6
+					}}
+				>
+					<SelectionChip
+						count={selectedTables.length}
+						label="table"
+						actions={[
+							{
+								id: "frame",
+								label: "Frame",
+								hint: "F",
+								onClick: () => {
+									createFrameFromSelection();
+									clearSelection();
+								}
+							},
+							{
+								id: "hide",
+								label: "Masquer",
+								onClick: () => {
+									hideSelected();
+									clearSelection();
+								}
+							}
+						]}
+						onClear={clearSelection}
+					/>
+				</Box>
 			) : null}
 
 			{/* Chip « masqués — tout réafficher » quand ≥1 table est cachée. */}
@@ -745,16 +865,34 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 				</UnstyledButton>
 			) : null}
 
-			{/* Menu contextuel (tour 1b). */}
+			{/* Menu contextuel (tour 1b + retirer du frame tour 1d). */}
 			{menu !== null ? (
 				<CanvasContextMenu
 					open
 					position={{ x: menu.x, y: menu.y }}
 					tableName={menu.tableName}
-					frames={framesFor(schema)}
+					frames={framesApi.frames}
+					frameOfTable={framesApi.frameOfTable(menu.tableName)}
 					onClose={() => setMenu(null)}
 					onHide={hideTable}
 					onFocus={focusAndZoom}
+					onAddToFrame={(frameKey) => {
+						// Ajoute la table au frame ciblé (createFrame gère aussi la
+						// migration : détache d'un frame précédent). Ici on veut juste
+						// une "translation" — supprime de l'ancien, ajoute au nouveau.
+						framesApi.removeTableFromFrame(menu.tableName);
+						const target = framesApi.frames.find((f) => f.key === frameKey);
+						if (target) {
+							framesApi.createFrame(
+								[...target.collections, menu.tableName],
+								target.label
+							);
+							framesApi.removeFrame(frameKey);
+						}
+					}}
+					onRemoveFromFrame={() =>
+						framesApi.removeTableFromFrame(menu.tableName)
+					}
 				/>
 			) : null}
 

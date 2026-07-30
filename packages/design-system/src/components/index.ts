@@ -21,6 +21,11 @@ export {
 } from "./KindBadge/KindBadge";
 export { SearchInput, type SearchInputProps } from "./SearchInput/SearchInput";
 export {
+	SelectionChip,
+	type SelectionChipAction,
+	type SelectionChipProps,
+} from "./SelectionChip/SelectionChip";
+export {
 	StatusPill,
 	type StatusPillProps,
 	type StatusPillVariant,
