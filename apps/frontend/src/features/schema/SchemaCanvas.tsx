@@ -2,8 +2,13 @@ import {
 	SearchInput,
 	showNotification,
 	SidebarDrawer,
-	type SidebarTab
+	type SidebarTab,
+	Spotlight,
+	spotlight,
+	useCommandPaletteShortcut
 } from "@sqlnest/design-system";
+import { useNavigate } from "@tanstack/react-router";
+import { buildCanvasCommands } from "./commands";
 import { Box, Stack, Text, UnstyledButton } from "@mantine/core";
 import {
 	Background,
@@ -261,6 +266,30 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 
 	const unhideAll = () => setHiddenIds(new Set());
 
+	// ─── palette Cmd+K (tour 1c) ──────────────────────────────────────────
+	const navigate = useNavigate();
+	useCommandPaletteShortcut(spotlight.open);
+	const soon = (title: string) =>
+		showNotification({
+			title,
+			message: "Bientôt disponible.",
+			color: "amber",
+			autoClose: 2000
+		});
+	const commandGroups = useMemo(
+		() =>
+			buildCanvasCommands(schema, {
+				onFocusTable: focusNode,
+				onOpenInEditor: (name) =>
+					void navigate({ to: "/query", search: { source: `get ${name}` } }),
+				onFitView: () => fitView({ padding: 0.15, duration: 400 }),
+				onAskAi: () => soon("Demander à l'IA"),
+				onToggleTheme: () => soon("Thème sombre")
+			}),
+		// biome-ignore lint/correctness/useExhaustiveDependencies: focusNode/fitView are stable enough for the palette lifetime
+		[schema]
+	);
+
 	return (
 		<div style={{ position: "relative", width: "100%", height: "100%" }}>
 			{base === null ? (
@@ -469,6 +498,17 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 					onFocus={focusNode}
 				/>
 			) : null}
+
+			{/* Palette Cmd+K (tour 1c). */}
+			<Spotlight
+				actions={commandGroups}
+				searchProps={{
+					placeholder: "Chercher une table, une action…"
+				}}
+				nothingFound="Aucun résultat."
+				highlightQuery
+				shortcut={null}
+			/>
 		</div>
 	);
 }

@@ -1,0 +1,1 @@
+export { useCommandPaletteShortcut } from "./useCommandPaletteShortcut";

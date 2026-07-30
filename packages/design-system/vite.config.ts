@@ -22,6 +22,7 @@ export default defineConfig({
 				"@mantine/core",
 				"@mantine/hooks",
 				"@mantine/notifications",
+				"@mantine/spotlight",
 			],
 			output: {
 				globals: {
@@ -31,6 +32,7 @@ export default defineConfig({
 					"@mantine/core": "MantineCore",
 					"@mantine/hooks": "MantineHooks",
 					"@mantine/notifications": "MantineNotifications",
+					"@mantine/spotlight": "MantineSpotlight",
 				},
 			},
 		},

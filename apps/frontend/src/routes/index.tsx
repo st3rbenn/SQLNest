@@ -2,10 +2,11 @@ import {
 	EngineTabs,
 	FloatingPanel,
 	HintPill,
+	spotlight,
 	StatusPill,
 	type StatusPillVariant
 } from "@sqlnest/design-system";
-import { Group, TextInput } from "@mantine/core";
+import { Group, TextInput, UnstyledButton } from "@mantine/core";
 import { createFileRoute } from "@tanstack/react-router";
 import { type CSSProperties, useState } from "react";
 import { SchemaCanvas } from "../features/schema/SchemaCanvas";
@@ -121,7 +122,7 @@ function SchemaPage() {
 				</StatusPill>
 			</FloatingPanel>
 
-			{/* Cmd+K hint, bas-centre — visuel non-branché pour l'instant. */}
+			{/* Cmd+K hint : ouvre la palette (tour 1c). */}
 			<FloatingPanel
 				position="bottom-center"
 				offset={24}
@@ -130,7 +131,12 @@ function SchemaPage() {
 				shadow="none"
 				bg="transparent"
 			>
-				<HintPill keys={["⌘K"]}>Actions rapides</HintPill>
+				<UnstyledButton
+					onClick={() => spotlight.open()}
+					aria-label="Ouvrir la palette de commandes"
+				>
+					<HintPill keys={["⌘K"]}>Actions rapides</HintPill>
+				</UnstyledButton>
 			</FloatingPanel>
 
 			<SchemaCanvas schema={schema} />
