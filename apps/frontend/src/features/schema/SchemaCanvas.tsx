@@ -431,14 +431,45 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 		[nodes, neighbors, focusId, hiddenIds]
 	);
 
+	// Ref sur les nodes courants — le handler de resize a besoin de la
+	// dernière version des positions sans refermer sur une snapshot obsolète.
+	const nodesRef = useRef(nodes);
+	nodesRef.current = nodes;
+
+	// Après un resize du frame : recompute la membership. Toute table dont
+	// le centre tombe HORS du nouveau rect est retirée du frame — sinon le
+	// drag du frame la ferait suivre alors qu'elle est visuellement dehors.
+	const handleFrameResize = useCallback(
+		(key: string, newRect: FrameRect) => {
+			framesApi.setFrameRect(key, newRect);
+			const frame = framesApi.frames.find((f) => f.key === key);
+			if (!frame) return;
+			const byId = new Map(nodesRef.current.map((n) => [n.id, n]));
+			for (const memberName of frame.collections) {
+				const node = byId.get(memberName);
+				if (!node) continue;
+				const w = node.width ?? NODE_WIDTH;
+				const h = node.height ?? nodeHeight(node.data.collection);
+				const center = {
+					x: node.position.x + w / 2,
+					y: node.position.y + h / 2
+				};
+				if (!rectContainsPoint(newRect, center)) {
+					framesApi.removeTableFromFrame(memberName);
+				}
+			}
+		},
+		[framesApi]
+	);
+
 	const frameNodes = useMemo(
 		() =>
 			computeFrameNodes(
 				framesApi.frames,
 				nodes.filter((n) => !hiddenIds.has(n.id)),
-				framesApi.setFrameRect
+				handleFrameResize
 			),
-		[framesApi.frames, nodes, hiddenIds, framesApi.setFrameRect]
+		[framesApi.frames, nodes, hiddenIds, handleFrameResize]
 	);
 
 	const displayNodes = useMemo<SchemaNode[]>(
