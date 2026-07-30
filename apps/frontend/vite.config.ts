@@ -17,6 +17,14 @@ export default defineConfig({
 			)
 		}
 	},
+	// Pré-bundle explicite : `@tabler/icons-react` est importé depuis les
+	// features locales ET depuis `@sqlnest/design-system` (résolu en source).
+	// Sans cette entrée, Vite peut ne pas le scanner au démarrage et l'import
+	// échoue au 1er clic — un simple `pnpm dev --force` réglait, cette conf
+	// évite le piège.
+	optimizeDeps: {
+		include: ["@tabler/icons-react"]
+	},
 	server: {
 		port: Number(process.env.PORT ?? 3000),
 		strictPort: false

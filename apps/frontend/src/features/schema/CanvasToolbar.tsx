@@ -38,7 +38,14 @@ const ICON = { size: 18, stroke: 1.8 } as const;
 export function CanvasToolbar({ onAutoLayout }: Props) {
 	const [tool, setTool] = useState<Tool>("select");
 	return (
-		<FloatingPanel position="bottom-center" offset={{ x: 0, y: 16 }} p={0}>
+		<FloatingPanel
+			position="bottom-center"
+			offset={{ x: 0, y: 16 }}
+			p={0}
+			withBorder={false}
+			shadow="none"
+			bg="transparent"
+		>
 			<Toolbar orientation="horizontal" aria-label="Canvas actions">
 				<ToolbarButton
 					label="Sélection (V)"
