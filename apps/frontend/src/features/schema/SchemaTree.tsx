@@ -1,3 +1,4 @@
+import { Box, Text } from "@mantine/core";
 import { type CSSProperties, useMemo, useState } from "react";
 import { colorFor } from "./colors";
 import type { SchemaModel } from "./schema-model";
@@ -5,6 +6,7 @@ import type { SchemaModel } from "./schema-model";
 interface SchemaTreeProps {
 	readonly schema: SchemaModel;
 	readonly focusId: string | null;
+	readonly search: string;
 	readonly onSelect: (id: string) => void;
 }
 
@@ -29,47 +31,20 @@ interface Group {
 	readonly tables: string[];
 }
 
-const drawerStyle: CSSProperties = {
-	position: "absolute",
-	top: 12,
-	right: 12,
-	bottom: 12,
-	width: 300,
-	background: "#fff",
-	border: "1px solid #e2e8f0",
-	borderRadius: 12,
-	boxShadow: "0 8px 24px rgba(15,23,42,0.10)",
-	display: "flex",
-	flexDirection: "column",
-	overflow: "hidden",
-	fontFamily: "ui-sans-serif, system-ui, sans-serif",
-	zIndex: 4
-};
-
-const searchStyle: CSSProperties = {
-	padding: "8px 10px",
-	borderRadius: 8,
-	border: "1px solid #e2e8f0",
-	fontSize: 13,
-	width: "100%",
-	boxSizing: "border-box",
-	outline: "none"
-};
-
 const headerRow: CSSProperties = {
 	display: "flex",
 	alignItems: "center",
 	justifyContent: "space-between",
 	width: "100%",
 	padding: "6px 8px",
-	background: "#f8fafc",
+	background: "var(--mantine-color-slate-0)",
 	cursor: "pointer",
 	userSelect: "none",
 	fontSize: 12,
-	color: "#334155",
+	color: "var(--mantine-color-slate-7)",
 	fontWeight: 600,
 	border: "none",
-	borderTop: "1px solid #f1f5f9",
+	borderTop: "1px solid var(--mantine-color-slate-1)",
 	textAlign: "left",
 	fontFamily: "inherit"
 };
@@ -92,14 +67,16 @@ const itemBase: CSSProperties = {
 };
 
 /**
- * Drawer droit — arborescence de la base + recherche fusionnée. Clic sur une
- * table = « walk to » (l'appelant centre la vue et applique le focus). Regroupe
- * automatiquement les tables par préfixe : sur RNAcentral, les 68 partitions
- * `xref_p*` deviennent un seul groupe pliable, ce qui rend une base de 186
- * tables navigable comme un arbre de projet.
+ * Arborescence des tables + regroupement automatique par préfixe. Rendue à
+ * l'intérieur d'un `SidebarDrawer` par le parent : la recherche vit à part
+ * (slot `header` du drawer), ce composant reçoit sa valeur en prop.
  */
-export function SchemaTree({ schema, focusId, onSelect }: SchemaTreeProps) {
-	const [search, setSearch] = useState("");
+export function SchemaTree({
+	schema,
+	focusId,
+	search,
+	onSelect
+}: SchemaTreeProps) {
 	const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(
 		() => new Set()
 	);
@@ -150,108 +127,100 @@ export function SchemaTree({ schema, focusId, onSelect }: SchemaTreeProps) {
 	const totalMatch = filtered.reduce((s, g) => s + g.tables.length, 0);
 
 	return (
-		<div style={drawerStyle}>
-			<div
-				style={{
-					padding: 12,
-					borderBottom: "1px solid #f1f5f9",
-					display: "flex",
-					flexDirection: "column",
-					gap: 8
-				}}
-			>
-				<input
-					value={search}
-					onChange={(e) => setSearch(e.target.value)}
-					placeholder={`Rechercher parmi ${schema.collections.length} tables…`}
-					spellCheck={false}
-					style={searchStyle}
-				/>
-				<div style={{ fontSize: 11, color: "#94a3b8" }}>
-					{query === "" ? (
-						<>
-							{schema.collections.length} tables · {schema.relations.length}{" "}
-							relations
-						</>
-					) : (
-						<>{totalMatch} résultat(s)</>
-					)}
-				</div>
-			</div>
-			<div style={{ flex: 1, overflowY: "auto" }}>
-				{filtered.map((g) => {
-					const showChildren = !isCollapsed(g.name);
-					return (
-						<div key={g.name}>
-							<button
-								type="button"
-								style={headerRow}
-								onClick={() => toggle(g.name)}
+		<Box>
+			<Text px="sm" pt={6} pb={4} size="xs" c="dimmed">
+				{query === ""
+					? `${schema.collections.length} tables · ${schema.relations.length} relations`
+					: `${totalMatch} résultat(s)`}
+			</Text>
+			{filtered.map((g) => {
+				const showChildren = !isCollapsed(g.name);
+				return (
+					<div key={g.name}>
+						<button
+							type="button"
+							style={headerRow}
+							onClick={() => toggle(g.name)}
+						>
+							<span>
+								<span
+									style={{
+										color: "var(--mantine-color-slate-3)",
+										marginRight: 6
+									}}
+								>
+									{showChildren ? "▾" : "▸"}
+								</span>
+								{g.name}
+							</span>
+							<span
+								style={{
+									color: "var(--mantine-color-slate-4)",
+									fontWeight: 500
+								}}
 							>
-								<span>
-									<span style={{ color: "#cbd5e1", marginRight: 6 }}>
-										{showChildren ? "▾" : "▸"}
-									</span>
-									{g.name}
-								</span>
-								<span style={{ color: "#94a3b8", fontWeight: 500 }}>
-									{g.tables.length}
-								</span>
-							</button>
-							{showChildren
-								? g.tables.map((t) => {
-										const color = colorFor(t);
-										const isFocus = t === focusId;
-										return (
-											<button
-												key={t}
-												type="button"
+								{g.tables.length}
+							</span>
+						</button>
+						{showChildren
+							? g.tables.map((t) => {
+									const color = colorFor(t);
+									const isFocus = t === focusId;
+									return (
+										<button
+											key={t}
+											type="button"
+											style={{
+												...itemBase,
+												background: isFocus
+													? "var(--mantine-color-brand-0)"
+													: "#fff",
+												borderLeftColor: isFocus
+													? "var(--mantine-color-brand-6)"
+													: "transparent",
+												color: isFocus
+													? "var(--mantine-color-brand-7)"
+													: "var(--mantine-color-slate-7)",
+												fontWeight: isFocus ? 600 : 400
+											}}
+											onClick={() => onSelect(t)}
+											title={t}
+										>
+											<span
 												style={{
-													...itemBase,
-													background: isFocus ? "#eff6ff" : "#fff",
-													borderLeftColor: isFocus ? "#2563eb" : "transparent",
-													color: isFocus ? "#1d4ed8" : "#334155",
-													fontWeight: isFocus ? 600 : 400
+													display: "flex",
+													alignItems: "center",
+													gap: 6,
+													minWidth: 0
 												}}
-												onClick={() => onSelect(t)}
-												title={t}
 											>
 												<span
 													style={{
-														display: "flex",
-														alignItems: "center",
-														gap: 6,
-														minWidth: 0
+														display: "inline-block",
+														width: 8,
+														height: 8,
+														borderRadius: 2,
+														background: color.border,
+														flexShrink: 0
+													}}
+												/>
+												<span
+													style={{
+														overflow: "hidden",
+														textOverflow: "ellipsis",
+														whiteSpace: "nowrap"
 													}}
 												>
-													<span
-														style={{
-															display: "inline-block",
-															width: 8,
-															height: 8,
-															borderRadius: 2,
-															background: color.border,
-															flexShrink: 0
-														}}
-													/>
-													<span
-														style={{
-															overflow: "hidden",
-															textOverflow: "ellipsis",
-															whiteSpace: "nowrap"
-														}}
-													>
-														{t}
-													</span>
+													{t}
 												</span>
-											</button>
-										);
-									})
-								: null}
-						</div>
-					);
-				})}
-			</div>
-		</div>
+											</span>
+										</button>
+									);
+								})
+							: null}
+					</div>
+				);
+			})}
+		</Box>
 	);
 }

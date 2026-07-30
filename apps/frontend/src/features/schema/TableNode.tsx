@@ -1,3 +1,4 @@
+import { KindBadge, TypePill } from "@sqlnest/design-system";
 import { Handle, type Node, type NodeProps, Position } from "@xyflow/react";
 import type { CSSProperties } from "react";
 import { colorFor } from "./colors";
@@ -29,16 +30,6 @@ export interface TableNodeData {
 }
 
 export type TableNodeType = Node<TableNodeData, "table">;
-
-const badgeStyle = (inferred: boolean): CSSProperties => ({
-	fontSize: 9,
-	fontWeight: 700,
-	letterSpacing: 0.3,
-	padding: "2px 6px",
-	borderRadius: 5,
-	background: inferred ? "#fef3c7" : "#dbeafe",
-	color: inferred ? "#b45309" : "#1d4ed8"
-});
 
 const HIDDEN_HANDLE: CSSProperties = { opacity: 0, border: "none" };
 
@@ -96,9 +87,7 @@ export function TableNode({ data }: NodeProps<TableNodeType>) {
 				>
 					{collection.name}
 				</span>
-				<span style={badgeStyle(inferred)}>
-					{inferred ? "INFÉRÉ" : "DÉCLARÉ"}
-				</span>
+				<KindBadge kind={inferred ? "inferred" : "declared"} />
 			</div>
 			<div style={{ padding: "4px 0" }}>
 				{shown.map((f) => (
@@ -125,33 +114,10 @@ export function TableNode({ data }: NodeProps<TableNodeType>) {
 								textOverflow: "ellipsis"
 							}}
 						>
-							{pk.has(f.name) ? (
-								<span
-									style={{
-										fontSize: 8,
-										fontWeight: 700,
-										color: "#b45309",
-										background: "#fef3c7",
-										padding: "1px 3px",
-										borderRadius: 3
-									}}
-								>
-									PK
-								</span>
-							) : null}
+							{pk.has(f.name) ? <KindBadge kind="pk" /> : null}
 							{f.name}
 						</span>
-						<span
-							style={{
-								color: "#94a3b8",
-								fontFamily: "ui-monospace, SFMono-Regular, monospace",
-								fontSize: 10.5,
-								whiteSpace: "nowrap"
-							}}
-						>
-							{f.type}
-							{f.nullable ? " ?" : ""}
-						</span>
+						<TypePill type={f.type} nullable={f.nullable} />
 					</div>
 				))}
 				{hidden > 0 ? (

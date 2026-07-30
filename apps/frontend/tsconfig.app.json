@@ -38,6 +38,5 @@
 		"allowSyntheticDefaultImports": true,
 		"forceConsistentCasingInFileNames": true
 	},
-	"include": ["src"],
-	"references": [{ "path": "../../packages/design-system/tsconfig.lib.json" }]
+	"include": ["src"]
 }

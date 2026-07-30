@@ -1,3 +1,5 @@
+import { SidebarDrawer, type SidebarTab } from "@sqlnest/design-system";
+import { Box, Stack, Text } from "@mantine/core";
 import {
 	Background,
 	Controls,
@@ -12,6 +14,9 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useEffect, useMemo, useState } from "react";
+import { CanvasToolbar } from "./CanvasToolbar";
+import { FrameNode, type FrameNodeType } from "./FrameNode";
+import { framesFor } from "./frames";
 import { buildLayout, type LayoutResult } from "./layout";
 import { SchemaTree } from "./SchemaTree";
 import type { SchemaModel } from "./schema-model";
@@ -22,10 +27,21 @@ import {
 	TableNode,
 	type TableNodeType
 } from "./TableNode";
+import { SearchInput } from "@sqlnest/design-system";
 
 const DECLARED = "#2563eb";
 const INFERRED = "#d97706";
-const nodeTypes = { table: TableNode };
+const nodeTypes = { table: TableNode, frame: FrameNode };
+
+type SchemaNode = TableNodeType | FrameNodeType;
+
+const TABS: SidebarTab[] = [
+	{ value: "tables", label: "Tables" },
+	{ value: "frames", label: "Frames" },
+	{ value: "diff", label: "Diff" }
+];
+
+const FRAME_PAD = 24;
 
 function makeNode(schema: SchemaModel) {
 	return (name: string): TableNodeType => {
@@ -62,6 +78,44 @@ function makeEdge(rel: SchemaModel["relations"][number], i: number): Edge {
 	};
 }
 
+function computeFrameNodes(
+	schema: SchemaModel,
+	tableNodes: readonly TableNodeType[]
+): FrameNodeType[] {
+	const frames = framesFor(schema);
+	if (frames.length === 0) return [];
+	const byId = new Map(tableNodes.map((n) => [n.id, n]));
+	return frames.flatMap((frame) => {
+		const rects = frame.collections
+			.map((c) => byId.get(c))
+			.filter((n): n is TableNodeType => n !== undefined);
+		if (rects.length === 0) return [];
+		const minX = Math.min(...rects.map((n) => n.position.x));
+		const minY = Math.min(...rects.map((n) => n.position.y));
+		const maxX = Math.max(
+			...rects.map((n) => n.position.x + (n.width ?? NODE_WIDTH))
+		);
+		const maxY = Math.max(
+			...rects.map((n) => n.position.y + (n.height ?? 200))
+		);
+		return [
+			{
+				id: `frame:${frame.key}`,
+				type: "frame" as const,
+				position: { x: minX - FRAME_PAD, y: minY - FRAME_PAD },
+				width: maxX - minX + FRAME_PAD * 2,
+				height: maxY - minY + FRAME_PAD * 2,
+				data: { frame },
+				draggable: false,
+				selectable: false,
+				connectable: false,
+				zIndex: -1,
+				style: { pointerEvents: "none" as const }
+			}
+		];
+	});
+}
+
 function CanvasInner({ schema }: { schema: SchemaModel }) {
 	// Layout ELK — async. Le composant est **remonté** au changement de schéma
 	// (clé sur ReactFlowProvider), donc pas de course entre deux layouts.
@@ -83,6 +137,8 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 	}, [base, setNodes]);
 
 	const [focusId, setFocusId] = useState<string | null>(null);
+	const [search, setSearch] = useState("");
+	const [activeTab, setActiveTab] = useState<string>("tables");
 	const { fitView } = useReactFlow();
 
 	// Voisinage FK direct du nœud focalisé (le nœud + ses 1-sauts).
@@ -96,8 +152,8 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 		return set;
 	}, [focusId, base]);
 
-	// Nœuds affichés : positions vivantes (drag) + drapeaux focus.
-	const displayNodes = useMemo(
+	// Nœuds table affichés : positions vivantes (drag) + drapeaux focus.
+	const displayTableNodes = useMemo(
 		() =>
 			nodes.map((n) => {
 				const inFocus = neighbors ? neighbors.has(n.id) : true;
@@ -112,6 +168,16 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 				};
 			}),
 		[nodes, neighbors, focusId]
+	);
+
+	const frameNodes = useMemo(
+		() => computeFrameNodes(schema, nodes),
+		[schema, nodes]
+	);
+
+	const displayNodes = useMemo<SchemaNode[]>(
+		() => [...frameNodes, ...displayTableNodes],
+		[frameNodes, displayTableNodes]
 	);
 
 	const displayEdges = useMemo(
@@ -147,11 +213,14 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 		fitView({ padding: 0.15, duration: 400 });
 	};
 
+	const relayoutAll = () => {
+		if (base !== null) setNodes(base.nodes);
+		fitView({ padding: 0.15, duration: 400 });
+	};
+
 	return (
 		<div style={{ position: "relative", width: "100%", height: "100%" }}>
 			{base === null ? (
-				// ELK peut mouliner ~1 s sur RNAcentral (186 nœuds). L'overlay évite un
-				// « saut » (canvas vide → canvas plein), et l'arbre reste utilisable.
 				<div
 					style={{
 						position: "absolute",
@@ -168,8 +237,9 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 					Calcul du layout…
 				</div>
 			) : null}
+
 			<ReactFlow
-				nodes={displayNodes}
+				nodes={displayNodes as unknown as TableNodeType[]}
 				edges={displayEdges}
 				onNodesChange={onNodesChange}
 				nodeTypes={nodeTypes}
@@ -187,11 +257,13 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 				<MiniMap
 					pannable
 					zoomable
-					nodeColor={(n) =>
-						(n.data as TableNodeType["data"]).collection.source === "inferred"
+					nodeColor={(n) => {
+						if (n.type === "frame") return "transparent";
+						return (n.data as TableNodeType["data"]).collection.source ===
+							"inferred"
 							? INFERRED
-							: DECLARED
-					}
+							: DECLARED;
+					}}
 					nodeStrokeWidth={0}
 					style={{ background: "#f8fafc" }}
 				/>
@@ -218,8 +290,78 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 				) : null}
 			</ReactFlow>
 
-			{/* Drawer droit : arborescence + recherche fusionnée */}
-			<SchemaTree schema={schema} focusId={focusId} onSelect={focusNode} />
+			{/* Toolbar verticale gauche */}
+			<CanvasToolbar onAutoLayout={relayoutAll} />
+
+			{/* Drawer droit : arborescence + tabs (Tables/Frames/Diff) */}
+			<Box
+				style={{
+					position: "absolute",
+					top: 12,
+					right: 12,
+					bottom: 12,
+					zIndex: 4
+				}}
+			>
+				<SidebarDrawer
+					tabs={TABS}
+					value={activeTab}
+					onTabChange={setActiveTab}
+					header={
+						activeTab === "tables" ? (
+							<SearchInput
+								value={search}
+								onChange={(e) => setSearch(e.currentTarget.value)}
+								placeholder={`Rechercher parmi ${schema.collections.length} tables…`}
+							/>
+						) : null
+					}
+					style={{ height: "100%" }}
+				>
+					{activeTab === "tables" ? (
+						<SchemaTree
+							schema={schema}
+							focusId={focusId}
+							search={search}
+							onSelect={focusNode}
+						/>
+					) : null}
+					{activeTab === "frames" ? (
+						<Stack gap="xs" p="sm">
+							<Text size="xs" c="dimmed">
+								Frames de regroupement (aperçu statique — bientôt éditable).
+							</Text>
+							{framesFor(schema).map((f) => (
+								<Text key={f.key} size="sm">
+									<span
+										style={{
+											display: "inline-block",
+											width: 8,
+											height: 8,
+											borderRadius: 2,
+											background: `hsl(${f.hue}, 55%, 60%)`,
+											marginRight: 6
+										}}
+									/>
+									{f.label} · {f.collections.length}
+								</Text>
+							))}
+							{framesFor(schema).length === 0 ? (
+								<Text size="xs" c="dimmed">
+									Aucun frame défini pour cette base.
+								</Text>
+							) : null}
+						</Stack>
+					) : null}
+					{activeTab === "diff" ? (
+						<Stack gap="xs" p="sm">
+							<Text size="xs" c="dimmed">
+								Diff de schémas — bientôt.
+							</Text>
+						</Stack>
+					) : null}
+				</SidebarDrawer>
+			</Box>
 
 			{/* Drawer gauche : infos + FK cliquables (visible uniquement quand focus) */}
 			{focusId !== null ? (

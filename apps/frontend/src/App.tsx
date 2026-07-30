@@ -1,26 +1,17 @@
-import "@sqlnest/design-system/dist/design-system.css";
-import { showNotification, updateNotification } from "@sqlnest/design-system";
+import { AppShell, showNotification, updateNotification } from "@sqlnest/design-system";
+import { Group, Text } from "@mantine/core";
 import { Link, Outlet } from "@tanstack/react-router";
 import { type CSSProperties, useEffect } from "react";
 import { useHealthCheck } from "./features/healthcheck/useHealthCheck";
 
-const navStyle: CSSProperties = {
-	display: "flex",
-	alignItems: "center",
-	gap: 20,
-	padding: "12px 28px",
-	borderBottom: "1px solid #e2e8f0",
-	fontFamily: "ui-sans-serif, system-ui, sans-serif"
-};
-
-const linkStyle: CSSProperties = {
+const linkBase: CSSProperties = {
 	textDecoration: "none",
-	color: "#64748b",
+	color: "var(--mantine-color-slate-5)",
 	fontWeight: 600,
 	fontSize: 14
 };
 
-const activeLinkStyle: CSSProperties = { color: "#2563eb" };
+const linkActive: CSSProperties = { color: "var(--mantine-color-brand-6)" };
 
 function App() {
 	const { data, error, isLoading } = useHealthCheck();
@@ -57,28 +48,31 @@ function App() {
 		}
 	}, [isLoading, error, data]);
 
+	const header = (
+		<Group gap="lg" px="lg" w="100%">
+			<Text fw={700}>🦅 SQLNest</Text>
+			<Link
+				to="/"
+				style={linkBase}
+				activeProps={{ style: linkActive }}
+				activeOptions={{ exact: true }}
+			>
+				Schéma
+			</Link>
+			<Link
+				to="/query"
+				style={linkBase}
+				activeProps={{ style: linkActive }}
+			>
+				Requête
+			</Link>
+		</Group>
+	);
+
 	return (
-		<>
-			<nav style={navStyle}>
-				<span style={{ fontWeight: 700, color: "#0f172a" }}>🦅 SQLNest</span>
-				<Link
-					to="/"
-					style={linkStyle}
-					activeProps={{ style: activeLinkStyle }}
-					activeOptions={{ exact: true }}
-				>
-					Schéma
-				</Link>
-				<Link
-					to="/query"
-					style={linkStyle}
-					activeProps={{ style: activeLinkStyle }}
-				>
-					Requête
-				</Link>
-			</nav>
+		<AppShell header={header}>
 			<Outlet />
-		</>
+		</AppShell>
 	);
 }
 

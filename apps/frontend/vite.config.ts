@@ -1,5 +1,6 @@
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import react from "@vitejs/plugin-react";
+import { resolve } from "path";
 import { defineConfig } from "vitest/config";
 
 // https://vite.dev/config/
@@ -8,11 +9,21 @@ export default defineConfig({
 		tanstackRouter({ target: "react", autoCodeSplitting: true }),
 		react()
 	],
+	resolve: {
+		alias: {
+			"@sqlnest/design-system": resolve(
+				__dirname,
+				"../../packages/design-system/src/index.ts"
+			)
+		}
+	},
 	server: {
-		port: 3000
+		port: Number(process.env.PORT ?? 3000),
+		strictPort: false
 	},
 	preview: {
-		port: 3000
+		port: Number(process.env.PORT ?? 3000),
+		strictPort: false
 	},
 	build: {
 		sourcemap: true

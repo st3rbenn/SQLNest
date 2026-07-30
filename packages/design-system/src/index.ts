@@ -4,5 +4,6 @@ export {
 	updateNotification,
 } from "@mantine/notifications";
 export * from "./components";
+export * from "./layouts";
 export { DesignSystemProvider } from "./main";
-export { theme } from "./theme";
+export { FRAME_HUES, type FrameHueKey, theme } from "./theme";

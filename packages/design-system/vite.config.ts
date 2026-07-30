@@ -12,6 +12,7 @@ export default defineConfig({
 			name: "SqlnestDesignSystem",
 			formats: ["es", "cjs"],
 			fileName: (format) => `index.${format === "es" ? "js" : "cjs"}`,
+			cssFileName: "design-system",
 		},
 		rollupOptions: {
 			external: [
@@ -20,6 +21,7 @@ export default defineConfig({
 				"react/jsx-runtime",
 				"@mantine/core",
 				"@mantine/hooks",
+				"@mantine/notifications",
 			],
 			output: {
 				globals: {
@@ -27,6 +29,8 @@ export default defineConfig({
 					"react-dom": "ReactDOM",
 					"react/jsx-runtime": "jsx",
 					"@mantine/core": "MantineCore",
+					"@mantine/hooks": "MantineHooks",
+					"@mantine/notifications": "MantineNotifications",
 				},
 			},
 		},

@@ -44,6 +44,8 @@
 		"**/*.spec.ts",
 		"**/*.spec.tsx",
 		"**/*.stories.ts",
-		"**/*.stories.tsx"
+		"**/*.stories.tsx",
+		"**/test-utils/**",
+		"**/test-setup.ts"
 	]
 }
