@@ -2,6 +2,7 @@ import {
 	ActionIcon,
 	type ActionIconProps,
 	Box,
+	type FloatingPosition,
 	Tooltip,
 } from "@mantine/core";
 import type { MouseEventHandler, ReactNode } from "react";
@@ -12,6 +13,7 @@ export type ToolbarButtonProps = {
 	label: string;
 	active?: boolean;
 	statusDot?: ToolbarButtonStatus;
+	tooltipPosition?: FloatingPosition;
 	onClick?: MouseEventHandler<HTMLButtonElement>;
 	children: ReactNode;
 } & Omit<ActionIconProps, "children" | "onClick" | "aria-label">;
@@ -22,16 +24,34 @@ const DOT_COLOR: Record<ToolbarButtonStatus, string> = {
 	danger: "var(--mantine-color-red-5)",
 };
 
+// Tooltip compact — plus petit padding + fz, coins doux. Applied via `styles`
+// pour ne toucher que ce tooltip-là (pas un override global).
+const COMPACT_TOOLTIP_STYLES = {
+	tooltip: {
+		fontSize: 11,
+		padding: "4px 8px",
+		borderRadius: 6,
+	},
+} as const;
+
 export function ToolbarButton({
 	label,
 	active,
 	statusDot,
+	tooltipPosition = "top",
 	onClick,
 	children,
 	...rest
 }: ToolbarButtonProps) {
 	return (
-		<Tooltip label={label} position="right" withArrow>
+		<Tooltip
+			label={label}
+			position={tooltipPosition}
+			openDelay={200}
+			withArrow
+			arrowSize={5}
+			styles={COMPACT_TOOLTIP_STYLES}
+		>
 			<Box style={{ position: "relative" }}>
 				<ActionIcon
 					aria-label={label}
