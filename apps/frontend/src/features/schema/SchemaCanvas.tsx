@@ -227,17 +227,20 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 		[base, focusId, hiddenIds]
 	);
 
-	/** « Walk to » — isole une table et centre la vue dessus. Point d'entrée
-	 * commun pour l'arbre, le panneau d'infos (FK cliquables) et le clic canvas. */
-	const focusNode = (id: string) => {
+	/** Focus visuel : isole une table, estompe le reste, ouvre le drawer d'infos —
+	 * SANS recadrer la vue. Comportement par défaut du clic gauche sur canvas et
+	 * du clic-droit (menu contextuel). L'utilisateur choisit quand zoomer via
+	 * `focusAndZoom` (double-clic, menu Détails, entrées distantes). */
+	const focusNode = (id: string) => setFocusId(id);
+
+	/** Focus + recadrage sur la table. Utilisé par les points d'entrée
+	 * « distants » — arbre, palette Cmd+K, menu Détails, FK cliquables du
+	 * drawer — où l'utilisateur cherche activement une table et veut être
+	 * amené dessus. Aussi le double-clic sur la carte. */
+	const focusAndZoom = (id: string) => {
 		setFocusId(id);
 		fitView({ nodes: [{ id }], duration: 500, maxZoom: 1 });
 	};
-
-	/** Focus visuel sans recadrer. Utilisé par le clic-droit : ouvrir le menu
-	 * sans déplacer la vue (sinon la table glisse sous le curseur et le menu,
-	 * positionné en coordonnées écran, se retrouve à côté). */
-	const focusWithoutFit = (id: string) => setFocusId(id);
 
 	const clearFocus = () => {
 		setFocusId(null);
@@ -279,14 +282,15 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 	const commandGroups = useMemo(
 		() =>
 			buildCanvasCommands(schema, {
-				onFocusTable: focusNode,
+				// Palette = entrée distante → recadre sur la table choisie.
+				onFocusTable: focusAndZoom,
 				onOpenInEditor: (name) =>
 					void navigate({ to: "/query", search: { source: `get ${name}` } }),
 				onFitView: () => fitView({ padding: 0.15, duration: 400 }),
 				onAskAi: () => soon("Demander à l'IA"),
 				onToggleTheme: () => soon("Thème sombre")
 			}),
-		// biome-ignore lint/correctness/useExhaustiveDependencies: focusNode/fitView are stable enough for the palette lifetime
+		// biome-ignore lint/correctness/useExhaustiveDependencies: focusAndZoom/fitView are stable enough for the palette lifetime
 		[schema]
 	);
 
@@ -315,13 +319,19 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 				edges={displayEdges}
 				onNodesChange={onNodesChange}
 				nodeTypes={nodeTypes}
+				// Clic gauche = focus visuel (ring + estompage voisins + drawer) sans
+				// bouger la vue. Double-clic = recadre sur la table (comme Figma).
 				onNodeClick={(_, node) => focusNode(node.id)}
+				onNodeDoubleClick={(_, node) => {
+					if ((node as { type?: string }).type === "frame") return;
+					focusAndZoom(node.id);
+				}}
 				onNodeContextMenu={(event, node) => {
 					if ((node as { type?: string }).type === "frame") return;
 					event.preventDefault();
-					// Focus visuel (ring + drawer) sans fitView : la vue ne bouge pas,
-					// donc le menu positionné en clientX/Y reste face à la carte cliquée.
-					focusWithoutFit(node.id);
+					// Focus visuel sans fitView : la vue ne bouge pas, donc le menu
+					// positionné en clientX/Y reste face à la carte cliquée.
+					focusNode(node.id);
 					setMenu({
 						x: event.clientX,
 						y: event.clientY,
@@ -410,7 +420,7 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 							schema={schema}
 							focusId={focusId}
 							search={search}
-							onSelect={focusNode}
+							onSelect={focusAndZoom}
 						/>
 					) : null}
 					{activeTab === "frames" ? (
@@ -455,7 +465,7 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 				<TableDetails
 					schema={schema}
 					tableName={focusId}
-					onSelect={focusNode}
+					onSelect={focusAndZoom}
 					onClose={clearFocus}
 				/>
 			) : null}
@@ -495,7 +505,7 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 					frames={framesFor(schema)}
 					onClose={() => setMenu(null)}
 					onHide={hideTable}
-					onFocus={focusNode}
+					onFocus={focusAndZoom}
 				/>
 			) : null}
 
