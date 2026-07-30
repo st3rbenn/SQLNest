@@ -23,7 +23,7 @@ import {
 	useReactFlow
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CanvasContextMenu } from "./CanvasContextMenu";
 import { CanvasToolbar } from "./CanvasToolbar";
 import { FrameNode, type FrameNodeType } from "./FrameNode";
@@ -44,6 +44,32 @@ const INFERRED = "#d97706";
 const nodeTypes = { table: TableNode, frame: FrameNode };
 
 type SchemaNode = TableNodeType | FrameNodeType;
+
+/**
+ * Vue aérienne cible. `maxZoom` cap le fit : sans lui, RF zoomerait à ~1×
+ * sur un petit sample (cartes énormes). Avec, on garde une hauteur de
+ * plafond confortable qui révèle les frames et les arêtes.
+ */
+const OVERVIEW_FIT: { padding: number; maxZoom: number; duration: number } = {
+	padding: 0.25,
+	maxZoom: 0.6,
+	duration: 400
+};
+
+/**
+ * Zoom initial adaptatif : quand RF ne peut pas calculer un fit propre au
+ * mount (parent 0×0 pendant l'hydratation Mantine AppShell), on part d'un
+ * zoom sensé basé sur la taille du schéma. Petit schéma → vue moyenne.
+ * Gros schéma → vue **très** aérienne. `fitView` explicit prend le relais
+ * dès que `useNodesInitialized` bascule.
+ */
+function initialZoom(collectionCount: number): number {
+	if (collectionCount <= 4) return 0.6;
+	if (collectionCount <= 12) return 0.4;
+	if (collectionCount <= 40) return 0.25;
+	if (collectionCount <= 100) return 0.15;
+	return 0.08;
+}
 
 const TABS: SidebarTab[] = [
 	{ value: "tables", label: "Tables" },
@@ -85,6 +111,62 @@ function makeEdge(rel: SchemaModel["relations"][number], i: number): Edge {
 			strokeDasharray: inferred ? "5 4" : undefined
 		},
 		data: { inferred }
+	};
+}
+
+/**
+ * Bounds englobants de toutes les tables (frames exclus). Utilisé pour
+ * calculer un viewport initial propre — `fitView` de React Flow refuse
+ * de tourner tant que le conteneur parent n'est pas mesuré (warning
+ * « needs a width and a height »), et sous Mantine `AppShell` cette
+ * mesure arrive **après** l'hydratation. Pur → testable.
+ */
+export function tablesBounds(nodes: readonly TableNodeType[]): {
+	minX: number;
+	minY: number;
+	maxX: number;
+	maxY: number;
+} | null {
+	if (nodes.length === 0) return null;
+	let minX = Infinity;
+	let minY = Infinity;
+	let maxX = -Infinity;
+	let maxY = -Infinity;
+	for (const n of nodes) {
+		const w = n.width ?? NODE_WIDTH;
+		const h = n.height ?? 200;
+		if (n.position.x < minX) minX = n.position.x;
+		if (n.position.y < minY) minY = n.position.y;
+		if (n.position.x + w > maxX) maxX = n.position.x + w;
+		if (n.position.y + h > maxY) maxY = n.position.y + h;
+	}
+	return { minX, minY, maxX, maxY };
+}
+
+/**
+ * Viewport qui centre les bounds dans une fenêtre avec un padding en % et
+ * un zoom maxi. Pure (aucune dépendance à React Flow) → testable et prévisible.
+ */
+export function overviewViewport(
+	bounds: { minX: number; minY: number; maxX: number; maxY: number },
+	container: { width: number; height: number },
+	options: { padding: number; maxZoom: number; minZoom?: number }
+): { x: number; y: number; zoom: number } {
+	const contentW = bounds.maxX - bounds.minX;
+	const contentH = bounds.maxY - bounds.minY;
+	const pad = options.padding;
+	const availW = container.width * (1 - 2 * pad);
+	const availH = container.height * (1 - 2 * pad);
+	const zoom = Math.max(
+		options.minZoom ?? 0.02,
+		Math.min(options.maxZoom, availW / contentW, availH / contentH)
+	);
+	const centerX = (bounds.minX + bounds.maxX) / 2;
+	const centerY = (bounds.minY + bounds.maxY) / 2;
+	return {
+		x: container.width / 2 - centerX * zoom,
+		y: container.height / 2 - centerY * zoom,
+		zoom
 	};
 }
 
@@ -157,7 +239,8 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 		y: number;
 		tableName: string;
 	} | null>(null);
-	const { fitView } = useReactFlow();
+	const { fitView, setViewport } = useReactFlow();
+	const containerRef = useRef<HTMLDivElement | null>(null);
 
 	// Voisinage FK direct du nœud focalisé (le nœud + ses 1-sauts).
 	const neighbors = useMemo(() => {
@@ -227,6 +310,26 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 		[base, focusId, hiddenIds]
 	);
 
+	// Vue aérienne au 1er layout. On calcule le viewport nous-mêmes à partir
+	// des bounds ELK (positions déjà connues, pas besoin d'attendre que RF
+	// mesure ses nœuds) et on l'applique via `setViewport`. Ça contourne le
+	// warning « container needs width and height » de RF sous Mantine
+	// AppShell (le conteneur est bien 1440×850 mais RF a raté sa fenêtre
+	// initiale de mesure et refuse ensuite de re-fit).
+	useEffect(() => {
+		if (base === null || containerRef.current === null) return;
+		const bounds = tablesBounds(base.nodes);
+		if (bounds === null) return;
+		const rect = containerRef.current.getBoundingClientRect();
+		if (rect.width === 0 || rect.height === 0) return;
+		setViewport(
+			overviewViewport(bounds, rect, {
+				padding: OVERVIEW_FIT.padding,
+				maxZoom: OVERVIEW_FIT.maxZoom
+			})
+		);
+	}, [base, setViewport]);
+
 	/** Focus visuel : isole une table, estompe le reste, ouvre le drawer d'infos —
 	 * SANS recadrer la vue. Comportement par défaut du clic gauche sur canvas et
 	 * du clic-droit (menu contextuel). L'utilisateur choisit quand zoomer via
@@ -242,14 +345,29 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 		fitView({ nodes: [{ id }], duration: 500, maxZoom: 1 });
 	};
 
+	const applyOverview = () => {
+		if (base === null || containerRef.current === null) return;
+		const bounds = tablesBounds(base.nodes);
+		if (bounds === null) return;
+		const rect = containerRef.current.getBoundingClientRect();
+		if (rect.width === 0 || rect.height === 0) return;
+		setViewport(
+			overviewViewport(bounds, rect, {
+				padding: OVERVIEW_FIT.padding,
+				maxZoom: OVERVIEW_FIT.maxZoom
+			}),
+			{ duration: OVERVIEW_FIT.duration }
+		);
+	};
+
 	const clearFocus = () => {
 		setFocusId(null);
-		fitView({ padding: 0.15, duration: 400 });
+		applyOverview();
 	};
 
 	const relayoutAll = () => {
 		if (base !== null) setNodes(base.nodes);
-		fitView({ padding: 0.15, duration: 400 });
+		applyOverview();
 	};
 
 	const hideTable = (name: string) => {
@@ -286,7 +404,7 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 				onFocusTable: focusAndZoom,
 				onOpenInEditor: (name) =>
 					void navigate({ to: "/query", search: { source: `get ${name}` } }),
-				onFitView: () => fitView({ padding: 0.15, duration: 400 }),
+				onFitView: () => applyOverview(),
 				onAskAi: () => soon("Demander à l'IA"),
 				onToggleTheme: () => soon("Thème sombre")
 			}),
@@ -295,7 +413,10 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 	);
 
 	return (
-		<div style={{ position: "relative", width: "100%", height: "100%" }}>
+		<div
+			ref={containerRef}
+			style={{ position: "relative", width: "100%", height: "100%" }}
+		>
 			{base === null ? (
 				<div
 					style={{
@@ -342,8 +463,12 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 					setFocusId(null);
 					setMenu(null);
 				}}
-				fitView
-				fitViewOptions={{ padding: 0.15 }}
+				// `defaultViewport` = zoom initial garanti même quand le container
+				// n'est pas encore mesuré (Mantine AppShell hydrate en 2 passes) ;
+				// dès que les nodes sont mesurés, l'effet `nodesInitialized`
+				// ci-dessus appelle `fitView(OVERVIEW_FIT)` pour un cadrage parfait.
+				defaultViewport={{ x: 0, y: 0, zoom: initialZoom(schema.collections.length) }}
+				fitViewOptions={OVERVIEW_FIT}
 				minZoom={0.02}
 				maxZoom={1.75}
 				onlyRenderVisibleElements
