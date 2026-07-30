@@ -29,7 +29,7 @@ import { startTransition, useCallback, useEffect, useMemo, useRef, useState } fr
 import { CanvasContextMenu } from "./CanvasContextMenu";
 import { CanvasToolbar } from "./CanvasToolbar";
 import { FrameNode, type FrameNodeType } from "./FrameNode";
-import { type Frame, rectContainsPoint } from "./frames";
+import { type Frame, type FrameRect, rectContainsPoint } from "./frames";
 import { buildLayout, type LayoutResult } from "./layout";
 import { SchemaTree } from "./SchemaTree";
 import type { SchemaModel } from "./schema-model";
@@ -290,7 +290,8 @@ export function boundsOfTables(
 
 function computeFrameNodes(
 	frames: readonly Frame[],
-	tableNodes: readonly TableNodeType[]
+	tableNodes: readonly TableNodeType[],
+	onFrameResize: (key: string, rect: FrameRect) => void
 ): FrameNodeType[] {
 	if (frames.length === 0) return [];
 	const byId = new Map(tableNodes.map((n) => [n.id, n]));
@@ -312,7 +313,10 @@ function computeFrameNodes(
 				position: { x: rect.x, y: rect.y },
 				width: rect.width,
 				height: rect.height,
-				data: { frame },
+				data: {
+					frame,
+					onResizeEnd: (r: FrameRect) => onFrameResize(frame.key, r)
+				},
 				// Draggable pour permettre de déplacer le frame + ses tables
 				// ensemble (handler `onNodeDrag` dans CanvasInner applique le
 				// delta aux membres).
@@ -413,9 +417,10 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 		() =>
 			computeFrameNodes(
 				framesApi.frames,
-				nodes.filter((n) => !hiddenIds.has(n.id))
+				nodes.filter((n) => !hiddenIds.has(n.id)),
+				framesApi.setFrameRect
 			),
-		[framesApi.frames, nodes, hiddenIds]
+		[framesApi.frames, nodes, hiddenIds, framesApi.setFrameRect]
 	);
 
 	const displayNodes = useMemo<SchemaNode[]>(
