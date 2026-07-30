@@ -56,4 +56,25 @@ describe("SidebarDrawer", () => {
 		).toBeInTheDocument();
 		expect(screen.getByText("body")).toBeInTheDocument();
 	});
+
+	it("renders without any tab bar when tabs are omitted", () => {
+		renderWithProviders(
+			<SidebarDrawer header={<span>hdr</span>}>
+				<div>body</div>
+			</SidebarDrawer>,
+		);
+		expect(screen.queryByRole("tab")).toBeNull();
+		expect(screen.getByText("hdr")).toBeInTheDocument();
+		expect(screen.getByText("body")).toBeInTheDocument();
+	});
+
+	it("renders a title in place of tabs when title is provided and tabs are omitted", () => {
+		renderWithProviders(
+			<SidebarDrawer title="Schéma">
+				<div>body</div>
+			</SidebarDrawer>,
+		);
+		expect(screen.getByText("Schéma")).toBeInTheDocument();
+		expect(screen.queryByRole("tab")).toBeNull();
+	});
 });

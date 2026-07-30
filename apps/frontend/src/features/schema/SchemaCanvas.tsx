@@ -2,14 +2,13 @@ import {
 	SearchInput,
 	showNotification,
 	SidebarDrawer,
-	type SidebarTab,
 	Spotlight,
 	spotlight,
 	useCommandPaletteShortcut
 } from "@sqlnest/design-system";
 import { useNavigate } from "@tanstack/react-router";
 import { buildCanvasCommands } from "./commands";
-import { Box, Stack, Text, UnstyledButton } from "@mantine/core";
+import { Box, UnstyledButton } from "@mantine/core";
 import {
 	Background,
 	Controls,
@@ -70,12 +69,6 @@ function initialZoom(collectionCount: number): number {
 	if (collectionCount <= 100) return 0.15;
 	return 0.08;
 }
-
-const TABS: SidebarTab[] = [
-	{ value: "tables", label: "Tables" },
-	{ value: "frames", label: "Frames" },
-	{ value: "diff", label: "Diff" }
-];
 
 const FRAME_PAD = 24;
 
@@ -143,29 +136,51 @@ export function tablesBounds(nodes: readonly TableNodeType[]): {
 	return { minX, minY, maxX, maxY };
 }
 
+export interface ViewportSafeArea {
+	readonly left?: number;
+	readonly right?: number;
+	readonly top?: number;
+	readonly bottom?: number;
+}
+
 /**
- * Viewport qui centre les bounds dans une fenêtre avec un padding en % et
- * un zoom maxi. Pure (aucune dépendance à React Flow) → testable et prévisible.
+ * Viewport qui centre les bounds dans la fenêtre visible avec un padding en %
+ * et un zoom maxi. `safeArea` défalque les bandes occupées par les panels
+ * flottants (drawer, toolbar) : le contenu se centre dans le rectangle libre,
+ * pas dans le conteneur brut. Pure → testable.
  */
 export function overviewViewport(
 	bounds: { minX: number; minY: number; maxX: number; maxY: number },
 	container: { width: number; height: number },
-	options: { padding: number; maxZoom: number; minZoom?: number }
+	options: {
+		padding: number;
+		maxZoom: number;
+		minZoom?: number;
+		safeArea?: ViewportSafeArea;
+	}
 ): { x: number; y: number; zoom: number } {
+	const safeLeft = options.safeArea?.left ?? 0;
+	const safeRight = options.safeArea?.right ?? 0;
+	const safeTop = options.safeArea?.top ?? 0;
+	const safeBottom = options.safeArea?.bottom ?? 0;
+	const freeW = Math.max(1, container.width - safeLeft - safeRight);
+	const freeH = Math.max(1, container.height - safeTop - safeBottom);
 	const contentW = bounds.maxX - bounds.minX;
 	const contentH = bounds.maxY - bounds.minY;
 	const pad = options.padding;
-	const availW = container.width * (1 - 2 * pad);
-	const availH = container.height * (1 - 2 * pad);
+	const availW = freeW * (1 - 2 * pad);
+	const availH = freeH * (1 - 2 * pad);
 	const zoom = Math.max(
 		options.minZoom ?? 0.02,
 		Math.min(options.maxZoom, availW / contentW, availH / contentH)
 	);
 	const centerX = (bounds.minX + bounds.maxX) / 2;
 	const centerY = (bounds.minY + bounds.maxY) / 2;
+	const freeCenterX = safeLeft + freeW / 2;
+	const freeCenterY = safeTop + freeH / 2;
 	return {
-		x: container.width / 2 - centerX * zoom,
-		y: container.height / 2 - centerY * zoom,
+		x: freeCenterX - centerX * zoom,
+		y: freeCenterY - centerY * zoom,
 		zoom
 	};
 }
@@ -230,7 +245,6 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 
 	const [focusId, setFocusId] = useState<string | null>(null);
 	const [search, setSearch] = useState("");
-	const [activeTab, setActiveTab] = useState<string>("tables");
 	const [hiddenIds, setHiddenIds] = useState<ReadonlySet<string>>(
 		() => new Set()
 	);
@@ -310,6 +324,20 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 		[base, focusId, hiddenIds]
 	);
 
+	// `safeArea` correspond aux bandes occupées par les panels flottants
+	// (drawer arbre à gauche + toolbar verticale, drawer TableDetails à droite
+	// quand une table est focus). Le calcul de viewport centre les tables
+	// dans la zone LIBRE — sinon elles passeraient sous le drawer arbre.
+	const safeArea = useMemo(
+		() => ({
+			left: 76 + 300 + 8, // toolbar (52+2×12) + drawer (300) + gap
+			right: focusId !== null ? 12 + 340 + 8 : 8, // droite : drawer TableDetails seulement quand focus
+			top: 12,
+			bottom: 12
+		}),
+		[focusId]
+	);
+
 	// Vue aérienne au 1er layout. On calcule le viewport nous-mêmes à partir
 	// des bounds ELK (positions déjà connues, pas besoin d'attendre que RF
 	// mesure ses nœuds) et on l'applique via `setViewport`. Ça contourne le
@@ -325,10 +353,11 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 		setViewport(
 			overviewViewport(bounds, rect, {
 				padding: OVERVIEW_FIT.padding,
-				maxZoom: OVERVIEW_FIT.maxZoom
+				maxZoom: OVERVIEW_FIT.maxZoom,
+				safeArea
 			})
 		);
-	}, [base, setViewport]);
+	}, [base, setViewport, safeArea]);
 
 	/** Focus visuel : isole une table, estompe le reste, ouvre le drawer d'infos —
 	 * SANS recadrer la vue. Comportement par défaut du clic gauche sur canvas et
@@ -354,7 +383,8 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 		setViewport(
 			overviewViewport(bounds, rect, {
 				padding: OVERVIEW_FIT.padding,
-				maxZoom: OVERVIEW_FIT.maxZoom
+				maxZoom: OVERVIEW_FIT.maxZoom,
+				safeArea
 			}),
 			{ duration: OVERVIEW_FIT.duration }
 		);
@@ -515,77 +545,39 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 			{/* Toolbar verticale gauche */}
 			<CanvasToolbar onAutoLayout={relayoutAll} />
 
-			{/* Drawer droit : arborescence + tabs (Tables/Frames/Diff) */}
+			{/* Drawer gauche : arborescence (frames + reste). Ancré après la
+			 * toolbar verticale (52 px). */}
 			<Box
 				style={{
 					position: "absolute",
 					top: 12,
-					right: 12,
+					left: 76,
 					bottom: 12,
 					zIndex: 4
 				}}
 			>
 				<SidebarDrawer
-					tabs={TABS}
-					value={activeTab}
-					onTabChange={setActiveTab}
+					title="Schéma"
 					header={
-						activeTab === "tables" ? (
-							<SearchInput
-								value={search}
-								onChange={(e) => setSearch(e.currentTarget.value)}
-								placeholder={`Rechercher parmi ${schema.collections.length} tables…`}
-							/>
-						) : null
+						<SearchInput
+							value={search}
+							onChange={(e) => setSearch(e.currentTarget.value)}
+							placeholder={`Rechercher parmi ${schema.collections.length} tables…`}
+						/>
 					}
 					style={{ height: "100%" }}
 				>
-					{activeTab === "tables" ? (
-						<SchemaTree
-							schema={schema}
-							focusId={focusId}
-							search={search}
-							onSelect={focusAndZoom}
-						/>
-					) : null}
-					{activeTab === "frames" ? (
-						<Stack gap="xs" p="sm">
-							<Text size="xs" c="dimmed">
-								Frames de regroupement (aperçu statique — bientôt éditable).
-							</Text>
-							{framesFor(schema).map((f) => (
-								<Text key={f.key} size="sm">
-									<span
-										style={{
-											display: "inline-block",
-											width: 8,
-											height: 8,
-											borderRadius: 2,
-											background: `hsl(${f.hue}, 55%, 60%)`,
-											marginRight: 6
-										}}
-									/>
-									{f.label} · {f.collections.length}
-								</Text>
-							))}
-							{framesFor(schema).length === 0 ? (
-								<Text size="xs" c="dimmed">
-									Aucun frame défini pour cette base.
-								</Text>
-							) : null}
-						</Stack>
-					) : null}
-					{activeTab === "diff" ? (
-						<Stack gap="xs" p="sm">
-							<Text size="xs" c="dimmed">
-								Diff de schémas — bientôt.
-							</Text>
-						</Stack>
-					) : null}
+					<SchemaTree
+						schema={schema}
+						frames={framesFor(schema)}
+						focusId={focusId}
+						search={search}
+						onSelect={focusAndZoom}
+					/>
 				</SidebarDrawer>
 			</Box>
 
-			{/* Drawer gauche : infos + FK cliquables (visible uniquement quand focus) */}
+			{/* Drawer droit : infos de la table focus (visible uniquement quand focus). */}
 			{focusId !== null ? (
 				<TableDetails
 					schema={schema}

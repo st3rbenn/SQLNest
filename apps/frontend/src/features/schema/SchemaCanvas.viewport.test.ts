@@ -74,4 +74,15 @@ describe("overviewViewport", () => {
 		});
 		expect(vp.zoom).toBe(0.05);
 	});
+
+	it("centers into the free area when safeArea is provided", () => {
+		const vp = overviewViewport(bounds, container, {
+			padding: 0,
+			maxZoom: 1,
+			safeArea: { left: 400, right: 0, top: 0, bottom: 0 }
+		});
+		// Free area starts at x=400, spans 1040 → center x = 920.
+		// content center = 500, at zoom vp.zoom → vp.x + 500*zoom == 920
+		expect(vp.x + 500 * vp.zoom).toBeCloseTo(920, 4);
+	});
 });

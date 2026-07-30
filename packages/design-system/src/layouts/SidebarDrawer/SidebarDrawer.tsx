@@ -7,20 +7,25 @@ export type SidebarTab = {
 	count?: number;
 };
 
-export type SidebarDrawerProps = {
-	tabs: readonly SidebarTab[];
-	value: string;
-	onTabChange?: (value: string) => void;
+type BaseProps = {
 	header?: ReactNode;
 	children: ReactNode;
 	width?: number;
-} & Omit<PaperProps, "children">;
+	title?: string;
+} & Omit<PaperProps, "children" | "title">;
+
+export type SidebarDrawerProps = BaseProps & {
+	tabs?: readonly SidebarTab[];
+	value?: string;
+	onTabChange?: (value: string) => void;
+};
 
 export function SidebarDrawer({
 	tabs,
 	value,
 	onTabChange,
 	header,
+	title,
 	children,
 	width = 300,
 	...paperProps
@@ -34,29 +39,41 @@ export function SidebarDrawer({
 			style={{ display: "flex", flexDirection: "column", overflow: "hidden" }}
 			{...paperProps}
 		>
-			<Tabs
-				value={value}
-				onChange={(v) => v && onTabChange?.(v)}
-				variant="default"
-				keepMounted={false}
-			>
-				<Tabs.List px={8} pt={8}>
-					{tabs.map((tab) => (
-						<Tabs.Tab key={tab.value} value={tab.value} flex={1}>
-							<Group gap={4} justify="center" wrap="nowrap">
-								<Text size="xs" fw={600} span>
-									{tab.label}
-								</Text>
-								{tab.count !== undefined ? (
-									<Text size="xs" c="slate.4" span>
-										{tab.count}
+			{tabs !== undefined && tabs.length > 0 ? (
+				<Tabs
+					value={value ?? tabs[0]?.value ?? null}
+					onChange={(v) => v && onTabChange?.(v)}
+					variant="default"
+					keepMounted={false}
+				>
+					<Tabs.List px={8} pt={8}>
+						{tabs.map((tab) => (
+							<Tabs.Tab key={tab.value} value={tab.value} flex={1}>
+								<Group gap={4} justify="center" wrap="nowrap">
+									<Text size="xs" fw={600} span>
+										{tab.label}
 									</Text>
-								) : null}
-							</Group>
-						</Tabs.Tab>
-					))}
-				</Tabs.List>
-			</Tabs>
+									{tab.count !== undefined ? (
+										<Text size="xs" c="slate.4" span>
+											{tab.count}
+										</Text>
+									) : null}
+								</Group>
+							</Tabs.Tab>
+						))}
+					</Tabs.List>
+				</Tabs>
+			) : title ? (
+				<Box
+					px="sm"
+					py="xs"
+					style={{ borderBottom: "1px solid var(--mantine-color-slate-1)" }}
+				>
+					<Text size="sm" fw={700} c="slate.7">
+						{title}
+					</Text>
+				</Box>
+			) : null}
 
 			{header ? (
 				<Box

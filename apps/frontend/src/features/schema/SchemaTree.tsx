@@ -1,10 +1,12 @@
 import { Box, Text } from "@mantine/core";
 import { type CSSProperties, useMemo, useState } from "react";
 import { colorFor } from "./colors";
-import type { SchemaModel } from "./schema-model";
+import type { Frame } from "./frames";
+import type { Collection, SchemaModel } from "./schema-model";
 
 interface SchemaTreeProps {
 	readonly schema: SchemaModel;
+	readonly frames: readonly Frame[];
 	readonly focusId: string | null;
 	readonly search: string;
 	readonly onSelect: (id: string) => void;
@@ -13,22 +15,77 @@ interface SchemaTreeProps {
 const PARTITIONED = /^([a-z][a-z0-9]*)_p\d+/;
 
 /**
- * Extrait un préfixe de groupe raisonnable :
+ * Préfixe raisonnable :
  *  - `xref_p12_deleted` → `xref` (partitions numérotées)
  *  - `rnc_sequence_features` → `rnc`
- *  - `orders`, `users` → segment complet (pas de groupe, juste racines)
- * Une table isolée sans préfixe distinct devient sa propre entrée racine.
+ *  - `orders`, `users` → segment complet (racines isolées)
  */
-function groupOf(name: string): string {
+function prefixOf(name: string): string {
 	const partitioned = PARTITIONED.exec(name);
 	if (partitioned?.[1] !== undefined) return partitioned[1];
 	const first = name.split("_")[0];
 	return first ?? name;
 }
 
-interface Group {
-	readonly name: string;
-	readonly tables: string[];
+export interface TreeGroup {
+	readonly key: string;
+	readonly label: string;
+	readonly kind: "frame" | "prefix";
+	readonly hue?: number;
+	readonly tables: readonly string[];
+}
+
+/**
+ * Groupage pour l'arbre : frames explicites d'abord (dans leur ordre déclaré),
+ * puis groupes de préfixe pour ce qui reste. Pure → testable sans DOM.
+ */
+export function buildTreeGroups(
+	collections: readonly Collection[],
+	frames: readonly Frame[]
+): TreeGroup[] {
+	// 1. Index de couverture par les frames.
+	const inFrame = new Map<string, string>(); // tableName → frameKey
+	for (const f of frames) {
+		for (const c of f.collections) {
+			if (!inFrame.has(c)) inFrame.set(c, f.key);
+		}
+	}
+
+	// 2. Groupes de frames : conservent l'ordre déclaré, filtrent les
+	//    collections qui n'existent pas dans le schéma.
+	const collectionNames = new Set(collections.map((c) => c.name));
+	const frameGroups: TreeGroup[] = frames
+		.map<TreeGroup>((f) => ({
+			key: `frame:${f.key}`,
+			label: f.label,
+			kind: "frame",
+			hue: f.hue,
+			tables: f.collections.filter((c) => collectionNames.has(c)).slice().sort()
+		}))
+		.filter((g) => g.tables.length > 0);
+
+	// 3. Reste → groupes de préfixe (comme avant).
+	const byPrefix = new Map<string, string[]>();
+	for (const c of collections) {
+		if (inFrame.has(c.name)) continue;
+		const p = prefixOf(c.name);
+		const arr = byPrefix.get(p) ?? [];
+		arr.push(c.name);
+		byPrefix.set(p, arr);
+	}
+	const prefixGroups: TreeGroup[] = [...byPrefix.entries()]
+		.map<TreeGroup>(([name, tables]) => ({
+			key: `prefix:${name}`,
+			label: name,
+			kind: "prefix",
+			tables: tables.slice().sort()
+		}))
+		.sort(
+			(a, b) =>
+				b.tables.length - a.tables.length || a.label.localeCompare(b.label)
+		);
+
+	return [...frameGroups, ...prefixGroups];
 }
 
 const headerRow: CSSProperties = {
@@ -67,12 +124,13 @@ const itemBase: CSSProperties = {
 };
 
 /**
- * Arborescence des tables + regroupement automatique par préfixe. Rendue à
- * l'intérieur d'un `SidebarDrawer` par le parent : la recherche vit à part
- * (slot `header` du drawer), ce composant reçoit sa valeur en prop.
+ * Arborescence des tables — frames explicites d'abord (avec leur pastille
+ * colorée), puis groupes de préfixe pour ce qui reste. Rendue à l'intérieur
+ * d'un `SidebarDrawer` par le parent.
  */
 export function SchemaTree({
 	schema,
+	frames,
 	focusId,
 	search,
 	onSelect
@@ -81,45 +139,35 @@ export function SchemaTree({
 		() => new Set()
 	);
 
-	const groups = useMemo<Group[]>(() => {
-		const byGroup = new Map<string, string[]>();
-		for (const c of schema.collections) {
-			const g = groupOf(c.name);
-			const arr = byGroup.get(g) ?? [];
-			arr.push(c.name);
-			byGroup.set(g, arr);
-		}
-		return [...byGroup.entries()]
-			.map(([name, tables]) => ({ name, tables: tables.slice().sort() }))
-			.sort(
-				(a, b) =>
-					b.tables.length - a.tables.length || a.name.localeCompare(b.name)
-			);
-	}, [schema]);
+	const groups = useMemo<TreeGroup[]>(
+		() => buildTreeGroups(schema.collections, frames),
+		[schema, frames]
+	);
 
 	const query = search.trim().toLowerCase();
-	// Filtrage : une table matche par son nom OU son groupe (« xref » matche
-	// tous les `xref_p*`). Recherche non vide → tous les groupes contenant un
-	// match sont dépliés automatiquement.
-	const filtered = useMemo<Group[]>(() => {
+	// Filtrage : une table matche par son nom OU son groupe. Recherche non
+	// vide → tous les groupes contenant un match sont dépliés automatiquement.
+	const filtered = useMemo<TreeGroup[]>(() => {
 		if (query === "") return groups;
 		return groups
-			.map((g) => ({
-				name: g.name,
+			.map<TreeGroup>((g) => ({
+				...g,
 				tables: g.tables.filter(
-					(t) => t.toLowerCase().includes(query) || g.name.includes(query)
+					(t) =>
+						t.toLowerCase().includes(query) ||
+						g.label.toLowerCase().includes(query)
 				)
 			}))
 			.filter((g) => g.tables.length > 0);
 	}, [groups, query]);
 
-	const isCollapsed = (g: string) => query === "" && collapsed.has(g);
+	const isCollapsed = (k: string) => query === "" && collapsed.has(k);
 
-	const toggle = (g: string) => {
+	const toggle = (k: string) => {
 		setCollapsed((prev) => {
 			const next = new Set(prev);
-			if (next.has(g)) next.delete(g);
-			else next.add(g);
+			if (next.has(k)) next.delete(k);
+			else next.add(k);
 			return next;
 		});
 	};
@@ -134,24 +182,36 @@ export function SchemaTree({
 					: `${totalMatch} résultat(s)`}
 			</Text>
 			{filtered.map((g) => {
-				const showChildren = !isCollapsed(g.name);
+				const showChildren = !isCollapsed(g.key);
 				return (
-					<div key={g.name}>
+					<div key={g.key}>
 						<button
 							type="button"
 							style={headerRow}
-							onClick={() => toggle(g.name)}
+							onClick={() => toggle(g.key)}
 						>
-							<span>
+							<span
+								style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+							>
 								<span
 									style={{
-										color: "var(--mantine-color-slate-3)",
-										marginRight: 6
+										color: "var(--mantine-color-slate-3)"
 									}}
 								>
 									{showChildren ? "▾" : "▸"}
 								</span>
-								{g.name}
+								{g.kind === "frame" && g.hue !== undefined ? (
+									<span
+										style={{
+											display: "inline-block",
+											width: 10,
+											height: 10,
+											borderRadius: 3,
+											background: `hsl(${g.hue}, 55%, 60%)`
+										}}
+									/>
+								) : null}
+								{g.label}
 							</span>
 							<span
 								style={{
