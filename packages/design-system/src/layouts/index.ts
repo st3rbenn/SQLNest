@@ -8,9 +8,11 @@ export {
 export {
 	SidebarDrawer,
 	type SidebarDrawerProps,
+	type SidebarDrawerVariant,
 	type SidebarTab,
 } from "./SidebarDrawer/SidebarDrawer";
 export {
-	VerticalToolbar,
-	type VerticalToolbarProps,
-} from "./VerticalToolbar/VerticalToolbar";
+	Toolbar,
+	type ToolbarOrientation,
+	type ToolbarProps,
+} from "./Toolbar/Toolbar";

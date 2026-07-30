@@ -1,5 +1,5 @@
 import { Box, Group, Paper, type PaperProps, Tabs, Text } from "@mantine/core";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 
 export type SidebarTab = {
 	value: string;
@@ -7,11 +7,15 @@ export type SidebarTab = {
 	count?: number;
 };
 
+export type SidebarDrawerVariant = "floating" | "docked";
+
 type BaseProps = {
 	header?: ReactNode;
 	children: ReactNode;
+	footer?: ReactNode;
 	width?: number;
 	title?: string;
+	variant?: SidebarDrawerVariant;
 } & Omit<PaperProps, "children" | "title">;
 
 export type SidebarDrawerProps = BaseProps & {
@@ -20,23 +24,41 @@ export type SidebarDrawerProps = BaseProps & {
 	onTabChange?: (value: string) => void;
 };
 
+const DOCKED_STYLE: CSSProperties = {
+	borderTopLeftRadius: 0,
+	borderBottomLeftRadius: 0,
+	borderLeft: "none",
+	boxShadow: "4px 0 16px rgba(15,23,42,0.06)"
+};
+
 export function SidebarDrawer({
 	tabs,
 	value,
 	onTabChange,
 	header,
 	title,
+	footer,
+	variant = "floating",
 	children,
 	width = 300,
+	style,
 	...paperProps
 }: SidebarDrawerProps) {
+	const docked = variant === "docked";
 	return (
 		<Paper
-			radius="lg"
-			shadow="lg"
+			data-variant={variant}
+			radius={docked ? 0 : "lg"}
+			{...(docked ? {} : { shadow: "lg" as const })}
 			withBorder
 			w={width}
-			style={{ display: "flex", flexDirection: "column", overflow: "hidden" }}
+			style={{
+				display: "flex",
+				flexDirection: "column",
+				overflow: "hidden",
+				...(docked ? DOCKED_STYLE : {}),
+				...(style as CSSProperties | undefined)
+			}}
 			{...paperProps}
 		>
 			{tabs !== undefined && tabs.length > 0 ? (
@@ -87,6 +109,16 @@ export function SidebarDrawer({
 			<Box style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
 				{children}
 			</Box>
+
+			{footer ? (
+				<Box
+					px="sm"
+					py="xs"
+					style={{ borderTop: "1px solid var(--mantine-color-slate-1)" }}
+				>
+					{footer}
+				</Box>
+			) : null}
 		</Paper>
 	);
 }

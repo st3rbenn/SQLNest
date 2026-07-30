@@ -1,12 +1,10 @@
 import {
 	EngineTabs,
 	FloatingPanel,
-	HintPill,
-	spotlight,
 	StatusPill,
 	type StatusPillVariant
 } from "@sqlnest/design-system";
-import { Group, TextInput, UnstyledButton } from "@mantine/core";
+import { Group, TextInput } from "@mantine/core";
 import { createFileRoute } from "@tanstack/react-router";
 import { type CSSProperties, useState } from "react";
 import { SchemaCanvas } from "../features/schema/SchemaCanvas";
@@ -90,8 +88,8 @@ function SchemaPage() {
 
 	return (
 		<div style={pageStyle}>
-			{/* Panel flottant : moteur + schéma. En haut-gauche, discret. */}
-			<FloatingPanel position="top-left" offset={{ x: 82, y: 12 }} p="xs">
+			{/* Panel flottant : moteur + schéma. Ancré après le drawer docké (300 px). */}
+			<FloatingPanel position="top-left" offset={{ x: 316, y: 12 }} p="xs">
 				<Group gap="xs" wrap="nowrap">
 					<EngineTabs value={engine} onChange={setEngine} />
 					{engine === "postgres" ? (
@@ -109,10 +107,10 @@ function SchemaPage() {
 				</Group>
 			</FloatingPanel>
 
-			{/* Bandeau statut, en bas-gauche, non-intrusif. */}
+			{/* Bandeau statut : bottom-left, après le drawer. */}
 			<FloatingPanel
 				position="bottom-left"
-				offset={{ x: 82, y: 12 }}
+				offset={{ x: 316, y: 12 }}
 				p={0}
 				withBorder={false}
 				shadow="none"
@@ -120,23 +118,6 @@ function SchemaPage() {
 				<StatusPill status={status.variant} withDot={status.variant === "success"}>
 					{status.text}
 				</StatusPill>
-			</FloatingPanel>
-
-			{/* Cmd+K hint : ouvre la palette (tour 1c). */}
-			<FloatingPanel
-				position="bottom-center"
-				offset={24}
-				p={0}
-				withBorder={false}
-				shadow="none"
-				bg="transparent"
-			>
-				<UnstyledButton
-					onClick={() => spotlight.open()}
-					aria-label="Ouvrir la palette de commandes"
-				>
-					<HintPill keys={["⌘K"]}>Actions rapides</HintPill>
-				</UnstyledButton>
 			</FloatingPanel>
 
 			<SchemaCanvas schema={schema} />

@@ -77,4 +77,38 @@ describe("SidebarDrawer", () => {
 		expect(screen.getByText("Schéma")).toBeInTheDocument();
 		expect(screen.queryByRole("tab")).toBeNull();
 	});
+
+	it("renders a footer slot below the body when provided", () => {
+		renderWithProviders(
+			<SidebarDrawer footer={<span>foot</span>}>
+				<div>body</div>
+			</SidebarDrawer>,
+		);
+		expect(screen.getByText("foot")).toBeInTheDocument();
+		expect(screen.getByText("body")).toBeInTheDocument();
+	});
+
+	it("exposes data-variant='docked' when variant='docked'", () => {
+		renderWithProviders(
+			<SidebarDrawer variant="docked" data-testid="drawer">
+				<div>body</div>
+			</SidebarDrawer>,
+		);
+		expect(screen.getByTestId("drawer")).toHaveAttribute(
+			"data-variant",
+			"docked",
+		);
+	});
+
+	it("defaults to variant='floating'", () => {
+		renderWithProviders(
+			<SidebarDrawer data-testid="drawer">
+				<div>body</div>
+			</SidebarDrawer>,
+		);
+		expect(screen.getByTestId("drawer")).toHaveAttribute(
+			"data-variant",
+			"floating",
+		);
+	});
 });

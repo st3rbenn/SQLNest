@@ -1,4 +1,5 @@
 import {
+	HintPill,
 	SearchInput,
 	showNotification,
 	SidebarDrawer,
@@ -324,16 +325,16 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 		[base, focusId, hiddenIds]
 	);
 
-	// `safeArea` correspond aux bandes occupées par les panels flottants
-	// (drawer arbre à gauche + toolbar verticale, drawer TableDetails à droite
-	// quand une table est focus). Le calcul de viewport centre les tables
-	// dans la zone LIBRE — sinon elles passeraient sous le drawer arbre.
+	// `safeArea` = bandes occupées par les panels flottants ou dockés :
+	// - gauche : drawer arbre docké (300 px pleine hauteur)
+	// - droite : drawer TableDetails flottant (352 px) seulement au focus
+	// - bas   : toolbar horizontale flottante (~68 px avec ses marges)
 	const safeArea = useMemo(
 		() => ({
-			left: 76 + 300 + 8, // toolbar (52+2×12) + drawer (300) + gap
-			right: focusId !== null ? 12 + 340 + 8 : 8, // droite : drawer TableDetails seulement quand focus
+			left: 300 + 8,
+			right: focusId !== null ? 12 + 340 + 8 : 8,
 			top: 12,
-			bottom: 12
+			bottom: 68
 		}),
 		[focusId]
 	);
@@ -545,18 +546,19 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 			{/* Toolbar verticale gauche */}
 			<CanvasToolbar onAutoLayout={relayoutAll} />
 
-			{/* Drawer gauche : arborescence (frames + reste). Ancré après la
-			 * toolbar verticale (52 px). */}
+			{/* Drawer gauche docké : arborescence (frames + reste), pleine
+			 * hauteur, collé au bord. La pill Cmd+K vit dans son footer. */}
 			<Box
 				style={{
 					position: "absolute",
-					top: 12,
-					left: 76,
-					bottom: 12,
+					top: 0,
+					left: 0,
+					bottom: 0,
 					zIndex: 4
 				}}
 			>
 				<SidebarDrawer
+					variant="docked"
 					title="Schéma"
 					header={
 						<SearchInput
@@ -564,6 +566,26 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 							onChange={(e) => setSearch(e.currentTarget.value)}
 							placeholder={`Rechercher parmi ${schema.collections.length} tables…`}
 						/>
+					}
+					footer={
+						<UnstyledButton
+							onClick={() => spotlight.open()}
+							aria-label="Ouvrir la palette de commandes"
+							style={{ width: "100%" }}
+						>
+							<HintPill
+								keys={["⌘K"]}
+								bg="transparent"
+								withBorder={false}
+								shadow="none"
+								style={{
+									display: "flex",
+									justifyContent: "center"
+								}}
+							>
+								Actions rapides
+							</HintPill>
+						</UnstyledButton>
 					}
 					style={{ height: "100%" }}
 				>

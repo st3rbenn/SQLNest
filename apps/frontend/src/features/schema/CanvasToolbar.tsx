@@ -1,8 +1,8 @@
 import {
 	FloatingPanel,
 	showNotification,
-	ToolbarButton,
-	VerticalToolbar
+	Toolbar,
+	ToolbarButton
 } from "@sqlnest/design-system";
 import { useState } from "react";
 
@@ -138,12 +138,12 @@ interface Props {
 	readonly onAutoLayout?: () => void;
 }
 
-/** Toolbar verticale gauche du canvas Schéma. Foundation 1a. */
+/** Toolbar horizontale du canvas Schéma — flottante en bas-centre. */
 export function CanvasToolbar({ onAutoLayout }: Props) {
 	const [tool, setTool] = useState<Tool>("select");
 	return (
-		<FloatingPanel position="top-left" offset={{ x: 12, y: 70 }} p={0}>
-			<VerticalToolbar aria-label="Canvas actions">
+		<FloatingPanel position="bottom-center" offset={{ x: 0, y: 16 }} p={0}>
+			<Toolbar orientation="horizontal" aria-label="Canvas actions">
 				<ToolbarButton
 					label="Sélection (V)"
 					active={tool === "select"}
@@ -181,7 +181,7 @@ export function CanvasToolbar({ onAutoLayout }: Props) {
 				>
 					<Comment />
 				</ToolbarButton>
-				<VerticalToolbar.Divider />
+				<Toolbar.Divider orientation="horizontal" />
 				<ToolbarButton
 					label="Relayoute auto"
 					onClick={() => {
@@ -205,7 +205,7 @@ export function CanvasToolbar({ onAutoLayout }: Props) {
 				>
 					<Ai />
 				</ToolbarButton>
-				<VerticalToolbar.Divider />
+				<Toolbar.Divider orientation="horizontal" />
 				<ToolbarButton
 					label="Exporter"
 					onClick={() => notImplemented("Export")}
@@ -215,7 +215,7 @@ export function CanvasToolbar({ onAutoLayout }: Props) {
 				<ToolbarButton label="Thème" onClick={() => notImplemented("Thème")}>
 					<Theme />
 				</ToolbarButton>
-			</VerticalToolbar>
+			</Toolbar>
 		</FloatingPanel>
 	);
 }
