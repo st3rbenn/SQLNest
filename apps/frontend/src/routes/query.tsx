@@ -1,11 +1,26 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { type CSSProperties, useState } from "react";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { SnqlEditor } from "../features/query/SnqlEditor";
 import { useRunQuery } from "../features/query/useRunQuery";
 import { useSchema } from "../features/schema/useSchema";
 
+interface QuerySearch {
+	source?: string;
+	autorun?: 1;
+}
+
+function validateSearch(raw: Record<string, unknown>): QuerySearch {
+	const out: QuerySearch = {};
+	if (typeof raw.source === "string" && raw.source.length > 0) {
+		out.source = raw.source;
+	}
+	if (raw.autorun === 1 || raw.autorun === "1") out.autorun = 1;
+	return out;
+}
+
 export const Route = createFileRoute("/query")({
-	component: QueryPage
+	component: QueryPage,
+	validateSearch
 });
 
 type Engine = "postgres" | "mongodb";
@@ -46,8 +61,10 @@ function renderCell(value: unknown) {
 }
 
 function QueryPage() {
+	const search = Route.useSearch();
+	const navigate = useNavigate({ from: Route.fullPath });
 	const [engine, setEngine] = useState<Engine>("postgres");
-	const [source, setSource] = useState(EXAMPLES.postgres);
+	const [source, setSource] = useState(search.source ?? EXAMPLES.postgres);
 	const [pgSchema, setPgSchema] = useState("");
 	// Le schéma cible ne concerne que Postgres ; vide → défaut `public`.
 	const targetSchema =
@@ -63,6 +80,31 @@ function QueryPage() {
 			...(targetSchema ? { schema: targetSchema } : {})
 		});
 	};
+
+	// Injection depuis un lien externe (menu contextuel du canvas Schéma).
+	// `source` → charge dans l'éditeur ; `autorun=1` → exécute **une seule fois**.
+	// On efface `autorun` de l'URL après tir pour éviter la re-exécution au refresh.
+	const didAutorun = useRef(false);
+	useEffect(() => {
+		if (search.source && search.source !== source) setSource(search.source);
+		if (search.autorun === 1 && !didAutorun.current && search.source) {
+			didAutorun.current = true;
+			run.mutate({
+				engine,
+				source: search.source,
+				...(targetSchema ? { schema: targetSchema } : {})
+			});
+			void navigate({
+				search: (prev) => {
+					const next: QuerySearch = {};
+					if (prev.source !== undefined) next.source = prev.source;
+					return next;
+				},
+				replace: true
+			});
+		}
+	// biome-ignore lint/correctness/useExhaustiveDependencies: intentional — only react to URL changes and mount, not local state
+	}, [search.source, search.autorun]);
 
 	const selectEngine = (next: Engine) => {
 		setEngine(next);

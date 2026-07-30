@@ -1,5 +1,10 @@
-import { SidebarDrawer, type SidebarTab } from "@sqlnest/design-system";
-import { Box, Stack, Text } from "@mantine/core";
+import {
+	SearchInput,
+	showNotification,
+	SidebarDrawer,
+	type SidebarTab
+} from "@sqlnest/design-system";
+import { Box, Stack, Text, UnstyledButton } from "@mantine/core";
 import {
 	Background,
 	Controls,
@@ -14,6 +19,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useEffect, useMemo, useState } from "react";
+import { CanvasContextMenu } from "./CanvasContextMenu";
 import { CanvasToolbar } from "./CanvasToolbar";
 import { FrameNode, type FrameNodeType } from "./FrameNode";
 import { framesFor } from "./frames";
@@ -27,7 +33,6 @@ import {
 	TableNode,
 	type TableNodeType
 } from "./TableNode";
-import { SearchInput } from "@sqlnest/design-system";
 
 const DECLARED = "#2563eb";
 const INFERRED = "#d97706";
@@ -139,6 +144,14 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 	const [focusId, setFocusId] = useState<string | null>(null);
 	const [search, setSearch] = useState("");
 	const [activeTab, setActiveTab] = useState<string>("tables");
+	const [hiddenIds, setHiddenIds] = useState<ReadonlySet<string>>(
+		() => new Set()
+	);
+	const [menu, setMenu] = useState<{
+		x: number;
+		y: number;
+		tableName: string;
+	} | null>(null);
 	const { fitView } = useReactFlow();
 
 	// Voisinage FK direct du nœud focalisé (le nœud + ses 1-sauts).
@@ -152,27 +165,33 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 		return set;
 	}, [focusId, base]);
 
-	// Nœuds table affichés : positions vivantes (drag) + drapeaux focus.
+	// Nœuds table affichés : positions vivantes (drag) + drapeaux focus + masqués.
 	const displayTableNodes = useMemo(
 		() =>
-			nodes.map((n) => {
-				const inFocus = neighbors ? neighbors.has(n.id) : true;
-				return {
-					...n,
-					data: {
-						...n.data,
-						dimmed: neighbors !== null && !inFocus,
-						focused: n.id === focusId,
-						matched: false
-					}
-				};
-			}),
-		[nodes, neighbors, focusId]
+			nodes
+				.filter((n) => !hiddenIds.has(n.id))
+				.map((n) => {
+					const inFocus = neighbors ? neighbors.has(n.id) : true;
+					return {
+						...n,
+						data: {
+							...n.data,
+							dimmed: neighbors !== null && !inFocus,
+							focused: n.id === focusId,
+							matched: false
+						}
+					};
+				}),
+		[nodes, neighbors, focusId, hiddenIds]
 	);
 
 	const frameNodes = useMemo(
-		() => computeFrameNodes(schema, nodes),
-		[schema, nodes]
+		() =>
+			computeFrameNodes(
+				schema,
+				nodes.filter((n) => !hiddenIds.has(n.id))
+			),
+		[schema, nodes, hiddenIds]
 	);
 
 	const displayNodes = useMemo<SchemaNode[]>(
@@ -182,23 +201,25 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 
 	const displayEdges = useMemo(
 		() =>
-			(base?.edges ?? []).map((e) => {
-				const touchesFocus =
-					focusId !== null && (e.source === focusId || e.target === focusId);
-				const dim = focusId !== null && !touchesFocus;
-				const inferred = (e.data as { inferred?: boolean })?.inferred;
-				return {
-					...e,
-					style: {
-						...e.style,
-						stroke: dim ? "#cbd5e1" : inferred ? INFERRED : DECLARED,
-						strokeWidth: touchesFocus ? 2.5 : 1.5,
-						opacity: dim ? 0.35 : 1
-					},
-					zIndex: touchesFocus ? 10 : 0
-				};
-			}),
-		[base, focusId]
+			(base?.edges ?? [])
+				.filter((e) => !hiddenIds.has(e.source) && !hiddenIds.has(e.target))
+				.map((e) => {
+					const touchesFocus =
+						focusId !== null && (e.source === focusId || e.target === focusId);
+					const dim = focusId !== null && !touchesFocus;
+					const inferred = (e.data as { inferred?: boolean })?.inferred;
+					return {
+						...e,
+						style: {
+							...e.style,
+							stroke: dim ? "#cbd5e1" : inferred ? INFERRED : DECLARED,
+							strokeWidth: touchesFocus ? 2.5 : 1.5,
+							opacity: dim ? 0.35 : 1
+						},
+						zIndex: touchesFocus ? 10 : 0
+					};
+				}),
+		[base, focusId, hiddenIds]
 	);
 
 	/** « Walk to » — isole une table et centre la vue dessus. Point d'entrée
@@ -217,6 +238,23 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 		if (base !== null) setNodes(base.nodes);
 		fitView({ padding: 0.15, duration: 400 });
 	};
+
+	const hideTable = (name: string) => {
+		setHiddenIds((prev) => {
+			const next = new Set(prev);
+			next.add(name);
+			return next;
+		});
+		if (focusId === name) setFocusId(null);
+		showNotification({
+			title: "Table masquée",
+			message: `${name} — restaure via « Tout réafficher ».`,
+			color: "blue",
+			autoClose: 2000
+		});
+	};
+
+	const unhideAll = () => setHiddenIds(new Set());
 
 	return (
 		<div style={{ position: "relative", width: "100%", height: "100%" }}>
@@ -244,7 +282,20 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 				onNodesChange={onNodesChange}
 				nodeTypes={nodeTypes}
 				onNodeClick={(_, node) => focusNode(node.id)}
-				onPaneClick={() => setFocusId(null)}
+				onNodeContextMenu={(event, node) => {
+					if ((node as { type?: string }).type === "frame") return;
+					event.preventDefault();
+					focusNode(node.id);
+					setMenu({
+						x: event.clientX,
+						y: event.clientY,
+						tableName: node.id
+					});
+				}}
+				onPaneClick={() => {
+					setFocusId(null);
+					setMenu(null);
+				}}
 				fitView
 				fitViewOptions={{ padding: 0.15 }}
 				minZoom={0.02}
@@ -370,6 +421,45 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 					tableName={focusId}
 					onSelect={focusNode}
 					onClose={clearFocus}
+				/>
+			) : null}
+
+			{/* Chip « masqués — tout réafficher » quand ≥1 table est cachée. */}
+			{hiddenIds.size > 0 ? (
+				<UnstyledButton
+					onClick={unhideAll}
+					style={{
+						position: "absolute",
+						top: 12,
+						left: "50%",
+						transform: "translateX(-50%)",
+						zIndex: 5,
+						padding: "6px 12px",
+						borderRadius: 999,
+						background: "#fff",
+						border: "1px solid var(--mantine-color-slate-2)",
+						boxShadow: "var(--mantine-shadow-md)",
+						fontSize: 12,
+						fontWeight: 600,
+						color: "var(--mantine-color-slate-7)"
+					}}
+				>
+					{hiddenIds.size} table
+					{hiddenIds.size > 1 ? "s" : ""} masquée
+					{hiddenIds.size > 1 ? "s" : ""} — tout réafficher
+				</UnstyledButton>
+			) : null}
+
+			{/* Menu contextuel (tour 1b). */}
+			{menu !== null ? (
+				<CanvasContextMenu
+					open
+					position={{ x: menu.x, y: menu.y }}
+					tableName={menu.tableName}
+					frames={framesFor(schema)}
+					onClose={() => setMenu(null)}
+					onHide={hideTable}
+					onFocus={focusNode}
 				/>
 			) : null}
 		</div>

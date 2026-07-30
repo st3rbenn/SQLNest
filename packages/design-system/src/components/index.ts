@@ -1,5 +1,13 @@
 export * from "./Buttons";
 export {
+	ContextMenu,
+	type ContextMenuActionItem,
+	type ContextMenuDividerItem,
+	type ContextMenuItem,
+	type ContextMenuProps,
+	type ContextMenuSubmenuItem,
+} from "./ContextMenu/ContextMenu";
+export {
 	EngineTabs,
 	type EngineTabsProps,
 	type EngineValue,
