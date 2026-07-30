@@ -71,6 +71,28 @@ function initialZoom(collectionCount: number): number {
 	return 0.08;
 }
 
+// Bornes de zoom pour le focus d'une table. Sous `min`, on zoome IN (l'user
+// vient d'une vue aérienne, il veut voir la table). Au-dessus de `max`, on
+// dézoome vers `max` (l'user autorise le dezoom pour garder une lecture
+// confortable). Entre les deux → on ne touche pas le zoom, juste pan.
+const FOCUS_ZOOM_MIN = 1;
+const FOCUS_ZOOM_MAX = 1.5;
+
+/**
+ * Zoom cible d'un focus-table. Pure → testable.
+ * - currentZoom < min → min (zoom in)
+ * - currentZoom > max → max (dezoom vers la cible max)
+ * - sinon → currentZoom (juste pan)
+ */
+export function focusZoom(
+	currentZoom: number,
+	opts: { min: number; max: number }
+): number {
+	if (currentZoom < opts.min) return opts.min;
+	if (currentZoom > opts.max) return opts.max;
+	return currentZoom;
+}
+
 const FRAME_PAD = 24;
 
 function makeNode(schema: SchemaModel) {
@@ -254,7 +276,7 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 		y: number;
 		tableName: string;
 	} | null>(null);
-	const { fitView, setViewport } = useReactFlow();
+	const { getViewport, setViewport } = useReactFlow();
 	const containerRef = useRef<HTMLDivElement | null>(null);
 
 	// Voisinage FK direct du nœud focalisé (le nœud + ses 1-sauts).
@@ -339,12 +361,12 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 		[focusId]
 	);
 
-	// Vue aérienne au 1er layout. On calcule le viewport nous-mêmes à partir
-	// des bounds ELK (positions déjà connues, pas besoin d'attendre que RF
-	// mesure ses nœuds) et on l'applique via `setViewport`. Ça contourne le
-	// warning « container needs width and height » de RF sous Mantine
-	// AppShell (le conteneur est bien 1440×850 mais RF a raté sa fenêtre
-	// initiale de mesure et refuse ensuite de re-fit).
+	// Vue aérienne au 1er layout SEULEMENT — on ne re-fit pas quand `safeArea`
+	// change (sinon chaque focus déclencherait un reset overview qui écrase
+	// le `setCenter` du `focusAndZoom`). Le safeArea courant est lu via ref
+	// pour rester à jour dans le calcul sans re-trigger l'effet.
+	const safeAreaRef = useRef(safeArea);
+	safeAreaRef.current = safeArea;
 	useEffect(() => {
 		if (base === null || containerRef.current === null) return;
 		const bounds = tablesBounds(base.nodes);
@@ -355,10 +377,10 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 			overviewViewport(bounds, rect, {
 				padding: OVERVIEW_FIT.padding,
 				maxZoom: OVERVIEW_FIT.maxZoom,
-				safeArea
+				safeArea: safeAreaRef.current
 			})
 		);
-	}, [base, setViewport, safeArea]);
+	}, [base, setViewport]);
 
 	/** Focus visuel : isole une table, estompe le reste, ouvre le drawer d'infos —
 	 * SANS recadrer la vue. Comportement par défaut du clic gauche sur canvas et
@@ -369,10 +391,46 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 	/** Focus + recadrage sur la table. Utilisé par les points d'entrée
 	 * « distants » — arbre, palette Cmd+K, menu Détails, FK cliquables du
 	 * drawer — où l'utilisateur cherche activement une table et veut être
-	 * amené dessus. Aussi le double-clic sur la carte. */
+	 * amené dessus. Aussi le double-clic sur la carte.
+	 *
+	 * Stratégie « pan-first » : on ne reset PAS le zoom à chaque focus. Si
+	 * la vue est déjà dans la fourchette confortable [FOCUS_ZOOM_MIN,
+	 * FOCUS_ZOOM_MAX], on garde le zoom courant et on se contente d'un pan
+	 * animé vers la nouvelle table. Si le zoom est trop bas (vue aérienne)
+	 * on zoome IN au seuil, si trop haut (user a zoomé manuellement) on
+	 * dézoome vers le plafond — dans les deux cas, autorisé pour garder
+	 * une lecture correcte de la carte. */
 	const focusAndZoom = (id: string) => {
 		setFocusId(id);
-		fitView({ nodes: [{ id }], duration: 500, maxZoom: 1 });
+		const node = nodes.find((n) => n.id === id);
+		if (!node || containerRef.current === null) return;
+		const cx = node.position.x + (node.width ?? NODE_WIDTH) / 2;
+		const cy =
+			node.position.y +
+			(node.height ?? nodeHeight(node.data.collection)) / 2;
+		const current = getViewport().zoom;
+		const zoom = focusZoom(current, {
+			min: FOCUS_ZOOM_MIN,
+			max: FOCUS_ZOOM_MAX
+		});
+		// Centre la node dans la zone LIBRE (respect du safeArea) — pas au
+		// milieu bête du conteneur, sinon la table passerait sous le drawer
+		// arbre. `setCenter` de RF ignore le safeArea, donc on calcule le
+		// viewport nous-mêmes (même approche que `applyOverview`).
+		const rect = containerRef.current.getBoundingClientRect();
+		const sa = safeAreaRef.current;
+		const freeCenterX = sa.left + (rect.width - sa.left - sa.right) / 2;
+		const freeCenterY = sa.top + (rect.height - sa.top - sa.bottom) / 2;
+		const target = {
+			x: freeCenterX - cx * zoom,
+			y: freeCenterY - cy * zoom,
+			zoom
+		};
+		// Sans options : setViewport applique immédiatement. Avec { duration }
+		// il retourne une Promise qu'il faut attacher — parfois avalée par un
+		// render concurrent. La forme instantanée est plus fiable ; l'animation
+		// est perdue mais on peut y revenir plus tard avec un `useTransition`.
+		setViewport(target);
 	};
 
 	const applyOverview = () => {

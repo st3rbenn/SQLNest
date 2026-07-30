@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { overviewViewport, tablesBounds } from "./SchemaCanvas";
+import { focusZoom, overviewViewport, tablesBounds } from "./SchemaCanvas";
 import type { TableNodeType } from "./TableNode";
 
 function n(id: string, x: number, y: number, w: number, h: number): TableNodeType {
@@ -84,5 +84,23 @@ describe("overviewViewport", () => {
 		// Free area starts at x=400, spans 1040 → center x = 920.
 		// content center = 500, at zoom vp.zoom → vp.x + 500*zoom == 920
 		expect(vp.x + 500 * vp.zoom).toBeCloseTo(920, 4);
+	});
+});
+
+describe("focusZoom", () => {
+	const opts = { min: 1, max: 1.5 };
+
+	it("zooms IN to min when the current zoom is below min", () => {
+		expect(focusZoom(0.4, opts)).toBe(1);
+	});
+
+	it("zooms OUT to max when the current zoom is above max", () => {
+		expect(focusZoom(2.5, opts)).toBe(1.5);
+	});
+
+	it("KEEPS the current zoom when it is inside the focus window (just pan)", () => {
+		expect(focusZoom(1, opts)).toBe(1);
+		expect(focusZoom(1.2, opts)).toBe(1.2);
+		expect(focusZoom(1.5, opts)).toBe(1.5);
 	});
 });

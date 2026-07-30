@@ -23,6 +23,7 @@ export default defineConfig({
 				"@mantine/hooks",
 				"@mantine/notifications",
 				"@mantine/spotlight",
+				"@tabler/icons-react",
 			],
 			output: {
 				globals: {

@@ -19,6 +19,7 @@
 		"@mantine/hooks": "^8.3.3",
 		"@sqlnest/design-system": "workspace:*",
 		"@sqlnest/snql": "workspace:*",
+		"@tabler/icons-react": "^3.46.0",
 		"@tanstack/react-query": "^5.90.2",
 		"@tanstack/react-router": "catalog:",
 		"@tanstack/react-router-devtools": "^1.132.37",

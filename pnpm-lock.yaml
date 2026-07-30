@@ -141,6 +141,9 @@ importers:
       '@sqlnest/snql':
         specifier: workspace:*
         version: link:../../packages/snql
+      '@tabler/icons-react':
+        specifier: ^3.46.0
+        version: 3.46.0(react@19.1.1)
       '@tanstack/react-query':
         specifier: ^5.90.2
         version: 5.90.2(react@19.1.1)
@@ -220,6 +223,9 @@ importers:
       '@mantine/spotlight':
         specifier: ^8.3.18
         version: 8.3.18(@mantine/core@8.3.3(@mantine/hooks@8.3.3(react@19.1.1))(@types/react@19.1.16)(react-dom@19.1.1(react@19.1.1))(react@19.1.1))(@mantine/hooks@8.3.3(react@19.1.1))(react-dom@19.1.1(react@19.1.1))(react@19.1.1)
+      '@tabler/icons-react':
+        specifier: ^3.46.0
+        version: 3.46.0(react@19.1.1)
       react:
         specifier: ^19.1.1
         version: 19.1.1
@@ -1456,6 +1462,14 @@ packages:
     resolution: {integrity: sha512-33kzHZa7h6/EygeLZDcm1PNRTlybokz8dzAh2JYjpETf77pG8jhPmEfrI2oHSAdgNeK7A3OMcGA/EwEN7EJdzw==}
     peerDependencies:
       storybook: ^8.2.0 || ^8.3.0-0 || ^8.4.0-0 || ^8.5.0-0 || ^8.6.0-0
+
+  '@tabler/icons-react@3.46.0':
+    resolution: {integrity: sha512-CCm7xJWhDT2PH4ZIFkP6AgYKtVhq0gpYkjUN+GVh1AzmIQaa77OW0bQPBPQiTE0PsXMR9oSxFqA3qBglzPyrVQ==}
+    peerDependencies:
+      react: '>= 16'
+
+  '@tabler/icons@3.46.0':
+    resolution: {integrity: sha512-f2RYFl3fzPwj5WO82x6en0dmkjefxEfOm16D1ByM6cj/McNiwOkL4VaPUoP9VVIrXAD9WnTSVFr70px703b//A==}
 
   '@tanstack/history@1.132.31':
     resolution: {integrity: sha512-UCHM2uS0t/uSszqPEo+SBSSoQVeQ+LlOWAVBl5SA7+AedeAbKafIPjFn8huZCXNLAYb0WKV2+wETr7lDK9uz7g==}
@@ -5112,6 +5126,13 @@ snapshots:
   '@storybook/types@8.6.14(storybook@9.1.10(@testing-library/dom@10.4.1)(msw@2.11.3(@types/node@24.6.2)(typescript@5.9.3))(prettier@3.6.2)(rolldown-vite@7.1.12(@types/node@24.6.2)(esbuild@0.25.10)(tsx@4.20.6)(yaml@2.8.1)))':
     dependencies:
       storybook: 9.1.10(@testing-library/dom@10.4.1)(msw@2.11.3(@types/node@24.6.2)(typescript@5.9.3))(prettier@3.6.2)(rolldown-vite@7.1.12(@types/node@24.6.2)(esbuild@0.25.10)(tsx@4.20.6)(yaml@2.8.1))
+
+  '@tabler/icons-react@3.46.0(react@19.1.1)':
+    dependencies:
+      '@tabler/icons': 3.46.0
+      react: 19.1.1
+
+  '@tabler/icons@3.46.0': {}
 
   '@tanstack/history@1.132.31': {}
 
