@@ -229,6 +229,11 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 		fitView({ nodes: [{ id }], duration: 500, maxZoom: 1 });
 	};
 
+	/** Focus visuel sans recadrer. Utilisé par le clic-droit : ouvrir le menu
+	 * sans déplacer la vue (sinon la table glisse sous le curseur et le menu,
+	 * positionné en coordonnées écran, se retrouve à côté). */
+	const focusWithoutFit = (id: string) => setFocusId(id);
+
 	const clearFocus = () => {
 		setFocusId(null);
 		fitView({ padding: 0.15, duration: 400 });
@@ -285,7 +290,9 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 				onNodeContextMenu={(event, node) => {
 					if ((node as { type?: string }).type === "frame") return;
 					event.preventDefault();
-					focusNode(node.id);
+					// Focus visuel (ring + drawer) sans fitView : la vue ne bouge pas,
+					// donc le menu positionné en clientX/Y reste face à la carte cliquée.
+					focusWithoutFit(node.id);
 					setMenu({
 						x: event.clientX,
 						y: event.clientY,
