@@ -23,19 +23,27 @@ const SAMPLE_FRAMES: Frame[] = [
 	}
 ];
 
+const SAMPLE_TABLES: ReadonlySet<string> = new Set(
+	SAMPLE_FRAMES.flatMap((f) => f.collections)
+);
+
 /**
  * Regroupe les tables en frames colorés pour l'aperçu macro. Minimum viable
  * 1a : la fixture d'exemple (`SAMPLE_POSTGRES`/`SAMPLE_MONGODB`) porte deux
- * frames statiques ; toute base introspectée renvoie une liste vide (les
- * frames dérivés d'une heuristique/IA sont hors périmètre — voir vault
- * `The Cross-DB Reader`).
+ * frames statiques ; toute base introspectée avec des tables **hors sample**
+ * renvoie une liste vide (les frames sont visuellement trompeurs si une
+ * partie des tables du canvas n'est couverte par aucun frame — un frame
+ * calculé sur un sous-ensemble se retrouve à côté d'orphelins mal placés).
+ * Les frames dérivés d'une heuristique/IA sont hors périmètre —
+ * voir vault `The Cross-DB Reader`.
  */
 export function framesFor(schema: SchemaModel): Frame[] {
 	const names = new Set(schema.collections.map((c) => c.name));
-	const inSample = SAMPLE_FRAMES.every((f) =>
-		f.collections.every((c) => names.has(c) || c === "carts")
-	);
-	if (!inSample) return [];
+	// Toutes les tables du schéma doivent être couvertes par un frame
+	// hardcodé — sinon on hide tout (des orphelins autour d'un frame
+	// donneraient un rendu incohérent, cf. bug reviews/addresses).
+	const allCovered = [...names].every((c) => SAMPLE_TABLES.has(c));
+	if (!allCovered) return [];
 	return SAMPLE_FRAMES.map((f) => ({
 		...f,
 		collections: f.collections.filter((c) => names.has(c))

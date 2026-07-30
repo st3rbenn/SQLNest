@@ -4,7 +4,7 @@ import fp from "fastify-plugin";
 const schema = {
 	type: "object",
 	properties: {
-		NODE_ENV: { type: "string", enum: ["development", "production"] },
+		NODE_ENV: { type: "string", enum: ["development", "production"], default: "development" },
 		FRONTEND_URL: { type: "string", default: "http://localhost:3000" },
 		BASE_URL: { type: "string", default: "http://localhost:4000" }
 	},
