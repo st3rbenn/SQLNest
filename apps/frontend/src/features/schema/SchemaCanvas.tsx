@@ -706,19 +706,47 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 	// pour rester à jour dans le calcul sans re-trigger l'effet.
 	const safeAreaRef = useRef(safeArea);
 	safeAreaRef.current = safeArea;
+	// Le container peut être en 0×0 quand l'effet tire pour la première
+	// fois (Vite dev + hydratation → warning RF "parent container needs
+	// width and height"). On rAF-retry jusqu'à ce que le rect soit mesuré
+	// ET que RF ait terminé son propre mount (setViewport ignoré sinon).
+	// Guard `didFit` évite les re-fits inutiles ; reset quand base change.
+	const didFitRef = useRef(false);
 	useEffect(() => {
-		if (base === null || containerRef.current === null) return;
-		const bounds = tablesBounds(base.nodes);
-		if (bounds === null) return;
-		const rect = containerRef.current.getBoundingClientRect();
-		if (rect.width === 0 || rect.height === 0) return;
-		setViewport(
-			overviewViewport(bounds, rect, {
-				padding: OVERVIEW_FIT.padding,
-				maxZoom: OVERVIEW_FIT.maxZoom,
-				safeArea: safeAreaRef.current
-			})
-		);
+		didFitRef.current = false;
+	}, [base]);
+	useEffect(() => {
+		if (base === null) return;
+		if (didFitRef.current) return;
+		let cancelled = false;
+		let raf = 0;
+		const tryFit = () => {
+			if (cancelled || didFitRef.current) return;
+			if (containerRef.current === null) {
+				raf = requestAnimationFrame(tryFit);
+				return;
+			}
+			const rect = containerRef.current.getBoundingClientRect();
+			if (rect.width === 0 || rect.height === 0) {
+				raf = requestAnimationFrame(tryFit);
+				return;
+			}
+			const bounds = tablesBounds(base.nodes);
+			if (bounds === null) return;
+			didFitRef.current = true;
+			setViewport(
+				overviewViewport(bounds, rect, {
+					padding: OVERVIEW_FIT.padding,
+					maxZoom: OVERVIEW_FIT.maxZoom,
+					safeArea: safeAreaRef.current
+				})
+			);
+		};
+		raf = requestAnimationFrame(tryFit);
+		return () => {
+			cancelled = true;
+			cancelAnimationFrame(raf);
+		};
 	}, [base, setViewport]);
 
 	/** Focus visuel : isole une table, estompe le reste, ouvre le drawer d'infos —
