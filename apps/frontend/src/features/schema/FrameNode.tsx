@@ -31,12 +31,15 @@ const MIN_FRAME_HEIGHT = 120;
  * Le corps du frame ignore les pointer-events (pour que le clic sur une
  * table passe à travers), mais son **label** (le `FrameBadge` en coin)
  * ET les **handles de resize** (fournis par `NodeResizer`) les acceptent.
+ *
+ * Non-sélectionnable (`selectable: false` côté SchemaCanvas). Les gestes
+ * user sont : drag = déplacer, drag d'un handle = resize, double-clic
+ * badge = renommer, right-click badge = supprimer.
  */
 export function FrameNode({
 	data,
 	width,
 	height,
-	selected,
 	positionAbsoluteX,
 	positionAbsoluteY
 }: NodeProps<FrameNodeType>) {
@@ -65,10 +68,12 @@ export function FrameNode({
 
 	return (
 		<>
-			{/* Handles de resize (visibles quand le frame est sélectionné).
-			 * `pointerEvents` passe automatiquement à `auto` via les propres
-			 * styles de `NodeResizer` — nos overrides ci-dessous n'atteignent
-			 * pas ces handles. `onResizeEnd` persiste le nouveau rect. */}
+			{/* Handles de resize toujours visibles (frame non-sélectionnable).
+			 * Le tracking live des dimensions et position pendant le drag est
+			 * délégué à `SchemaCanvas.handleNodesChange` qui intercepte les
+			 * `dimensions` / `position` NodeChange émis par NodeResizer et les
+			 * route vers `framesApi.setFrameRect`. `onResizeEnd` sert juste au
+			 * signal de fin → reconciliation membership. */}
 			<NodeResizer
 				isVisible
 				minWidth={MIN_FRAME_WIDTH}
@@ -86,10 +91,6 @@ export function FrameNode({
 					borderWidth: 2
 				}}
 				onResizeEnd={(_, params) => {
-					// Marque la fin d'un drag de resize → reconciliation membership
-					// dans SchemaCanvas. Les dimensions/position en direct sont
-					// gérées via `handleNodesChange` (interception des `dimensions`
-					// et `position` changes émis par RF pendant le drag).
 					onResizeEnd?.({
 						x: params.x ?? positionAbsoluteX,
 						y: params.y ?? positionAbsoluteY,
@@ -100,20 +101,15 @@ export function FrameNode({
 			/>
 			<div
 				style={{
-					// Suit les dimensions React du node — mises à jour en direct
-					// pendant le drag grâce au handler `onResize` (live setFrameRect
-					// → re-render → nouvelles width/height dans les props).
+					// Suit les dimensions React (width/height du node), mises à
+					// jour en direct par `SchemaCanvas.handleNodesChange` qui
+					// route les `dimensions` NodeChange RF vers setFrameRect.
 					width,
 					height,
 					borderRadius: 14,
 					border: `2px solid hsl(${frame.hue}, 55%, 60%)`,
 					background: `hsla(${frame.hue}, 60%, 90%, 0.35)`,
-					// Sélectionné → halo bleu autour, garde le style couleur du frame
-					// intact. Sinon → ombre inset douce comme avant.
-					boxShadow: selected
-						? "0 0 0 3px rgba(37,99,235,0.45), inset 0 0 0 1px rgba(255,255,255,0.6)"
-						: "inset 0 0 0 1px rgba(255,255,255,0.6)",
-					transition: "box-shadow 120ms",
+					boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.6)",
 					position: "relative",
 					pointerEvents: "none"
 				}}

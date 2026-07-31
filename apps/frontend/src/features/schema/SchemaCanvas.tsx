@@ -414,20 +414,36 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 	// via lasso + F et le menu contextuel « Retirer du frame ».
 	const framesApi = useFrames(schema);
 
-	// Intercept les changes RF pour les frames (préfixe `frame:`) et route
-	// vers `framesApi.setFrameRect`. Sinon les changements `dimensions` /
-	// `position` émis par NodeResizer sont silencieusement drops par
-	// `applyNodeChanges` (notre `nodes` state ne contient que les tables) →
-	// le resize ne s'appliquait jamais visuellement.
+	// Frames : deux chemins d'update qui doivent cohabiter sans se marcher
+	// dessus :
+	//   (A) DRAG du frame — le user attrape le corps → `onNodeDrag` custom
+	//       (plus bas) shift TOUS les membres + call setFrameRect à chaque
+	//       tick. `frameDragStateRef` est set pendant ce geste.
+	//   (B) RESIZE via handle NodeResizer — RF dispatche `dimensions` et,
+	//       pour les corners top/left, ALSO des `position` NodeChange.
+	//       `onNodeDrag` NE fire PAS. Ces changes finissent par défaut dans
+	//       `applyNodeChanges(nodes)` où `nodes` ne contient que les tables →
+	//       drop silencieux → resize visuellement figé.
+	// Notre `handleNodesChange` intercepte (B) : dimensions + position pour
+	// les IDs `frame:*` → route vers `framesApi.setFrameRect`. On saute les
+	// `position` quand un drag est en cours pour le frame concerné (chemin A
+	// gère déjà, éviter la double-update).
 	const framesApiRef = useRef(framesApi);
 	framesApiRef.current = framesApi;
+	const frameDragStateRef = useRef<{
+		frameKey: string;
+		frameOrigin: { x: number; y: number };
+		rectSize: { width: number; height: number };
+		memberOrigins: Map<string, { x: number; y: number }>;
+	} | null>(null);
 	const handleNodesChange = useCallback(
 		(changes: NodeChange[]) => {
-			const tableChanges: NodeChange[] = [];
+			const restChanges: NodeChange[] = [];
 			const api = framesApiRef.current;
+			const dragKey = frameDragStateRef.current?.frameKey;
 			for (const c of changes) {
 				if (!c.id?.startsWith("frame:")) {
-					tableChanges.push(c);
+					restChanges.push(c);
 					continue;
 				}
 				const key = c.id.slice("frame:".length);
@@ -440,7 +456,10 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 						width: c.dimensions.width,
 						height: c.dimensions.height
 					});
-				} else if (c.type === "position" && c.position) {
+				} else if (c.type === "position" && c.position && key !== dragKey) {
+					// Position d'un frame → uniquement durant un resize corner
+					// top/left. Pendant un drag (dragKey === key), `onNodeDrag`
+					// custom gère déjà avec le shift des membres.
 					api.setFrameRect(key, {
 						x: c.position.x,
 						y: c.position.y,
@@ -448,8 +467,9 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 						height: frame.rect.height
 					});
 				}
+				// select/remove/… pour les frames → ignorés (non-selectable).
 			}
-			if (tableChanges.length > 0) onNodesChange(tableChanges);
+			if (restChanges.length > 0) onNodesChange(restChanges);
 		},
 		[onNodesChange]
 	);
@@ -538,20 +558,13 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 	const nodesRef = useRef(nodes);
 	nodesRef.current = nodes;
 
-	// Snapshot du drag de frame en cours — capturé au `onNodeDragStart` et
-	// consommé par `onNodeDrag`/`onNodeDragStop`. Sans cette ref, la version
-	// naïve (dx = node.position - frame.rect) est vulnérable au batching
-	// React 18 : plusieurs mousemove peuvent tirer avant qu'un setFrameRect
-	// ait committé, `frame.rect` reste stale, dx explose, les membres
-	// dérivent plus vite que le frame. Ici on calcule le delta ABSOLU depuis
-	// l'origine et on re-place chaque membre à `origin + delta` → indépendant
-	// des cycles de commit.
-	const frameDragStateRef = useRef<{
-		frameKey: string;
-		frameOrigin: { x: number; y: number };
-		rectSize: { width: number; height: number };
-		memberOrigins: Map<string, { x: number; y: number }>;
-	} | null>(null);
+	// `frameDragStateRef` déclaré plus haut (partagé avec handleNodesChange
+	// pour éviter la double-update des `position` NodeChange pendant un drag).
+	// Le snapshot capturé au `onNodeDragStart` calcule un delta ABSOLU depuis
+	// l'origine → immune au batching React 18 (plusieurs mousemove peuvent
+	// tirer avant qu'un setFrameRect ait committé, dx naïf `node.position -
+	// frame.rect` exploserait, les membres dériveraient plus vite que le
+	// frame).
 
 	// Après un resize du frame : recompute la membership. Toute table dont
 	// le centre tombe HORS du nouveau rect est retirée du frame — sinon le
