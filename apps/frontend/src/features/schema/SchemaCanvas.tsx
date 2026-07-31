@@ -28,6 +28,7 @@ import "@xyflow/react/dist/style.css";
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CanvasContextMenu } from "./CanvasContextMenu";
 import { CanvasToolbar } from "./CanvasToolbar";
+import { bestHandles } from "./edgeRouting";
 import { FrameNode, type FrameNodeType } from "./FrameNode";
 import { type Frame, type FrameRect, rectContainsPoint } from "./frames";
 import { buildLayout, type LayoutResult } from "./layout";
@@ -522,6 +523,13 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 		[frameNodes, displayTableNodes]
 	);
 
+	// Index rapide pour l'auto-routing des edges — évite un O(n) par edge.
+	const nodeById = useMemo(() => {
+		const map = new Map<string, TableNodeType>();
+		for (const n of nodes) map.set(n.id, n);
+		return map;
+	}, [nodes]);
+
 	const displayEdges = useMemo(
 		() =>
 			(base?.edges ?? [])
@@ -531,8 +539,36 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 						focusId !== null && (e.source === focusId || e.target === focusId);
 					const dim = focusId !== null && !touchesFocus;
 					const inferred = (e.data as { inferred?: boolean })?.inferred;
+					// Auto-routing : pour chaque edge, choisir le meilleur couple
+					// (source-side, target-side) selon les positions vivantes des
+					// tables — recalculé à chaque drag → les arrows suivent.
+					const src = nodeById.get(e.source);
+					const tgt = nodeById.get(e.target);
+					const handles =
+						src && tgt
+							? bestHandles(
+									{
+										x: src.position.x,
+										y: src.position.y,
+										width: src.width ?? NODE_WIDTH,
+										height: src.height ?? nodeHeight(src.data.collection)
+									},
+									{
+										x: tgt.position.x,
+										y: tgt.position.y,
+										width: tgt.width ?? NODE_WIDTH,
+										height: tgt.height ?? nodeHeight(tgt.data.collection)
+									}
+								)
+							: null;
 					return {
 						...e,
+						...(handles
+							? {
+									sourceHandle: handles.source,
+									targetHandle: handles.target
+								}
+							: {}),
 						style: {
 							...e.style,
 							stroke: dim ? "#cbd5e1" : inferred ? INFERRED : DECLARED,
@@ -542,7 +578,7 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 						zIndex: touchesFocus ? 10 : 0
 					};
 				}),
-		[base, focusId, hiddenIds]
+		[base, focusId, hiddenIds, nodeById]
 	);
 
 	// `safeArea` = bandes occupées par les panels flottants ou dockés :

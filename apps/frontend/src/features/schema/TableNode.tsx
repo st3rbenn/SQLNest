@@ -7,8 +7,9 @@ import {
 	Position,
 	useStore
 } from "@xyflow/react";
-import type { CSSProperties } from "react";
+import { Fragment, type CSSProperties } from "react";
 import { colorFor } from "./colors";
+import type { Side } from "./edgeRouting";
 import type { Collection } from "./schema-model";
 import { levelForZoom, type ZoomLevel } from "./zoomLevel";
 
@@ -40,6 +41,43 @@ export interface TableNodeData {
 export type TableNodeType = Node<TableNodeData, "table">;
 
 const HIDDEN_HANDLE: CSSProperties = { opacity: 0, border: "none" };
+
+/**
+ * 4 côtés × (source + target) = 8 handles par table. Les edges pointent
+ * chacun sur une paire précise via `sourceHandle`/`targetHandle` (calculée
+ * dans `SchemaCanvas.displayEdges` selon les positions relatives). Sans ces
+ * 4 côtés, RF n'aurait que Left/Right et les tables empilées verticalement
+ * verraient leurs arrows partir dans le vide.
+ */
+const HANDLE_SIDES: readonly { id: Side; position: Position }[] = [
+	{ id: "top", position: Position.Top },
+	{ id: "right", position: Position.Right },
+	{ id: "bottom", position: Position.Bottom },
+	{ id: "left", position: Position.Left }
+];
+
+function AllHandles() {
+	return (
+		<>
+			{HANDLE_SIDES.map((s) => (
+				<Fragment key={s.id}>
+					<Handle
+						id={s.id}
+						type="source"
+						position={s.position}
+						style={HIDDEN_HANDLE}
+					/>
+					<Handle
+						id={s.id}
+						type="target"
+						position={s.position}
+						style={HIDDEN_HANDLE}
+					/>
+				</Fragment>
+			))}
+		</>
+	);
+}
 
 /**
  * Sélecteur Zustand : niveau LOD dérivé du zoom courant. On ne remonte QUE
@@ -95,16 +133,7 @@ export function TableNode({ data }: NodeProps<TableNodeType>) {
 				color="dark"
 			>
 				<div style={{ ...shellStyle, background: color.border }}>
-					<Handle
-						type="target"
-						position={Position.Left}
-						style={HIDDEN_HANDLE}
-					/>
-					<Handle
-						type="source"
-						position={Position.Right}
-						style={HIDDEN_HANDLE}
-					/>
+					<AllHandles />
 				</div>
 			</Tooltip>
 		);
@@ -116,7 +145,7 @@ export function TableNode({ data }: NodeProps<TableNodeType>) {
 	const hidden = collection.fields.length - shown.length;
 	return (
 		<div style={shellStyle}>
-			<Handle type="target" position={Position.Left} style={HIDDEN_HANDLE} />
+			<AllHandles />
 			<div
 				style={{
 					display: "flex",
@@ -188,7 +217,6 @@ export function TableNode({ data }: NodeProps<TableNodeType>) {
 					</div>
 				) : null}
 			</div>
-			<Handle type="source" position={Position.Right} style={HIDDEN_HANDLE} />
 		</div>
 	);
 }
