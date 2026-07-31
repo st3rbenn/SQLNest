@@ -1,0 +1,12 @@
+/*
+ * Overrides RF pour un feel Figma :
+ * - masque le bounding-box qui entoure une multi-sélection de nœuds
+ *   (`.react-flow__nodesselection`). L'utilisateur veut voir uniquement
+ *   le highlight PAR nœud, pas le rectangle qui les regroupe.
+ * - masque aussi le rectangle interne (`.react-flow__nodesselection-rect`)
+ *   au cas où RF le rendrait séparément.
+ */
+.react-flow__nodesselection,
+.react-flow__nodesselection-rect {
+	display: none !important;
+}

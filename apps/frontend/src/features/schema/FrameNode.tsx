@@ -94,7 +94,12 @@ export function FrameNode({
 					borderRadius: 14,
 					border: `2px solid hsl(${frame.hue}, 55%, 60%)`,
 					background: `hsla(${frame.hue}, 60%, 90%, 0.35)`,
-					boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.6)",
+					// Sélectionné → halo bleu autour, garde le style couleur du frame
+					// intact. Sinon → ombre inset douce comme avant.
+					boxShadow: selected
+						? "0 0 0 3px rgba(37,99,235,0.45), inset 0 0 0 1px rgba(255,255,255,0.6)"
+						: "inset 0 0 0 1px rgba(255,255,255,0.6)",
+					transition: "box-shadow 120ms",
 					position: "relative",
 					pointerEvents: "none"
 				}}
