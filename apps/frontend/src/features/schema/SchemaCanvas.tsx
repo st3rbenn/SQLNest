@@ -10,7 +10,11 @@ import {
 } from "@sqlnest/design-system";
 import { useNavigate } from "@tanstack/react-router";
 import { buildCanvasCommands } from "./commands";
-import { Box, UnstyledButton } from "@mantine/core";
+import { ActionIcon, Box, UnstyledButton } from "@mantine/core";
+import {
+	IconLayoutSidebarLeftCollapse,
+	IconLayoutSidebarLeftExpand
+} from "@tabler/icons-react";
 import {
 	Background,
 	Controls,
@@ -25,7 +29,15 @@ import {
 	useReactFlow
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+	startTransition,
+	useCallback,
+	useEffect,
+	useMemo,
+	useRef,
+	useState
+} from "react";
+import { CanvasConsole } from "./CanvasConsole";
 import { CanvasContextMenu } from "./CanvasContextMenu";
 import { CanvasToolbar } from "./CanvasToolbar";
 import { bestHandles, type Side, spreadOffsets } from "./edgeRouting";
@@ -286,9 +298,7 @@ export function boundsOfTables(
 	const maxX = Math.max(
 		...tables.map((n) => n.position.x + (n.width ?? NODE_WIDTH))
 	);
-	const maxY = Math.max(
-		...tables.map((n) => n.position.y + (n.height ?? 200))
-	);
+	const maxY = Math.max(...tables.map((n) => n.position.y + (n.height ?? 200)));
 	return {
 		x: minX - pad,
 		y: minY - pad,
@@ -443,7 +453,7 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 			const rect = boundsOfTables(members, FRAME_PAD);
 			if (rect) framesApi.setFrameRect(frame.key, rect);
 		}
-	// biome-ignore lint/correctness/useExhaustiveDependencies: framesApi lu via closure — ok car le ref garantit exec unique
+		// biome-ignore lint/correctness/useExhaustiveDependencies: framesApi lu via closure — ok car le ref garantit exec unique
 	}, [base, nodes]);
 
 	// Voisinage FK direct du nœud focalisé (le nœud + ses 1-sauts).
@@ -537,13 +547,7 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 				handleFrameResize,
 				handleFrameRename
 			),
-		[
-			framesApi.frames,
-			nodes,
-			hiddenIds,
-			handleFrameResize,
-			handleFrameRename
-		]
+		[framesApi.frames, nodes, hiddenIds, handleFrameResize, handleFrameRename]
 	);
 
 	const displayNodes = useMemo<SchemaNode[]>(
@@ -666,18 +670,53 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 		});
 	}, [base, focusId, hiddenIds, nodeById, edgeAnchors.overrides, anchorApi]);
 
+	// Hauteur courante de la console SNQL (bas droite). Publiée par
+	// `CanvasConsole.onHeightChange` — sert (a) au safeArea pour que le
+	// fit initial garde le contenu au-dessus de la console, (b) au
+	// bottom-offset de la toolbar horizontale pour qu'elle remonte quand
+	// la console s'ouvre.
+	const [consoleHeight, setConsoleHeight] = useState(38);
+	const CONSOLE_GAP = 8;
+
+	// Visibilité du drawer gauche — masquable via un IconButton pour libérer
+	// de l'espace sur les petits écrans. Persisté en localStorage : au refresh,
+	// le drawer garde sa dernière position. `leftPadding` dérivé sert au
+	// safeArea (fit initial) et à la console SNQL (leftOffset).
+	const [leftDrawerVisible, setLeftDrawerVisible] = useState<boolean>(() => {
+		if (typeof window === "undefined") return true;
+		try {
+			return (
+				window.localStorage.getItem("sqlnest:canvas:leftDrawer") !== "hidden"
+			);
+		} catch {
+			return true;
+		}
+	});
+	useEffect(() => {
+		if (typeof window === "undefined") return;
+		try {
+			window.localStorage.setItem(
+				"sqlnest:canvas:leftDrawer",
+				leftDrawerVisible ? "visible" : "hidden"
+			);
+		} catch {
+			/* quota / private mode */
+		}
+	}, [leftDrawerVisible]);
+	const leftPadding = leftDrawerVisible ? 300 + 8 : 8;
+
 	// `safeArea` = bandes occupées par les panels flottants ou dockés :
-	// - gauche : drawer arbre docké (300 px pleine hauteur)
+	// - gauche : drawer arbre docké (300 px pleine hauteur) OU juste padding
 	// - droite : drawer TableDetails flottant (352 px) seulement au focus
-	// - bas   : toolbar horizontale flottante (~68 px avec ses marges)
+	// - bas   : toolbar (68 px) + console (dynamique, poussée au-dessus)
 	const safeArea = useMemo(
 		() => ({
-			left: 300 + 8,
+			left: leftPadding,
 			right: focusId !== null ? 12 + 340 + 8 : 8,
 			top: 12,
-			bottom: 68
+			bottom: 68 + consoleHeight + CONSOLE_GAP
 		}),
-		[focusId]
+		[focusId, consoleHeight, leftPadding]
 	);
 
 	// Vue aérienne au 1er layout SEULEMENT — on ne re-fit pas quand `safeArea`
@@ -727,8 +766,7 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 		}
 		const cx = node.position.x + (node.width ?? NODE_WIDTH) / 2;
 		const cy =
-			node.position.y +
-			(node.height ?? nodeHeight(node.data.collection)) / 2;
+			node.position.y + (node.height ?? nodeHeight(node.data.collection)) / 2;
 		const from = getViewport();
 		const zoom = focusZoom(from.zoom, {
 			min: FOCUS_ZOOM_MIN,
@@ -1046,7 +1084,11 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 				// n'est pas encore mesuré (Mantine AppShell hydrate en 2 passes) ;
 				// dès que les nodes sont mesurés, l'effet `nodesInitialized`
 				// ci-dessus appelle `fitView(OVERVIEW_FIT)` pour un cadrage parfait.
-				defaultViewport={{ x: 0, y: 0, zoom: initialZoom(schema.collections.length) }}
+				defaultViewport={{
+					x: 0,
+					y: 0,
+					zoom: initialZoom(schema.collections.length)
+				}}
 				fitViewOptions={OVERVIEW_FIT}
 				minZoom={0.02}
 				maxZoom={1.75}
@@ -1054,7 +1096,13 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 				proOptions={{ hideAttribution: false }}
 			>
 				<Background color="#e2e8f0" gap={20} />
-				<Controls showInteractive={false} />
+				{/* Contrôles RF (+/−, fit) et minimap remontés au-dessus de la
+				 * console SNQL — sans ça ils passent derrière quand elle est
+				 * ouverte. Bottom = hauteur console + gap standard. */}
+				<Controls
+					showInteractive={false}
+					style={{ bottom: consoleHeight + CONSOLE_GAP + 4 }}
+				/>
 				<MiniMap
 					pannable
 					zoomable
@@ -1066,7 +1114,10 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 							: DECLARED;
 					}}
 					nodeStrokeWidth={0}
-					style={{ background: "#f8fafc" }}
+					style={{
+						background: "#f8fafc",
+						bottom: consoleHeight + CONSOLE_GAP + 4
+					}}
 				/>
 				{focusId ? (
 					<Panel position="bottom-center">
@@ -1091,61 +1142,106 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 				) : null}
 			</ReactFlow>
 
-			{/* Toolbar verticale gauche */}
-			<CanvasToolbar onAutoLayout={relayoutAll} />
+			{/* Toolbar horizontale bas-centre — remonte au-dessus de la console
+			 * SNQL quand elle est ouverte pour rester accessible. */}
+			<CanvasToolbar
+				onAutoLayout={relayoutAll}
+				bottomOffset={consoleHeight + CONSOLE_GAP}
+			/>
 
-			{/* Drawer gauche docké : arborescence (frames + reste), pleine
-			 * hauteur, collé au bord. La pill Cmd+K vit dans son footer. */}
-			<Box
+			{/* Console SNQL escamotable (bas-droit, à droite du drawer). */}
+			<CanvasConsole
+				engine={schema.engine as "postgres" | "mongodb"}
+				leftOffset={leftPadding}
+				onHeightChange={setConsoleHeight}
+			/>
+
+			{/* Toggle drawer gauche : ActionIcon flottant qui bascule sur le
+			 * bord du drawer (visible) ou au coin canvas (masqué). */}
+			<ActionIcon
+				variant="filled"
+				size="lg"
+				radius="md"
+				onClick={() => setLeftDrawerVisible((x) => !x)}
+				aria-label={
+					leftDrawerVisible
+						? "Masquer le drawer gauche"
+						: "Afficher le drawer gauche"
+				}
 				style={{
 					position: "absolute",
-					top: 0,
-					left: 0,
-					bottom: 0,
-					zIndex: 4
+					top: 12,
+					left: leftDrawerVisible ? 300 - 18 : 8,
+					zIndex: 5,
+					background: "#fff",
+					color: "#475569",
+					border: "1px solid #e2e8f0",
+					boxShadow: "0 2px 6px rgba(15,23,42,0.10)",
+					transition: "left 180ms ease-out"
 				}}
 			>
-				<SidebarDrawer
-					variant="docked"
-					title="Schéma"
-					header={
-						<SearchInput
-							value={search}
-							onChange={(e) => setSearch(e.currentTarget.value)}
-							placeholder={`Rechercher parmi ${schema.collections.length} tables…`}
-						/>
-					}
-					footer={
-						<UnstyledButton
-							onClick={() => spotlight.open()}
-							aria-label="Ouvrir la palette de commandes"
-							style={{ width: "100%" }}
-						>
-							<HintPill
-								keys={["⌘K"]}
-								bg="transparent"
-								withBorder={false}
-								shadow="none"
-								style={{
-									display: "flex",
-									justifyContent: "center"
-								}}
-							>
-								Actions rapides
-							</HintPill>
-						</UnstyledButton>
-					}
-					style={{ height: "100%" }}
+				{leftDrawerVisible ? (
+					<IconLayoutSidebarLeftCollapse size={16} />
+				) : (
+					<IconLayoutSidebarLeftExpand size={16} />
+				)}
+			</ActionIcon>
+
+			{/* Drawer gauche docké : arborescence (frames + reste), pleine
+			 * hauteur, collé au bord. La pill Cmd+K vit dans son footer.
+			 * Masquable via le toggle ci-dessus. */}
+			{leftDrawerVisible ? (
+				<Box
+					style={{
+						position: "absolute",
+						top: 0,
+						left: 0,
+						bottom: 0,
+						zIndex: 4
+					}}
 				>
-					<SchemaTree
-						schema={schema}
-						frames={framesApi.frames}
-						focusId={focusId}
-						search={search}
-						onSelect={focusAndZoom}
-					/>
-				</SidebarDrawer>
-			</Box>
+					<SidebarDrawer
+						variant="docked"
+						title="Schéma"
+						header={
+							<SearchInput
+								value={search}
+								onChange={(e) => setSearch(e.currentTarget.value)}
+								placeholder={`Rechercher parmi ${schema.collections.length} tables…`}
+							/>
+						}
+						footer={
+							<UnstyledButton
+								onClick={() => spotlight.open()}
+								aria-label="Ouvrir la palette de commandes"
+								style={{ width: "100%" }}
+							>
+								<HintPill
+									keys={["⌘K"]}
+									bg="transparent"
+									withBorder={false}
+									shadow="none"
+									style={{
+										display: "flex",
+										justifyContent: "center"
+									}}
+								>
+									Actions rapides
+								</HintPill>
+							</UnstyledButton>
+						}
+						style={{ height: "100%" }}
+					>
+						<SchemaTree
+							schema={schema}
+							frames={framesApi.frames}
+							focusId={focusId}
+							search={search}
+							onSelect={focusAndZoom}
+						/>
+					</SidebarDrawer>
+				</Box>
+			) : null}
 
 			{/* Drawer droit : infos de la table focus (visible uniquement quand focus). */}
 			{focusId !== null ? (

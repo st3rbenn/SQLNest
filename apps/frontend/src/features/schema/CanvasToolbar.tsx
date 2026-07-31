@@ -30,17 +30,21 @@ const notImplemented = (label: string) =>
 
 interface Props {
 	readonly onAutoLayout?: () => void;
+	/** Décalage supplémentaire depuis le bas (px) — utilisé par SchemaCanvas
+	 * pour remonter la toolbar au-dessus de la console SNQL quand elle est
+	 * ouverte. */
+	readonly bottomOffset?: number;
 }
 
 const ICON = { size: 18, stroke: 1.8 } as const;
 
 /** Toolbar horizontale du canvas Schéma — flottante en bas-centre. */
-export function CanvasToolbar({ onAutoLayout }: Props) {
+export function CanvasToolbar({ onAutoLayout, bottomOffset = 0 }: Props) {
 	const [tool, setTool] = useState<Tool>("select");
 	return (
 		<FloatingPanel
 			position="bottom-center"
-			offset={{ x: 0, y: 16 }}
+			offset={{ x: 0, y: 16 + bottomOffset }}
 			p={0}
 			withBorder={false}
 			shadow="none"

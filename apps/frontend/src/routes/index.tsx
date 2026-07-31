@@ -3,9 +3,8 @@ import {
 	StatusPill,
 	type StatusPillVariant
 } from "@sqlnest/design-system";
-import { TextInput } from "@mantine/core";
 import { createFileRoute } from "@tanstack/react-router";
-import { type CSSProperties, useState } from "react";
+import type { CSSProperties } from "react";
 import { SchemaCanvas } from "../features/schema/SchemaCanvas";
 import { SAMPLE_POSTGRES } from "../features/schema/schema-model";
 import { SchemaRequestError, useSchema } from "../features/schema/useSchema";
@@ -30,8 +29,11 @@ const pageStyle: CSSProperties = {
 };
 
 function SchemaPage() {
-	const [pgSchema, setPgSchema] = useState("");
-	const targetSchema = pgSchema.trim() || undefined;
+	// Le sélecteur de schéma Postgres (input "schéma public") a été retiré
+	// de cette page — cette info remontera dans le breadcrumb en haut du
+	// canvas (cf. memory `todo-canvas-breadcrumbs`). En attendant, on
+	// interroge le schéma par défaut (`public`).
+	const targetSchema: string | undefined = undefined;
 	const { data, error, isLoading } = useSchema(ENGINE, targetSchema);
 	const schema = data ?? SAMPLE_POSTGRES;
 	const badSchema =
@@ -78,32 +80,6 @@ function SchemaPage() {
 
 	return (
 		<div style={pageStyle}>
-			{/* Panel flottant : champ schéma (Postgres uniquement pour l'instant).
-			 * Le sélecteur de moteur migrera vers la page de connexion. */}
-			<FloatingPanel position="top-left" offset={{ x: 316, y: 12 }} p="xs">
-				<TextInput
-					value={pgSchema}
-					onChange={(e) => setPgSchema(e.currentTarget.value)}
-					placeholder="public"
-					size="xs"
-					radius="sm"
-					w={140}
-					spellCheck={false}
-					leftSection={
-						<span style={{ fontSize: 10, color: "var(--mantine-color-slate-5)" }}>
-							schéma
-						</span>
-					}
-					leftSectionWidth={52}
-					styles={{
-						input: {
-							fontFamily: "var(--mantine-font-family-monospace)",
-							paddingLeft: 56
-						}
-					}}
-				/>
-			</FloatingPanel>
-
 			{/* Bandeau statut : bottom-left, après le drawer. */}
 			<FloatingPanel
 				position="bottom-left"
