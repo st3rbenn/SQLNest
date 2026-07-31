@@ -13,7 +13,6 @@ import type { SchemaModel } from "./schema-model";
 type Engine = "postgres" | "mongodb";
 
 const CONSOLE_LS_KEY = "sqlnest:canvas-console:source";
-const CONSOLE_EXPANDED_LS_KEY = "sqlnest:canvas-console:expanded";
 const CONSOLE_HEIGHT_LS_KEY = "sqlnest:canvas-console:height";
 const CONSOLE_HISTORY_LS_KEY = "sqlnest:canvas-console:history";
 const HISTORY_MAX = 20;
@@ -61,26 +60,11 @@ export function CanvasConsole({
 	onHeightChange,
 	schema
 }: Props) {
-	// État `expanded` persisté en localStorage → survit au refresh.
-	const [expanded, setExpanded] = useState<boolean>(() => {
-		if (typeof window === "undefined") return false;
-		try {
-			return window.localStorage.getItem(CONSOLE_EXPANDED_LS_KEY) === "1";
-		} catch {
-			return false;
-		}
-	});
-	useEffect(() => {
-		if (typeof window === "undefined") return;
-		try {
-			window.localStorage.setItem(
-				CONSOLE_EXPANDED_LS_KEY,
-				expanded ? "1" : "0"
-			);
-		} catch {
-			/* quota / private mode */
-		}
-	}, [expanded]);
+	// État `expanded` volatile — reset au refresh. La persistance était
+	// plus embêtante qu'utile : à chaque refresh la console revenait ouverte
+	// même si l'utilisateur ne voulait pas la voir. La hauteur/source/histo
+	// restent persistés (contenu, pas chrome).
+	const [expanded, setExpanded] = useState(false);
 
 	// Hauteur `expanded` persistée : l'utilisateur peut redimensionner via
 	// la poignée en haut de la console. Clampée entre MIN et MAX.
@@ -506,7 +490,14 @@ const historyItemStyle: CSSProperties = {
 
 const resultsStyle: CSSProperties = {
 	flex: 1,
-	overflow: "auto",
+	minHeight: 0,
+	// Overflow HIDDEN ici, pas auto — sinon le sticky `<th>` s'attache
+	// à `tableWrapperStyle` qui scrolle avec `resultsStyle`, résultat :
+	// le header défile hors écran. Un seul scroll container = celui du
+	// tableWrapper (voir `tableWrapperStyle`).
+	overflow: "hidden",
+	display: "flex",
+	flexDirection: "column",
 	borderTop: "1px solid var(--mantine-color-slate-1, #f1f5f9)",
 	paddingTop: 8
 };
@@ -535,6 +526,11 @@ const resultHeaderStyle: CSSProperties = {
 };
 
 const tableWrapperStyle: CSSProperties = {
+	// Le vrai scroll container : `flex: 1` prend la place restante dans
+	// resultsStyle (flex column), `overflow: auto` scrolle en X et Y.
+	// `<th>` sticky s'attache ici — reste visible pendant le scroll.
+	flex: 1,
+	minHeight: 0,
 	overflow: "auto",
 	border: "1px solid var(--mantine-color-slate-2, #e2e8f0)",
 	borderRadius: 6

@@ -678,30 +678,12 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 	const CONSOLE_GAP = 8;
 
 	// Visibilité du drawer gauche — masquable via un IconButton pour libérer
-	// de l'espace sur les petits écrans. Persisté en localStorage : au refresh,
-	// le drawer garde sa dernière position. `leftPadding` dérivé sert au
-	// safeArea (fit initial) et à la console SNQL (leftOffset).
-	const [leftDrawerVisible, setLeftDrawerVisible] = useState<boolean>(() => {
-		if (typeof window === "undefined") return true;
-		try {
-			return (
-				window.localStorage.getItem("sqlnest:canvas:leftDrawer") !== "hidden"
-			);
-		} catch {
-			return true;
-		}
-	});
-	useEffect(() => {
-		if (typeof window === "undefined") return;
-		try {
-			window.localStorage.setItem(
-				"sqlnest:canvas:leftDrawer",
-				leftDrawerVisible ? "visible" : "hidden"
-			);
-		} catch {
-			/* quota / private mode */
-		}
-	}, [leftDrawerVisible]);
+	// de l'espace. État volatile (reset au refresh) : la persistance était
+	// plus embêtante qu'utile (le drawer revient à sa position par défaut
+	// à chaque rechargement, plus prévisible que "ce qu'il était avant").
+	// `leftPadding` dérivé sert au safeArea (fit initial) et à la console
+	// SNQL (leftOffset).
+	const [leftDrawerVisible, setLeftDrawerVisible] = useState(true);
 	const leftPadding = leftDrawerVisible ? 300 + 8 : 8;
 
 	// `safeArea` = bandes occupées par les panels flottants ou dockés :
