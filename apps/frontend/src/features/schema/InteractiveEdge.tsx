@@ -5,8 +5,16 @@ import {
 	Position,
 	useReactFlow
 } from "@xyflow/react";
-import { type CSSProperties, type PointerEvent, useRef, useState } from "react";
+import {
+	type CSSProperties,
+	type PointerEvent,
+	useEffect,
+	useRef,
+	useState
+} from "react";
 import { closestSide, type Side } from "./edgeRouting";
+import { humanFooter, humanRelation, joinPreview } from "./fkFormat";
+import type { Relation } from "./schema-model";
 
 export interface InteractiveEdgeData {
 	readonly setOverride?: (
@@ -20,6 +28,9 @@ export interface InteractiveEdgeData {
 	 * par `SchemaCanvas.displayEdges`. */
 	readonly sourceOffsetRatio?: number;
 	readonly targetOffsetRatio?: number;
+	/** Relation FK complète pour formatter le tooltip au hover (colonnes
+	 * reliées, kind/origine, preview SQL du join). */
+	readonly relation?: Relation;
 	readonly [key: string]: unknown;
 }
 
@@ -119,6 +130,69 @@ function anchorStyle(x: number, y: number): CSSProperties {
 		transform: `translate(-50%, -50%) translate(${x}px, ${y}px)`
 	};
 }
+
+/**
+ * Tooltip sombre au midpoint de l'edge — s'affiche au hover pour révéler
+ * la relation en langage humain (+ preview SQL discret en pied). Font-family
+ * système par défaut, seul le bloc SQL est monospacé. `pointerEvents: none`
+ * pour ne pas voler le hover à la ligne d'interaction.
+ */
+const TOOLTIP_BASE: CSSProperties = {
+	position: "absolute",
+	background: "#0f172a",
+	color: "#f1f5f9",
+	padding: "10px 14px",
+	borderRadius: 8,
+	fontSize: 13,
+	lineHeight: 1.5,
+	fontFamily: "ui-sans-serif, system-ui, -apple-system, sans-serif",
+	boxShadow: "0 6px 20px rgba(15,23,42,0.35)",
+	whiteSpace: "nowrap",
+	pointerEvents: "none",
+	zIndex: 11,
+	minWidth: 220
+};
+
+function tooltipStyle(
+	x: number,
+	y: number,
+	revealed: boolean
+): CSSProperties {
+	// Opacity + petit slide vers le haut pour un fade-in soigné (translate
+	// combine offset de position + décalage d'entrée). Transition dure 220ms.
+	const enterOffset = revealed ? "0px" : "6px";
+	return {
+		...TOOLTIP_BASE,
+		transform: `translate(-50%, calc(-100% - 6px + ${enterOffset})) translate(${x}px, ${y}px)`,
+		opacity: revealed ? 1 : 0,
+		transition: "opacity 220ms ease-out, transform 220ms ease-out"
+	};
+}
+
+const TOOLTIP_TABLE: CSSProperties = {
+	fontWeight: 700,
+	color: "#fff",
+	background: "rgba(255,255,255,0.08)",
+	padding: "1px 6px",
+	borderRadius: 4
+};
+
+const TOOLTIP_FOOTER: CSSProperties = {
+	marginTop: 4,
+	fontSize: 11,
+	color: "#94a3b8"
+};
+
+const TOOLTIP_SQL: CSSProperties = {
+	marginTop: 8,
+	padding: "6px 8px",
+	background: "rgba(255,255,255,0.05)",
+	borderRadius: 4,
+	fontSize: 10.5,
+	color: "#94a3b8",
+	fontFamily:
+		"ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace"
+};
 
 /**
  * Edge FK personnalisé avec endpoints déplaçables.
@@ -249,7 +323,7 @@ export function InteractiveEdge(props: EdgeProps) {
 	// la poignée pendant le drag. Au release, le SchemaCanvas réinjecte le
 	// vrai `sourceHandle`/`targetHandle` et RF recalcule sourceX/… → même
 	// path, transition invisible.
-	const [edgePath] = getSmoothStepPath({
+	const [edgePath, labelX, labelY] = getSmoothStepPath({
 		sourceX: srcXY.x,
 		sourceY: srcXY.y,
 		targetX: tgtXY.x,
@@ -257,6 +331,26 @@ export function InteractiveEdge(props: EdgeProps) {
 		sourcePosition: srcPos,
 		targetPosition: tgtPos
 	});
+
+	// Tooltip visible au hover simple (pas pendant un drag — on masque pour
+	// laisser la scène claire quand l'utilisateur repositionne un endpoint).
+	const showTooltip = hovered && dragEnd === null && api?.relation !== undefined;
+	const relation = api?.relation;
+
+	// Délai avant reveal : hover soutenu court avant que le tooltip apparaisse
+	// (fade-in), pour ne pas polluer la scène au moindre survol accidentel.
+	// La condition `hovered && !dragEnd` sert de gate — un drag ou une sortie
+	// du hover reset le timer via cleanup. Le tooltip mounte immédiatement à
+	// opacity 0 puis transition vers 1 quand `tooltipRevealed` bascule.
+	const [tooltipRevealed, setTooltipRevealed] = useState(false);
+	useEffect(() => {
+		if (!showTooltip) {
+			setTooltipRevealed(false);
+			return;
+		}
+		const t = window.setTimeout(() => setTooltipRevealed(true), 400);
+		return () => window.clearTimeout(t);
+	}, [showTooltip]);
 
 	const onDown = (end: "source" | "target") => (e: PointerEvent) => {
 		e.stopPropagation();
@@ -323,6 +417,27 @@ export function InteractiveEdge(props: EdgeProps) {
 				onMouseEnter={show}
 				onMouseLeave={hide}
 			/>
+			{showTooltip && relation !== undefined
+				? (() => {
+						const s = humanRelation(relation);
+						return (
+							<EdgeLabelRenderer>
+								<div style={tooltipStyle(labelX, labelY, tooltipRevealed)}>
+									<div>
+										{s.prefix}
+										<span style={TOOLTIP_TABLE}>{s.from}</span>
+										{s.middle}
+										<span style={TOOLTIP_TABLE}>{s.to}</span>
+									</div>
+									<div style={TOOLTIP_FOOTER}>{humanFooter(relation)}</div>
+									<div style={TOOLTIP_SQL}>
+										{joinPreview(relation.from, relation.to)}
+									</div>
+								</div>
+							</EdgeLabelRenderer>
+						);
+					})()
+				: null}
 			{showHandles ? (
 				<EdgeLabelRenderer>
 					{/* Anchors sur les 3 côtés autres que le snapped (pointer-events

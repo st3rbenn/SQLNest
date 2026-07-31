@@ -187,7 +187,9 @@ function makeEdge(rel: SchemaModel["relations"][number], i: number): Edge {
 			strokeWidth: 1.5,
 			strokeDasharray: inferred ? "5 4" : undefined
 		},
-		data: { inferred }
+		// `relation` intégral pour que le tooltip du hover puisse formater
+		// les colonnes reliées, la kind/origine et le preview SQL du join.
+		data: { inferred, relation: rel }
 	};
 }
 
