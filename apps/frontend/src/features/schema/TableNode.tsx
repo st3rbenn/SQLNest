@@ -1,3 +1,4 @@
+import { Tooltip } from "@mantine/core";
 import { KindBadge, TypePill } from "@sqlnest/design-system";
 import {
 	Handle,
@@ -41,30 +42,19 @@ export type TableNodeType = Node<TableNodeData, "table">;
 const HIDDEN_HANDLE: CSSProperties = { opacity: 0, border: "none" };
 
 /**
- * Sélecteur Zustand : (zoom brut quantifié à 0.01 + level dérivé). Le zoom
- * brut sert à compenser la font-size (inversement proportionnelle) pour que
- * les noms restent lisibles au zoom out. Quantification → réduit les re-renders
- * de ~100× (une seule fois par 0.01 de zoom).
+ * Sélecteur Zustand : niveau LOD dérivé du zoom courant. On ne remonte QUE
+ * le niveau (pas le zoom brut) — la node se re-render alors uniquement quand
+ * on franchit un seuil (3 fois au total sur toute la plage), pas à chaque
+ * pixel de zoom. La compensation dynamique de font-size a été retirée : les
+ * niveaux < full sont des cartes colorées silencieuses.
  */
-const zoomSelector = (s: {
+const levelSelector = (s: {
 	transform: readonly [number, number, number];
-}): { zoom: number; level: ZoomLevel } => {
-	const raw = s.transform[2];
-	const quantized = Math.round(raw * 100) / 100;
-	return { zoom: quantized, level: levelForZoom(quantized) };
-};
-
-/** Font-size world coord pour un nom lisible à l'écran quel que soit le zoom.
- *  Cible ~ 14 px écran (`14 / zoom`), clampée pour rester raisonnable
- *  aux extrêmes (jamais < 13, jamais > 180). */
-function nameFont(zoom: number, base = 14, min = 13, max = 180): number {
-	if (zoom <= 0) return min;
-	return Math.min(max, Math.max(min, base / zoom));
-}
+}): ZoomLevel => levelForZoom(s.transform[2]);
 
 export function TableNode({ data }: NodeProps<TableNodeType>) {
 	const { collection, dimmed, focused, matched } = data;
-	const { zoom, level } = useStore(zoomSelector);
+	const level = useStore(levelSelector);
 	const inferred = collection.source === "inferred";
 	const color = colorFor(collection.name);
 	const height = nodeHeight(collection);
@@ -90,91 +80,33 @@ export function TableNode({ data }: NodeProps<TableNodeType>) {
 		fontFamily: "ui-sans-serif, system-ui, sans-serif"
 	};
 
-	// ── LOD level 4 : dot (zoom < 0.1) ────────────────────────────────
-	// Wrapper rempli d'une couleur solide, pas de texte. Arrows attachés
-	// aux bords (comme les autres levels).
-	if (level === "dot") {
+	// ── LOD < full : cartes colorées silencieuses (dot / pill / compact) ────
+	// Les trois niveaux rendent le même HTML — seul le zoom RF les distingue
+	// visuellement (dot ≈ point coloré, compact ≈ carrelage). Le tooltip
+	// Mantine (portal → coord écran, taille constante) affiche le nom au
+	// survol : friendly, à la demande, aucun bruit au repos.
+	if (level !== "full") {
 		return (
-			<div
-				style={{
-					...shellStyle,
-					background: color.border
-				}}
+			<Tooltip
+				label={collection.name}
+				openDelay={150}
+				withArrow
+				position="top"
+				color="dark"
 			>
-				<Handle type="target" position={Position.Left} style={HIDDEN_HANDLE} />
-				<Handle type="source" position={Position.Right} style={HIDDEN_HANDLE} />
-			</div>
-		);
-	}
-
-	// ── LOD level 3 : pill (0.1 ≤ zoom < 0.2) ─────────────────────────
-	// Wrapper rempli couleur.header, nom centré en gros (font-size ~ 14/zoom
-	// pour rester lisible ≈ 14 px écran).
-	if (level === "pill") {
-		return (
-			<div
-				style={{
-					...shellStyle,
-					background: color.header,
-					display: "flex",
-					alignItems: "center",
-					justifyContent: "center",
-					padding: "0 16px"
-				}}
-			>
-				<Handle type="target" position={Position.Left} style={HIDDEN_HANDLE} />
-				<span
-					style={{
-						fontSize: nameFont(zoom, 14, 40, 140),
-						fontWeight: 800,
-						color: color.text,
-						whiteSpace: "nowrap",
-						overflow: "hidden",
-						textOverflow: "ellipsis",
-						textAlign: "center",
-						width: "100%"
-					}}
-				>
-					{collection.name}
-				</span>
-				<Handle type="source" position={Position.Right} style={HIDDEN_HANDLE} />
-			</div>
-		);
-	}
-
-	// ── LOD level 2 : compact (0.2 ≤ zoom < 0.5) ──────────────────────
-	// Header seul (nom fs compensé + kind badge) — la carte reste à sa taille
-	// pleine pour que les arrows collent au bord.
-	if (level === "compact") {
-		return (
-			<div style={{ ...shellStyle, background: color.header }}>
-				<Handle type="target" position={Position.Left} style={HIDDEN_HANDLE} />
-				<div
-					style={{
-						display: "flex",
-						alignItems: "center",
-						justifyContent: "space-between",
-						gap: 8,
-						padding: "10px 12px",
-						height: "100%"
-					}}
-				>
-					<span
-						style={{
-							fontWeight: 700,
-							fontSize: nameFont(zoom, 14, 18, 60),
-							color: color.text,
-							whiteSpace: "nowrap",
-							overflow: "hidden",
-							textOverflow: "ellipsis"
-						}}
-					>
-						{collection.name}
-					</span>
-					<KindBadge kind={inferred ? "inferred" : "declared"} />
+				<div style={{ ...shellStyle, background: color.border }}>
+					<Handle
+						type="target"
+						position={Position.Left}
+						style={HIDDEN_HANDLE}
+					/>
+					<Handle
+						type="source"
+						position={Position.Right}
+						style={HIDDEN_HANDLE}
+					/>
 				</div>
-				<Handle type="source" position={Position.Right} style={HIDDEN_HANDLE} />
-			</div>
+			</Tooltip>
 		);
 	}
 
