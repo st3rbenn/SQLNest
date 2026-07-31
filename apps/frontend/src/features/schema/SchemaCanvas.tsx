@@ -28,9 +28,10 @@ import "@xyflow/react/dist/style.css";
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CanvasContextMenu } from "./CanvasContextMenu";
 import { CanvasToolbar } from "./CanvasToolbar";
-import { bestHandles } from "./edgeRouting";
+import { bestHandles, type Side, spreadOffsets } from "./edgeRouting";
 import { FrameNode, type FrameNodeType } from "./FrameNode";
 import { type Frame, type FrameRect, rectContainsPoint } from "./frames";
+import { InteractiveEdge, type InteractiveEdgeData } from "./InteractiveEdge";
 import { buildLayout, type LayoutResult } from "./layout";
 import { SchemaTree } from "./SchemaTree";
 import type { SchemaModel } from "./schema-model";
@@ -41,12 +42,14 @@ import {
 	TableNode,
 	type TableNodeType
 } from "./TableNode";
+import { useEdgeAnchors } from "./useEdgeAnchors";
 import { useFrames } from "./useFrames";
 import { useTablePositions, type XY } from "./useTablePositions";
 
 const DECLARED = "#2563eb";
 const INFERRED = "#d97706";
 const nodeTypes = { table: TableNode, frame: FrameNode };
+const edgeTypes = { fk: InteractiveEdge };
 
 type SchemaNode = TableNodeType | FrameNodeType;
 
@@ -175,7 +178,9 @@ function makeEdge(rel: SchemaModel["relations"][number], i: number): Edge {
 		id: `e${i}-${rel.from.collection}-${rel.to.collection}`,
 		source: rel.from.collection,
 		target: rel.to.collection,
-		type: "smoothstep",
+		// Custom edge type — dessine le path + expose des poignées drag aux
+		// endpoints (voir `InteractiveEdge`).
+		type: "fk",
 		markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14 },
 		style: {
 			stroke: inferred ? INFERRED : DECLARED,
@@ -389,6 +394,12 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 	// via lasso + F et le menu contextuel « Retirer du frame ».
 	const framesApi = useFrames(schema);
 
+	// Overrides d'ancres par edge (source-side / target-side). Persistés en
+	// localStorage par signature de schéma. Lus dans `displayEdges` avec
+	// fallback sur l'auto-routing (`bestHandles`) quand aucun override n'est
+	// posé. Setters passés aux edges via `data` (voir InteractiveEdge).
+	const edgeAnchors = useEdgeAnchors(schema);
+
 	// Sélection multi-tables tenue à jour par RF. Alimente le chip bas-centre
 	// et le raccourci `F`. Filtre les frame-nodes (non sélectionnables mais
 	// robuste face à un futur changement).
@@ -530,56 +541,113 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 		return map;
 	}, [nodes]);
 
-	const displayEdges = useMemo(
-		() =>
-			(base?.edges ?? [])
-				.filter((e) => !hiddenIds.has(e.source) && !hiddenIds.has(e.target))
-				.map((e) => {
-					const touchesFocus =
-						focusId !== null && (e.source === focusId || e.target === focusId);
-					const dim = focusId !== null && !touchesFocus;
-					const inferred = (e.data as { inferred?: boolean })?.inferred;
-					// Auto-routing : pour chaque edge, choisir le meilleur couple
-					// (source-side, target-side) selon les positions vivantes des
-					// tables — recalculé à chaque drag → les arrows suivent.
-					const src = nodeById.get(e.source);
-					const tgt = nodeById.get(e.target);
-					const handles =
-						src && tgt
-							? bestHandles(
-									{
-										x: src.position.x,
-										y: src.position.y,
-										width: src.width ?? NODE_WIDTH,
-										height: src.height ?? nodeHeight(src.data.collection)
-									},
-									{
-										x: tgt.position.x,
-										y: tgt.position.y,
-										width: tgt.width ?? NODE_WIDTH,
-										height: tgt.height ?? nodeHeight(tgt.data.collection)
-									}
-								)
-							: null;
-					return {
-						...e,
-						...(handles
-							? {
-									sourceHandle: handles.source,
-									targetHandle: handles.target
-								}
-							: {}),
-						style: {
-							...e.style,
-							stroke: dim ? "#cbd5e1" : inferred ? INFERRED : DECLARED,
-							strokeWidth: touchesFocus ? 2.5 : 1.5,
-							opacity: dim ? 0.35 : 1
-						},
-						zIndex: touchesFocus ? 10 : 0
-					};
-				}),
-		[base, focusId, hiddenIds, nodeById]
+	// Enveloppe stable pour passer les setters d'ancres aux edges via
+	// `data` — recréée seulement si l'API change (refs stables via
+	// useCallback dans useEdgeAnchors).
+	const anchorApi = useMemo<InteractiveEdgeData>(
+		() => ({
+			setOverride: edgeAnchors.setOverride,
+			clearOverride: edgeAnchors.clearOverride
+		}),
+		[edgeAnchors.setOverride, edgeAnchors.clearOverride]
 	);
+
+	const displayEdges = useMemo(() => {
+		const visible = (base?.edges ?? []).filter(
+			(e) => !hiddenIds.has(e.source) && !hiddenIds.has(e.target)
+		);
+		// Pass 1 : résout side source + side target de chaque edge
+		// (override > auto-routing). Sert de base au groupement offset.
+		const resolved = visible.map((e) => {
+			const src = nodeById.get(e.source);
+			const tgt = nodeById.get(e.target);
+			const auto =
+				src && tgt
+					? bestHandles(
+							{
+								x: src.position.x,
+								y: src.position.y,
+								width: src.width ?? NODE_WIDTH,
+								height: src.height ?? nodeHeight(src.data.collection)
+							},
+							{
+								x: tgt.position.x,
+								y: tgt.position.y,
+								width: tgt.width ?? NODE_WIDTH,
+								height: tgt.height ?? nodeHeight(tgt.data.collection)
+							}
+						)
+					: null;
+			const override = edgeAnchors.overrides[e.id];
+			const sourceHandle: Side | undefined = override?.source ?? auto?.source;
+			const targetHandle: Side | undefined = override?.target ?? auto?.target;
+			return { edge: e, sourceHandle, targetHandle };
+		});
+
+		// Pass 2 : groupe les edges par (nodeId, side) — pour source ET target —
+		// pour distribuer leurs endpoints le long du côté partagé (sans ça,
+		// plusieurs arrows convergent au mid-side et se superposent, impossibles
+		// à cibler individuellement).
+		const srcGroups = new Map<string, string[]>();
+		const tgtGroups = new Map<string, string[]>();
+		for (const { edge, sourceHandle, targetHandle } of resolved) {
+			if (sourceHandle) {
+				const key = `${edge.source}:${sourceHandle}`;
+				const list = srcGroups.get(key) ?? [];
+				list.push(edge.id);
+				srcGroups.set(key, list);
+			}
+			if (targetHandle) {
+				const key = `${edge.target}:${targetHandle}`;
+				const list = tgtGroups.get(key) ?? [];
+				list.push(edge.id);
+				tgtGroups.set(key, list);
+			}
+		}
+		// Pass 3 : calcule le ratio d'offset par edge/end.
+		const offsets = new Map<string, { source?: number; target?: number }>();
+		for (const [, ids] of srcGroups) {
+			const ratios = spreadOffsets(ids.length);
+			ids.forEach((id, i) => {
+				const prev = offsets.get(id) ?? {};
+				offsets.set(id, { ...prev, source: ratios[i] });
+			});
+		}
+		for (const [, ids] of tgtGroups) {
+			const ratios = spreadOffsets(ids.length);
+			ids.forEach((id, i) => {
+				const prev = offsets.get(id) ?? {};
+				offsets.set(id, { ...prev, target: ratios[i] });
+			});
+		}
+
+		// Pass 4 : compose l'edge final (styles + handles + data avec offsets).
+		return resolved.map(({ edge: e, sourceHandle, targetHandle }) => {
+			const touchesFocus =
+				focusId !== null && (e.source === focusId || e.target === focusId);
+			const dim = focusId !== null && !touchesFocus;
+			const inferred = (e.data as { inferred?: boolean })?.inferred;
+			const o = offsets.get(e.id);
+			return {
+				...e,
+				...(sourceHandle !== undefined ? { sourceHandle } : {}),
+				...(targetHandle !== undefined ? { targetHandle } : {}),
+				style: {
+					...e.style,
+					stroke: dim ? "#cbd5e1" : inferred ? INFERRED : DECLARED,
+					strokeWidth: touchesFocus ? 2.5 : 1.5,
+					opacity: dim ? 0.35 : 1
+				},
+				zIndex: touchesFocus ? 10 : 0,
+				data: {
+					...(e.data ?? {}),
+					...anchorApi,
+					sourceOffsetRatio: o?.source ?? 0,
+					targetOffsetRatio: o?.target ?? 0
+				}
+			};
+		});
+	}, [base, focusId, hiddenIds, nodeById, edgeAnchors.overrides, anchorApi]);
 
 	// `safeArea` = bandes occupées par les panels flottants ou dockés :
 	// - gauche : drawer arbre docké (300 px pleine hauteur)
@@ -828,6 +896,7 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 				edges={displayEdges}
 				onNodesChange={onNodesChange}
 				nodeTypes={nodeTypes}
+				edgeTypes={edgeTypes}
 				// Lasso multi-select : glisser dans le vide (bouton gauche) trace
 				// un rectangle, sélectionne les tables intersectées. Shift+click
 				// pour ajouter à la sélection. `panOnDrag` limité au bouton du
