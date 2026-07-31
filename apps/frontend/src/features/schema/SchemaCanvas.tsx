@@ -700,40 +700,30 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 		[focusId, consoleHeight, leftPadding]
 	);
 
-	// Vue aérienne au 1er layout SEULEMENT — on ne re-fit pas quand `safeArea`
-	// change (sinon chaque focus déclencherait un reset overview qui écrase
-	// le `setCenter` du `focusAndZoom`). Le safeArea courant est lu via ref
-	// pour rester à jour dans le calcul sans re-trigger l'effet.
+	// Vue aérienne — auto-fit + auto-refit tant que l'utilisateur n'a pas
+	// interagi (pan / wheel / drag). Sans ça :
+	//   - le container peut être mesuré à une taille intermédiaire pendant
+	//     l'hydratation, le fit s'y bloque (rect capturé trop petit sur les
+	//     écrans larges → schéma décollé du centre).
+	//   - le refresh sur une fenêtre différente laisse le schéma dans un
+	//     coin.
+	// Un ResizeObserver refit à chaque changement de taille du container ;
+	// dès que l'utilisateur pan/zoom, on arrête (la vue lui appartient).
+	// Le safeArea est lu via ref pour rester frais sans re-créer l'observer.
 	const safeAreaRef = useRef(safeArea);
 	safeAreaRef.current = safeArea;
-	// Le container peut être en 0×0 quand l'effet tire pour la première
-	// fois (Vite dev + hydratation → warning RF "parent container needs
-	// width and height"). On rAF-retry jusqu'à ce que le rect soit mesuré
-	// ET que RF ait terminé son propre mount (setViewport ignoré sinon).
-	// Guard `didFit` évite les re-fits inutiles ; reset quand base change.
-	const didFitRef = useRef(false);
-	useEffect(() => {
-		didFitRef.current = false;
-	}, [base]);
+	const userTouchedViewportRef = useRef(false);
 	useEffect(() => {
 		if (base === null) return;
-		if (didFitRef.current) return;
-		let cancelled = false;
-		let raf = 0;
-		const tryFit = () => {
-			if (cancelled || didFitRef.current) return;
-			if (containerRef.current === null) {
-				raf = requestAnimationFrame(tryFit);
-				return;
-			}
-			const rect = containerRef.current.getBoundingClientRect();
-			if (rect.width === 0 || rect.height === 0) {
-				raf = requestAnimationFrame(tryFit);
-				return;
-			}
+		const el = containerRef.current;
+		if (el === null) return;
+
+		const fit = () => {
+			if (userTouchedViewportRef.current) return;
+			const rect = el.getBoundingClientRect();
+			if (rect.width === 0 || rect.height === 0) return;
 			const bounds = tablesBounds(base.nodes);
 			if (bounds === null) return;
-			didFitRef.current = true;
 			setViewport(
 				overviewViewport(bounds, rect, {
 					padding: OVERVIEW_FIT.padding,
@@ -742,12 +732,44 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 				})
 			);
 		};
-		raf = requestAnimationFrame(tryFit);
-		return () => {
-			cancelled = true;
-			cancelAnimationFrame(raf);
+
+		// Tentative immédiate, plus observer pour les rendus tardifs
+		// (hydratation, resize fenêtre). Le drawer et la console sont
+		// absolute donc leur toggle ne fait pas resize le container —
+		// c'est le dep `safeArea` qui déclenche le refit dans ces cas.
+		fit();
+		const ro = new ResizeObserver(fit);
+		ro.observe(el);
+		return () => ro.disconnect();
+	}, [base, setViewport, safeArea]);
+	// Reset du flag "user touched" quand base change (nouveau schéma =
+	// nouvelle vue par défaut, on ré-auto-fit jusqu'à interaction).
+	useEffect(() => {
+		userTouchedViewportRef.current = false;
+	}, [base]);
+	// Détecte les gestes viewport user (wheel = zoom, mousedown sur la
+	// pane = début de pan). Une fois marqué, l'auto-fit s'arrête → la
+	// vue de l'utilisateur est préservée sur les resize suivants.
+	useEffect(() => {
+		const el = containerRef.current;
+		if (el === null) return;
+		const markWheel = () => {
+			userTouchedViewportRef.current = true;
 		};
-	}, [base, setViewport]);
+		const markPan = (e: PointerEvent) => {
+			const t = e.target as HTMLElement | null;
+			// Pan démarre depuis la pane vide (pas sur un nœud/edge/UI).
+			if (t?.classList.contains("react-flow__pane")) {
+				userTouchedViewportRef.current = true;
+			}
+		};
+		el.addEventListener("wheel", markWheel, { passive: true });
+		el.addEventListener("pointerdown", markPan);
+		return () => {
+			el.removeEventListener("wheel", markWheel);
+			el.removeEventListener("pointerdown", markPan);
+		};
+	}, []);
 
 	/** Focus visuel : isole une table, estompe le reste, ouvre le drawer d'infos —
 	 * SANS recadrer la vue. Comportement par défaut du clic gauche sur canvas et
