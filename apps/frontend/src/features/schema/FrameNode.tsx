@@ -27,8 +27,6 @@ const MIN_FRAME_HEIGHT = 120;
  */
 export function FrameNode({
 	data,
-	width,
-	height,
 	selected,
 	positionAbsoluteX,
 	positionAbsoluteY
@@ -89,8 +87,13 @@ export function FrameNode({
 			/>
 			<div
 				style={{
-					width,
-					height,
+					// 100 %/100 % au lieu des `width`/`height` React → suit le
+					// wrapper RF que NodeResizer met à jour DOM-directement en
+					// temps réel pendant le drag. Sinon notre div interne restait
+					// figée aux dimensions React (pas mises à jour avant
+					// `onResizeEnd`) et le user voyait des sauts.
+					width: "100%",
+					height: "100%",
 					borderRadius: 14,
 					border: `2px solid hsl(${frame.hue}, 55%, 60%)`,
 					background: `hsla(${frame.hue}, 60%, 90%, 0.35)`,
