@@ -300,7 +300,8 @@ export function boundsOfTables(
 function computeFrameNodes(
 	frames: readonly Frame[],
 	tableNodes: readonly TableNodeType[],
-	onFrameResize: (key: string, rect: FrameRect) => void
+	onFrameResize: (key: string, rect: FrameRect) => void,
+	onFrameRename: (key: string, label: string) => void
 ): FrameNodeType[] {
 	if (frames.length === 0) return [];
 	const byId = new Map(tableNodes.map((n) => [n.id, n]));
@@ -324,7 +325,8 @@ function computeFrameNodes(
 				height: rect.height,
 				data: {
 					frame,
-					onResizeEnd: (r: FrameRect) => onFrameResize(frame.key, r)
+					onResizeEnd: (r: FrameRect) => onFrameResize(frame.key, r),
+					onRename: (label: string) => onFrameRename(frame.key, label)
 				},
 				// Draggable pour permettre de déplacer le frame + ses tables
 				// ensemble (handler `onNodeDrag` dans CanvasInner applique le
@@ -521,14 +523,27 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 		[framesApi]
 	);
 
+	// Rename inline depuis le badge d'un frame (double-clic → input → Enter).
+	const handleFrameRename = useCallback(
+		(key: string, label: string) => framesApi.renameFrame(key, label),
+		[framesApi]
+	);
+
 	const frameNodes = useMemo(
 		() =>
 			computeFrameNodes(
 				framesApi.frames,
 				nodes.filter((n) => !hiddenIds.has(n.id)),
-				handleFrameResize
+				handleFrameResize,
+				handleFrameRename
 			),
-		[framesApi.frames, nodes, hiddenIds, handleFrameResize]
+		[
+			framesApi.frames,
+			nodes,
+			hiddenIds,
+			handleFrameResize,
+			handleFrameRename
+		]
 	);
 
 	const displayNodes = useMemo<SchemaNode[]>(

@@ -1,5 +1,6 @@
 import { FrameBadge } from "@sqlnest/design-system";
 import { type Node, NodeResizer, type NodeProps } from "@xyflow/react";
+import { useState } from "react";
 import type { Frame, FrameRect } from "./frames";
 
 export interface FrameNodeData {
@@ -7,6 +8,9 @@ export interface FrameNodeData {
 	/** Callback appelé quand l'utilisateur redimensionne le frame via les
 	 * handles (fourni par SchemaCanvas — closure sur `useFrames.setFrameRect`). */
 	readonly onResizeEnd?: (rect: FrameRect) => void;
+	/** Callback appelé au commit d'un rename inline (Enter ou blur). Fourni
+	 * par SchemaCanvas — closure sur `useFrames.renameFrame`. */
+	readonly onRename?: (label: string) => void;
 	readonly [key: string]: unknown;
 }
 
@@ -29,7 +33,29 @@ export function FrameNode({
 	positionAbsoluteX,
 	positionAbsoluteY
 }: NodeProps<FrameNodeType>) {
-	const { frame, onResizeEnd } = data;
+	const { frame, onResizeEnd, onRename } = data;
+
+	// Rename inline : double-clic sur le badge → input, Enter/blur commit,
+	// Escape cancel. Un `draft` local évite d'écrire dans le state parent
+	// à chaque keystroke ; commit ne fire onRename que si le label a
+	// vraiment changé (et n'est pas vide après trim).
+	const [editing, setEditing] = useState(false);
+	const [draft, setDraft] = useState(frame.label);
+
+	const startEdit = () => {
+		setDraft(frame.label);
+		setEditing(true);
+	};
+	const commit = () => {
+		const trimmed = draft.trim();
+		if (trimmed !== "" && trimmed !== frame.label) onRename?.(trimmed);
+		setEditing(false);
+	};
+	const cancel = () => {
+		setDraft(frame.label);
+		setEditing(false);
+	};
+
 	return (
 		<>
 			{/* Handles de resize (visibles quand le frame est sélectionné).
@@ -79,14 +105,61 @@ export function FrameNode({
 						top: -13,
 						left: 12,
 						pointerEvents: "auto",
-						cursor: "grab"
+						cursor: editing ? "text" : "grab"
+					}}
+					onDoubleClick={(e) => {
+						// Empêche RF `onNodeDoubleClick` de faire son travail
+						// (focusAndZoom sur les tables — ici on rename).
+						e.stopPropagation();
+						startEdit();
 					}}
 				>
-					<FrameBadge
-						hue={frame.hue}
-						label={frame.label}
-						count={frame.collections.length}
-					/>
+					{editing ? (
+						<input
+							// biome-ignore lint/a11y/noAutofocus: pattern classique inline-edit — le focus est déclenché par un geste user.
+							autoFocus
+							value={draft}
+							onChange={(e) => setDraft(e.currentTarget.value)}
+							onBlur={commit}
+							onKeyDown={(e) => {
+								// Enter commit, Escape cancel. Toujours stop-prop pour
+								// que le raccourci global "F" (créer un frame) ne se
+								// déclenche pas depuis l'input.
+								e.stopPropagation();
+								if (e.key === "Enter") {
+									e.preventDefault();
+									commit();
+								} else if (e.key === "Escape") {
+									e.preventDefault();
+									cancel();
+								}
+							}}
+							onFocus={(e) => e.currentTarget.select()}
+							onMouseDown={(e) => e.stopPropagation()}
+							onClick={(e) => e.stopPropagation()}
+							style={{
+								background: `hsl(${frame.hue}, 55%, 45%)`,
+								color: "#fff",
+								border: "none",
+								padding: "3px 10px",
+								borderRadius: 999,
+								fontSize: 11,
+								fontWeight: 700,
+								outline: "none",
+								minWidth: 90,
+								maxWidth: 240,
+								fontFamily: "inherit",
+								letterSpacing: 0.2
+							}}
+							aria-label="Renommer le frame"
+						/>
+					) : (
+						<FrameBadge
+							hue={frame.hue}
+							label={frame.label}
+							count={frame.collections.length}
+						/>
+					)}
 				</div>
 			</div>
 		</>
