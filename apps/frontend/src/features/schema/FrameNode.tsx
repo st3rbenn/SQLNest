@@ -5,20 +5,19 @@ import type { Frame, FrameRect } from "./frames";
 
 export interface FrameNodeData {
 	readonly frame: Frame;
-	/** Appelé PENDANT le drag de resize (chaque tick pointermove). Doit
-	 * juste maj le rect — pas de reconciliation membership (le user est
-	 * en train de bouger, les tables ne bougent pas encore). Sans ce
-	 * handler, RF's NodeResizer ne redraw pas en direct (visuellement
-	 * figé jusqu'au release). Fourni par SchemaCanvas — closure sur
-	 * `framesApi.setFrameRect`. */
-	readonly onResize?: (rect: FrameRect) => void;
 	/** Appelé au release du resize. Rect final + reconciliation membership
 	 * (tables tombées hors du nouveau rect → retirées). Fourni par
-	 * SchemaCanvas — closure sur `handleFrameResize`. */
+	 * SchemaCanvas — closure sur `handleFrameResize`. Le suivi live des
+	 * dimensions/position pendant le drag est géré côté SchemaCanvas via
+	 * l'interception des `dimensions`/`position` changes RF (voir
+	 * `handleNodesChange`). */
 	readonly onResizeEnd?: (rect: FrameRect) => void;
 	/** Callback appelé au commit d'un rename inline (Enter ou blur). Fourni
 	 * par SchemaCanvas — closure sur `useFrames.renameFrame`. */
 	readonly onRename?: (label: string) => void;
+	/** Callback appelé au right-click sur le badge du frame — supprime
+	 * l'entrée. Fourni par SchemaCanvas — closure sur `useFrames.removeFrame`. */
+	readonly onDelete?: () => void;
 	readonly [key: string]: unknown;
 }
 
@@ -41,7 +40,7 @@ export function FrameNode({
 	positionAbsoluteX,
 	positionAbsoluteY
 }: NodeProps<FrameNodeType>) {
-	const { frame, onResize, onResizeEnd, onRename } = data;
+	const { frame, onResizeEnd, onRename, onDelete } = data;
 
 	// Rename inline : double-clic sur le badge → input, Enter/blur commit,
 	// Escape cancel. Un `draft` local évite d'écrire dans le state parent
@@ -86,17 +85,11 @@ export function FrameNode({
 					borderColor: `hsl(${frame.hue}, 55%, 55%)`,
 					borderWidth: 2
 				}}
-				onResize={(_, params) => {
-					// Live update pendant le drag → le rect (et donc les dimensions
-					// passées au node par computeFrameNodes) suit en temps réel.
-					onResize?.({
-						x: params.x ?? positionAbsoluteX,
-						y: params.y ?? positionAbsoluteY,
-						width: params.width,
-						height: params.height
-					});
-				}}
 				onResizeEnd={(_, params) => {
+					// Marque la fin d'un drag de resize → reconciliation membership
+					// dans SchemaCanvas. Les dimensions/position en direct sont
+					// gérées via `handleNodesChange` (interception des `dimensions`
+					// et `position` changes émis par RF pendant le drag).
 					onResizeEnd?.({
 						x: params.x ?? positionAbsoluteX,
 						y: params.y ?? positionAbsoluteY,
@@ -138,6 +131,13 @@ export function FrameNode({
 						// (focusAndZoom sur les tables — ici on rename).
 						e.stopPropagation();
 						startEdit();
+					}}
+					onContextMenu={(e) => {
+						// Right-click sur le badge → supprime le frame. Empêche
+						// le menu par défaut du navigateur ET RF's onNodeContextMenu.
+						e.preventDefault();
+						e.stopPropagation();
+						onDelete?.();
 					}}
 				>
 					{editing ? (

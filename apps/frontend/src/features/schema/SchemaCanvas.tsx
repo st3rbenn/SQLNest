@@ -20,6 +20,7 @@ import {
 	type Edge,
 	MarkerType,
 	MiniMap,
+	type NodeChange,
 	Panel,
 	ReactFlow,
 	ReactFlowProvider,
@@ -311,9 +312,9 @@ export function boundsOfTables(
 function computeFrameNodes(
 	frames: readonly Frame[],
 	tableNodes: readonly TableNodeType[],
-	onFrameResizeLive: (key: string, rect: FrameRect) => void,
 	onFrameResizeEnd: (key: string, rect: FrameRect) => void,
-	onFrameRename: (key: string, label: string) => void
+	onFrameRename: (key: string, label: string) => void,
+	onFrameDelete: (key: string) => void
 ): FrameNodeType[] {
 	if (frames.length === 0) return [];
 	const byId = new Map(tableNodes.map((n) => [n.id, n]));
@@ -337,9 +338,9 @@ function computeFrameNodes(
 				height: rect.height,
 				data: {
 					frame,
-					onResize: (r: FrameRect) => onFrameResizeLive(frame.key, r),
 					onResizeEnd: (r: FrameRect) => onFrameResizeEnd(frame.key, r),
-					onRename: (label: string) => onFrameRename(frame.key, label)
+					onRename: (label: string) => onFrameRename(frame.key, label),
+					onDelete: () => onFrameDelete(frame.key)
 				},
 				// Draggable pour déplacer le frame + ses tables ensemble
 				// (handler `onNodeDrag` applique le delta aux membres).
@@ -412,6 +413,46 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 	// `framesFor(schema)` statique — l'utilisateur crée/retire ses frames
 	// via lasso + F et le menu contextuel « Retirer du frame ».
 	const framesApi = useFrames(schema);
+
+	// Intercept les changes RF pour les frames (préfixe `frame:`) et route
+	// vers `framesApi.setFrameRect`. Sinon les changements `dimensions` /
+	// `position` émis par NodeResizer sont silencieusement drops par
+	// `applyNodeChanges` (notre `nodes` state ne contient que les tables) →
+	// le resize ne s'appliquait jamais visuellement.
+	const framesApiRef = useRef(framesApi);
+	framesApiRef.current = framesApi;
+	const handleNodesChange = useCallback(
+		(changes: NodeChange[]) => {
+			const tableChanges: NodeChange[] = [];
+			const api = framesApiRef.current;
+			for (const c of changes) {
+				if (!c.id?.startsWith("frame:")) {
+					tableChanges.push(c);
+					continue;
+				}
+				const key = c.id.slice("frame:".length);
+				const frame = api.frames.find((f) => f.key === key);
+				if (!frame?.rect) continue;
+				if (c.type === "dimensions" && c.dimensions) {
+					api.setFrameRect(key, {
+						x: frame.rect.x,
+						y: frame.rect.y,
+						width: c.dimensions.width,
+						height: c.dimensions.height
+					});
+				} else if (c.type === "position" && c.position) {
+					api.setFrameRect(key, {
+						x: c.position.x,
+						y: c.position.y,
+						width: frame.rect.width,
+						height: frame.rect.height
+					});
+				}
+			}
+			if (tableChanges.length > 0) onNodesChange(tableChanges);
+		},
+		[onNodesChange]
+	);
 
 	// Overrides d'ancres par edge (source-side / target-side). Persistés en
 	// localStorage par signature de schéma. Lus dans `displayEdges` avec
@@ -544,22 +585,40 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 		[framesApi]
 	);
 
+	// Right-click sur le badge d'un frame → supprime (l'auto-delete a été
+	// retiré, il faut un geste explicite maintenant).
+	const handleFrameDelete = useCallback(
+		(key: string) => {
+			const frame = framesApi.frames.find((f) => f.key === key);
+			framesApi.removeFrame(key);
+			if (frame) {
+				showNotification({
+					title: `Frame « ${frame.label} » supprimé`,
+					message: `${frame.collections.length} table${frame.collections.length > 1 ? "s" : ""} conservée${frame.collections.length > 1 ? "s" : ""}.`,
+					color: "blue",
+					autoClose: 2500
+				});
+			}
+		},
+		[framesApi]
+	);
+
 	const frameNodes = useMemo(
 		() =>
 			computeFrameNodes(
 				framesApi.frames,
 				nodes.filter((n) => !hiddenIds.has(n.id)),
-				framesApi.setFrameRect,
 				handleFrameResize,
-				handleFrameRename
+				handleFrameRename,
+				handleFrameDelete
 			),
 		[
 			framesApi.frames,
-			framesApi.setFrameRect,
 			nodes,
 			hiddenIds,
 			handleFrameResize,
-			handleFrameRename
+			handleFrameRename,
+			handleFrameDelete
 		]
 	);
 
@@ -991,7 +1050,7 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 			<ReactFlow
 				nodes={displayNodes as unknown as TableNodeType[]}
 				edges={displayEdges}
-				onNodesChange={onNodesChange}
+				onNodesChange={handleNodesChange}
 				nodeTypes={nodeTypes}
 				edgeTypes={edgeTypes}
 				// Comportements souris à la Figma :
