@@ -5,8 +5,16 @@ import type { Frame, FrameRect } from "./frames";
 
 export interface FrameNodeData {
 	readonly frame: Frame;
-	/** Callback appelé quand l'utilisateur redimensionne le frame via les
-	 * handles (fourni par SchemaCanvas — closure sur `useFrames.setFrameRect`). */
+	/** Appelé PENDANT le drag de resize (chaque tick pointermove). Doit
+	 * juste maj le rect — pas de reconciliation membership (le user est
+	 * en train de bouger, les tables ne bougent pas encore). Sans ce
+	 * handler, RF's NodeResizer ne redraw pas en direct (visuellement
+	 * figé jusqu'au release). Fourni par SchemaCanvas — closure sur
+	 * `framesApi.setFrameRect`. */
+	readonly onResize?: (rect: FrameRect) => void;
+	/** Appelé au release du resize. Rect final + reconciliation membership
+	 * (tables tombées hors du nouveau rect → retirées). Fourni par
+	 * SchemaCanvas — closure sur `handleFrameResize`. */
 	readonly onResizeEnd?: (rect: FrameRect) => void;
 	/** Callback appelé au commit d'un rename inline (Enter ou blur). Fourni
 	 * par SchemaCanvas — closure sur `useFrames.renameFrame`. */
@@ -27,11 +35,13 @@ const MIN_FRAME_HEIGHT = 120;
  */
 export function FrameNode({
 	data,
+	width,
+	height,
 	selected,
 	positionAbsoluteX,
 	positionAbsoluteY
 }: NodeProps<FrameNodeType>) {
-	const { frame, onResizeEnd, onRename } = data;
+	const { frame, onResize, onResizeEnd, onRename } = data;
 
 	// Rename inline : double-clic sur le badge → input, Enter/blur commit,
 	// Escape cancel. Un `draft` local évite d'écrire dans le state parent
@@ -76,6 +86,16 @@ export function FrameNode({
 					borderColor: `hsl(${frame.hue}, 55%, 55%)`,
 					borderWidth: 2
 				}}
+				onResize={(_, params) => {
+					// Live update pendant le drag → le rect (et donc les dimensions
+					// passées au node par computeFrameNodes) suit en temps réel.
+					onResize?.({
+						x: params.x ?? positionAbsoluteX,
+						y: params.y ?? positionAbsoluteY,
+						width: params.width,
+						height: params.height
+					});
+				}}
 				onResizeEnd={(_, params) => {
 					onResizeEnd?.({
 						x: params.x ?? positionAbsoluteX,
@@ -87,13 +107,11 @@ export function FrameNode({
 			/>
 			<div
 				style={{
-					// 100 %/100 % au lieu des `width`/`height` React → suit le
-					// wrapper RF que NodeResizer met à jour DOM-directement en
-					// temps réel pendant le drag. Sinon notre div interne restait
-					// figée aux dimensions React (pas mises à jour avant
-					// `onResizeEnd`) et le user voyait des sauts.
-					width: "100%",
-					height: "100%",
+					// Suit les dimensions React du node — mises à jour en direct
+					// pendant le drag grâce au handler `onResize` (live setFrameRect
+					// → re-render → nouvelles width/height dans les props).
+					width,
+					height,
 					borderRadius: 14,
 					border: `2px solid hsl(${frame.hue}, 55%, 60%)`,
 					background: `hsla(${frame.hue}, 60%, 90%, 0.35)`,

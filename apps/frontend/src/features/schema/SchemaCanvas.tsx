@@ -311,7 +311,8 @@ export function boundsOfTables(
 function computeFrameNodes(
 	frames: readonly Frame[],
 	tableNodes: readonly TableNodeType[],
-	onFrameResize: (key: string, rect: FrameRect) => void,
+	onFrameResizeLive: (key: string, rect: FrameRect) => void,
+	onFrameResizeEnd: (key: string, rect: FrameRect) => void,
 	onFrameRename: (key: string, label: string) => void
 ): FrameNodeType[] {
 	if (frames.length === 0) return [];
@@ -336,7 +337,8 @@ function computeFrameNodes(
 				height: rect.height,
 				data: {
 					frame,
-					onResizeEnd: (r: FrameRect) => onFrameResize(frame.key, r),
+					onResize: (r: FrameRect) => onFrameResizeLive(frame.key, r),
+					onResizeEnd: (r: FrameRect) => onFrameResizeEnd(frame.key, r),
 					onRename: (label: string) => onFrameRename(frame.key, label)
 				},
 				// Draggable pour déplacer le frame + ses tables ensemble
@@ -547,10 +549,18 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 			computeFrameNodes(
 				framesApi.frames,
 				nodes.filter((n) => !hiddenIds.has(n.id)),
+				framesApi.setFrameRect,
 				handleFrameResize,
 				handleFrameRename
 			),
-		[framesApi.frames, nodes, hiddenIds, handleFrameResize, handleFrameRename]
+		[
+			framesApi.frames,
+			framesApi.setFrameRect,
+			nodes,
+			hiddenIds,
+			handleFrameResize,
+			handleFrameRename
+		]
 	);
 
 	const displayNodes = useMemo<SchemaNode[]>(
