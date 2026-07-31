@@ -1,19 +1,26 @@
-import { IconChevronDown, IconChevronUp, IconTerminal2 } from "@tabler/icons-react";
+import { ActionIcon, Menu, Tooltip } from "@mantine/core";
 import {
-	type CSSProperties,
-	type KeyboardEvent,
-	useEffect,
-	useRef,
-	useState
-} from "react";
+	IconChevronDown,
+	IconChevronUp,
+	IconHistory,
+	IconTerminal2
+} from "@tabler/icons-react";
+import { type CSSProperties, useEffect, useRef, useState } from "react";
+import { SnqlEditor } from "../query/SnqlEditor";
 import { type QueryResult, useRunQuery } from "../query/useRunQuery";
+import type { SchemaModel } from "./schema-model";
 
 type Engine = "postgres" | "mongodb";
 
 const CONSOLE_LS_KEY = "sqlnest:canvas-console:source";
 const CONSOLE_EXPANDED_LS_KEY = "sqlnest:canvas-console:expanded";
+const CONSOLE_HEIGHT_LS_KEY = "sqlnest:canvas-console:height";
+const CONSOLE_HISTORY_LS_KEY = "sqlnest:canvas-console:history";
+const HISTORY_MAX = 20;
 const CONSOLE_HEIGHT_COLLAPSED = 38;
-const CONSOLE_HEIGHT_EXPANDED = 340;
+const CONSOLE_HEIGHT_EXPANDED_DEFAULT = 340;
+const CONSOLE_HEIGHT_MIN = 180;
+const CONSOLE_HEIGHT_MAX = 800;
 
 const EXAMPLES: Record<Engine, string> = {
 	postgres: "get users | where is_active = true | pick email, display_name",
@@ -24,6 +31,9 @@ interface Props {
 	readonly engine: Engine;
 	readonly leftOffset: number;
 	readonly onHeightChange?: (h: number) => void;
+	/** Schéma courant → autocomplete des noms de tables/colonnes dans l'éditeur.
+	 * Facultatif : sans schéma, l'éditeur reste utilisable mais sans completion. */
+	readonly schema?: SchemaModel | undefined;
 }
 
 /**
@@ -40,7 +50,12 @@ interface Props {
  *   d'historique — c'est une console rapide, la page /query reste
  *   l'endroit pour les vraies sessions).
  */
-export function CanvasConsole({ engine, leftOffset, onHeightChange }: Props) {
+export function CanvasConsole({
+	engine,
+	leftOffset,
+	onHeightChange,
+	schema
+}: Props) {
 	// État `expanded` persisté en localStorage → survit au refresh.
 	const [expanded, setExpanded] = useState<boolean>(() => {
 		if (typeof window === "undefined") return false;
@@ -61,6 +76,35 @@ export function CanvasConsole({ engine, leftOffset, onHeightChange }: Props) {
 			/* quota / private mode */
 		}
 	}, [expanded]);
+
+	// Hauteur `expanded` persistée : l'utilisateur peut redimensionner via
+	// la poignée en haut de la console. Clampée entre MIN et MAX.
+	const [expandedHeight, setExpandedHeight] = useState<number>(() => {
+		if (typeof window === "undefined") return CONSOLE_HEIGHT_EXPANDED_DEFAULT;
+		try {
+			const raw = window.localStorage.getItem(CONSOLE_HEIGHT_LS_KEY);
+			if (raw !== null) {
+				const n = Number(raw);
+				if (
+					Number.isFinite(n) &&
+					n >= CONSOLE_HEIGHT_MIN &&
+					n <= CONSOLE_HEIGHT_MAX
+				)
+					return n;
+			}
+		} catch {
+			/* storage indispo */
+		}
+		return CONSOLE_HEIGHT_EXPANDED_DEFAULT;
+	});
+	useEffect(() => {
+		if (typeof window === "undefined") return;
+		try {
+			window.localStorage.setItem(CONSOLE_HEIGHT_LS_KEY, String(expandedHeight));
+		} catch {
+			/* quota / private mode */
+		}
+	}, [expandedHeight]);
 
 	const [source, setSource] = useState<string>(() => {
 		if (typeof window === "undefined") return EXAMPLES[engine];
@@ -83,7 +127,40 @@ export function CanvasConsole({ engine, leftOffset, onHeightChange }: Props) {
 	const result = run.data;
 	const error = run.error;
 
-	const height = expanded ? CONSOLE_HEIGHT_EXPANDED : CONSOLE_HEIGHT_COLLAPSED;
+	const height = expanded ? expandedHeight : CONSOLE_HEIGHT_COLLAPSED;
+
+	// Drag pour redimensionner : dragger la poignée du haut vers le haut
+	// agrandit, vers le bas réduit. Ref pour l'état du drag (immune aux
+	// closures stales entre pointermove). `isResizing` désactive la
+	// transition height pendant le drag — sinon lag visible (transition
+	// chase constamment le nouveau setState toutes les ~16 ms).
+	const dragRef = useRef<{ startY: number; startHeight: number } | null>(null);
+	const [isResizing, setIsResizing] = useState(false);
+	const onResizeDown = (e: import("react").PointerEvent<HTMLDivElement>) => {
+		e.preventDefault();
+		(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+		dragRef.current = { startY: e.clientY, startHeight: expandedHeight };
+		setIsResizing(true);
+	};
+	const onResizeMove = (e: import("react").PointerEvent<HTMLDivElement>) => {
+		if (!dragRef.current) return;
+		const delta = dragRef.current.startY - e.clientY;
+		const next = Math.max(
+			CONSOLE_HEIGHT_MIN,
+			Math.min(CONSOLE_HEIGHT_MAX, dragRef.current.startHeight + delta)
+		);
+		setExpandedHeight(next);
+	};
+	const onResizeUp = (e: import("react").PointerEvent<HTMLDivElement>) => {
+		if (!dragRef.current) return;
+		try {
+			(e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+		} catch {
+			/* pointer déjà relâché */
+		}
+		dragRef.current = null;
+		setIsResizing(false);
+	};
 	// Publie la hauteur au parent pour qu'il pousse la toolbar au-dessus.
 	// Ref d'égalité pour éviter de re-fire si la hauteur ne change pas
 	// (React n'appelle le callback qu'après commit, donc c'est safe).
@@ -95,27 +172,60 @@ export function CanvasConsole({ engine, leftOffset, onHeightChange }: Props) {
 		}
 	}, [height, onHeightChange]);
 
+	// Historique local des requêtes exécutées — dedup + cap MAX. Persiste
+	// en localStorage → survit au refresh. Utilisé par le menu déroulant à
+	// côté du bouton Exécuter.
+	const [history, setHistory] = useState<readonly string[]>(() => {
+		if (typeof window === "undefined") return [];
+		try {
+			const raw = window.localStorage.getItem(CONSOLE_HISTORY_LS_KEY);
+			if (raw !== null) {
+				const parsed = JSON.parse(raw);
+				if (Array.isArray(parsed)) {
+					return parsed.filter((x): x is string => typeof x === "string");
+				}
+			}
+		} catch {
+			/* storage indispo / JSON corrompu */
+		}
+		return [];
+	});
+	useEffect(() => {
+		if (typeof window === "undefined") return;
+		try {
+			window.localStorage.setItem(
+				CONSOLE_HISTORY_LS_KEY,
+				JSON.stringify(history)
+			);
+		} catch {
+			/* quota / private mode */
+		}
+	}, [history]);
+
 	const execute = () => {
-		if (source.trim() === "" || run.isPending) return;
+		const q = source.trim();
+		if (q === "" || run.isPending) return;
+		setHistory((prev) => {
+			const dedup = prev.filter((x) => x !== q);
+			return [q, ...dedup].slice(0, HISTORY_MAX);
+		});
 		run.mutate({ engine, source });
 	};
 
-	const onEditorKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-		// Cmd/Ctrl + Enter exécute.
-		if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-			e.preventDefault();
-			execute();
-			return;
-		}
-		// Escape referme la console si le textarea a le focus (rapide).
-		if (e.key === "Escape") {
-			e.preventDefault();
-			setExpanded(false);
-		}
-	};
-
 	return (
-		<div style={containerStyle(leftOffset, height)}>
+		<div style={containerStyle(leftOffset, height, isResizing)}>
+			{expanded ? (
+				<div
+					style={resizeHandleStyle}
+					onPointerDown={onResizeDown}
+					onPointerMove={onResizeMove}
+					onPointerUp={onResizeUp}
+					onPointerCancel={onResizeUp}
+					role="separator"
+					aria-orientation="horizontal"
+					aria-label="Redimensionner la console"
+				/>
+			) : null}
 			<button
 				type="button"
 				onClick={() => setExpanded((x) => !x)}
@@ -134,14 +244,15 @@ export function CanvasConsole({ engine, leftOffset, onHeightChange }: Props) {
 			</button>
 			{expanded ? (
 				<div id="canvas-console-body" style={bodyStyle}>
-					<textarea
-						value={source}
-						onChange={(e) => setSource(e.currentTarget.value)}
-						onKeyDown={onEditorKeyDown}
-						placeholder={EXAMPLES[engine]}
-						spellCheck={false}
-						style={editorStyle}
-					/>
+					<div style={editorWrapperStyle}>
+						<SnqlEditor
+							value={source}
+							onChange={setSource}
+							onRun={execute}
+							schema={schema}
+							placeholder={EXAMPLES[engine]}
+						/>
+					</div>
 					<div style={actionsStyle}>
 						<button
 							type="button"
@@ -151,6 +262,46 @@ export function CanvasConsole({ engine, leftOffset, onHeightChange }: Props) {
 						>
 							{run.isPending ? "Exécution…" : "Exécuter"}
 						</button>
+						<Menu
+							shadow="md"
+							width={440}
+							position="top-start"
+							withArrow
+							disabled={history.length === 0}
+						>
+							<Menu.Target>
+								<Tooltip
+									label="Historique des requêtes"
+									openDelay={400}
+									withArrow
+								>
+									<ActionIcon
+										variant="subtle"
+										color="gray"
+										size="lg"
+										disabled={history.length === 0}
+										aria-label="Historique des requêtes"
+									>
+										<IconHistory size={16} />
+									</ActionIcon>
+								</Tooltip>
+							</Menu.Target>
+							<Menu.Dropdown>
+								{history.map((q) => (
+									<Menu.Item
+										key={q}
+										onClick={() => setSource(q)}
+										style={historyItemStyle}
+									>
+										{q.length > 90 ? `${q.slice(0, 87)}…` : q}
+									</Menu.Item>
+								))}
+								<Menu.Divider />
+								<Menu.Item color="red" onClick={() => setHistory([])}>
+									Vider l'historique
+								</Menu.Item>
+							</Menu.Dropdown>
+						</Menu>
 					</div>
 					<div style={resultsStyle}>
 						{error ? (
@@ -230,7 +381,11 @@ function renderCell(value: unknown) {
 }
 
 // ─── styles ──────────────────────────────────────────────────────────
-function containerStyle(leftOffset: number, height: number): CSSProperties {
+function containerStyle(
+	leftOffset: number,
+	height: number,
+	isResizing: boolean
+): CSSProperties {
 	return {
 		position: "absolute",
 		left: leftOffset,
@@ -242,12 +397,27 @@ function containerStyle(leftOffset: number, height: number): CSSProperties {
 		borderRadius: 10,
 		boxShadow: "0 -4px 16px rgba(15,23,42,0.08)",
 		overflow: "hidden",
-		transition: "height 180ms ease-out",
+		transition: isResizing ? "none" : "height 180ms ease-out",
 		zIndex: 5,
 		display: "flex",
 		flexDirection: "column"
 	};
 }
+
+// Poignée de resize collée en haut — overlap sur les 6 premiers px du header
+// (z-index supérieur). Curseur ns-resize signale l'affordance. Fond transparent
+// pour ne pas encombrer visuellement.
+const resizeHandleStyle: CSSProperties = {
+	position: "absolute",
+	top: 0,
+	left: 0,
+	right: 0,
+	height: 6,
+	cursor: "ns-resize",
+	background: "transparent",
+	zIndex: 6,
+	touchAction: "none"
+};
 
 const headerStyle: CSSProperties = {
 	all: "unset",
@@ -289,19 +459,11 @@ const bodyStyle: CSSProperties = {
 	gap: 8
 };
 
-const editorStyle: CSSProperties = {
-	resize: "none",
-	fontFamily:
-		"ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace",
-	fontSize: 13,
-	lineHeight: 1.5,
-	padding: "8px 10px",
-	borderRadius: 6,
-	border: "1px solid var(--mantine-color-slate-2, #e2e8f0)",
-	background: "#fff",
-	color: "#0f172a",
-	minHeight: 80,
-	outline: "none"
+// SnqlEditor a son propre habillage (bord, radius, thème). Le wrapper impose
+// juste la contrainte flex : `flex: 0 0 auto` sinon CodeMirror voudrait
+// s'étirer au max et écraserait le bloc résultat.
+const editorWrapperStyle: CSSProperties = {
+	flex: "0 0 auto"
 };
 
 const actionsStyle: CSSProperties = {
@@ -322,6 +484,16 @@ function runButtonStyle(pending: boolean): CSSProperties {
 		cursor: pending ? "default" : "pointer"
 	};
 }
+
+const historyItemStyle: CSSProperties = {
+	fontFamily:
+		"ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace",
+	fontSize: 11.5,
+	color: "#334155",
+	whiteSpace: "nowrap",
+	overflow: "hidden",
+	textOverflow: "ellipsis"
+};
 
 const resultsStyle: CSSProperties = {
 	flex: 1,

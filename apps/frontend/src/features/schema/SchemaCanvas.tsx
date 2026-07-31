@@ -1154,6 +1154,7 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 				engine={schema.engine as "postgres" | "mongodb"}
 				leftOffset={leftPadding}
 				onHeightChange={setConsoleHeight}
+				schema={schema}
 			/>
 
 			{/* Toggle drawer gauche : ActionIcon flottant qui bascule sur le
