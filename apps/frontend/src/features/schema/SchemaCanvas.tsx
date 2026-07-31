@@ -8,7 +8,6 @@ import {
 	spotlight,
 	useCommandPaletteShortcut
 } from "@sqlnest/design-system";
-import { useNavigate } from "@tanstack/react-router";
 import { buildCanvasCommands } from "./commands";
 import { ActionIcon, Box, UnstyledButton } from "@mantine/core";
 import {
@@ -899,7 +898,6 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 	}, [selectedTables, createFrameFromSelection, clearSelection]);
 
 	// ─── palette Cmd+K (tour 1c) ──────────────────────────────────────────
-	const navigate = useNavigate();
 	useCommandPaletteShortcut(spotlight.open);
 	const soon = (title: string) =>
 		showNotification({
@@ -913,8 +911,6 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 			buildCanvasCommands(schema, {
 				// Palette = entrée distante → recadre sur la table choisie.
 				onFocusTable: focusAndZoom,
-				onOpenInEditor: (name) =>
-					void navigate({ to: "/query", search: { source: `get ${name}` } }),
 				onFitView: () => applyOverview(),
 				onAskAi: () => soon("Demander à l'IA"),
 				onToggleTheme: () => soon("Thème sombre")

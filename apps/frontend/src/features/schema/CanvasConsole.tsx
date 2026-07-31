@@ -20,7 +20,12 @@ const HISTORY_MAX = 20;
 const CONSOLE_HEIGHT_COLLAPSED = 38;
 const CONSOLE_HEIGHT_EXPANDED_DEFAULT = 340;
 const CONSOLE_HEIGHT_MIN = 180;
-const CONSOLE_HEIGHT_MAX = 800;
+// Max = presque tout le viewport (laisse ~80 px pour la toolbar + marges).
+// Calculé au drag time pour suivre les changements de fenêtre.
+function maxHeight(): number {
+	if (typeof window === "undefined") return 800;
+	return Math.max(CONSOLE_HEIGHT_MIN, window.innerHeight - 80);
+}
 
 const EXAMPLES: Record<Engine, string> = {
 	postgres: "get users | where is_active = true | pick email, display_name",
@@ -88,7 +93,7 @@ export function CanvasConsole({
 				if (
 					Number.isFinite(n) &&
 					n >= CONSOLE_HEIGHT_MIN &&
-					n <= CONSOLE_HEIGHT_MAX
+					n <= maxHeight()
 				)
 					return n;
 			}
@@ -147,7 +152,7 @@ export function CanvasConsole({
 		const delta = dragRef.current.startY - e.clientY;
 		const next = Math.max(
 			CONSOLE_HEIGHT_MIN,
-			Math.min(CONSOLE_HEIGHT_MAX, dragRef.current.startHeight + delta)
+			Math.min(maxHeight(), dragRef.current.startHeight + delta)
 		);
 		setExpandedHeight(next);
 	};
@@ -271,9 +276,13 @@ export function CanvasConsole({
 						>
 							<Menu.Target>
 								<Tooltip
-									label="Historique des requêtes"
+									label="Historique"
 									openDelay={400}
+									fz={11}
+									px={6}
+									py={2}
 									withArrow
+									arrowSize={4}
 								>
 									<ActionIcon
 										variant="subtle"
@@ -544,7 +553,12 @@ const thStyle: CSSProperties = {
 	borderBottom: "1px solid #e2e8f0",
 	fontWeight: 650,
 	color: "#334155",
-	whiteSpace: "nowrap"
+	whiteSpace: "nowrap",
+	// Sticky header : reste visible pendant le scroll vertical du tableau
+	// (utile pour les gros résultats de plusieurs pages de lignes).
+	position: "sticky",
+	top: 0,
+	zIndex: 1
 };
 
 const tdStyle: CSSProperties = {

@@ -1,18 +1,15 @@
-import { AppShell, showNotification, updateNotification } from "@sqlnest/design-system";
-import { Group, Text } from "@mantine/core";
-import { Link, Outlet } from "@tanstack/react-router";
-import { type CSSProperties, useEffect } from "react";
+import { showNotification, updateNotification } from "@sqlnest/design-system";
+import { Outlet } from "@tanstack/react-router";
+import { useEffect } from "react";
 import { useHealthCheck } from "./features/healthcheck/useHealthCheck";
 
-const linkBase: CSSProperties = {
-	textDecoration: "none",
-	color: "var(--mantine-color-slate-5)",
-	fontWeight: 600,
-	fontSize: 14
-};
-
-const linkActive: CSSProperties = { color: "var(--mantine-color-brand-6)" };
-
+/**
+ * Shell minimal : plus de header/navigation top (le canvas Schéma prend
+ * tout le viewport, à la Figma). Le side-effect healthcheck reste — il
+ * informe l'utilisateur via `notifications` de l'état de la connexion API.
+ * La navigation entre pages passera par le breadcrumb futur (cf. memory
+ * `todo-canvas-breadcrumbs`) et la palette Cmd+K.
+ */
 function App() {
 	const { data, error, isLoading } = useHealthCheck();
 
@@ -48,32 +45,7 @@ function App() {
 		}
 	}, [isLoading, error, data]);
 
-	const header = (
-		<Group gap="lg" px="lg" w="100%">
-			<Text fw={700}>🦅 SQLNest</Text>
-			<Link
-				to="/"
-				style={linkBase}
-				activeProps={{ style: linkActive }}
-				activeOptions={{ exact: true }}
-			>
-				Schéma
-			</Link>
-			<Link
-				to="/query"
-				style={linkBase}
-				activeProps={{ style: linkActive }}
-			>
-				Requête
-			</Link>
-		</Group>
-	);
-
-	return (
-		<AppShell header={header}>
-			<Outlet />
-		</AppShell>
-	);
+	return <Outlet />;
 }
 
 export default App;

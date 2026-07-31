@@ -4,7 +4,6 @@ import type { SchemaModel } from "./schema-model";
 
 export interface CanvasCommandCallbacks {
 	readonly onFocusTable: (name: string) => void;
-	readonly onOpenInEditor: (name: string) => void;
 	readonly onFitView: () => void;
 	readonly onAskAi: () => void;
 	readonly onToggleTheme: () => void;
@@ -41,14 +40,6 @@ export function buildCanvasCommands(
 		};
 	});
 
-	const editorActions = schema.collections.map((c) => ({
-		id: `open:${c.name}`,
-		label: `Ouvrir ${c.name} dans l'éditeur`,
-		description: `get ${c.name}`,
-		keywords: ["ouvrir", "éditeur", "editor", "query", c.name],
-		onClick: () => cbs.onOpenInEditor(c.name)
-	}));
-
 	const canvasActions = [
 		{
 			id: "fit-view",
@@ -75,7 +66,6 @@ export function buildCanvasCommands(
 
 	return [
 		{ group: "Tables", actions: tableActions },
-		{ group: "Ouvrir dans l'éditeur", actions: editorActions },
 		{ group: "Actions canvas", actions: canvasActions }
 	];
 }

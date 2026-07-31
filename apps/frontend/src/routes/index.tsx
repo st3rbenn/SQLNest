@@ -18,12 +18,12 @@ export const Route = createFileRoute("/")({
 // `postgres` — le canvas Schéma vit sur une seule base à la fois.
 const ENGINE = "postgres" as const;
 
-// Canvas plein écran : viewport moins la nav (~50 px). Les contrôles sont des
-// panels FLOTTANTS par-dessus le canvas — le visualizer n'est plus une carte
-// dans une page, c'est la page.
+// Canvas plein écran : viewport complet (plus de top nav depuis App.tsx).
+// Les contrôles sont des panels FLOTTANTS par-dessus — le visualizer EST
+// la page, à la Figma.
 const pageStyle: CSSProperties = {
 	position: "relative",
-	height: "calc(100vh - 50px)",
+	height: "100vh",
 	background: "#fafbfc",
 	overflow: "hidden"
 };

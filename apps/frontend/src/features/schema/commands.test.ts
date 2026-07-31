@@ -6,7 +6,6 @@ import { SAMPLE_POSTGRES } from "./schema-model";
 function makeCbs(overrides: Partial<CanvasCommandCallbacks> = {}): CanvasCommandCallbacks {
 	return {
 		onFocusTable: vi.fn(),
-		onOpenInEditor: vi.fn(),
 		onFitView: vi.fn(),
 		onAskAi: vi.fn(),
 		onToggleTheme: vi.fn(),
