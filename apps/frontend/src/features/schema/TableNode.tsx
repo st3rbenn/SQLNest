@@ -41,23 +41,41 @@ export type TableNodeType = Node<TableNodeData, "table">;
 const HIDDEN_HANDLE: CSSProperties = { opacity: 0, border: "none" };
 
 /**
- * Sélecteur Zustand : ne re-render la node que quand le NIVEAU change, pas
- * à chaque pixel de zoom. `transform[2]` = zoom scalar dans RF v12.
+ * Sélecteur Zustand : (zoom brut quantifié à 0.01 + level dérivé). Le zoom
+ * brut sert à compenser la font-size (inversement proportionnelle) pour que
+ * les noms restent lisibles au zoom out. Quantification → réduit les re-renders
+ * de ~100× (une seule fois par 0.01 de zoom).
  */
-const zoomLevelSelector = (s: {
+const zoomSelector = (s: {
 	transform: readonly [number, number, number];
-}): ZoomLevel => levelForZoom(s.transform[2]);
+}): { zoom: number; level: ZoomLevel } => {
+	const raw = s.transform[2];
+	const quantized = Math.round(raw * 100) / 100;
+	return { zoom: quantized, level: levelForZoom(quantized) };
+};
+
+/** Font-size world coord pour un nom lisible à l'écran quel que soit le zoom.
+ *  Cible ~ 14 px écran (`14 / zoom`), clampée pour rester raisonnable
+ *  aux extrêmes (jamais < 13, jamais > 180). */
+function nameFont(zoom: number, base = 14, min = 13, max = 180): number {
+	if (zoom <= 0) return min;
+	return Math.min(max, Math.max(min, base / zoom));
+}
 
 export function TableNode({ data }: NodeProps<TableNodeType>) {
 	const { collection, dimmed, focused, matched } = data;
-	const level = useStore(zoomLevelSelector);
+	const { zoom, level } = useStore(zoomSelector);
 	const inferred = collection.source === "inferred";
 	const color = colorFor(collection.name);
+	const height = nodeHeight(collection);
 
 	// Enveloppe commune : border colorée (bleu/ambre override en focus/match),
-	// ombre focus/match, gestion `dimmed` — tous les niveaux LOD la partagent.
+	// ombre focus/match, gestion `dimmed`. LOD variants remplissent l'enveloppe
+	// à la taille RÉELLE (NODE_WIDTH × nodeHeight) — sinon les handles (aux
+	// bords du wrapper RF) ne s'alignent plus avec le visuel à faible zoom.
 	const shellStyle: CSSProperties = {
 		width: NODE_WIDTH,
+		height,
 		borderRadius: 10,
 		background: "#fff",
 		border: `2px solid ${matched ? "#f59e0b" : focused ? "#2563eb" : color.border}`,
@@ -73,16 +91,13 @@ export function TableNode({ data }: NodeProps<TableNodeType>) {
 	};
 
 	// ── LOD level 4 : dot (zoom < 0.1) ────────────────────────────────
-	// Petite pastille pleine — les frame labels prennent le relais visuel
-	// à ce zoom. Aucun texte (illisible de toute façon).
+	// Wrapper rempli d'une couleur solide, pas de texte. Arrows attachés
+	// aux bords (comme les autres levels).
 	if (level === "dot") {
 		return (
 			<div
 				style={{
 					...shellStyle,
-					width: 48,
-					height: 48,
-					borderRadius: 12,
 					background: color.border
 				}}
 			>
@@ -93,27 +108,31 @@ export function TableNode({ data }: NodeProps<TableNodeType>) {
 	}
 
 	// ── LOD level 3 : pill (0.1 ≤ zoom < 0.2) ─────────────────────────
-	// Pastille remplie avec le nom en gros. Font-size compensée pour rester
-	// lisible à ce zoom (48px world ≈ 8px écran à zoom 0.15).
+	// Wrapper rempli couleur.header, nom centré en gros (font-size ~ 14/zoom
+	// pour rester lisible ≈ 14 px écran).
 	if (level === "pill") {
 		return (
 			<div
 				style={{
 					...shellStyle,
-					padding: "12px 16px",
-					background: color.header
+					background: color.header,
+					display: "flex",
+					alignItems: "center",
+					justifyContent: "center",
+					padding: "0 16px"
 				}}
 			>
 				<Handle type="target" position={Position.Left} style={HIDDEN_HANDLE} />
 				<span
 					style={{
-						fontSize: 48,
+						fontSize: nameFont(zoom, 14, 40, 140),
 						fontWeight: 800,
 						color: color.text,
 						whiteSpace: "nowrap",
 						overflow: "hidden",
 						textOverflow: "ellipsis",
-						display: "block"
+						textAlign: "center",
+						width: "100%"
 					}}
 				>
 					{collection.name}
@@ -124,10 +143,11 @@ export function TableNode({ data }: NodeProps<TableNodeType>) {
 	}
 
 	// ── LOD level 2 : compact (0.2 ≤ zoom < 0.5) ──────────────────────
-	// Header seul avec le kind badge — nom typiquement lisible à ce zoom.
+	// Header seul (nom fs compensé + kind badge) — la carte reste à sa taille
+	// pleine pour que les arrows collent au bord.
 	if (level === "compact") {
 		return (
-			<div style={shellStyle}>
+			<div style={{ ...shellStyle, background: color.header }}>
 				<Handle type="target" position={Position.Left} style={HIDDEN_HANDLE} />
 				<div
 					style={{
@@ -135,14 +155,14 @@ export function TableNode({ data }: NodeProps<TableNodeType>) {
 						alignItems: "center",
 						justifyContent: "space-between",
 						gap: 8,
-						padding: "14px 12px",
-						background: color.header
+						padding: "10px 12px",
+						height: "100%"
 					}}
 				>
 					<span
 						style={{
 							fontWeight: 700,
-							fontSize: 20,
+							fontSize: nameFont(zoom, 14, 18, 60),
 							color: color.text,
 							whiteSpace: "nowrap",
 							overflow: "hidden",

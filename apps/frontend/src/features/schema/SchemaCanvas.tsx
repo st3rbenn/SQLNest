@@ -382,23 +382,41 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 		}, [])
 	});
 
-	// Fige le rect des frames-seed dès qu'ELK a placé les tables. Sans ça,
-	// `computeFrameNodes` retomberait sur `boundsOfTables(members)` à chaque
-	// render → auto-resize non désiré quand une table membre est déplacée.
-	// Ne s'exécute qu'UNE FOIS par frame (idempotent : si `rect` est déjà là,
-	// on ne le réécrit pas).
+	// Post-ELK : (a) fige le rect des frames-seed ; (b) filtre les collections
+	// pour ne garder que les membres RÉELLEMENT dans le rect. Sans (b), un
+	// refresh restaure la membership du localStorage mais ELK re-place les
+	// tables — la plupart des membres se retrouvent hors du rect, et pourtant
+	// un drag du frame les emmène (membership fantôme).
 	useEffect(() => {
-		if (nodes.length === 0) return;
+		if (base === null || nodes.length === 0) return;
 		const byId = new Map(nodes.map((n) => [n.id, n]));
 		for (const frame of framesApi.frames) {
-			if (frame.rect) continue;
-			const members = frame.collections
-				.map((c) => byId.get(c))
-				.filter((n): n is TableNodeType => n !== undefined);
-			const rect = boundsOfTables(members, FRAME_PAD);
-			if (rect) framesApi.setFrameRect(frame.key, rect);
+			// (a) rect manquant → compute + persist, sortir.
+			if (!frame.rect) {
+				const members = frame.collections
+					.map((c) => byId.get(c))
+					.filter((n): n is TableNodeType => n !== undefined);
+				const rect = boundsOfTables(members, FRAME_PAD);
+				if (rect) framesApi.setFrameRect(frame.key, rect);
+				continue;
+			}
+			// (b) rect présent → check chaque membre : centre hors du rect → retire.
+			for (const memberName of frame.collections) {
+				const node = byId.get(memberName);
+				if (!node) continue;
+				const w = node.width ?? NODE_WIDTH;
+				const h = node.height ?? nodeHeight(node.data.collection);
+				const center = {
+					x: node.position.x + w / 2,
+					y: node.position.y + h / 2
+				};
+				if (!rectContainsPoint(frame.rect, center)) {
+					framesApi.removeTableFromFrame(memberName);
+				}
+			}
 		}
-	}, [nodes, framesApi]);
+	// biome-ignore lint/correctness/useExhaustiveDependencies: on ne veut réagir qu'à un nouveau layout ELK (base), pas à chaque render post-mutation
+	}, [base]);
 
 	// Voisinage FK direct du nœud focalisé (le nœud + ses 1-sauts).
 	const neighbors = useMemo(() => {
