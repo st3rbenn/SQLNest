@@ -387,8 +387,16 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 	// refresh restaure la membership du localStorage mais ELK re-place les
 	// tables — la plupart des membres se retrouvent hors du rect, et pourtant
 	// un drag du frame les emmène (membership fantôme).
+	//
+	// Deps `[base, nodes]` + guard `membershipRefreshedFor` : on doit attendre
+	// que `nodes` soit populé (setNodes fire dans un autre effet AVANT que le
+	// nôtre voit la valeur mise à jour) — mais on ne veut relire qu'UNE FOIS
+	// par layout, sinon chaque drag re-déclenche la logique.
+	const membershipRefreshedFor = useRef<LayoutResult | null>(null);
 	useEffect(() => {
 		if (base === null || nodes.length === 0) return;
+		if (membershipRefreshedFor.current === base) return;
+		membershipRefreshedFor.current = base;
 		const byId = new Map(nodes.map((n) => [n.id, n]));
 		for (const frame of framesApi.frames) {
 			// (a) rect manquant → compute + persist, sortir.
@@ -415,8 +423,8 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 				}
 			}
 		}
-	// biome-ignore lint/correctness/useExhaustiveDependencies: on ne veut réagir qu'à un nouveau layout ELK (base), pas à chaque render post-mutation
-	}, [base]);
+	// biome-ignore lint/correctness/useExhaustiveDependencies: framesApi lu via closure — ok car le ref garantit exec unique
+	}, [base, nodes]);
 
 	// Voisinage FK direct du nœud focalisé (le nœud + ses 1-sauts).
 	const neighbors = useMemo(() => {
