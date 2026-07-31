@@ -23,6 +23,7 @@ import {
 	Panel,
 	ReactFlow,
 	ReactFlowProvider,
+	SelectionMode,
 	useNodesState,
 	useOnSelectionChange,
 	useReactFlow
@@ -980,12 +981,20 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 				onNodesChange={onNodesChange}
 				nodeTypes={nodeTypes}
 				edgeTypes={edgeTypes}
-				// Lasso multi-select : glisser dans le vide (bouton gauche) trace
-				// un rectangle, sélectionne les tables intersectées. Shift+click
-				// pour ajouter à la sélection. `panOnDrag` limité au bouton du
-				// milieu — le glisser gauche est réservé au lasso.
+				// Comportements souris à la Figma :
+				// - wheel/trackpad → pan (Cmd/Ctrl+wheel garde le zoom natif RF)
+				// - clic gauche + drag sur le vide → lasso (sélection partielle :
+				//   sélectionne dès qu'un nœud touche le rectangle, pas besoin
+				//   d'être 100 % dedans)
+				// - clic milieu drag → pan (fallback quand pas de wheel)
+				// - clic droit sur le vide → aucun menu par défaut du navigateur
+				//   (les nœuds gardent leur propre menu via `onNodeContextMenu`)
+				panOnScroll
+				zoomOnScroll={false}
 				selectionOnDrag
-				panOnDrag={[1, 2]}
+				selectionMode={SelectionMode.Partial}
+				panOnDrag={[1]}
+				onPaneContextMenu={(event) => event.preventDefault()}
 				// Clic gauche = focus visuel (ring + estompage voisins + drawer) sans
 				// bouger la vue. Double-clic = recadre sur la table (comme Figma).
 				onNodeClick={(_, node) => focusNode(node.id)}
