@@ -157,13 +157,15 @@ export function useFrames(schema: SchemaModel): FramesApi {
 	}, []);
 
 	const removeTableFromFrame = useCallback((tableName: string) => {
+		// Un frame vide reste vide — plus de suppression auto. L'utilisateur
+		// peut vouloir garder un frame comme conteneur pour y déposer des
+		// tables plus tard (drag-in). La suppression manuelle passe par
+		// `removeFrame` (menu contextuel ou action explicite).
 		setFrames((prev) =>
-			prev
-				.map((f) => ({
-					...f,
-					collections: f.collections.filter((c) => c !== tableName)
-				}))
-				.filter((f) => f.collections.length > 0)
+			prev.map((f) => ({
+				...f,
+				collections: f.collections.filter((c) => c !== tableName)
+			}))
 		);
 	}, []);
 

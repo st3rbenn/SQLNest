@@ -63,7 +63,7 @@ export function FrameNode({
 			 * styles de `NodeResizer` — nos overrides ci-dessous n'atteignent
 			 * pas ces handles. `onResizeEnd` persiste le nouveau rect. */}
 			<NodeResizer
-				isVisible={selected === true}
+				isVisible
 				minWidth={MIN_FRAME_WIDTH}
 				minHeight={MIN_FRAME_HEIGHT}
 				lineStyle={{

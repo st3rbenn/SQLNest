@@ -20,7 +20,6 @@ import {
 	type Edge,
 	MarkerType,
 	MiniMap,
-	type NodeChange,
 	Panel,
 	ReactFlow,
 	ReactFlowProvider,
@@ -313,8 +312,7 @@ function computeFrameNodes(
 	frames: readonly Frame[],
 	tableNodes: readonly TableNodeType[],
 	onFrameResize: (key: string, rect: FrameRect) => void,
-	onFrameRename: (key: string, label: string) => void,
-	selectedFrameKeys: ReadonlySet<string>
+	onFrameRename: (key: string, label: string) => void
 ): FrameNodeType[] {
 	if (frames.length === 0) return [];
 	const byId = new Map(tableNodes.map((n) => [n.id, n]));
@@ -336,28 +334,20 @@ function computeFrameNodes(
 				position: { x: rect.x, y: rect.y },
 				width: rect.width,
 				height: rect.height,
-				// `selected` re-injecté depuis notre state externe : les frames
-				// sont créés fresh à chaque render (dérivés de `framesApi.frames`),
-				// donc RF's onNodesChange pour eux ne persiste pas naturellement.
-				// On intercepte les select-changes dans handleNodesChange et on
-				// re-pose le flag ici.
-				selected: selectedFrameKeys.has(frame.key),
 				data: {
 					frame,
 					onResizeEnd: (r: FrameRect) => onFrameResize(frame.key, r),
 					onRename: (label: string) => onFrameRename(frame.key, label)
 				},
-				// Draggable pour permettre de déplacer le frame + ses tables
-				// ensemble (handler `onNodeDrag` dans CanvasInner applique le
-				// delta aux membres).
+				// Draggable pour déplacer le frame + ses tables ensemble
+				// (handler `onNodeDrag` applique le delta aux membres).
+				// NON sélectionnable : au lasso ou au clic, le frame est
+				// ignoré (le user manipule les frames via drag + resize
+				// handles NodeResizer toujours visibles).
 				draggable: true,
-				selectable: true,
+				selectable: false,
 				connectable: false,
-				// z=0 (default) : RF push automatiquement les nodes selected à
-				// z=1000, les tables restent donc au-dessus des frames même
-				// non-sélectionnées. On évite `-1` : RF exclut les nodes à
-				// z-index négatif de la sélection lasso.
-				zIndex: 0
+				zIndex: -1
 			}
 		];
 	});
@@ -379,33 +369,6 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 
 	// nodes reflètent les positions vivantes (drag) ; réinitialisés dès qu'ELK rend.
 	const [nodes, setNodes, onNodesChange] = useNodesState<TableNodeType>([]);
-
-	// Sélection des frames : RF n'a pas de state persistant pour eux (ils sont
-	// recréés à chaque render dans `computeFrameNodes` depuis
-	// `framesApi.frames` — leurs `selected` internes se perdent). On
-	// intercepte les select-changes émises par RF pour les IDs `frame:*` et
-	// on stocke les clés sélectionnées ici.
-	const [selectedFrameKeys, setSelectedFrameKeys] = useState<ReadonlySet<string>>(
-		() => new Set()
-	);
-	const handleNodesChange = useCallback(
-		(changes: NodeChange[]) => {
-			// Route les changes de tables vers RF's applyNodeChanges (inclut
-			// drag, dimensions, tables select).
-			onNodesChange(changes);
-			// Extrait les select-changes pour frame:* → maj de notre set.
-			let mutated: Set<string> | null = null;
-			for (const c of changes) {
-				if (c.type !== "select" || !c.id.startsWith("frame:")) continue;
-				const key = c.id.slice("frame:".length);
-				if (mutated === null) mutated = new Set(selectedFrameKeys);
-				if (c.selected) mutated.add(key);
-				else mutated.delete(key);
-			}
-			if (mutated !== null) setSelectedFrameKeys(mutated);
-		},
-		[onNodesChange, selectedFrameKeys]
-	);
 
 	// Positions user persistées en localStorage — overlay au-dessus du layout ELK
 	// pour que la disposition survive au refresh (sans ça, ELK re-place tout,
@@ -585,17 +548,9 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 				framesApi.frames,
 				nodes.filter((n) => !hiddenIds.has(n.id)),
 				handleFrameResize,
-				handleFrameRename,
-				selectedFrameKeys
+				handleFrameRename
 			),
-		[
-			framesApi.frames,
-			nodes,
-			hiddenIds,
-			handleFrameResize,
-			handleFrameRename,
-			selectedFrameKeys
-		]
+		[framesApi.frames, nodes, hiddenIds, handleFrameResize, handleFrameRename]
 	);
 
 	const displayNodes = useMemo<SchemaNode[]>(
@@ -1026,7 +981,7 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 			<ReactFlow
 				nodes={displayNodes as unknown as TableNodeType[]}
 				edges={displayEdges}
-				onNodesChange={handleNodesChange}
+				onNodesChange={onNodesChange}
 				nodeTypes={nodeTypes}
 				edgeTypes={edgeTypes}
 				// Comportements souris à la Figma :
