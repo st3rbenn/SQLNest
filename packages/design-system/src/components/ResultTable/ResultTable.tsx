@@ -80,9 +80,9 @@ function renderCell(value: unknown): string {
 
 const wrapperStyle: CSSProperties = {
 	overflow: "auto",
-	border: "1px solid var(--mantine-color-slate-2)",
+	border: "1px solid var(--sqlnest-border)",
 	borderRadius: 6,
-	background: "#fff"
+	background: "var(--sqlnest-surface)"
 };
 
 const tableStyle: CSSProperties = {
@@ -95,10 +95,10 @@ const tableStyle: CSSProperties = {
 const thStyle: CSSProperties = {
 	textAlign: "left",
 	padding: "6px 10px",
-	background: "var(--mantine-color-slate-0)",
-	borderBottom: "1px solid var(--mantine-color-slate-2)",
+	background: "var(--sqlnest-surface-hover)",
+	borderBottom: "1px solid var(--sqlnest-border)",
 	fontWeight: 650,
-	color: "var(--mantine-color-slate-7)",
+	color: "var(--sqlnest-text-primary)",
 	whiteSpace: "nowrap",
 	position: "sticky",
 	top: 0,
@@ -107,8 +107,8 @@ const thStyle: CSSProperties = {
 
 const tdStyle: CSSProperties = {
 	padding: "5px 10px",
-	borderTop: "1px solid var(--mantine-color-slate-1)",
-	color: "var(--mantine-color-slate-8)",
+	borderTop: "1px solid var(--sqlnest-border-subtle)",
+	color: "var(--sqlnest-text-secondary)",
 	whiteSpace: "nowrap"
 };
 
@@ -117,9 +117,9 @@ const emptyStyle: CSSProperties = {
 	alignItems: "center",
 	justifyContent: "center",
 	padding: "24px 16px",
-	color: "var(--mantine-color-slate-5)",
+	color: "var(--sqlnest-text-tertiary)",
 	fontSize: 12,
-	border: "1px solid var(--mantine-color-slate-2)",
+	border: "1px solid var(--sqlnest-border)",
 	borderRadius: 6,
-	background: "#fff"
+	background: "var(--sqlnest-surface)"
 };

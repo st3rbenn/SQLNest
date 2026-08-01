@@ -42,8 +42,12 @@ export function SelectionChip({
 			radius="xl"
 			shadow="lg"
 			style={{
-				background: "var(--mantine-color-slate-9)",
-				color: "#fff",
+				// Surface Figma (au lieu de slate-9 quasi-noir) — le chip garde
+				// une teinte reconnaissable par rapport au canvas #1E1E1E via
+				// la bordure + son ombre diffusée.
+				background: "var(--sqlnest-surface)",
+				border: "1px solid var(--sqlnest-border)",
+				color: "var(--sqlnest-text-primary)",
 				padding: "8px 14px"
 			}}
 		>
@@ -54,10 +58,10 @@ export function SelectionChip({
 							width: 6,
 							height: 6,
 							borderRadius: "50%",
-							background: "var(--mantine-color-brand-4)"
+							background: "var(--sqlnest-accent)"
 						}}
 					/>
-					<Text size="xs" c="white">
+					<Text size="xs" style={{ color: "var(--sqlnest-text-primary)" }}>
 						{summary}
 					</Text>
 				</Group>
@@ -66,7 +70,7 @@ export function SelectionChip({
 						style={{
 							width: 1,
 							height: 14,
-							background: "var(--mantine-color-slate-7)"
+							background: "var(--sqlnest-border)"
 						}}
 					/>
 				) : null}
@@ -78,7 +82,9 @@ export function SelectionChip({
 						style={{
 							border: "none",
 							background: "transparent",
-							color: a.danger ? "var(--mantine-color-red-3)" : "#fff",
+							color: a.danger
+								? "var(--sqlnest-danger)"
+								: "var(--sqlnest-text-primary)",
 							fontSize: 12,
 							fontFamily: "inherit",
 							cursor: "pointer",
@@ -99,7 +105,7 @@ export function SelectionChip({
 					size="sm"
 					onClick={onClear}
 					aria-label="Fermer la sélection"
-					style={{ color: "var(--mantine-color-slate-4)" }}
+					style={{ color: "var(--sqlnest-text-tertiary)" }}
 				>
 					✕
 				</ActionIcon>

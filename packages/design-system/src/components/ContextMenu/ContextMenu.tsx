@@ -69,14 +69,14 @@ function ItemRow({
 		...rowBase,
 		background:
 			item.kind === "action" && item.active
-				? "var(--mantine-color-brand-0)"
+				? "var(--sqlnest-accent-soft)"
 				: "transparent",
 		color:
 			item.kind === "action" && item.danger
-				? "var(--mantine-color-red-7)"
+				? "var(--sqlnest-danger)"
 				: item.kind === "action" && item.active
-					? "var(--mantine-color-brand-7)"
-					: "var(--mantine-color-slate-7)",
+					? "var(--sqlnest-accent)"
+					: "var(--sqlnest-text-secondary)",
 	};
 	return (
 		<UnstyledButton
@@ -103,15 +103,17 @@ function ItemRow({
 				{item.label}
 			</span>
 			{isSubmenu ? (
-				<span aria-hidden style={{ color: "var(--mantine-color-slate-4)" }}>
+				<span aria-hidden style={{ color: "var(--sqlnest-text-tertiary)" }}>
 					›
 				</span>
 			) : "hint" in item && item.hint ? (
 				<Text
 					ff="monospace"
 					size="xs"
-					c="slate.5"
-					style={{ whiteSpace: "nowrap" }}
+					style={{
+						whiteSpace: "nowrap",
+						color: "var(--sqlnest-text-tertiary)"
+					}}
 				>
 					{item.hint}
 				</Text>
@@ -173,10 +175,10 @@ export function ContextMenu({
 						left: position.x,
 						top: position.y,
 						width,
-						background: "#fff",
-						border: "1px solid var(--mantine-color-slate-2)",
+						background: "var(--sqlnest-surface)",
+						border: "1px solid var(--sqlnest-border)",
 						borderRadius: 10,
-						boxShadow: "0 16px 40px rgba(15,23,42,0.18)",
+						boxShadow: "0 16px 40px rgba(0,0,0,0.55)",
 						padding: 6,
 						zIndex: 9999,
 					}}
@@ -184,13 +186,15 @@ export function ContextMenu({
 					{title ? (
 						<Text
 							size="xs"
-							c="slate.4"
 							fw={700}
 							tt="uppercase"
 							px="xs"
 							pt={4}
 							pb={2}
-							style={{ letterSpacing: 0.5 }}
+							style={{
+								letterSpacing: 0.5,
+								color: "var(--sqlnest-text-tertiary)"
+							}}
 						>
 							{title}
 						</Text>
@@ -204,7 +208,7 @@ export function ContextMenu({
 										key={`d-${i}`}
 										style={{
 											height: 1,
-											background: "var(--mantine-color-slate-1)",
+											background: "var(--sqlnest-border-subtle)",
 											margin: "4px 6px",
 										}}
 									/>
@@ -256,7 +260,7 @@ export function ContextMenu({
 										key={`ds-${i}`}
 										style={{
 											height: 1,
-											background: "var(--mantine-color-slate-1)",
+											background: "var(--sqlnest-border-subtle)",
 											margin: "4px 6px",
 										}}
 									/>

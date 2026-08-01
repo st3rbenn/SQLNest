@@ -16,36 +16,41 @@ export type StatusPillProps = {
 
 type Palette = { bg: string; color: string; border: string; dot: string };
 
+/**
+ * Palette dark-first — bg = version « soft » (10-15 % alpha) du token,
+ * text/dot = version pleine. Rendu discret sur `--sqlnest-canvas-bg`
+ * (#1E1E1E) tout en gardant la sémantique de couleur intacte.
+ */
 const PALETTE: Record<StatusPillVariant, Palette> = {
 	success: {
-		bg: "var(--mantine-color-emerald-0)",
-		color: "var(--mantine-color-emerald-7)",
-		border: "var(--mantine-color-emerald-2)",
-		dot: "var(--mantine-color-emerald-5)",
+		bg: "var(--sqlnest-success-soft)",
+		color: "var(--sqlnest-success)",
+		border: "var(--sqlnest-success)",
+		dot: "var(--sqlnest-success)",
 	},
 	info: {
-		bg: "var(--mantine-color-brand-0)",
-		color: "var(--mantine-color-brand-7)",
-		border: "var(--mantine-color-brand-2)",
-		dot: "var(--mantine-color-brand-5)",
+		bg: "var(--sqlnest-accent-soft)",
+		color: "var(--sqlnest-accent)",
+		border: "var(--sqlnest-accent)",
+		dot: "var(--sqlnest-accent)",
 	},
 	warning: {
-		bg: "var(--mantine-color-amber-0)",
-		color: "var(--mantine-color-amber-7)",
-		border: "var(--mantine-color-amber-2)",
-		dot: "var(--mantine-color-amber-5)",
+		bg: "var(--sqlnest-warning-soft)",
+		color: "var(--sqlnest-warning)",
+		border: "var(--sqlnest-warning)",
+		dot: "var(--sqlnest-warning)",
 	},
 	danger: {
-		bg: "var(--mantine-color-red-0)",
-		color: "var(--mantine-color-red-7)",
-		border: "var(--mantine-color-red-2)",
-		dot: "var(--mantine-color-red-5)",
+		bg: "var(--sqlnest-danger-soft)",
+		color: "var(--sqlnest-danger)",
+		border: "var(--sqlnest-danger)",
+		dot: "var(--sqlnest-danger)",
 	},
 	neutral: {
-		bg: "var(--mantine-color-slate-0)",
-		color: "var(--mantine-color-slate-7)",
-		border: "var(--mantine-color-slate-2)",
-		dot: "var(--mantine-color-slate-4)",
+		bg: "var(--sqlnest-surface)",
+		color: "var(--sqlnest-text-secondary)",
+		border: "var(--sqlnest-border)",
+		dot: "var(--sqlnest-text-tertiary)",
 	},
 };
 

@@ -54,14 +54,25 @@ export function FloatingPanel({
 	offset,
 	children,
 	style,
+	bg,
 	...rest
 }: FloatingPanelProps) {
-	const style_ = { position: "absolute" as const, ...positionStyles(position, offset), ...(style as CSSProperties | undefined) };
+	const style_ = {
+		position: "absolute" as const,
+		// Border token appliqué ici — override possible via `style.borderColor`.
+		borderColor: "var(--sqlnest-border)",
+		...positionStyles(position, offset),
+		...(style as CSSProperties | undefined),
+	};
+	// Bg par défaut = surface Figma. Le caller peut passer `bg="transparent"`
+	// (cas CanvasToolbar qui délègue le fond au Toolbar interne) — dans ce
+	// cas on respecte sa valeur.
 	return (
 		<Paper
 			radius="lg"
 			shadow="md"
 			withBorder
+			bg={bg ?? "var(--sqlnest-surface)"}
 			style={style_}
 			{...rest}
 		>

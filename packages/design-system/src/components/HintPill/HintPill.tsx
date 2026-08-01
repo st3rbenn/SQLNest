@@ -14,11 +14,8 @@ export function HintPill({ keys, children, style, ...rest }: HintPillProps) {
 			withBorder
 			px="sm"
 			py={6}
+			bg="var(--sqlnest-surface)"
 			style={{
-				// Match surface Figma — sans override le Paper part sur bg blanc
-				// même en dark mode Mantine, donnant une pill claire dans le
-				// footer sombre du drawer.
-				background: "var(--sqlnest-surface)",
 				borderColor: "var(--sqlnest-border)",
 				...(style as Record<string, unknown> | undefined),
 			}}

@@ -237,10 +237,12 @@ function containerStyle(
 		right: 8,
 		bottom: 8,
 		height,
-		background: "#fff",
-		border: "1px solid var(--mantine-color-slate-2, #e2e8f0)",
+		background: "var(--sqlnest-surface)",
+		border: "1px solid var(--sqlnest-border)",
 		borderRadius: 10,
-		boxShadow: "0 -4px 16px rgba(15,23,42,0.08)",
+		// Shadow noire, plus intense (surface flottante au-dessus du canvas
+		// #1E1E1E — sans l'intensité une box sur bg proche disparaît).
+		boxShadow: "0 -4px 16px rgba(0,0,0,0.5)",
 		overflow: "hidden",
 		transition: isResizing ? "none" : "height 180ms ease-out",
 		zIndex: 5,
@@ -259,11 +261,13 @@ const headerStyle: CSSProperties = {
 	height: 38,
 	boxSizing: "border-box",
 	cursor: "pointer",
-	borderBottom: "1px solid var(--mantine-color-slate-1, #f1f5f9)",
-	color: "var(--mantine-color-slate-7, #334155)",
+	borderBottom: "1px solid var(--sqlnest-border-subtle)",
+	color: "var(--sqlnest-text-primary)",
 	fontSize: 12,
 	fontWeight: 600,
-	background: "var(--mantine-color-slate-0, #f8fafc)"
+	// Header légèrement plus clair que le body — délimitation subtile sans
+	// bordure épaisse.
+	background: "var(--sqlnest-surface-hover)"
 };
 
 const headerLabelStyle: CSSProperties = {
@@ -277,7 +281,7 @@ const headerHintStyle: CSSProperties = {
 	marginRight: 8,
 	fontSize: 11,
 	fontWeight: 400,
-	color: "var(--mantine-color-slate-5, #64748b)"
+	color: "var(--sqlnest-text-tertiary)"
 };
 
 const bodyStyle: CSSProperties = {
@@ -305,7 +309,7 @@ const actionsStyle: CSSProperties = {
 const historyItemStyle: CSSProperties = {
 	fontFamily: "var(--mantine-font-family-monospace)",
 	fontSize: 11.5,
-	color: "#334155",
+	color: "var(--sqlnest-text-secondary)",
 	whiteSpace: "nowrap",
 	overflow: "hidden",
 	textOverflow: "ellipsis"
@@ -321,19 +325,19 @@ const resultsStyle: CSSProperties = {
 	overflow: "hidden",
 	display: "flex",
 	flexDirection: "column",
-	borderTop: "1px solid var(--mantine-color-slate-1, #f1f5f9)",
+	borderTop: "1px solid var(--sqlnest-border-subtle)",
 	paddingTop: 8
 };
 
 const placeholderStyle: CSSProperties = {
-	color: "#94a3b8",
+	color: "var(--sqlnest-text-tertiary)",
 	fontSize: 12,
 	padding: "8px 4px"
 };
 
 const errorStyle: CSSProperties = {
-	background: "#fef2f2",
-	color: "#b91c1c",
+	background: "var(--sqlnest-danger-soft)",
+	color: "var(--sqlnest-danger)",
 	padding: "8px 10px",
 	borderRadius: 6,
 	fontSize: 12,
@@ -343,7 +347,7 @@ const errorStyle: CSSProperties = {
 
 const resultHeaderStyle: CSSProperties = {
 	fontSize: 11,
-	color: "#64748b",
+	color: "var(--sqlnest-text-secondary)",
 	margin: "4px 0 6px",
 	padding: "0 4px"
 };

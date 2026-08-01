@@ -40,6 +40,10 @@ export function Toolbar({
 	...paperProps
 }: ToolbarProps) {
 	const Container = orientation === "vertical" ? Stack : Group;
+	// Bg via prop `bg` (le caller peut override par un bg custom) ; border
+	// via `style` (Mantine ne propose pas de prop). Le Paper Mantine part
+	// par défaut sur blanc en absence d'override, ce qui casserait le rendu
+	// sur canvas #1E1E1E.
 	return (
 		<Paper
 			role="toolbar"
@@ -52,6 +56,8 @@ export function Toolbar({
 			px={orientation === "vertical" ? 0 : 8}
 			w={orientation === "vertical" ? 52 : undefined}
 			h={orientation === "vertical" ? undefined : 52}
+			bg="var(--sqlnest-surface)"
+			style={{ borderColor: "var(--sqlnest-border)" }}
 			{...paperProps}
 		>
 			<Container gap={4} align="center" wrap="nowrap">

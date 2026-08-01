@@ -54,14 +54,14 @@ export function SidebarDrawer({
 			{...(docked ? {} : { shadow: "lg" as const })}
 			withBorder
 			w={width}
+			// bg via prop Mantine — le Paper hérite sinon d'un bg blanc en
+			// absence d'override, même sous forceColorScheme dark (le token
+			// Mantine white est appliqué par le style-api du composant).
+			bg="var(--sqlnest-surface)"
 			style={{
 				display: "flex",
 				flexDirection: "column",
 				overflow: "hidden",
-				// Surface Figma + border explicite : sans ça Paper hérite du
-				// bg blanc de Mantine (le forceColorScheme dark n'a pas
-				// systématiquement pris sur `Paper` selon la version).
-				background: "var(--sqlnest-surface)",
 				borderColor: "var(--sqlnest-border)",
 				...(docked ? DOCKED_STYLE : {}),
 				...(style as CSSProperties | undefined)

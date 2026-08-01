@@ -24,12 +24,12 @@ export function HiddenChip({ count, onUnhideAll }: HiddenChipProps) {
 				zIndex: 5,
 				padding: "6px 12px",
 				borderRadius: 999,
-				background: "#fff",
-				border: "1px solid var(--mantine-color-slate-2)",
+				background: "var(--sqlnest-surface)",
+				border: "1px solid var(--sqlnest-border)",
 				boxShadow: "var(--mantine-shadow-md)",
 				fontSize: 12,
 				fontWeight: 600,
-				color: "var(--mantine-color-slate-7)",
+				color: "var(--sqlnest-text-secondary)",
 			}}
 		>
 			{count} table{plural} masquée{plural} — tout réafficher
