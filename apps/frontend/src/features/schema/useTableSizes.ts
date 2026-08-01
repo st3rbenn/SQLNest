@@ -25,6 +25,7 @@ function schemaKey(schema: SchemaModel): string {
 interface SizesApi {
 	readonly sizes: SizesMap;
 	readonly setSize: (name: string, size: TableSize) => void;
+	readonly replaceAll: (sizes: SizesMap) => void;
 }
 
 /**
@@ -78,5 +79,12 @@ export function useTableSizes(schema: SchemaModel): SizesApi {
 		setSizes((prev) => ({ ...prev, [name]: size }));
 	}, []);
 
-	return { sizes, setSize };
+	// Remplacement atomique (pas de merge). Utilisé par l'undo/redo pour
+	// restaurer un snapshot d'historique intégral — l'effet de persist qui
+	// dépend de [key, sizes] ré-écrit le storage au tick suivant.
+	const replaceAll = useCallback((next: SizesMap) => {
+		setSizes(next);
+	}, []);
+
+	return { sizes, setSize, replaceAll };
 }

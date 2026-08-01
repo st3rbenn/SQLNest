@@ -308,6 +308,44 @@ describe("useFrames", () => {
 		expect(result.current.frames).toEqual([]);
 	});
 
+	it("replaceAll remplace intégralement le state (pas de merge)", () => {
+		const { result } = renderHook(() => useFrames(SAMPLE_SCHEMA));
+		// SAMPLE_SCHEMA seed 2 frames (users, commerce)
+		expect(result.current.frames).toHaveLength(2);
+		const snapshot: Frame[] = [
+			makeFrame({ key: "only", label: "Only", collections: ["users"] })
+		];
+		act(() => {
+			result.current.replaceAll(snapshot);
+		});
+		// Les seeds ont disparu — c'est bien un remplacement, pas un merge.
+		expect(result.current.frames).toEqual(snapshot);
+	});
+
+	it("replaceAll déclenche la persistance localStorage", () => {
+		const { result } = renderHook(() => useFrames(CUSTOM_SCHEMA));
+		const snapshot: Frame[] = [
+			makeFrame({ key: "snap", label: "Snap", collections: ["alpha"] })
+		];
+		act(() => {
+			result.current.replaceAll(snapshot);
+		});
+		const raw = window.localStorage.getItem(storageKey(CUSTOM_SCHEMA));
+		expect(raw).not.toBeNull();
+		expect(JSON.parse(raw ?? "[]")).toEqual(snapshot);
+	});
+
+	it("replaceAll avec le state courant est idempotent (pas d'erreur)", () => {
+		const { result } = renderHook(() => useFrames(SAMPLE_SCHEMA));
+		const before = result.current.frames;
+		expect(() =>
+			act(() => {
+				result.current.replaceAll(before);
+			})
+		).not.toThrow();
+		expect(result.current.frames).toEqual(before);
+	});
+
 	it("re-hydrates from localStorage when the schema signature changes to a stored key", () => {
 		const stored: Frame[] = [
 			{ key: "stored", label: "Stored", hue: 262, collections: ["alpha"] }

@@ -26,6 +26,7 @@ interface PositionsApi {
 	readonly positions: PositionsMap;
 	readonly setPosition: (name: string, xy: XY) => void;
 	readonly setManyPositions: (entries: Readonly<Record<string, XY>>) => void;
+	readonly replaceAll: (positions: PositionsMap) => void;
 }
 
 /**
@@ -94,5 +95,12 @@ export function useTablePositions(schema: SchemaModel): PositionsApi {
 		[]
 	);
 
-	return { positions, setPosition, setManyPositions };
+	// Remplacement atomique (pas de merge). Utilisé par l'undo/redo pour
+	// restaurer un snapshot d'historique intégral — l'effet de persist qui
+	// dépend de [key, positions] ré-écrit le storage au tick suivant.
+	const replaceAll = useCallback((next: PositionsMap) => {
+		setPositions(next);
+	}, []);
+
+	return { positions, setPosition, setManyPositions, replaceAll };
 }

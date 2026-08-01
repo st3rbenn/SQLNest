@@ -68,6 +68,7 @@ interface FramesApi {
 	readonly addTableToFrame: (frameKey: string, tableName: string) => void;
 	readonly moveFrame: (key: string, dx: number, dy: number) => void;
 	readonly setFrameRect: (key: string, rect: FrameRect) => void;
+	readonly replaceAll: (frames: readonly Frame[]) => void;
 }
 
 /**
@@ -216,6 +217,13 @@ export function useFrames(schema: SchemaModel): FramesApi {
 		);
 	}, []);
 
+	// Remplacement atomique (pas de merge). Utilisé par l'undo/redo pour
+	// restaurer un snapshot d'historique intégral — l'effet de persist qui
+	// dépend de [key, frames] ré-écrit le storage au tick suivant.
+	const replaceAll = useCallback((next: readonly Frame[]) => {
+		setFrames(next);
+	}, []);
+
 	return {
 		frames,
 		frameOfTable,
@@ -225,6 +233,7 @@ export function useFrames(schema: SchemaModel): FramesApi {
 		removeTableFromFrame,
 		addTableToFrame,
 		moveFrame,
-		setFrameRect
+		setFrameRect,
+		replaceAll
 	};
 }

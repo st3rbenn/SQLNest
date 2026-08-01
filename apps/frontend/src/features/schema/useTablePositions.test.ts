@@ -134,6 +134,43 @@ describe("useTablePositions", () => {
 		expect(result.current.positions).toEqual(stored);
 	});
 
+	it("replaceAll remplace intégralement le state (pas de merge)", () => {
+		const { result } = renderHook(() => useTablePositions(SCHEMA_A));
+		act(() => {
+			result.current.setPosition("users", { x: 1, y: 2 });
+			result.current.setPosition("orders", { x: 3, y: 4 });
+		});
+		act(() => {
+			result.current.replaceAll({ users: { x: 999, y: 999 } });
+		});
+		// `orders` a disparu — c'est bien un remplacement, pas un merge.
+		expect(result.current.positions).toEqual({ users: { x: 999, y: 999 } });
+	});
+
+	it("replaceAll déclenche la persistance localStorage", () => {
+		const { result } = renderHook(() => useTablePositions(SCHEMA_A));
+		act(() => {
+			result.current.replaceAll({ alpha: { x: 10, y: 20 } });
+		});
+		const raw = window.localStorage.getItem(storageKey(SCHEMA_A));
+		expect(raw).not.toBeNull();
+		expect(JSON.parse(raw ?? "{}")).toEqual({ alpha: { x: 10, y: 20 } });
+	});
+
+	it("replaceAll avec le state courant est idempotent (pas d'erreur)", () => {
+		const { result } = renderHook(() => useTablePositions(SCHEMA_A));
+		act(() => {
+			result.current.setPosition("users", { x: 1, y: 2 });
+		});
+		const before = result.current.positions;
+		expect(() =>
+			act(() => {
+				result.current.replaceAll(before);
+			})
+		).not.toThrow();
+		expect(result.current.positions).toEqual(before);
+	});
+
 	it("re-seed falls back to {} when stored JSON is corrupt for the new key", () => {
 		window.localStorage.setItem(storageKey(SCHEMA_B), "not-json");
 		const { result, rerender } = renderHook(
