@@ -118,7 +118,7 @@ function QueryPage() {
 		borderRadius: 8,
 		border: "1px solid #e2e8f0",
 		fontSize: 13,
-		fontFamily: "ui-monospace, SFMono-Regular, monospace",
+		fontFamily: "var(--mantine-font-family-monospace)",
 		color: "#0f172a",
 		width: 130
 	};
@@ -213,7 +213,7 @@ function QueryPage() {
 						padding: "12px 14px",
 						borderRadius: 8,
 						fontSize: 14,
-						fontFamily: "ui-monospace, monospace"
+						fontFamily: "var(--mantine-font-family-monospace)"
 					}}
 				>
 					{run.error.message}

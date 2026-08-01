@@ -190,8 +190,7 @@ const TOOLTIP_SQL: CSSProperties = {
 	borderRadius: 4,
 	fontSize: 10.5,
 	color: "#94a3b8",
-	fontFamily:
-		"ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace"
+	fontFamily: "var(--mantine-font-family-monospace)"
 };
 
 /**

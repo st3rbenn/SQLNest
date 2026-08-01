@@ -438,8 +438,7 @@ const actionsStyle: CSSProperties = {
 };
 
 const historyItemStyle: CSSProperties = {
-	fontFamily:
-		"ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace",
+	fontFamily: "var(--mantine-font-family-monospace)",
 	fontSize: 11.5,
 	color: "#334155",
 	whiteSpace: "nowrap",
@@ -473,7 +472,7 @@ const errorStyle: CSSProperties = {
 	padding: "8px 10px",
 	borderRadius: 6,
 	fontSize: 12,
-	fontFamily: "ui-monospace, SFMono-Regular, monospace",
+	fontFamily: "var(--mantine-font-family-monospace)",
 	whiteSpace: "pre-wrap"
 };
 

@@ -29,7 +29,7 @@ const theme = EditorView.theme({
 	},
 	"&.cm-focused": { outline: "none", borderColor: "#93c5fd" },
 	".cm-content": {
-		fontFamily: "ui-monospace, SFMono-Regular, monospace",
+		fontFamily: "var(--mantine-font-family-monospace)",
 		padding: "12px 14px",
 		minHeight: "84px",
 		caretColor: "#2563eb"
