@@ -1,5 +1,4 @@
 import {
-	ConfirmModal,
 	HintPill,
 	SearchInput,
 	SelectionChip,
@@ -57,11 +56,13 @@ import {
 	tablesBounds,
 	type Viewport
 } from "./canvas/viewport";
+import { AutoLayoutModal } from "./canvas/AutoLayoutModal";
 import {
 	boundsOfTables,
 	computeFrameNodes,
 	FRAME_PAD
 } from "./canvas/computeFrameNodes";
+import { HiddenChip } from "./canvas/HiddenChip";
 import { CanvasConsole } from "./CanvasConsole";
 import { CanvasContextMenu } from "./CanvasContextMenu";
 import { CanvasToolbar } from "./CanvasToolbar";
@@ -1260,14 +1261,10 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 				onAutoLayout={() => setLayoutConfirmOpen(true)}
 				bottomOffset={consoleHeight + CONSOLE_GAP}
 			/>
-			<ConfirmModal
+			<AutoLayoutModal
 				opened={layoutConfirmOpen}
 				onClose={() => setLayoutConfirmOpen(false)}
 				onConfirm={relayoutAll}
-				title="Réappliquer le layout automatique ?"
-				message="Toutes les positions des tables et les rects des frames seront remplacés par la disposition calculée automatiquement. Cette action n'est pas annulable pour l'instant."
-				destructive
-				confirmLabel="Réappliquer"
 			/>
 
 			{/* Console SNQL escamotable (bas-droit, à droite du drawer). */}
@@ -1477,28 +1474,7 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 
 			{/* Chip « masqués — tout réafficher » quand ≥1 table est cachée. */}
 			{hiddenIds.size > 0 ? (
-				<UnstyledButton
-					onClick={unhideAll}
-					style={{
-						position: "absolute",
-						top: 12,
-						left: "50%",
-						transform: "translateX(-50%)",
-						zIndex: 5,
-						padding: "6px 12px",
-						borderRadius: 999,
-						background: "#fff",
-						border: "1px solid var(--mantine-color-slate-2)",
-						boxShadow: "var(--mantine-shadow-md)",
-						fontSize: 12,
-						fontWeight: 600,
-						color: "var(--mantine-color-slate-7)"
-					}}
-				>
-					{hiddenIds.size} table
-					{hiddenIds.size > 1 ? "s" : ""} masquée
-					{hiddenIds.size > 1 ? "s" : ""} — tout réafficher
-				</UnstyledButton>
+				<HiddenChip count={hiddenIds.size} onUnhideAll={unhideAll} />
 			) : null}
 
 			{/* Menu contextuel (tour 1b + retirer du frame tour 1d). */}
