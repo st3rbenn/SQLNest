@@ -32,11 +32,19 @@
 .react-flow__node-table .react-flow__resize-control.handle,
 .react-flow__node-table .react-flow__resize-control.line {
 	opacity: 0;
+	/* `pointer-events: none` critique : sans ça, les handles restent cliquables
+	 * même invisibles → un Cmd+click qui tombe sur la zone d'un handle (les
+	 * corners débordent légèrement de la carte) est intercepté et n'atteint
+	 * jamais le node RF → la sélection multi « saute » de temps en temps
+	 * (bug intermittent car dépend de la position exacte du curseur). */
+	pointer-events: none;
 	transition: opacity 120ms ease-out;
 }
 .react-flow__node-table:not(.selected):hover .react-flow__resize-control.handle {
 	opacity: 1;
+	pointer-events: auto;
 }
 .react-flow__node-table:not(.selected):hover .react-flow__resize-control.line {
 	opacity: 0.6;
+	pointer-events: auto;
 }
