@@ -12,7 +12,7 @@ import { FrameDetails } from "../FrameDetails";
 import type { Frame } from "../frames";
 import { SchemaTree } from "../SchemaTree";
 import type { SchemaModel } from "../schema-model";
-import { TableDetails } from "../TableDetails";
+import { TableDetails } from "../table-details";
 import { useFrames } from "../useFrames";
 
 const DRAWER_MIN_WIDTH = 260;
