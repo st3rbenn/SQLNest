@@ -120,5 +120,13 @@ export function useConsolePersistence(engine: Engine): ConsolePersistence {
 	};
 	const clearHistory = () => setHistory([]);
 
-	return { source, setSource, height, setHeight, history, addHistory, clearHistory };
+	return {
+		source,
+		setSource,
+		height,
+		setHeight,
+		history,
+		addHistory,
+		clearHistory
+	};
 }

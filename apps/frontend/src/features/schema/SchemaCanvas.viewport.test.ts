@@ -7,7 +7,13 @@ import {
 } from "./canvas/viewport";
 import type { TableNodeType } from "./TableNode";
 
-function n(id: string, x: number, y: number, w: number, h: number): TableNodeType {
+function n(
+	id: string,
+	x: number,
+	y: number,
+	w: number,
+	h: number
+): TableNodeType {
 	return {
 		id,
 		type: "table",
@@ -146,7 +152,12 @@ describe("animateViewport", () => {
 	it("falls back to applying `to` immediately when no viewport exists", () => {
 		document.body.innerHTML = "";
 		const apply = vi.fn();
-		animateViewport({ x: 0, y: 0, zoom: 0.5 }, { x: 1, y: 2, zoom: 3 }, 200, apply);
+		animateViewport(
+			{ x: 0, y: 0, zoom: 0.5 },
+			{ x: 1, y: 2, zoom: 3 },
+			200,
+			apply
+		);
 		expect(apply).toHaveBeenCalledExactlyOnceWith({ x: 1, y: 2, zoom: 3 });
 	});
 });

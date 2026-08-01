@@ -6,7 +6,13 @@ import {
 	IconHistory,
 	IconTerminal2
 } from "@tabler/icons-react";
-import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
+import {
+	type CSSProperties,
+	useEffect,
+	useMemo,
+	useRef,
+	useState
+} from "react";
 import { SnqlEditor } from "../query/SnqlEditor";
 import { type QueryResult, useRunQuery } from "../query/useRunQuery";
 import { ConsoleResizeHandle } from "./console/ConsoleResizeHandle";
@@ -203,8 +209,8 @@ function ResultView({ result }: { result: QueryResult }) {
 	if (result.written && result.rows.length === 0) {
 		return (
 			<div style={placeholderStyle}>
-				<b>{result.rowCount}</b> ligne(s) affectée(s) — le moteur ne renvoie
-				pas les documents modifiés.
+				<b>{result.rowCount}</b> ligne(s) affectée(s) — le moteur ne renvoie pas
+				les documents modifiés.
 			</div>
 		);
 	}

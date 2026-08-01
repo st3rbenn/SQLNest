@@ -1,7 +1,7 @@
 import {
 	ContextMenu,
 	type ContextMenuItem,
-	showNotification,
+	showNotification
 } from "@sqlnest/design-system";
 import {
 	IconCopy,
@@ -48,7 +48,7 @@ export function CanvasContextMenu({
 	const goToEditor = (source: string, autorun: boolean) => {
 		void navigate({
 			to: "/query",
-			search: autorun ? { source, autorun: 1 } : { source },
+			search: autorun ? { source, autorun: 1 } : { source }
 		});
 	};
 
@@ -59,14 +59,14 @@ export function CanvasContextMenu({
 				title: "Copié",
 				message: tableName,
 				color: "blue",
-				autoClose: 1500,
+				autoClose: 1500
 			});
 		} catch {
 			showNotification({
 				title: "Copie impossible",
 				message: "Le presse-papiers a refusé l'accès.",
 				color: "red",
-				autoClose: 2500,
+				autoClose: 2500
 			});
 		}
 	};
@@ -117,7 +117,7 @@ export function CanvasContextMenu({
 			icon: <IconEditCircle {...ICON} />,
 			hint: `get ${tableName}`,
 			active: true,
-			onClick: () => goToEditor(`get ${tableName}`, false),
+			onClick: () => goToEditor(`get ${tableName}`, false)
 		},
 		{
 			kind: "action",
@@ -125,7 +125,7 @@ export function CanvasContextMenu({
 			label: "Voir les données",
 			icon: <IconTable {...ICON} />,
 			hint: "limit 100",
-			onClick: () => goToEditor(`get ${tableName} | limit 100`, true),
+			onClick: () => goToEditor(`get ${tableName} | limit 100`, true)
 		},
 		{
 			kind: "submenu",
@@ -142,22 +142,22 @@ export function CanvasContextMenu({
 			id: "copy",
 			label: "Copier le nom",
 			icon: <IconCopy {...ICON} />,
-			onClick: () => void copyName(),
+			onClick: () => void copyName()
 		},
 		{
 			kind: "action",
 			id: "hide",
 			label: "Masquer",
 			icon: <IconEyeOff {...ICON} />,
-			onClick: () => onHide(tableName),
+			onClick: () => onHide(tableName)
 		},
 		{
 			kind: "action",
 			id: "details",
 			label: "Détails",
 			icon: <IconInfoCircle {...ICON} />,
-			onClick: () => onFocus(tableName),
-		},
+			onClick: () => onFocus(tableName)
+		}
 	];
 
 	return (

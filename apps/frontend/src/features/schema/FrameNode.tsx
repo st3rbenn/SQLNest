@@ -1,5 +1,5 @@
 import { FrameBadge } from "@sqlnest/design-system";
-import { type Node, NodeResizer, type NodeProps } from "@xyflow/react";
+import { type Node, type NodeProps, NodeResizer } from "@xyflow/react";
 import { useState } from "react";
 import type { Frame, FrameRect } from "./frames";
 

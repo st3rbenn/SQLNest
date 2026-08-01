@@ -81,10 +81,7 @@ export function spreadOffsets(n: number): number[] {
  * la plus proche même si le curseur est très hors du rect sur l'axe
  * complémentaire). Le mid-side reflète où le handle finit visuellement.
  */
-export function closestSide(
-	point: { x: number; y: number },
-	rect: Rect
-): Side {
+export function closestSide(point: { x: number; y: number }, rect: Rect): Side {
 	const midTop = { x: rect.x + rect.width / 2, y: rect.y };
 	const midRight = { x: rect.x + rect.width, y: rect.y + rect.height / 2 };
 	const midBottom = { x: rect.x + rect.width / 2, y: rect.y + rect.height };

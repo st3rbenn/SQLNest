@@ -6,15 +6,13 @@ import { useUndoRedoShortcuts } from "./useUndoRedoShortcuts";
  * Dispatche un keydown avec un `target` optionnel (par défaut document.body).
  * On instancie un vrai KeyboardEvent pour que preventDefault soit trackable.
  */
-function fireKey(
-	init: {
-		readonly key: string;
-		readonly meta?: boolean;
-		readonly ctrl?: boolean;
-		readonly shift?: boolean;
-		readonly target?: HTMLElement;
-	}
-): KeyboardEvent {
+function fireKey(init: {
+	readonly key: string;
+	readonly meta?: boolean;
+	readonly ctrl?: boolean;
+	readonly shift?: boolean;
+	readonly target?: HTMLElement;
+}): KeyboardEvent {
 	const event = new KeyboardEvent("keydown", {
 		key: init.key,
 		metaKey: init.meta ?? false,

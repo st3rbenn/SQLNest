@@ -90,7 +90,8 @@
 	pointer-events: none;
 	transition: opacity 120ms ease-out;
 }
-.react-flow__node-table:not(.selected):hover .react-flow__resize-control.handle {
+.react-flow__node-table:not(.selected):hover
+	.react-flow__resize-control.handle {
 	opacity: 1;
 	pointer-events: auto;
 }
@@ -100,14 +101,31 @@
 }
 
 /*
- * Attribution React Flow (proOptions.hideAttribution=false). Texte trop
- * sombre sur bg noir → couleur secondary + bg transparent pour rester
- * discret sans se fondre.
+ * Mode « frame » (toolbar) — cursor crosshair sur le pane pour signaler
+ * qu'un lasso va créer un frame (au lieu de sélectionner). La classe est
+ * posée sur le wrapper du canvas par SchemaCanvas quand `activeTool` vaut
+ * « frame » ; on ne cible QUE le pane (pas les nodes) pour garder le grab
+ * cursor sur les tables draggables.
+ */
+.canvas-tool-frame .react-flow__pane {
+	cursor: crosshair !important;
+}
+.canvas-tool-frame .react-flow__selection {
+	/* Filet bleu accent pour appuyer la sémantique « frame draw » — on
+	 * réutilise l'accent Figma déjà utilisé pour la sélection normale mais
+	 * on pousse l'opacité et le trait pour distinguer visuellement. */
+	background: var(--sqlnest-accent-soft) !important;
+	border: 2px dashed var(--sqlnest-accent) !important;
+}
+
+/*
+ * Attribution React Flow — masquée visuellement, PAS désactivée côté RF
+ * (`proOptions.hideAttribution: false`). Le node reste émis dans le DOM,
+ * seule la présentation est nulle. Choix commercial en attendant l'arbitrage
+ * final : souscription React Flow Pro ($169/mois) OU migration vers un
+ * engine MIT sans clause d'attribution (@antv/x6, react-diagrams). Réévaluer
+ * AVANT toute mise en vente publique — cf. Obsidian « Roadmap / Licence RF ».
  */
 .react-flow__attribution {
-	background: rgba(44, 44, 44, 0.85) !important;
-	color: var(--sqlnest-text-tertiary) !important;
-}
-.react-flow__attribution a {
-	color: var(--sqlnest-text-secondary) !important;
+	display: none !important;
 }

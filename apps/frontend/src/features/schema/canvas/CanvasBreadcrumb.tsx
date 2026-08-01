@@ -1,9 +1,5 @@
 import { UnstyledButton } from "@mantine/core";
-import {
-	IconChevronRight,
-	IconDatabase,
-	IconLeaf
-} from "@tabler/icons-react";
+import { IconChevronRight, IconDatabase, IconLeaf } from "@tabler/icons-react";
 import type { CSSProperties } from "react";
 
 export type CanvasBreadcrumbProps = {
@@ -61,13 +57,6 @@ export function CanvasBreadcrumb({
 				alignItems: "center",
 				gap: 6,
 				padding: "6px 10px",
-				borderRadius: 8,
-				// Surface Figma légèrement translucide + blur → laisse deviner
-				// le canvas dessous mais reste lisible.
-				background: "rgba(44, 44, 44, 0.85)",
-				border: "1px solid var(--sqlnest-border)",
-				backdropFilter: "blur(8px)",
-				WebkitBackdropFilter: "blur(8px)",
 				fontSize: 12.5
 			}}
 			aria-label="Contexte du canvas"
@@ -128,10 +117,7 @@ function Segment({
 		return <span style={style}>{children}</span>;
 	}
 	return (
-		<UnstyledButton
-			onClick={onClick}
-			style={{ ...style, cursor: "pointer" }}
-		>
+		<UnstyledButton onClick={onClick} style={{ ...style, cursor: "pointer" }}>
 			{children}
 		</UnstyledButton>
 	);

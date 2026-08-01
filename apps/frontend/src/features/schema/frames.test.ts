@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-	type FrameRect,
-	framesFor,
-	rectContainsPoint
-} from "./frames";
+import { type FrameRect, framesFor, rectContainsPoint } from "./frames";
 import { SAMPLE_POSTGRES, type SchemaModel } from "./schema-model";
 
 const rect: FrameRect = { x: 10, y: 20, width: 100, height: 50 };

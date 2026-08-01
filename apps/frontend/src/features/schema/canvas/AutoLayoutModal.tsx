@@ -14,7 +14,7 @@ export type AutoLayoutModalProps = {
 export function AutoLayoutModal({
 	opened,
 	onClose,
-	onConfirm,
+	onConfirm
 }: AutoLayoutModalProps) {
 	return (
 		<ConfirmModal

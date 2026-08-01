@@ -107,10 +107,7 @@ export function animateViewport(
  * - currentZoom >= min → currentZoom (on ne dézoome jamais — respecte le
  *   niveau choisi par l'utilisateur)
  */
-export function focusZoom(
-	currentZoom: number,
-	opts: { min: number }
-): number {
+export function focusZoom(currentZoom: number, opts: { min: number }): number {
 	if (currentZoom < opts.min) return opts.min;
 	return currentZoom;
 }

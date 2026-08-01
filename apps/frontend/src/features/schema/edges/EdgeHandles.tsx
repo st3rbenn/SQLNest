@@ -9,9 +9,9 @@ const HANDLE_BASE: CSSProperties = {
 	width: 14,
 	height: 14,
 	borderRadius: "50%",
-	background: "#2563eb",
-	border: "2px solid #fff",
-	boxShadow: "0 0 0 1px #2563eb, 0 1px 3px rgba(15,23,42,0.25)",
+	background: "var(--sqlnest-accent)",
+	border: "2px solid var(--sqlnest-surface)",
+	boxShadow: "0 0 0 1px var(--sqlnest-accent), 0 1px 3px rgba(0, 0, 0, 0.45)",
 	pointerEvents: "auto",
 	touchAction: "none",
 	zIndex: 10
@@ -22,8 +22,8 @@ const ANCHOR_BASE: CSSProperties = {
 	width: 10,
 	height: 10,
 	borderRadius: "50%",
-	background: "#fff",
-	border: "2px solid #2563eb",
+	background: "var(--sqlnest-surface)",
+	border: "2px solid var(--sqlnest-accent)",
 	opacity: 0.7,
 	pointerEvents: "none",
 	zIndex: 9,
@@ -51,9 +51,7 @@ export interface EdgeHandlesProps {
 	readonly dragEnd: "source" | "target" | null;
 	readonly snapped: Side | null;
 	readonly anchors: Record<Side, { x: number; y: number }> | null;
-	readonly onDown: (
-		end: "source" | "target"
-	) => (e: PointerEvent) => void;
+	readonly onDown: (end: "source" | "target") => (e: PointerEvent) => void;
 	readonly onMove: (e: PointerEvent) => void;
 	readonly onUp: (e: PointerEvent) => void;
 	readonly onDoubleClick: (e: PointerEvent) => void;

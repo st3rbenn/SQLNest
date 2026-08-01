@@ -11,14 +11,17 @@ import {
 
 describe("formatColumns", () => {
 	it("single field → collection.field", () => {
-		expect(
-			formatColumns({ collection: "orders", fields: ["user_id"] })
-		).toBe("orders.user_id");
+		expect(formatColumns({ collection: "orders", fields: ["user_id"] })).toBe(
+			"orders.user_id"
+		);
 	});
 
 	it("composite fields → tous listés séparés par virgule", () => {
 		expect(
-			formatColumns({ collection: "membership", fields: ["user_id", "team_id"] })
+			formatColumns({
+				collection: "membership",
+				fields: ["user_id", "team_id"]
+			})
 		).toBe("membership.user_id, membership.team_id");
 	});
 });
@@ -137,9 +140,9 @@ describe("humanFooter", () => {
 	};
 
 	it("FK déclarée → « via {col} · relation déclarée » (pas de %)", () => {
-		expect(
-			humanFooter({ ...base, origin: "foreign-key", confidence: 1 })
-		).toBe("via user_id · relation déclarée");
+		expect(humanFooter({ ...base, origin: "foreign-key", confidence: 1 })).toBe(
+			"via user_id · relation déclarée"
+		);
 	});
 
 	it("inférée nommage confidence 0.6 → ajoute « certitude 60% »", () => {
@@ -161,8 +164,8 @@ describe("humanFooter", () => {
 	});
 
 	it("inférée confidence 1 → pas de certitude (trivial)", () => {
-		expect(
-			humanFooter({ ...base, origin: "ai", confidence: 1 })
-		).toBe("via user_id · détectée par IA");
+		expect(humanFooter({ ...base, origin: "ai", confidence: 1 })).toBe(
+			"via user_id · détectée par IA"
+		);
 	});
 });

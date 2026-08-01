@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
 import { FRAME_HUES } from "@sqlnest/design-system";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Frame, FrameRect } from "./frames";
 import { framesFor } from "./frames";
 import type { SchemaModel } from "./schema-model";
@@ -89,7 +89,9 @@ function loadFrames(schema: SchemaModel): readonly Frame[] {
 
 export function useFrames(schema: SchemaModel): FramesApi {
 	const key = schemaKey(schema);
-	const [frames, setFrames] = useState<readonly Frame[]>(() => loadFrames(schema));
+	const [frames, setFrames] = useState<readonly Frame[]>(() =>
+		loadFrames(schema)
+	);
 
 	// Track quel `key` est actuellement représenté par `frames` en state.
 	// Sert à distinguer un vrai mutate (persist OK) d'un pending re-seed après
@@ -154,9 +156,7 @@ export function useFrames(schema: SchemaModel): FramesApi {
 	}, []);
 
 	const renameFrame = useCallback((key: string, label: string) => {
-		setFrames((prev) =>
-			prev.map((f) => (f.key === key ? { ...f, label } : f))
-		);
+		setFrames((prev) => prev.map((f) => (f.key === key ? { ...f, label } : f)));
 	}, []);
 
 	const removeTableFromFrame = useCallback((tableName: string) => {
@@ -172,27 +172,24 @@ export function useFrames(schema: SchemaModel): FramesApi {
 		);
 	}, []);
 
-	const addTableToFrame = useCallback(
-		(frameKey: string, tableName: string) => {
-			setFrames((prev) =>
-				prev.map((f) => {
-					if (f.key === frameKey) {
-						if (f.collections.includes(tableName)) return f;
-						return { ...f, collections: [...f.collections, tableName] };
-					}
-					// Retire de tout autre frame (invariant : une table par frame).
-					if (f.collections.includes(tableName)) {
-						return {
-							...f,
-							collections: f.collections.filter((c) => c !== tableName)
-						};
-					}
-					return f;
-				})
-			);
-		},
-		[]
-	);
+	const addTableToFrame = useCallback((frameKey: string, tableName: string) => {
+		setFrames((prev) =>
+			prev.map((f) => {
+				if (f.key === frameKey) {
+					if (f.collections.includes(tableName)) return f;
+					return { ...f, collections: [...f.collections, tableName] };
+				}
+				// Retire de tout autre frame (invariant : une table par frame).
+				if (f.collections.includes(tableName)) {
+					return {
+						...f,
+						collections: f.collections.filter((c) => c !== tableName)
+					};
+				}
+				return f;
+			})
+		);
+	}, []);
 
 	const moveFrame = useCallback((key: string, dx: number, dy: number) => {
 		setFrames((prev) =>
@@ -212,9 +209,7 @@ export function useFrames(schema: SchemaModel): FramesApi {
 	}, []);
 
 	const setFrameRect = useCallback((key: string, rect: FrameRect) => {
-		setFrames((prev) =>
-			prev.map((f) => (f.key === key ? { ...f, rect } : f))
-		);
+		setFrames((prev) => prev.map((f) => (f.key === key ? { ...f, rect } : f)));
 	}, []);
 
 	// Remplacement atomique (pas de merge). Utilisé par l'undo/redo pour

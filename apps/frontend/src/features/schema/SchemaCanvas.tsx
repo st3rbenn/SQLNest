@@ -1,12 +1,11 @@
+import { ActionIcon, Box } from "@mantine/core";
 import {
 	SelectionChip,
-	showNotification,
 	Spotlight,
+	showNotification,
 	spotlight,
 	useCommandPaletteShortcut
 } from "@sqlnest/design-system";
-import { buildCanvasCommands } from "./commands";
-import { ActionIcon, Box } from "@mantine/core";
 import {
 	IconLayoutSidebarLeftCollapse,
 	IconLayoutSidebarLeftExpand
@@ -25,6 +24,7 @@ import {
 	useNodesState,
 	useReactFlow
 } from "@xyflow/react";
+import { buildCanvasCommands } from "./commands";
 import "@xyflow/react/dist/style.css";
 import "./canvas-overrides.css";
 import {
@@ -35,6 +35,22 @@ import {
 	useRef,
 	useState
 } from "react";
+import { CanvasConsole } from "./CanvasConsole";
+import { CanvasContextMenu } from "./CanvasContextMenu";
+import { type CanvasTool, CanvasToolbar } from "./CanvasToolbar";
+import { AutoLayoutModal } from "./canvas/AutoLayoutModal";
+import { CanvasBreadcrumb } from "./canvas/CanvasBreadcrumb";
+import {
+	boundsOfTables,
+	computeFrameNodes,
+	FRAME_PAD
+} from "./canvas/computeFrameNodes";
+import { DrawerPane, useResizableDrawer } from "./canvas/DrawerPane";
+import { HiddenChip } from "./canvas/HiddenChip";
+import { useCanvasFocus } from "./canvas/useCanvasFocus";
+import { useCanvasHistory } from "./canvas/useCanvasHistory";
+import { useCanvasSelection } from "./canvas/useCanvasSelection";
+import { useUndoRedoShortcuts } from "./canvas/useUndoRedoShortcuts";
 import {
 	animateViewport,
 	FOCUS_TWEEN_MS,
@@ -46,22 +62,6 @@ import {
 	tablesBounds,
 	type Viewport
 } from "./canvas/viewport";
-import { AutoLayoutModal } from "./canvas/AutoLayoutModal";
-import { useCanvasHistory } from "./canvas/useCanvasHistory";
-import {
-	boundsOfTables,
-	computeFrameNodes,
-	FRAME_PAD
-} from "./canvas/computeFrameNodes";
-import { DrawerPane, useResizableDrawer } from "./canvas/DrawerPane";
-import { CanvasBreadcrumb } from "./canvas/CanvasBreadcrumb";
-import { HiddenChip } from "./canvas/HiddenChip";
-import { useCanvasFocus } from "./canvas/useCanvasFocus";
-import { useCanvasSelection } from "./canvas/useCanvasSelection";
-import { useUndoRedoShortcuts } from "./canvas/useUndoRedoShortcuts";
-import { CanvasConsole } from "./CanvasConsole";
-import { CanvasContextMenu } from "./CanvasContextMenu";
-import { CanvasToolbar } from "./CanvasToolbar";
 import { bestHandles, type Side, spreadOffsets } from "./edgeRouting";
 import { FrameNode, type FrameNodeType } from "./FrameNode";
 import { type Frame, type FrameRect, rectContainsPoint } from "./frames";
@@ -217,7 +217,14 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 		y: number;
 		tableName: string;
 	} | null>(null);
-	const { getViewport, setViewport } = useReactFlow();
+	// Outil actif de la toolbar canvas. « frame » = mode explicite : cursor
+	// crosshair sur le pane, un lasso au release crée un frame à partir des
+	// tables touchées puis revient à « select ». Le raccourci F reste dispo
+	// pour créer un frame depuis une sélection existante — c'est le geste
+	// « expert », le mode toolbar est le geste « découvrable ».
+	const [activeTool, setActiveTool] = useState<CanvasTool>("select");
+	const { getViewport, setViewport, getNodes, screenToFlowPosition } =
+		useReactFlow();
 	const containerRef = useRef<HTMLDivElement | null>(null);
 	// Handle du tween en cours — annulé si un nouveau focus arrive.
 	const tweenRef = useRef<{ cancel: () => void } | null>(null);
@@ -427,7 +434,10 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 	// garder l'opposé fixe). Sans persister x/y, un refresh remettait la table
 	// à l'ancienne origine → elle semblait grossir uniquement vers la droite.
 	const handleTableResize = useCallback(
-		(name: string, size: { width: number; height: number; x: number; y: number }) => {
+		(
+			name: string,
+			size: { width: number; height: number; x: number; y: number }
+		) => {
 			tableSizes.setSize(name, { width: size.width, height: size.height });
 			tablePositions.setPosition(name, { x: size.x, y: size.y });
 			history.push();
@@ -961,6 +971,13 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 
 	useEffect(() => {
 		function onKey(e: KeyboardEvent) {
+			// Escape sort du mode « frame » de la toolbar sans rien créer —
+			// même sémantique que Figma. Priorité sur les autres handlers.
+			if (e.key === "Escape" && activeTool === "frame") {
+				e.preventDefault();
+				setActiveTool("select");
+				return;
+			}
 			if (e.key !== "f" && e.key !== "F") return;
 			if (e.metaKey || e.ctrlKey || e.altKey) return;
 			const target = e.target as HTMLElement | null;
@@ -980,7 +997,84 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 		}
 		document.addEventListener("keydown", onKey);
 		return () => document.removeEventListener("keydown", onKey);
-	}, [selectedTables, createFrameFromSelection, clearSelection]);
+	}, [activeTool, selectedTables, createFrameFromSelection, clearSelection]);
+
+	// Mode « frame » (toolbar) : on capture les coordonnées du lasso (start
+	// sur `onSelectionStart`, end sur `onSelectionEnd`) puis on crée un frame
+	// dont le RECT correspond au lasso — pas au bounds des tables. Ça permet
+	// (a) de préserver la taille dessinée par l'utilisateur et (b) de créer
+	// un frame VIDE si aucune table n'est englobée (utile comme conteneur à
+	// remplir plus tard). Les tables sélectionnées sont lues via `getNodes()`
+	// (source directe RF) car notre state `selectedTables` n'est pas encore
+	// flushé au moment du release.
+	const frameLassoStartRef = useRef<{ x: number; y: number } | null>(null);
+	const MIN_FRAME_LASSO = 40; // évite les frames dégénérés d'un simple clic
+
+	const handleSelectionStart = useCallback(
+		(event: React.MouseEvent) => {
+			if (activeTool !== "frame") return;
+			frameLassoStartRef.current = screenToFlowPosition({
+				x: event.clientX,
+				y: event.clientY
+			});
+		},
+		[activeTool, screenToFlowPosition]
+	);
+
+	const handleSelectionEnd = useCallback(
+		(event: React.MouseEvent) => {
+			if (activeTool !== "frame") return;
+			const start = frameLassoStartRef.current;
+			frameLassoStartRef.current = null;
+			// Sans point de départ (edge case : onSelectionEnd sans start
+			// correspondant), on retombe sur un no-op propre.
+			if (!start) {
+				setActiveTool("select");
+				return;
+			}
+			const end = screenToFlowPosition({
+				x: event.clientX,
+				y: event.clientY
+			});
+			const width = Math.abs(end.x - start.x);
+			const height = Math.abs(end.y - start.y);
+			// Simple clic (pas de vrai lasso) → on sort du mode sans rien créer.
+			if (width < MIN_FRAME_LASSO || height < MIN_FRAME_LASSO) {
+				setActiveTool("select");
+				return;
+			}
+			const rect = {
+				x: Math.min(start.x, end.x),
+				y: Math.min(start.y, end.y),
+				width,
+				height
+			};
+			const selectedTableIds = getNodes()
+				.filter((n) => n.selected && n.type === "table")
+				.map((n) => n.id);
+			const frame = framesApi.createFrame(selectedTableIds, { rect });
+			showNotification({
+				title: `Frame « ${frame.label} » créé`,
+				message:
+					selectedTableIds.length > 0
+						? `${selectedTableIds.length} table${selectedTableIds.length > 1 ? "s" : ""} groupée${selectedTableIds.length > 1 ? "s" : ""}`
+						: "Frame vide — glisse des tables dedans",
+				color: "green",
+				autoClose: 2500
+			});
+			history.push();
+			if (selectedTableIds.length > 0) clearSelection();
+			setActiveTool("select");
+		},
+		[
+			activeTool,
+			screenToFlowPosition,
+			getNodes,
+			framesApi,
+			history,
+			clearSelection
+		]
+	);
 
 	// ─── palette Cmd+K (tour 1c) ──────────────────────────────────────────
 	useCommandPaletteShortcut(spotlight.open);
@@ -1007,6 +1101,7 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 	return (
 		<div
 			ref={containerRef}
+			className={activeTool === "frame" ? "canvas-tool-frame" : undefined}
 			style={{ position: "relative", width: "100%", height: "100%" }}
 		>
 			{base === null ? (
@@ -1046,6 +1141,8 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 				selectionOnDrag
 				selectionMode={SelectionMode.Partial}
 				panOnDrag={[1]}
+				onSelectionStart={handleSelectionStart}
+				onSelectionEnd={handleSelectionEnd}
 				// Multi-select via click : accepte Shift OU le modifier natif de
 				// l'OS (Cmd sur Mac, Ctrl sur Win/Linux). RF prend un array de
 				// key codes — n'importe lequel matche. Ça couvre :
@@ -1222,10 +1319,14 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 				<Background color="var(--sqlnest-canvas-dot)" gap={20} />
 				{/* Contrôles RF (+/−, fit) et minimap remontés au-dessus de la
 				 * console SNQL — sans ça ils passent derrière quand elle est
-				 * ouverte. Bottom = hauteur console + gap standard. */}
+				 * ouverte. Bottom = hauteur console + gap standard. `left` suit
+				 * `leftPadding` pour rester à côté du drawer (comme la console). */}
 				<Controls
 					showInteractive={false}
-					style={{ bottom: consoleHeight + CONSOLE_GAP + 4 }}
+					style={{
+						bottom: consoleHeight + CONSOLE_GAP + 4,
+						left: leftPadding
+					}}
 				/>
 				<MiniMap
 					pannable
@@ -1276,6 +1377,8 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 			<CanvasToolbar
 				onAutoLayout={() => setLayoutConfirmOpen(true)}
 				bottomOffset={consoleHeight + CONSOLE_GAP}
+				activeTool={activeTool}
+				onSelectTool={setActiveTool}
 			/>
 			<AutoLayoutModal
 				opened={layoutConfirmOpen}

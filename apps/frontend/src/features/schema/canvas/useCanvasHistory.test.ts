@@ -7,8 +7,8 @@ import type { PositionsApi, PositionsMap, XY } from "../useTablePositions";
 import type { SizesApi, SizesMap, TableSize } from "../useTableSizes";
 import {
 	type CanvasSnapshot,
-	useCanvasHistory,
-	type UseCanvasHistoryOptions
+	type UseCanvasHistoryOptions,
+	useCanvasHistory
 } from "./useCanvasHistory";
 
 /**

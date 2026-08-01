@@ -44,6 +44,6 @@ export function colorFor(name: string): TableColor {
 		border: `hsl(${hue}, 55%, 55%)`,
 		// Nuance claire — usage compat (peut servir sur un futur tag).
 		text: `hsl(${hue}, 45%, 80%)`,
-		hue,
+		hue
 	};
 }

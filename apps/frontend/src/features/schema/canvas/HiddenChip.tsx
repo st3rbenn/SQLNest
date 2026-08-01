@@ -29,7 +29,7 @@ export function HiddenChip({ count, onUnhideAll }: HiddenChipProps) {
 				boxShadow: "var(--mantine-shadow-md)",
 				fontSize: 12,
 				fontWeight: 600,
-				color: "var(--sqlnest-text-secondary)",
+				color: "var(--sqlnest-text-secondary)"
 			}}
 		>
 			{count} table{plural} masquée{plural} — tout réafficher

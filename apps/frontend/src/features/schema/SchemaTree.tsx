@@ -1,6 +1,6 @@
 import { Box, Text, UnstyledButton } from "@mantine/core";
-import { IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { RowItem } from "@sqlnest/design-system";
+import { IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { type CSSProperties, useMemo, useState } from "react";
 import { colorFor } from "./colors";
 import type { Frame } from "./frames";
@@ -59,7 +59,10 @@ export function buildTreeGroups(
 			label: f.label,
 			kind: "frame",
 			hue: f.hue,
-			tables: f.collections.filter((c) => collectionNames.has(c)).slice().sort()
+			tables: f.collections
+				.filter((c) => collectionNames.has(c))
+				.slice()
+				.sort()
 		}))
 		.filter((g) => g.tables.length > 0);
 

@@ -1,6 +1,6 @@
 import { ActionIcon, Box, Menu, Text } from "@mantine/core";
-import { IconCheck, IconDots, IconX } from "@tabler/icons-react";
 import { RowItem, showNotification } from "@sqlnest/design-system";
+import { IconCheck, IconDots, IconX } from "@tabler/icons-react";
 import { useState } from "react";
 import { colorFor } from "./colors";
 import type { Frame } from "./frames";

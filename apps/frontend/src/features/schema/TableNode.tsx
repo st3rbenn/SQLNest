@@ -8,7 +8,7 @@ import {
 	Position,
 	useStore
 } from "@xyflow/react";
-import { Fragment, type CSSProperties } from "react";
+import { type CSSProperties, Fragment } from "react";
 import { colorFor } from "./colors";
 import type { Side } from "./edgeRouting";
 import type { Collection } from "./schema-model";

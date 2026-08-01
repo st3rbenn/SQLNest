@@ -1,3 +1,4 @@
+import { Box, UnstyledButton } from "@mantine/core";
 import {
 	HintPill,
 	SearchInput,
@@ -5,7 +6,6 @@ import {
 	spotlight,
 	useModKeyLabel
 } from "@sqlnest/design-system";
-import { Box, UnstyledButton } from "@mantine/core";
 import { IconChevronLeft } from "@tabler/icons-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FrameDetails } from "../FrameDetails";
@@ -13,7 +13,7 @@ import type { Frame } from "../frames";
 import { SchemaTree } from "../SchemaTree";
 import type { SchemaModel } from "../schema-model";
 import { TableDetails } from "../table-details";
-import { useFrames } from "../useFrames";
+import type { useFrames } from "../useFrames";
 
 const DRAWER_MIN_WIDTH = 260;
 const DRAWER_MAX_WIDTH = 600;
@@ -62,28 +62,19 @@ export function useResizableDrawer(): {
 		},
 		[width]
 	);
-	const onPointerMove = useCallback(
-		(e: React.PointerEvent<HTMLDivElement>) => {
-			const state = dragRef.current;
-			if (!state) return;
-			const next = Math.min(
-				DRAWER_MAX_WIDTH,
-				Math.max(
-					DRAWER_MIN_WIDTH,
-					state.startWidth + (e.clientX - state.startX)
-				)
-			);
-			setWidth(next);
-		},
-		[]
-	);
-	const onPointerUp = useCallback(
-		(e: React.PointerEvent<HTMLDivElement>) => {
-			e.currentTarget.releasePointerCapture(e.pointerId);
-			dragRef.current = null;
-		},
-		[]
-	);
+	const onPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+		const state = dragRef.current;
+		if (!state) return;
+		const next = Math.min(
+			DRAWER_MAX_WIDTH,
+			Math.max(DRAWER_MIN_WIDTH, state.startWidth + (e.clientX - state.startX))
+		);
+		setWidth(next);
+	}, []);
+	const onPointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+		e.currentTarget.releasePointerCapture(e.pointerId);
+		dragRef.current = null;
+	}, []);
 
 	return {
 		width,

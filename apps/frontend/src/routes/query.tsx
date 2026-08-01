@@ -1,6 +1,12 @@
 import { Button, ResultTable } from "@sqlnest/design-system";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
+import {
+	type CSSProperties,
+	useEffect,
+	useMemo,
+	useRef,
+	useState
+} from "react";
 import { SnqlEditor } from "../features/query/SnqlEditor";
 import { useRunQuery } from "../features/query/useRunQuery";
 import { useSchema } from "../features/schema/useSchema";
@@ -53,7 +59,9 @@ function tabStyle(active: boolean): CSSProperties {
 		borderRadius: 8,
 		border: `1px solid ${active ? "var(--sqlnest-accent)" : "var(--sqlnest-border)"}`,
 		background: active ? "var(--sqlnest-accent)" : "var(--sqlnest-surface)",
-		color: active ? "var(--sqlnest-text-primary)" : "var(--sqlnest-text-secondary)",
+		color: active
+			? "var(--sqlnest-text-primary)"
+			: "var(--sqlnest-text-secondary)",
 		fontWeight: 600,
 		fontSize: 14,
 		cursor: "pointer"
@@ -103,7 +111,7 @@ function QueryPage() {
 				replace: true
 			});
 		}
-	// biome-ignore lint/correctness/useExhaustiveDependencies: intentional — only react to URL changes and mount, not local state
+		// biome-ignore lint/correctness/useExhaustiveDependencies: intentional — only react to URL changes and mount, not local state
 	}, [search.source, search.autorun]);
 
 	const selectEngine = (next: Engine) => {
@@ -136,8 +144,22 @@ function QueryPage() {
 	return (
 		<div style={pageWrapperStyle}>
 			<div style={pageStyle}>
-				<h1 style={{ fontSize: 26, margin: "0 0 6px", color: "var(--sqlnest-text-primary)" }}>Requête SNQL</h1>
-				<p style={{ color: "var(--sqlnest-text-secondary)", margin: "0 0 20px", lineHeight: 1.5 }}>
+				<h1
+					style={{
+						fontSize: 26,
+						margin: "0 0 6px",
+						color: "var(--sqlnest-text-primary)"
+					}}
+				>
+					Requête SNQL
+				</h1>
+				<p
+					style={{
+						color: "var(--sqlnest-text-secondary)",
+						margin: "0 0 20px",
+						lineHeight: 1.5
+					}}
+				>
 					Un langage, deux moteurs. Tape une requête SNQL, exécute-la contre la
 					vraie base (Postgres ou MongoDB) et vois les lignes.
 				</p>
@@ -239,8 +261,11 @@ function QueryPage() {
 					// Discriminant = `written` (pas la forme du résultat) : une LECTURE à
 					// 0 ligne doit rester une table vide, pas « lignes affectées ».
 					<div style={{ fontSize: 13, color: "var(--sqlnest-text-secondary)" }}>
-						<b>{result.rowCount}</b> ligne(s) affectée(s) · moteur <b>{engine}</b>
-						<div style={{ color: "var(--sqlnest-text-tertiary)", marginTop: 6 }}>
+						<b>{result.rowCount}</b> ligne(s) affectée(s) · moteur{" "}
+						<b>{engine}</b>
+						<div
+							style={{ color: "var(--sqlnest-text-tertiary)", marginTop: 6 }}
+						>
 							Ce moteur ne renvoie pas les documents modifiés.
 						</div>
 					</div>
@@ -248,7 +273,13 @@ function QueryPage() {
 
 				{result && !(result.written && result.rows.length === 0) ? (
 					<div>
-						<div style={{ fontSize: 13, color: "var(--sqlnest-text-secondary)", margin: "0 0 10px" }}>
+						<div
+							style={{
+								fontSize: 13,
+								color: "var(--sqlnest-text-secondary)",
+								margin: "0 0 10px"
+							}}
+						>
 							<b>{result.rowCount}</b> ligne(s) · moteur <b>{engine}</b>
 						</div>
 						<ResultTable columns={columnNames} rows={result.rows} />

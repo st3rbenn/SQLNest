@@ -51,7 +51,9 @@ function loadPositions(key: string): PositionsMap {
 
 export function useTablePositions(schema: SchemaModel): PositionsApi {
 	const key = schemaKey(schema);
-	const [positions, setPositions] = useState<PositionsMap>(() => loadPositions(key));
+	const [positions, setPositions] = useState<PositionsMap>(() =>
+		loadPositions(key)
+	);
 
 	// Track quel `key` est actuellement représenté par `positions` en state.
 	// Sert à distinguer un vrai mutate user (persist OK) d'un pending re-seed

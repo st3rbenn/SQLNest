@@ -3,7 +3,7 @@ import type { Frame } from "../frames";
 import type { FramesApi } from "../useFrames";
 import type { PositionsApi, PositionsMap } from "../useTablePositions";
 import type { SizesApi, SizesMap } from "../useTableSizes";
-import { useHistoryStack, type UseHistoryStackReturn } from "./useHistoryStack";
+import { type UseHistoryStackReturn, useHistoryStack } from "./useHistoryStack";
 
 export interface CanvasSnapshot {
 	readonly positions: PositionsMap;
@@ -68,7 +68,8 @@ export function useCanvasHistory(
 	optsRef.current = opts;
 
 	const captureNow = useCallback((): CanvasSnapshot => {
-		const { tablePositions, tableSizes, framesApi, hiddenIds } = optsRef.current;
+		const { tablePositions, tableSizes, framesApi, hiddenIds } =
+			optsRef.current;
 		return {
 			positions: tablePositions.positions,
 			sizes: tableSizes.sizes,

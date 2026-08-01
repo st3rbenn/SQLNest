@@ -8,17 +8,16 @@ import {
 	IconArrowsShuffle,
 	IconDeviceFloppy,
 	IconDownload,
-	IconLasso,
 	IconMessage,
 	IconMoon,
 	IconPointer,
 	IconSparkles,
-	IconSquareDashed,
-	IconVersions
+	IconSquareDashed
 } from "@tabler/icons-react";
 import { useState } from "react";
 
-type Tool = "select" | "frame" | "lasso" | "comment";
+export type CanvasTool = "select" | "frame";
+type LocalTool = CanvasTool | "comment";
 
 const notImplemented = (label: string) =>
 	showNotification({
@@ -34,13 +33,30 @@ interface Props {
 	 * pour remonter la toolbar au-dessus de la console SNQL quand elle est
 	 * ouverte. */
 	readonly bottomOffset?: number;
+	/** Outil actif du canvas — piloté par le parent car il conditionne des
+	 * comportements RF (cursor, action au release du lasso, etc.). */
+	readonly activeTool: CanvasTool;
+	readonly onSelectTool: (tool: CanvasTool) => void;
 }
 
 const ICON = { size: 18, stroke: 1.8 } as const;
 
 /** Toolbar horizontale du canvas Schéma — flottante en bas-centre. */
-export function CanvasToolbar({ onAutoLayout, bottomOffset = 0 }: Props) {
-	const [tool, setTool] = useState<Tool>("select");
+export function CanvasToolbar({
+	onAutoLayout,
+	bottomOffset = 0,
+	activeTool,
+	onSelectTool
+}: Props) {
+	// Le tool « comment » reste local — pas d'implémentation côté canvas
+	// donc pas la peine de le remonter. Basculer sur select/frame quitte
+	// l'affichage `comment` de la toolbar (cohérent visuellement).
+	const [localComment, setLocalComment] = useState(false);
+	const displayTool: LocalTool = localComment ? "comment" : activeTool;
+	const selectCanvasTool = (t: CanvasTool) => {
+		setLocalComment(false);
+		onSelectTool(t);
+	};
 	return (
 		<FloatingPanel
 			position="bottom-center"
@@ -53,36 +69,23 @@ export function CanvasToolbar({ onAutoLayout, bottomOffset = 0 }: Props) {
 			<Toolbar orientation="horizontal" aria-label="Canvas actions">
 				<ToolbarButton
 					label="Sélection (V)"
-					active={tool === "select"}
-					onClick={() => setTool("select")}
+					active={displayTool === "select"}
+					onClick={() => selectCanvasTool("select")}
 				>
 					<IconPointer {...ICON} />
 				</ToolbarButton>
 				<ToolbarButton
-					label="Créer un frame (F)"
-					active={tool === "frame"}
-					onClick={() => {
-						setTool("frame");
-						notImplemented("Création de frame");
-					}}
+					label="Créer un frame — dessine un rectangle (F)"
+					active={displayTool === "frame"}
+					onClick={() => selectCanvasTool("frame")}
 				>
 					<IconSquareDashed {...ICON} />
 				</ToolbarButton>
 				<ToolbarButton
-					label="Lasso multi-sélection"
-					active={tool === "lasso"}
-					onClick={() => {
-						setTool("lasso");
-						notImplemented("Lasso");
-					}}
-				>
-					<IconLasso {...ICON} />
-				</ToolbarButton>
-				<ToolbarButton
 					label="Annoter (bientôt)"
-					active={tool === "comment"}
+					active={displayTool === "comment"}
 					onClick={() => {
-						setTool("comment");
+						setLocalComment(true);
 						notImplemented("Annotations");
 					}}
 				>
@@ -99,13 +102,6 @@ export function CanvasToolbar({ onAutoLayout, bottomOffset = 0 }: Props) {
 					<IconArrowsShuffle {...ICON} />
 				</ToolbarButton>
 				<ToolbarButton
-					label="Diff schémas (bientôt)"
-					statusDot="warning"
-					onClick={() => notImplemented("Diff schémas")}
-				>
-					<IconVersions {...ICON} />
-				</ToolbarButton>
-				<ToolbarButton
 					label="IA (bientôt)"
 					statusDot="warning"
 					onClick={() => notImplemented("IA")}
@@ -119,7 +115,10 @@ export function CanvasToolbar({ onAutoLayout, bottomOffset = 0 }: Props) {
 				>
 					<IconDownload {...ICON} />
 				</ToolbarButton>
-				<ToolbarButton label="Enregistrer" onClick={() => notImplemented("Enregistrer")}>
+				<ToolbarButton
+					label="Enregistrer"
+					onClick={() => notImplemented("Enregistrer")}
+				>
 					<IconDeviceFloppy {...ICON} />
 				</ToolbarButton>
 				<ToolbarButton label="Thème" onClick={() => notImplemented("Thème")}>

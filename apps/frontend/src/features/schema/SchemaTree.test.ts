@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildTreeGroups } from "./SchemaTree";
 import type { Frame } from "./frames";
+import { buildTreeGroups } from "./SchemaTree";
 import type { SchemaModel } from "./schema-model";
 
 function coll(name: string): SchemaModel["collections"][number] {

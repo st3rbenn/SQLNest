@@ -1,6 +1,6 @@
 import { ActionIcon, Box, Button, Menu, Text } from "@mantine/core";
-import { IconDots, IconMenu2 } from "@tabler/icons-react";
 import { ColorDot, KindBadge, showNotification } from "@sqlnest/design-system";
+import { IconDots, IconMenu2 } from "@tabler/icons-react";
 
 interface TableDetailsHeaderProps {
 	readonly tableName: string;

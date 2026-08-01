@@ -1,9 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
 import type { SpotlightActionGroupData } from "@sqlnest/design-system";
+import { describe, expect, it, vi } from "vitest";
 import { buildCanvasCommands, type CanvasCommandCallbacks } from "./commands";
 import { SAMPLE_POSTGRES } from "./schema-model";
 
-function makeCbs(overrides: Partial<CanvasCommandCallbacks> = {}): CanvasCommandCallbacks {
+function makeCbs(
+	overrides: Partial<CanvasCommandCallbacks> = {}
+): CanvasCommandCallbacks {
 	return {
 		onFocusTable: vi.fn(),
 		onFitView: vi.fn(),
@@ -43,7 +45,10 @@ describe("buildCanvasCommands", () => {
 
 	it("each table action invokes onFocusTable with its own name", () => {
 		const onFocusTable = vi.fn();
-		const groups = buildCanvasCommands(SAMPLE_POSTGRES, makeCbs({ onFocusTable }));
+		const groups = buildCanvasCommands(
+			SAMPLE_POSTGRES,
+			makeCbs({ onFocusTable })
+		);
 		const tables = group(groups, "Tables");
 		const users = actions(tables).find((a) => a.id === "table:users");
 		expect(users).toBeDefined();

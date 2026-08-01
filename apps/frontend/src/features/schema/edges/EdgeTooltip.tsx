@@ -11,25 +11,22 @@ import type { Relation } from "../schema-model";
  */
 const TOOLTIP_BASE: CSSProperties = {
 	position: "absolute",
-	background: "#0f172a",
-	color: "#f1f5f9",
+	background: "var(--sqlnest-surface)",
+	color: "var(--sqlnest-text-primary)",
 	padding: "10px 14px",
 	borderRadius: 8,
 	fontSize: 13,
 	lineHeight: 1.5,
 	fontFamily: "ui-sans-serif, system-ui, -apple-system, sans-serif",
-	boxShadow: "0 6px 20px rgba(15,23,42,0.35)",
+	border: "1px solid var(--sqlnest-border)",
+	boxShadow: "0 6px 20px rgba(0, 0, 0, 0.5)",
 	whiteSpace: "nowrap",
 	pointerEvents: "none",
 	zIndex: 11,
 	minWidth: 220
 };
 
-function tooltipStyle(
-	x: number,
-	y: number,
-	revealed: boolean
-): CSSProperties {
+function tooltipStyle(x: number, y: number, revealed: boolean): CSSProperties {
 	// Opacity + petit slide vers le haut pour un fade-in soigné (translate
 	// combine offset de position + décalage d'entrée). Transition dure 220ms.
 	const enterOffset = revealed ? "0px" : "6px";
@@ -43,8 +40,8 @@ function tooltipStyle(
 
 const TOOLTIP_TABLE: CSSProperties = {
 	fontWeight: 700,
-	color: "#fff",
-	background: "rgba(255,255,255,0.08)",
+	color: "var(--sqlnest-text-primary)",
+	background: "rgba(255, 255, 255, 0.08)",
 	padding: "1px 6px",
 	borderRadius: 4
 };
@@ -52,16 +49,16 @@ const TOOLTIP_TABLE: CSSProperties = {
 const TOOLTIP_FOOTER: CSSProperties = {
 	marginTop: 4,
 	fontSize: 11,
-	color: "#94a3b8"
+	color: "var(--sqlnest-text-secondary)"
 };
 
 const TOOLTIP_SQL: CSSProperties = {
 	marginTop: 8,
 	padding: "6px 8px",
-	background: "rgba(255,255,255,0.05)",
+	background: "rgba(255, 255, 255, 0.05)",
 	borderRadius: 4,
 	fontSize: 10.5,
-	color: "#94a3b8",
+	color: "var(--sqlnest-text-secondary)",
 	fontFamily: "var(--mantine-font-family-monospace)"
 };
 
@@ -89,9 +86,7 @@ export function EdgeTooltip({
 					<span style={TOOLTIP_TABLE}>{s.to}</span>
 				</div>
 				<div style={TOOLTIP_FOOTER}>{humanFooter(relation)}</div>
-				<div style={TOOLTIP_SQL}>
-					{joinPreview(relation.from, relation.to)}
-				</div>
+				<div style={TOOLTIP_SQL}>{joinPreview(relation.from, relation.to)}</div>
 			</div>
 		</EdgeLabelRenderer>
 	);

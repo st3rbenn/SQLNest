@@ -5,9 +5,9 @@ import {
 	useReactFlow
 } from "@xyflow/react";
 import { type PointerEvent, useEffect, useRef, useState } from "react";
+import { closestSide, type Side } from "./edgeRouting";
 import { EdgeHandles } from "./edges/EdgeHandles";
 import { EdgeTooltip } from "./edges/EdgeTooltip";
-import { closestSide, type Side } from "./edgeRouting";
 import type { Relation } from "./schema-model";
 
 export interface InteractiveEdgeData {
@@ -137,7 +137,8 @@ export function InteractiveEdge(props: EdgeProps) {
 		setHovered(true);
 	};
 	const hide = () => {
-		if (hideTimerRef.current !== null) window.clearTimeout(hideTimerRef.current);
+		if (hideTimerRef.current !== null)
+			window.clearTimeout(hideTimerRef.current);
 		hideTimerRef.current = window.setTimeout(() => setHovered(false), 100);
 	};
 
@@ -222,7 +223,8 @@ export function InteractiveEdge(props: EdgeProps) {
 
 	// Tooltip visible au hover simple (pas pendant un drag — on masque pour
 	// laisser la scène claire quand l'utilisateur repositionne un endpoint).
-	const showTooltip = hovered && dragEnd === null && api?.relation !== undefined;
+	const showTooltip =
+		hovered && dragEnd === null && api?.relation !== undefined;
 	const relation = api?.relation;
 
 	// Délai avant reveal : hover soutenu court avant que le tooltip apparaisse
