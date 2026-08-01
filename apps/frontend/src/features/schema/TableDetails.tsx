@@ -1,6 +1,6 @@
 import { ActionIcon, Box, Button, Menu, Text, UnstyledButton } from "@mantine/core";
 import { IconChevronRight, IconDots, IconMenu2 } from "@tabler/icons-react";
-import { KindBadge, showNotification } from "@sqlnest/design-system";
+import { ColorDot, KindBadge, showNotification } from "@sqlnest/design-system";
 import { useNavigate } from "@tanstack/react-router";
 import { colorFor } from "./colors";
 import type { SchemaModel } from "./schema-model";
@@ -68,16 +68,7 @@ export function TableDetails({
 						minWidth: 0
 					}}
 				>
-					<span
-						style={{
-							display: "inline-block",
-							width: 10,
-							height: 10,
-							borderRadius: 3,
-							background: color.border,
-							flexShrink: 0
-						}}
-					/>
+					<ColorDot color={color.border} size="md" />
 					<span
 						style={{
 							fontSize: 15,
@@ -359,16 +350,7 @@ function RelationLink({
 				transition: "background 100ms ease-out"
 			}}
 		>
-			<span
-				style={{
-					display: "inline-block",
-					width: 8,
-					height: 8,
-					borderRadius: "50%",
-					background: color.border,
-					flexShrink: 0
-				}}
-			/>
+			<ColorDot color={color.border} size="sm" />
 			<span
 				style={{
 					flex: 1,

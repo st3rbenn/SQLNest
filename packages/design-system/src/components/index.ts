@@ -8,6 +8,11 @@ export {
 	type ContextMenuSubmenuItem,
 } from "./ContextMenu/ContextMenu";
 export {
+	ColorDot,
+	type ColorDotProps,
+	type ColorDotSize,
+} from "./ColorDot/ColorDot";
+export {
 	EngineTabs,
 	type EngineTabsProps,
 	type EngineValue,

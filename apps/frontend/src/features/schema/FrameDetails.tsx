@@ -5,7 +5,7 @@ import {
 	IconDots,
 	IconX
 } from "@tabler/icons-react";
-import { showNotification } from "@sqlnest/design-system";
+import { ColorDot, showNotification } from "@sqlnest/design-system";
 import { useState } from "react";
 import { colorFor } from "./colors";
 import type { Frame } from "./frames";
@@ -236,16 +236,7 @@ export function FrameDetails({
 									transition: "background 100ms ease-out"
 								}}
 							>
-								<span
-									style={{
-										display: "inline-block",
-										width: 8,
-										height: 8,
-										borderRadius: "50%",
-										background: c.border,
-										flexShrink: 0
-									}}
-								/>
+								<ColorDot color={c.border} size="sm" />
 								<span
 									style={{
 										flex: 1,

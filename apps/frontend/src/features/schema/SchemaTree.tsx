@@ -1,5 +1,6 @@
 import { Box, Text, UnstyledButton } from "@mantine/core";
 import { IconChevronDown, IconChevronRight } from "@tabler/icons-react";
+import { ColorDot } from "@sqlnest/design-system";
 import { type CSSProperties, useMemo, useState } from "react";
 import { colorFor } from "./colors";
 import type { Frame } from "./frames";
@@ -267,16 +268,7 @@ export function SchemaTree({
 													minWidth: 0
 												}}
 											>
-												<span
-													style={{
-														display: "inline-block",
-														width: 8,
-														height: 8,
-														borderRadius: "50%",
-														background: color.border,
-														flexShrink: 0
-													}}
-												/>
+												<ColorDot color={color.border} size="sm" />
 												<span
 													style={{
 														overflow: "hidden",
