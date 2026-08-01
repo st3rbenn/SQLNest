@@ -13,6 +13,10 @@ export {
 	type ColorDotSize,
 } from "./ColorDot/ColorDot";
 export {
+	ConfirmModal,
+	type ConfirmModalProps,
+} from "./ConfirmModal/ConfirmModal";
+export {
 	EngineTabs,
 	type EngineTabsProps,
 	type EngineValue,

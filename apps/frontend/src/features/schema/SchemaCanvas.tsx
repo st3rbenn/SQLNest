@@ -1,4 +1,5 @@
 import {
+	ConfirmModal,
 	HintPill,
 	SearchInput,
 	SelectionChip,
@@ -13,10 +14,6 @@ import { buildCanvasCommands } from "./commands";
 import {
 	ActionIcon,
 	Box,
-	Button,
-	Group,
-	Modal,
-	Text,
 	UnstyledButton
 } from "@mantine/core";
 import {
@@ -1508,36 +1505,15 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 				onAutoLayout={() => setLayoutConfirmOpen(true)}
 				bottomOffset={consoleHeight + CONSOLE_GAP}
 			/>
-			<Modal
+			<ConfirmModal
 				opened={layoutConfirmOpen}
 				onClose={() => setLayoutConfirmOpen(false)}
+				onConfirm={relayoutAll}
 				title="Réappliquer le layout automatique ?"
-				centered
-				size="sm"
-			>
-				<Text size="sm" mb="md">
-					Toutes les positions des tables et les rects des frames seront
-					remplacés par la disposition calculée automatiquement. Cette action
-					n'est pas annulable pour l'instant.
-				</Text>
-				<Group justify="flex-end" gap="xs">
-					<Button
-						variant="default"
-						onClick={() => setLayoutConfirmOpen(false)}
-					>
-						Annuler
-					</Button>
-					<Button
-						color="red"
-						onClick={() => {
-							setLayoutConfirmOpen(false);
-							relayoutAll();
-						}}
-					>
-						Réappliquer
-					</Button>
-				</Group>
-			</Modal>
+				message="Toutes les positions des tables et les rects des frames seront remplacés par la disposition calculée automatiquement. Cette action n'est pas annulable pour l'instant."
+				destructive
+				confirmLabel="Réappliquer"
+			/>
 
 			{/* Console SNQL escamotable (bas-droit, à droite du drawer). */}
 			<CanvasConsole
