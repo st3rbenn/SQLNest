@@ -11,6 +11,7 @@ import {
 import { buildCanvasCommands } from "./commands";
 import { ActionIcon, Box, UnstyledButton } from "@mantine/core";
 import {
+	IconChevronLeft,
 	IconLayoutSidebarLeftCollapse,
 	IconLayoutSidebarLeftExpand
 } from "@tabler/icons-react";
@@ -59,6 +60,7 @@ import {
 import { useEdgeAnchors } from "./useEdgeAnchors";
 import { useFrames } from "./useFrames";
 import { useTablePositions, type XY } from "./useTablePositions";
+import { useTableSizes } from "./useTableSizes";
 
 const DECLARED = "#2563eb";
 const INFERRED = "#d97706";
@@ -68,13 +70,23 @@ const edgeTypes = { fk: InteractiveEdge };
 type SchemaNode = TableNodeType | FrameNodeType;
 
 /**
- * Vue aérienne cible. `maxZoom` cap le fit : sans lui, RF zoomerait à ~1×
- * sur un petit sample (cartes énormes). Avec, on garde une hauteur de
- * plafond confortable qui révèle les frames et les arêtes.
+ * Vue aérienne cible.
+ * - `maxZoom` cap le fit sur un petit sample (sinon cartes énormes à z ~= 1).
+ * - `minZoom` PLANCHER : on ne descend jamais sous ce seuil, quitte à laisser
+ *   des tables déborder hors du viewport. Règle produit : « on garde les
+ *   cartes en mode garni (full) ; si tout ne rentre pas, tant pis, l'user
+ *   peut pan ». 0.55 est calé juste au-dessus du seuil LOD `FULL_MIN` (0.5)
+ *   avec une marge pour éviter de flirter avec la bascule vers `compact`.
  */
-const OVERVIEW_FIT: { padding: number; maxZoom: number; duration: number } = {
+const OVERVIEW_FIT: {
+	padding: number;
+	maxZoom: number;
+	minZoom: number;
+	duration: number;
+} = {
 	padding: 0.25,
 	maxZoom: 0.6,
+	minZoom: 0.55,
 	duration: 400
 };
 
@@ -93,12 +105,12 @@ function initialZoom(collectionCount: number): number {
 	return 0.08;
 }
 
-// Bornes de zoom pour le focus d'une table. Sous `min`, on zoome IN (l'user
-// vient d'une vue aérienne, il veut voir la table). Au-dessus de `max`, on
-// dézoome vers `max` (l'user autorise le dezoom pour garder une lecture
-// confortable). Entre les deux → on ne touche pas le zoom, juste pan.
+// Zoom minimal après un focus-table. On ne dézoome JAMAIS : si l'utilisateur
+// est déjà bien zoomé (> min), on garde son niveau, on ne fait que pan. S'il
+// vient d'une vue aérienne (< min), on zoome IN jusqu'à ce seuil lisible.
+// Modèle mental Figma : cliquer sur un élément = « aller le voir », pas « re-
+// cadrer arbitrairement ».
 const FOCUS_ZOOM_MIN = 1;
-const FOCUS_ZOOM_MAX = 1.5;
 const FOCUS_TWEEN_MS = 350;
 
 interface Viewport {
@@ -153,16 +165,15 @@ export function animateViewport(
 
 /**
  * Zoom cible d'un focus-table. Pure → testable.
- * - currentZoom < min → min (zoom in)
- * - currentZoom > max → max (dezoom vers la cible max)
- * - sinon → currentZoom (juste pan)
+ * - currentZoom < min → min (zoom IN vers seuil lisible)
+ * - currentZoom >= min → currentZoom (on ne dézoome jamais — respecte le
+ *   niveau choisi par l'utilisateur)
  */
 export function focusZoom(
 	currentZoom: number,
-	opts: { min: number; max: number }
+	opts: { min: number }
 ): number {
 	if (currentZoom < opts.min) return opts.min;
-	if (currentZoom > opts.max) return opts.max;
 	return currentZoom;
 }
 
@@ -382,13 +393,26 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 	const tablePositions = useTablePositions(schema);
 	const tablePositionsRef = useRef(tablePositions.positions);
 	tablePositionsRef.current = tablePositions.positions;
+	// Sizes user persistées (NodeResizer 4 côtés de chaque table) — même
+	// pattern d'overlay que positions : ref pour éviter le re-seed en boucle.
+	// Stocke width ET height : le user peut resize dans les 2 axes.
+	const tableSizes = useTableSizes(schema);
+	const tableSizesRef = useRef(tableSizes.sizes);
+	tableSizesRef.current = tableSizes.sizes;
 	useEffect(() => {
 		if (base !== null) {
-			const saved = tablePositionsRef.current;
+			const savedPos = tablePositionsRef.current;
+			const savedSize = tableSizesRef.current;
 			setNodes(
 				base.nodes.map((n) => {
-					const savedPos = saved[n.id];
-					return savedPos !== undefined ? { ...n, position: savedPos } : n;
+					const pos = savedPos[n.id];
+					const size = savedSize[n.id];
+					return {
+						...n,
+						...(pos !== undefined ? { position: pos } : {}),
+						...(size?.width !== undefined ? { width: size.width } : {}),
+						...(size?.height !== undefined ? { height: size.height } : {})
+					};
 				})
 			);
 		}
@@ -440,7 +464,6 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 		(changes: NodeChange[]) => {
 			const restChanges: NodeChange[] = [];
 			const api = framesApiRef.current;
-			const dragKey = frameDragStateRef.current?.frameKey;
 			for (const c of changes) {
 				if (!c.id?.startsWith("frame:")) {
 					restChanges.push(c);
@@ -449,17 +472,29 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 				const key = c.id.slice("frame:".length);
 				const frame = api.frames.find((f) => f.key === key);
 				if (!frame?.rect) continue;
+
 				if (c.type === "dimensions" && c.dimensions) {
+					// RF émet AUSSI des `dimensions` changes en dehors de tout geste
+					// (mesure DOM automatique au mount, après re-render). Ces changes
+					// arrivent avec `resizing !== true` — les ignorer, sinon on écrit
+					// à chaque render la même dimension et on peut casser le rect
+					// (feedback loop avec computeFrameNodes qui lit puis réécrit).
+					if (c.resizing !== true) continue;
 					api.setFrameRect(key, {
 						x: frame.rect.x,
 						y: frame.rect.y,
 						width: c.dimensions.width,
 						height: c.dimensions.height
 					});
-				} else if (c.type === "position" && c.position && key !== dragKey) {
-					// Position d'un frame → uniquement durant un resize corner
-					// top/left. Pendant un drag (dragKey === key), `onNodeDrag`
-					// custom gère déjà avec le shift des membres.
+				} else if (c.type === "position" && c.position) {
+					// `position` change pour un frame — deux origines possibles :
+					//   1) resize d'un corner top/left → RF émet position (le coin
+					//      bouge). `dragging` est false ici. On l'écrit.
+					//   2) drag manuel du frame (`onNodeDrag` custom) → RF émet
+					//      position avec `dragging: true`. Notre handler custom
+					//      gère déjà en shiftant les membres — SKIP pour éviter
+					//      la double-update.
+					if (c.dragging === true) continue;
 					api.setFrameRect(key, {
 						x: c.position.x,
 						y: c.position.y,
@@ -533,7 +568,18 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 		return set;
 	}, [focusId, base]);
 
+	// Callback stable pour le NodeResizer d'une table : persist les nouvelles
+	// dimensions au release. `setSize` est stable (useCallback dans useTableSizes).
+	const handleTableResize = useCallback(
+		(name: string, size: { width: number; height: number }) =>
+			tableSizes.setSize(name, size),
+		[tableSizes]
+	);
+
 	// Nœuds table affichés : positions vivantes (drag) + drapeaux focus + masqués.
+	// Injecte aussi le callback `onResizeEnd` — TableNode s'en sert pour le
+	// NodeResizer 4 côtés. Absent = pas de handles (utile aux tests / rendus
+	// externes).
 	const displayTableNodes = useMemo(
 		() =>
 			nodes
@@ -546,11 +592,13 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 							...n.data,
 							dimmed: neighbors !== null && !inFocus,
 							focused: n.id === focusId,
-							matched: false
+							matched: false,
+							onResizeEnd: (s: { width: number; height: number }) =>
+								handleTableResize(n.id, s)
 						}
 					};
 				}),
-		[nodes, neighbors, focusId, hiddenIds]
+		[nodes, neighbors, focusId, hiddenIds, handleTableResize]
 	);
 
 	// Ref sur les nodes courants — le handler de resize a besoin de la
@@ -566,31 +614,34 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 	// frame.rect` exploserait, les membres dériveraient plus vite que le
 	// frame).
 
-	// Après un resize du frame : recompute la membership. Toute table dont
-	// le centre tombe HORS du nouveau rect est retirée du frame — sinon le
-	// drag du frame la ferait suivre alors qu'elle est visuellement dehors.
-	const handleFrameResize = useCallback(
-		(key: string, newRect: FrameRect) => {
-			framesApi.setFrameRect(key, newRect);
-			const frame = framesApi.frames.find((f) => f.key === key);
-			if (!frame) return;
-			const byId = new Map(nodesRef.current.map((n) => [n.id, n]));
-			for (const memberName of frame.collections) {
-				const node = byId.get(memberName);
-				if (!node) continue;
-				const w = node.width ?? NODE_WIDTH;
-				const h = node.height ?? nodeHeight(node.data.collection);
-				const center = {
-					x: node.position.x + w / 2,
-					y: node.position.y + h / 2
-				};
-				if (!rectContainsPoint(newRect, center)) {
-					framesApi.removeTableFromFrame(memberName);
-				}
+	// Callback `onResizeEnd` du NodeResizer — le rect a déjà été persisté en
+	// direct par `handleNodesChange` (intercept live des dimensions/position).
+	// Ici on ne fait QUE la reconciliation membership : table dont le centre
+	// tombe HORS du rect final → retirée du frame (sinon un drag du frame la
+	// ferait suivre alors qu'elle est visuellement dehors). Pas de nouveau
+	// `setFrameRect` — c'était un doublon qui écrasait le rect live avec le
+	// rect final tel que reçu du NodeResizer (précision floats + timing) et
+	// qui semblait provoquer des jumps + un état bancal empêchant le drag
+	// suivant.
+	const handleFrameResize = useCallback((key: string, newRect: FrameRect) => {
+		const api = framesApiRef.current;
+		const frame = api.frames.find((f) => f.key === key);
+		if (!frame) return;
+		const byId = new Map(nodesRef.current.map((n) => [n.id, n]));
+		for (const memberName of frame.collections) {
+			const node = byId.get(memberName);
+			if (!node) continue;
+			const w = node.width ?? NODE_WIDTH;
+			const h = node.height ?? nodeHeight(node.data.collection);
+			const center = {
+				x: node.position.x + w / 2,
+				y: node.position.y + h / 2
+			};
+			if (!rectContainsPoint(newRect, center)) {
+				api.removeTableFromFrame(memberName);
 			}
-		},
-		[framesApi]
-	);
+		}
+	}, []);
 
 	// Rename inline depuis le badge d'un frame (double-clic → input → Enter).
 	const handleFrameRename = useCallback(
@@ -767,35 +818,103 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 	// de l'espace. État volatile (reset au refresh) : la persistance était
 	// plus embêtante qu'utile (le drawer revient à sa position par défaut
 	// à chaque rechargement, plus prévisible que "ce qu'il était avant").
-	// `leftPadding` dérivé sert au safeArea (fit initial) et à la console
-	// SNQL (leftOffset).
 	const [leftDrawerVisible, setLeftDrawerVisible] = useState(true);
-	const leftPadding = leftDrawerVisible ? 300 + 8 : 8;
+
+	// Largeur du drawer — resizable via le handle droit. PERSISTÉE en
+	// localStorage (contrairement à la visibilité) : la largeur exprime une
+	// préférence forte (« mes noms de tables sont longs »), tandis que la
+	// visibilité est une action ponctuelle.
+	const DRAWER_MIN_WIDTH = 260;
+	const DRAWER_MAX_WIDTH = 600;
+	const DRAWER_STORAGE_KEY = "sqlnest:leftDrawer:width";
+	const [leftDrawerWidth, setLeftDrawerWidth] = useState<number>(() => {
+		if (typeof window === "undefined") return 320;
+		const raw = window.localStorage.getItem(DRAWER_STORAGE_KEY);
+		const parsed = raw !== null ? Number.parseInt(raw, 10) : Number.NaN;
+		if (!Number.isFinite(parsed)) return 320;
+		return Math.min(DRAWER_MAX_WIDTH, Math.max(DRAWER_MIN_WIDTH, parsed));
+	});
+	useEffect(() => {
+		if (typeof window === "undefined") return;
+		try {
+			window.localStorage.setItem(
+				DRAWER_STORAGE_KEY,
+				String(leftDrawerWidth)
+			);
+		} catch {
+			/* quota / private mode — no-op */
+		}
+	}, [leftDrawerWidth]);
+
+	// Drag-to-resize : capture le pointer au down, update en live au move,
+	// release au up. Ref pour l'origine du geste — immune au batching (le
+	// state React `leftDrawerWidth` peut lagger derrière plusieurs move).
+	const drawerDragRef = useRef<{
+		startX: number;
+		startWidth: number;
+	} | null>(null);
+	const onDrawerHandlePointerDown = useCallback(
+		(e: React.PointerEvent<HTMLDivElement>) => {
+			e.currentTarget.setPointerCapture(e.pointerId);
+			drawerDragRef.current = {
+				startX: e.clientX,
+				startWidth: leftDrawerWidth
+			};
+			e.preventDefault();
+		},
+		[leftDrawerWidth]
+	);
+	const onDrawerHandlePointerMove = useCallback(
+		(e: React.PointerEvent<HTMLDivElement>) => {
+			const state = drawerDragRef.current;
+			if (!state) return;
+			const next = Math.min(
+				DRAWER_MAX_WIDTH,
+				Math.max(DRAWER_MIN_WIDTH, state.startWidth + (e.clientX - state.startX))
+			);
+			setLeftDrawerWidth(next);
+		},
+		[]
+	);
+	const onDrawerHandlePointerUp = useCallback(
+		(e: React.PointerEvent<HTMLDivElement>) => {
+			e.currentTarget.releasePointerCapture(e.pointerId);
+			drawerDragRef.current = null;
+		},
+		[]
+	);
+
+	// `leftPadding` dérivé — sert au safeArea (fit initial) et à la console
+	// SNQL (leftOffset). Suit la largeur courante du drawer + gap.
+	const leftPadding = leftDrawerVisible ? leftDrawerWidth + 8 : 8;
 
 	// `safeArea` = bandes occupées par les panels flottants ou dockés :
-	// - gauche : drawer arbre docké (300 px pleine hauteur) OU juste padding
-	// - droite : drawer TableDetails flottant (352 px) seulement au focus
+	// - gauche : drawer unifié docké (300 px pleine hauteur — même largeur
+	//            en mode arborescence ET en mode détails) OU juste padding
+	// - droite : plus de drawer flottant droit (détails migrés dans le gauche)
 	// - bas   : toolbar (68 px) + console (dynamique, poussée au-dessus)
 	const safeArea = useMemo(
 		() => ({
 			left: leftPadding,
-			right: focusId !== null ? 12 + 340 + 8 : 8,
+			right: 8,
 			top: 12,
 			bottom: 68 + consoleHeight + CONSOLE_GAP
 		}),
-		[focusId, consoleHeight, leftPadding]
+		[consoleHeight, leftPadding]
 	);
 
-	// Vue aérienne — auto-fit + auto-refit tant que l'utilisateur n'a pas
-	// interagi (pan / wheel / drag). Sans ça :
+	// Vue aérienne — auto-fit au mount du layout ELK, puis refit uniquement
+	// quand le CONTAINER change de taille (resize fenêtre). Sans ça :
 	//   - le container peut être mesuré à une taille intermédiaire pendant
 	//     l'hydratation, le fit s'y bloque (rect capturé trop petit sur les
 	//     écrans larges → schéma décollé du centre).
 	//   - le refresh sur une fenêtre différente laisse le schéma dans un
 	//     coin.
-	// Un ResizeObserver refit à chaque changement de taille du container ;
-	// dès que l'utilisateur pan/zoom, on arrête (la vue lui appartient).
-	// Le safeArea est lu via ref pour rester frais sans re-créer l'observer.
+	// `safeArea` **N'EST PAS** dans les deps : ses changements (toggle drawer,
+	// focus qui ouvre TableDetails, console qui grandit) ne doivent PAS reset
+	// la vue de l'utilisateur — sinon toggler le drawer ou focuser une table
+	// « recadre » sous les pieds. Le safeArea est lu via ref pour être frais
+	// quand le fit legitime tourne (mount + resize).
 	const safeAreaRef = useRef(safeArea);
 	safeAreaRef.current = safeArea;
 	const userTouchedViewportRef = useRef(false);
@@ -814,20 +933,17 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 				overviewViewport(bounds, rect, {
 					padding: OVERVIEW_FIT.padding,
 					maxZoom: OVERVIEW_FIT.maxZoom,
+					minZoom: OVERVIEW_FIT.minZoom,
 					safeArea: safeAreaRef.current
 				})
 			);
 		};
 
-		// Tentative immédiate, plus observer pour les rendus tardifs
-		// (hydratation, resize fenêtre). Le drawer et la console sont
-		// absolute donc leur toggle ne fait pas resize le container —
-		// c'est le dep `safeArea` qui déclenche le refit dans ces cas.
 		fit();
 		const ro = new ResizeObserver(fit);
 		ro.observe(el);
 		return () => ro.disconnect();
-	}, [base, setViewport, safeArea]);
+	}, [base, setViewport]);
 	// Reset du flag "user touched" quand base change (nouveau schéma =
 	// nouvelle vue par défaut, on ré-auto-fit jusqu'à interaction).
 	useEffect(() => {
@@ -868,13 +984,11 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 	 * drawer — où l'utilisateur cherche activement une table et veut être
 	 * amené dessus. Aussi le double-clic sur la carte.
 	 *
-	 * Stratégie « pan-first » : on ne reset PAS le zoom à chaque focus. Si
-	 * la vue est déjà dans la fourchette confortable [FOCUS_ZOOM_MIN,
-	 * FOCUS_ZOOM_MAX], on garde le zoom courant et on se contente d'un pan
-	 * animé vers la nouvelle table. Si le zoom est trop bas (vue aérienne)
-	 * on zoome IN au seuil, si trop haut (user a zoomé manuellement) on
-	 * dézoome vers le plafond — dans les deux cas, autorisé pour garder
-	 * une lecture correcte de la carte. */
+	 * Stratégie « zoom-in-only » : si la vue est déjà zoomée (≥ FOCUS_ZOOM_MIN),
+	 * on GARDE le zoom courant et on se contente d'un pan animé. Si le zoom est
+	 * en-dessous (vue aérienne), on zoome IN au seuil lisible. On ne dézoome
+	 * JAMAIS — cliquer sur une table doit toujours « rapprocher », comme un
+	 * zoom Figma sur un objet. */
 	const focusAndZoom = (id: string) => {
 		const node = nodes.find((n) => n.id === id);
 		if (!node || containerRef.current === null) {
@@ -885,10 +999,7 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 		const cy =
 			node.position.y + (node.height ?? nodeHeight(node.data.collection)) / 2;
 		const from = getViewport();
-		const zoom = focusZoom(from.zoom, {
-			min: FOCUS_ZOOM_MIN,
-			max: FOCUS_ZOOM_MAX
-		});
+		const zoom = focusZoom(from.zoom, { min: FOCUS_ZOOM_MIN });
 		const rect = containerRef.current.getBoundingClientRect();
 		const sa = safeAreaRef.current;
 		const freeCenterX = sa.left + (rect.width - sa.left - sa.right) / 2;
@@ -901,6 +1012,11 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 		// Annule le tween précédent s'il est encore en cours, puis anime.
 		// `setFocusId` (ring/drawer/estompage) déféré via `startTransition`
 		// pour qu'il n'interrompe pas le tween mid-animation.
+		// Marque userTouched AVANT le tween : `setFocusId` change `safeArea`
+		// (drawer droit ouvre → right passe de 8 à 352), ce qui déclenche le
+		// `useEffect(fit, [safeArea])` — sans ce flag, ce fit écrase notre
+		// tween par un retour à l'overview (bug « ça dezoom au click »).
+		userTouchedViewportRef.current = true;
 		tweenRef.current?.cancel();
 		tweenRef.current = animateViewport(from, to, FOCUS_TWEEN_MS, setViewport);
 		startTransition(() => setFocusId(id));
@@ -916,6 +1032,7 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 			overviewViewport(bounds, rect, {
 				padding: OVERVIEW_FIT.padding,
 				maxZoom: OVERVIEW_FIT.maxZoom,
+				minZoom: OVERVIEW_FIT.minZoom,
 				safeArea
 			}),
 			{ duration: OVERVIEW_FIT.duration }
@@ -1294,13 +1411,12 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 				style={{
 					position: "absolute",
 					top: 12,
-					left: leftDrawerVisible ? 300 - 18 : 8,
+					left: leftDrawerVisible ? leftDrawerWidth - 18 : 8,
 					zIndex: 5,
 					background: "#fff",
 					color: "#475569",
 					border: "1px solid #e2e8f0",
-					boxShadow: "0 2px 6px rgba(15,23,42,0.10)",
-					transition: "left 180ms ease-out"
+					boxShadow: "0 2px 6px rgba(15,23,42,0.10)"
 				}}
 			>
 				{leftDrawerVisible ? (
@@ -1310,9 +1426,12 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 				)}
 			</ActionIcon>
 
-			{/* Drawer gauche docké : arborescence (frames + reste), pleine
-			 * hauteur, collé au bord. La pill Cmd+K vit dans son footer.
-			 * Masquable via le toggle ci-dessus. */}
+			{/* Drawer gauche docké — UN SEUL drawer qui switch entre l'arborescence
+			 * (par défaut) et la vue détails d'une table (quand focusId set).
+			 * Le back button « ← Schéma » du header détails clear focusId → retour
+			 * automatique à l'arborescence dans le même conteneur.
+			 * La pill Cmd+K du footer et la largeur restent identiques dans les
+			 * deux modes → pas de resize/reflow du canvas au focus. */}
 			{leftDrawerVisible ? (
 				<Box
 					style={{
@@ -1320,18 +1439,38 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 						top: 0,
 						left: 0,
 						bottom: 0,
+						width: leftDrawerWidth,
 						zIndex: 4
 					}}
 				>
 					<SidebarDrawer
 						variant="docked"
-						title="Schéma"
+						width={leftDrawerWidth}
+						{...(focusId === null ? { title: "Schéma" } : {})}
 						header={
-							<SearchInput
-								value={search}
-								onChange={(e) => setSearch(e.currentTarget.value)}
-								placeholder={`Rechercher parmi ${schema.collections.length} tables…`}
-							/>
+							focusId === null ? (
+								<SearchInput
+									value={search}
+									onChange={(e) => setSearch(e.currentTarget.value)}
+									placeholder={`Rechercher parmi ${schema.collections.length} tables…`}
+								/>
+							) : (
+								<UnstyledButton
+									onClick={clearFocus}
+									style={{
+										display: "inline-flex",
+										alignItems: "center",
+										gap: 4,
+										fontSize: 12.5,
+										color: "var(--mantine-color-slate-6)",
+										fontWeight: 500
+									}}
+									aria-label="Retour au schéma"
+								>
+									<IconChevronLeft size={14} stroke={2} />
+									<span>Schéma</span>
+								</UnstyledButton>
+							)
 						}
 						footer={
 							<UnstyledButton
@@ -1355,25 +1494,46 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 						}
 						style={{ height: "100%" }}
 					>
-						<SchemaTree
-							schema={schema}
-							frames={framesApi.frames}
-							focusId={focusId}
-							search={search}
-							onSelect={focusAndZoom}
-						/>
+						{focusId === null ? (
+							<SchemaTree
+								schema={schema}
+								frames={framesApi.frames}
+								focusId={focusId}
+								search={search}
+								onSelect={focusAndZoom}
+							/>
+						) : (
+							<TableDetails
+								schema={schema}
+								tableName={focusId}
+								frameLabel={framesApi.frameOfTable(focusId)?.label ?? null}
+								onSelect={focusAndZoom}
+							/>
+						)}
 					</SidebarDrawer>
+					{/* Handle draggable — barre verticale fine sur le bord droit.
+					 * Overlay au-dessus du chevron du drawer content. `touchAction:none`
+					 * évite les gestes tactiles concurrents (scroll page). */}
+					<Box
+						onPointerDown={onDrawerHandlePointerDown}
+						onPointerMove={onDrawerHandlePointerMove}
+						onPointerUp={onDrawerHandlePointerUp}
+						onPointerCancel={onDrawerHandlePointerUp}
+						role="separator"
+						aria-orientation="vertical"
+						aria-label="Redimensionner le drawer"
+						style={{
+							position: "absolute",
+							top: 0,
+							bottom: 0,
+							right: -3,
+							width: 6,
+							cursor: "col-resize",
+							touchAction: "none",
+							zIndex: 6
+						}}
+					/>
 				</Box>
-			) : null}
-
-			{/* Drawer droit : infos de la table focus (visible uniquement quand focus). */}
-			{focusId !== null ? (
-				<TableDetails
-					schema={schema}
-					tableName={focusId}
-					onSelect={focusAndZoom}
-					onClose={clearFocus}
-				/>
 			) : null}
 
 			{/* Chip de sélection multi-tables (tour 1d) — visible dès qu'une

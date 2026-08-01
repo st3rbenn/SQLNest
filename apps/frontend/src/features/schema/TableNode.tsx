@@ -4,6 +4,7 @@ import {
 	Handle,
 	type Node,
 	type NodeProps,
+	NodeResizer,
 	Position,
 	useStore
 } from "@xyflow/react";
@@ -35,6 +36,10 @@ export interface TableNodeData {
 	readonly focused: boolean;
 	/** Correspond à la recherche courante. */
 	readonly matched: boolean;
+	/** Callback au release du resize (n'importe quel côté ou coin). Fourni par
+	 * SchemaCanvas → persist localStorage via `useTableSizes`. Absent = table
+	 * non resizable (rendu externe / test). */
+	readonly onResizeEnd?: (size: { width: number; height: number }) => void;
 	readonly [key: string]: unknown;
 }
 
@@ -90,20 +95,28 @@ const levelSelector = (s: {
 	transform: readonly [number, number, number];
 }): ZoomLevel => levelForZoom(s.transform[2]);
 
-export function TableNode({ data }: NodeProps<TableNodeType>) {
-	const { collection, dimmed, focused, matched } = data;
+export function TableNode({
+	data,
+	width,
+	height: heightProp
+}: NodeProps<TableNodeType>) {
+	const { collection, dimmed, focused, matched, onResizeEnd } = data;
 	const level = useStore(levelSelector);
 	const inferred = collection.source === "inferred";
 	const color = colorFor(collection.name);
-	const height = nodeHeight(collection);
+	const contentHeight = nodeHeight(collection);
+	// Dimensions effectives — RF push les valeurs du store (mises à jour en
+	// direct pendant un drag de resize) ; défauts pour le tout premier render.
+	const effectiveWidth = width ?? NODE_WIDTH;
+	const effectiveHeight = heightProp ?? contentHeight;
 
 	// Enveloppe commune : border colorée (bleu/ambre override en focus/match),
 	// ombre focus/match, gestion `dimmed`. LOD variants remplissent l'enveloppe
-	// à la taille RÉELLE (NODE_WIDTH × nodeHeight) — sinon les handles (aux
-	// bords du wrapper RF) ne s'alignent plus avec le visuel à faible zoom.
+	// à la taille RÉELLE — sinon les handles (aux bords du wrapper RF) ne
+	// s'alignent plus avec le visuel à faible zoom.
 	const shellStyle: CSSProperties = {
-		width: NODE_WIDTH,
-		height,
+		width: effectiveWidth,
+		height: effectiveHeight,
 		borderRadius: 10,
 		background: "#fff",
 		border: `2px solid ${matched ? "#f59e0b" : focused ? "#2563eb" : color.border}`,
@@ -139,13 +152,42 @@ export function TableNode({ data }: NodeProps<TableNodeType>) {
 		);
 	}
 
-	// ── LOD level 1 : full (zoom ≥ 0.5) ───────────────────────────────
+	// ── LOD level 1 : full (zoom ≥ FULL_MIN) ──────────────────────────
 	const pk = new Set(collection.primaryKey ?? []);
 	const shown = collection.fields.slice(0, MAX_FIELDS);
 	const hidden = collection.fields.length - shown.length;
 	return (
 		<div style={shellStyle}>
 			<AllHandles />
+			{/* NodeResizer complet : 4 sides + 4 corners. Handles invisibles
+			 * par défaut (opacité 0 via `.react-flow__node-table` override CSS
+			 * dans canvas-overrides.css), apparaissent au hover du node — évite
+			 * la pollution visuelle quand plein de tables sont à l'écran. La
+			 * bordure line reste visible pour signaler la cible du drag. */}
+			{onResizeEnd !== undefined ? (
+				<NodeResizer
+					isVisible
+					minWidth={200}
+					maxWidth={800}
+					minHeight={60}
+					maxHeight={1600}
+					onResizeEnd={(_, p) =>
+						onResizeEnd({ width: p.width, height: p.height })
+					}
+					lineStyle={{
+						borderColor: color.border,
+						borderWidth: 1.5
+					}}
+					handleStyle={{
+						width: 8,
+						height: 8,
+						borderRadius: 2,
+						background: "#fff",
+						borderColor: color.border,
+						borderWidth: 2
+					}}
+				/>
+			) : null}
 			<div
 				style={{
 					display: "flex",

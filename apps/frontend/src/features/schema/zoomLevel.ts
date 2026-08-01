@@ -7,9 +7,16 @@
  */
 export type ZoomLevel = "full" | "compact" | "pill" | "dot";
 
-/** Seuils exportés pour tests et éventuelle configurabilité future. */
+/**
+ * Seuils exportés pour tests et éventuelle configurabilité future.
+ * FULL_MIN volontairement bas (0.3) — les cartes restent GARNIES (fields
+ * visibles) sur une large plage de zoom, l'utilisateur peut dézoomer un peu
+ * pour prendre du recul sans que la carte bascule en `compact` (colored card
+ * silencieuse). Bascule au dezoom : full → compact vers 0.3, compact → pill
+ * vers 0.2, pill → dot vers 0.1.
+ */
 export const ZOOM_LEVELS = {
-	FULL_MIN: 0.5,
+	FULL_MIN: 0.3,
 	COMPACT_MIN: 0.2,
 	PILL_MIN: 0.1
 } as const;

@@ -93,20 +93,16 @@ describe("overviewViewport", () => {
 });
 
 describe("focusZoom", () => {
-	const opts = { min: 1, max: 1.5 };
+	const opts = { min: 1 };
 
 	it("zooms IN to min when the current zoom is below min", () => {
 		expect(focusZoom(0.4, opts)).toBe(1);
 	});
 
-	it("zooms OUT to max when the current zoom is above max", () => {
-		expect(focusZoom(2.5, opts)).toBe(1.5);
-	});
-
-	it("KEEPS the current zoom when it is inside the focus window (just pan)", () => {
+	it("NEVER dezooms — keeps the current zoom when already above min", () => {
 		expect(focusZoom(1, opts)).toBe(1);
 		expect(focusZoom(1.2, opts)).toBe(1.2);
-		expect(focusZoom(1.5, opts)).toBe(1.5);
+		expect(focusZoom(2.5, opts)).toBe(2.5);
 	});
 });
 

@@ -10,3 +10,27 @@
 .react-flow__nodesselection-rect {
 	display: none !important;
 }
+
+/*
+ * Handles NodeResizer des tables : masqués par défaut, révélés au hover.
+ * Évite un canvas encombré de petits carrés sur toutes les tables au repos.
+ * La bordure `line` (les 4 côtés) reste visible et signale la cible du drag.
+ * Les frames gardent leurs handles toujours visibles (règle plus spécifique
+ * ciblée sur `.react-flow__node-table` uniquement).
+ */
+.react-flow__node-table .react-flow__resize-control.handle {
+	opacity: 0;
+	transition: opacity 120ms ease-out;
+}
+.react-flow__node-table:hover .react-flow__resize-control.handle,
+.react-flow__node-table.selected .react-flow__resize-control.handle {
+	opacity: 1;
+}
+.react-flow__node-table .react-flow__resize-control.line {
+	opacity: 0;
+	transition: opacity 120ms ease-out;
+}
+.react-flow__node-table:hover .react-flow__resize-control.line,
+.react-flow__node-table.selected .react-flow__resize-control.line {
+	opacity: 0.6;
+}

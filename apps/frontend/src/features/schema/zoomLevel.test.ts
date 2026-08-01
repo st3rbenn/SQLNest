@@ -9,9 +9,9 @@ describe("levelForZoom", () => {
 	});
 
 	it("returns 'compact' between COMPACT_MIN and FULL_MIN", () => {
-		expect(levelForZoom(0.499)).toBe("compact");
+		expect(levelForZoom(0.299)).toBe("compact");
 		expect(levelForZoom(ZOOM_LEVELS.COMPACT_MIN)).toBe("compact");
-		expect(levelForZoom(0.3)).toBe("compact");
+		expect(levelForZoom(0.25)).toBe("compact");
 	});
 
 	it("returns 'pill' between PILL_MIN and COMPACT_MIN", () => {

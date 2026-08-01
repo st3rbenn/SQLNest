@@ -1,4 +1,5 @@
-import { Box, Text } from "@mantine/core";
+import { Box, Text, UnstyledButton } from "@mantine/core";
+import { IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { type CSSProperties, useMemo, useState } from "react";
 import { colorFor } from "./colors";
 import type { Frame } from "./frames";
@@ -43,16 +44,13 @@ export function buildTreeGroups(
 	collections: readonly Collection[],
 	frames: readonly Frame[]
 ): TreeGroup[] {
-	// 1. Index de couverture par les frames.
-	const inFrame = new Map<string, string>(); // tableName → frameKey
+	const inFrame = new Map<string, string>();
 	for (const f of frames) {
 		for (const c of f.collections) {
 			if (!inFrame.has(c)) inFrame.set(c, f.key);
 		}
 	}
 
-	// 2. Groupes de frames : conservent l'ordre déclaré, filtrent les
-	//    collections qui n'existent pas dans le schéma.
 	const collectionNames = new Set(collections.map((c) => c.name));
 	const frameGroups: TreeGroup[] = frames
 		.map<TreeGroup>((f) => ({
@@ -64,7 +62,6 @@ export function buildTreeGroups(
 		}))
 		.filter((g) => g.tables.length > 0);
 
-	// 3. Reste → groupes de préfixe (comme avant).
 	const byPrefix = new Map<string, string[]>();
 	for (const c of collections) {
 		if (inFrame.has(c.name)) continue;
@@ -93,17 +90,17 @@ const headerRow: CSSProperties = {
 	alignItems: "center",
 	justifyContent: "space-between",
 	width: "100%",
-	padding: "6px 8px",
-	background: "var(--mantine-color-slate-0)",
+	padding: "7px 10px 7px 8px",
+	background: "transparent",
 	cursor: "pointer",
 	userSelect: "none",
-	fontSize: 12,
-	color: "var(--mantine-color-slate-7)",
-	fontWeight: 600,
+	fontSize: 12.5,
+	color: "var(--mantine-color-slate-8)",
+	fontWeight: 700,
 	border: "none",
-	borderTop: "1px solid var(--mantine-color-slate-1)",
 	textAlign: "left",
-	fontFamily: "inherit"
+	fontFamily: "inherit",
+	letterSpacing: 0.2
 };
 
 const itemBase: CSSProperties = {
@@ -112,7 +109,7 @@ const itemBase: CSSProperties = {
 	justifyContent: "space-between",
 	gap: 8,
 	width: "100%",
-	padding: "5px 10px 5px 22px",
+	padding: "6px 10px 6px 32px",
 	fontSize: 12.5,
 	cursor: "pointer",
 	borderLeft: "3px solid transparent",
@@ -120,14 +117,10 @@ const itemBase: CSSProperties = {
 	borderRight: "none",
 	borderBottom: "none",
 	textAlign: "left",
-	fontFamily: "inherit"
+	fontFamily: "inherit",
+	transition: "background 100ms ease-out"
 };
 
-/**
- * Arborescence des tables — frames explicites d'abord (avec leur pastille
- * colorée), puis groupes de préfixe pour ce qui reste. Rendue à l'intérieur
- * d'un `SidebarDrawer` par le parent.
- */
 export function SchemaTree({
 	schema,
 	frames,
@@ -145,8 +138,6 @@ export function SchemaTree({
 	);
 
 	const query = search.trim().toLowerCase();
-	// Filtrage : une table matche par son nom OU son groupe. Recherche non
-	// vide → tous les groupes contenant un match sont dépliés automatiquement.
 	const filtered = useMemo<TreeGroup[]>(() => {
 		if (query === "") return groups;
 		return groups
@@ -176,65 +167,87 @@ export function SchemaTree({
 
 	return (
 		<Box>
-			<Text px="sm" pt={6} pb={4} size="xs" c="dimmed">
+			<Text px="sm" pt={6} pb={6} size="xs" c="dimmed">
 				{query === ""
 					? `${schema.collections.length} tables · ${schema.relations.length} relations`
 					: `${totalMatch} résultat(s)`}
 			</Text>
 			{filtered.map((g) => {
 				const showChildren = !isCollapsed(g.key);
+				// Couleur du badge de groupe : hue explicite du frame si défini,
+				// sinon dérive une couleur du label (hash stable → même préfixe
+				// = même teinte à chaque render / reload).
+				const groupColor =
+					g.kind === "frame" && g.hue !== undefined
+						? `hsl(${g.hue}, 55%, 60%)`
+						: colorFor(g.label).border;
 				return (
 					<div key={g.key}>
-						<button
-							type="button"
-							style={headerRow}
-							onClick={() => toggle(g.key)}
-						>
+						<UnstyledButton style={headerRow} onClick={() => toggle(g.key)}>
 							<span
-								style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+								style={{
+									display: "inline-flex",
+									alignItems: "center",
+									gap: 8,
+									minWidth: 0
+								}}
 							>
 								<span
 									style={{
-										color: "var(--mantine-color-slate-3)"
+										display: "inline-flex",
+										color: "var(--mantine-color-slate-5)",
+										lineHeight: 0
 									}}
 								>
-									{showChildren ? "▾" : "▸"}
+									{showChildren ? (
+										<IconChevronDown size={12} stroke={2.5} />
+									) : (
+										<IconChevronRight size={12} stroke={2.5} />
+									)}
 								</span>
-								{g.kind === "frame" && g.hue !== undefined ? (
-									<span
-										style={{
-											display: "inline-block",
-											width: 10,
-											height: 10,
-											borderRadius: 3,
-											background: `hsl(${g.hue}, 55%, 60%)`
-										}}
-									/>
-								) : null}
-								{g.label}
+								<span
+									style={{
+										display: "inline-block",
+										width: 12,
+										height: 12,
+										borderRadius: 4,
+										background: groupColor,
+										flexShrink: 0
+									}}
+								/>
+								<span
+									style={{
+										textTransform: g.kind === "frame" ? "uppercase" : "none",
+										overflow: "hidden",
+										textOverflow: "ellipsis",
+										whiteSpace: "nowrap"
+									}}
+								>
+									{g.label}
+								</span>
 							</span>
 							<span
 								style={{
 									color: "var(--mantine-color-slate-4)",
-									fontWeight: 500
+									fontWeight: 500,
+									fontSize: 12
 								}}
 							>
 								{g.tables.length}
 							</span>
-						</button>
+						</UnstyledButton>
 						{showChildren
 							? g.tables.map((t) => {
 									const color = colorFor(t);
 									const isFocus = t === focusId;
 									return (
-										<button
+										<UnstyledButton
 											key={t}
-											type="button"
 											style={{
 												...itemBase,
 												background: isFocus
 													? "var(--mantine-color-brand-0)"
-													: "#fff",
+													: "transparent",
 												borderLeftColor: isFocus
 													? "var(--mantine-color-brand-6)"
 													: "transparent",
@@ -250,7 +263,7 @@ export function SchemaTree({
 												style={{
 													display: "flex",
 													alignItems: "center",
-													gap: 6,
+													gap: 8,
 													minWidth: 0
 												}}
 											>
@@ -259,7 +272,7 @@ export function SchemaTree({
 														display: "inline-block",
 														width: 8,
 														height: 8,
-														borderRadius: 2,
+														borderRadius: "50%",
 														background: color.border,
 														flexShrink: 0
 													}}
@@ -274,7 +287,7 @@ export function SchemaTree({
 													{t}
 												</span>
 											</span>
-										</button>
+										</UnstyledButton>
 									);
 								})
 							: null}
