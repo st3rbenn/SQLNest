@@ -19,11 +19,11 @@ describe("RowItem", () => {
 		expect(onClick).toHaveBeenCalledOnce();
 	});
 
-	it("applies the active style (brand bg + left border + weight 600)", () => {
+	it("applies the active style (accent bg + left border + weight 600)", () => {
 		renderWithProviders(<RowItem label="orders" active />);
 		const btn = screen.getByRole("button");
-		expect(btn.style.background).toContain("brand-0");
-		expect(btn.style.borderLeft).toContain("brand-6");
+		expect(btn.style.background).toContain("sqlnest-accent-soft");
+		expect(btn.style.borderLeft).toContain("sqlnest-accent");
 		expect(btn.style.fontWeight).toBe("600");
 	});
 

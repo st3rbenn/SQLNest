@@ -55,10 +55,13 @@ export function RowItem({
 	const spec = SIZES[size];
 
 	const pl = paddingLeft ?? 12;
+	// Sur dark : accent soft pour la row active (fond bleu translucide + text
+	// accent), surface-hover pour le hover (bump imperceptible depuis
+	// `#2C2C2C` mais suffisant à donner le retour visuel).
 	const bg = active
-		? "var(--mantine-color-brand-0)"
+		? "var(--sqlnest-accent-soft)"
 		: hover
-			? "var(--mantine-color-slate-0)"
+			? "var(--sqlnest-surface-hover)"
 			: "transparent";
 
 	const buttonStyle: CSSProperties = {
@@ -69,10 +72,10 @@ export function RowItem({
 		padding: `${spec.paddingY}px 12px ${spec.paddingY}px ${pl}px`,
 		fontSize: spec.fontSize,
 		background: bg,
-		borderLeft: `3px solid ${active ? "var(--mantine-color-brand-6)" : "transparent"}`,
+		borderLeft: `3px solid ${active ? "var(--sqlnest-accent)" : "transparent"}`,
 		color: active
-			? "var(--mantine-color-brand-7)"
-			: "var(--mantine-color-slate-8)",
+			? "var(--sqlnest-accent)"
+			: "var(--sqlnest-text-secondary)",
 		fontWeight: active ? 600 : 400,
 		textAlign: "left",
 		transition: "background 100ms ease-out"
@@ -105,7 +108,7 @@ export function RowItem({
 			<IconChevronRight
 				size={12}
 				stroke={2}
-				style={{ color: "var(--mantine-color-slate-4)", flexShrink: 0 }}
+				style={{ color: "var(--sqlnest-text-tertiary)", flexShrink: 0 }}
 			/>
 		</UnstyledButton>
 	);

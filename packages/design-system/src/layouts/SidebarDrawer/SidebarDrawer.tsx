@@ -28,7 +28,9 @@ const DOCKED_STYLE: CSSProperties = {
 	borderTopLeftRadius: 0,
 	borderBottomLeftRadius: 0,
 	borderLeft: "none",
-	boxShadow: "4px 0 16px rgba(15,23,42,0.06)"
+	// Ombre noire diffuse — Mantine par défaut est faible sur bg dark
+	// (rgba(15,23,42,…) devient invisible sur #1E1E1E). On force du noir.
+	boxShadow: "4px 0 16px rgba(0,0,0,0.4)"
 };
 
 export function SidebarDrawer({
@@ -56,6 +58,11 @@ export function SidebarDrawer({
 				display: "flex",
 				flexDirection: "column",
 				overflow: "hidden",
+				// Surface Figma + border explicite : sans ça Paper hérite du
+				// bg blanc de Mantine (le forceColorScheme dark n'a pas
+				// systématiquement pris sur `Paper` selon la version).
+				background: "var(--sqlnest-surface)",
+				borderColor: "var(--sqlnest-border)",
 				...(docked ? DOCKED_STYLE : {}),
 				...(style as CSSProperties | undefined)
 			}}
@@ -89,9 +96,13 @@ export function SidebarDrawer({
 				<Box
 					px="sm"
 					py="xs"
-					style={{ borderBottom: "1px solid var(--mantine-color-slate-1)" }}
+					style={{ borderBottom: "1px solid var(--sqlnest-border-subtle)" }}
 				>
-					<Text size="sm" fw={700} c="slate.7">
+					<Text
+						size="sm"
+						fw={700}
+						style={{ color: "var(--sqlnest-text-primary)" }}
+					>
 						{title}
 					</Text>
 				</Box>
@@ -100,7 +111,7 @@ export function SidebarDrawer({
 			{header ? (
 				<Box
 					p="sm"
-					style={{ borderBottom: "1px solid var(--mantine-color-slate-1)" }}
+					style={{ borderBottom: "1px solid var(--sqlnest-border-subtle)" }}
 				>
 					{header}
 				</Box>
@@ -114,7 +125,7 @@ export function SidebarDrawer({
 				<Box
 					px="sm"
 					py="xs"
-					style={{ borderTop: "1px solid var(--mantine-color-slate-1)" }}
+					style={{ borderTop: "1px solid var(--sqlnest-border-subtle)" }}
 				>
 					{footer}
 				</Box>

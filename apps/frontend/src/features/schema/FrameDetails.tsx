@@ -104,13 +104,13 @@ export function FrameDetails({
 									fontWeight: 700,
 									textTransform: "uppercase",
 									letterSpacing: 0.3,
-									color: "var(--mantine-color-slate-9)",
+									color: "var(--sqlnest-text-primary)",
 									padding: "4px 8px",
 									border: `1.5px solid ${hueColor}`,
 									borderRadius: 6,
 									outline: "none",
 									fontFamily: "inherit",
-									background: "#fff"
+									background: "var(--sqlnest-surface)"
 								}}
 							/>
 							<ActionIcon
@@ -141,7 +141,7 @@ export function FrameDetails({
 									fontWeight: 700,
 									textTransform: "uppercase",
 									letterSpacing: 0.3,
-									color: "var(--mantine-color-slate-9)",
+									color: "var(--sqlnest-text-primary)",
 									overflow: "hidden",
 									textOverflow: "ellipsis",
 									whiteSpace: "nowrap",

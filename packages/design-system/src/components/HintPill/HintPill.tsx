@@ -6,11 +6,26 @@ export type HintPillProps = {
 	children: ReactNode;
 } & Omit<PaperProps, "children">;
 
-export function HintPill({ keys, children, ...rest }: HintPillProps) {
+export function HintPill({ keys, children, style, ...rest }: HintPillProps) {
 	return (
-		<Paper radius="xl" shadow="md" withBorder px="sm" py={6} {...rest}>
+		<Paper
+			radius="xl"
+			shadow="md"
+			withBorder
+			px="sm"
+			py={6}
+			style={{
+				// Match surface Figma — sans override le Paper part sur bg blanc
+				// même en dark mode Mantine, donnant une pill claire dans le
+				// footer sombre du drawer.
+				background: "var(--sqlnest-surface)",
+				borderColor: "var(--sqlnest-border)",
+				...(style as Record<string, unknown> | undefined),
+			}}
+			{...rest}
+		>
 			<Group gap={8} wrap="nowrap">
-				<Text size="xs" c="slate.6">
+				<Text size="xs" style={{ color: "var(--sqlnest-text-secondary)" }}>
 					{children}
 				</Text>
 				{keys.map((k) => (

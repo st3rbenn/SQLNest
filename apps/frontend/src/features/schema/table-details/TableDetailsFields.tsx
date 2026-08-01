@@ -33,7 +33,7 @@ export function TableDetailsFields({
 							gap: 8,
 							padding: "3px 12px",
 							fontSize: 11.5,
-							color: "var(--mantine-color-slate-8)"
+							color: "var(--sqlnest-text-secondary)"
 						}}
 					>
 						<span
@@ -58,7 +58,7 @@ export function TableDetailsFields({
 						</span>
 						<span
 							style={{
-								color: "var(--mantine-color-slate-4)",
+								color: "var(--sqlnest-text-tertiary)",
 								fontFamily: "var(--mantine-font-family-monospace)",
 								fontSize: 10.5,
 								whiteSpace: "nowrap"

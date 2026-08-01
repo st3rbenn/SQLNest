@@ -10,6 +10,12 @@ const SearchIcon = () => (
 	</svg>
 );
 
+/**
+ * Champ de recherche minimaliste — TextInput Mantine + loupe à gauche.
+ * Overrides `styles` pour aligner sur la palette Figma : input sur surface
+ * plus sombre que le drawer (border-subtle → surface-hover contraste léger
+ * mais visible), border --sqlnest-border, focus ring accent Figma.
+ */
 export function SearchInput(props: SearchInputProps) {
 	return (
 		<TextInput
@@ -17,6 +23,16 @@ export function SearchInput(props: SearchInputProps) {
 			size="sm"
 			radius="sm"
 			leftSection={<SearchIcon />}
+			styles={{
+				input: {
+					background: "var(--sqlnest-surface-hover)",
+					borderColor: "var(--sqlnest-border)",
+					color: "var(--sqlnest-text-primary)",
+				},
+				section: {
+					color: "var(--sqlnest-text-tertiary)",
+				},
+			}}
 			{...props}
 		/>
 	);

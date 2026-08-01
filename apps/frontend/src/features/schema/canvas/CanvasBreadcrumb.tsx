@@ -36,10 +36,13 @@ export function CanvasBreadcrumb({
 }: CanvasBreadcrumbProps) {
 	const Icon = engine === "mongodb" ? IconLeaf : IconDatabase;
 	const engineLabel = engine === "mongodb" ? "MongoDB" : "Postgres";
+	// Sur dark, l'accent Figma sert de couleur d'engine « live » — mint pour
+	// MongoDB reste une couleur de code (mongo = green). Fallback aligné sur
+	// la palette actuelle.
 	const engineColor =
 		engine === "mongodb"
-			? "var(--mantine-color-mint-6, #10b981)"
-			: "var(--mantine-color-brand-6, #2563eb)";
+			? "var(--sqlnest-success, #10b981)"
+			: "var(--sqlnest-accent, #0d99ff)";
 
 	// Le dernier segment reçoit l'accent visuel (fw:600, slate-9) — les
 	// précédents sont estompés (fw:400, slate-6). Priorité au « où je suis ».
@@ -59,7 +62,10 @@ export function CanvasBreadcrumb({
 				gap: 6,
 				padding: "6px 10px",
 				borderRadius: 8,
-				background: "rgba(255, 255, 255, 0.85)",
+				// Surface Figma légèrement translucide + blur → laisse deviner
+				// le canvas dessous mais reste lisible.
+				background: "rgba(44, 44, 44, 0.85)",
+				border: "1px solid var(--sqlnest-border)",
 				backdropFilter: "blur(8px)",
 				WebkitBackdropFilter: "blur(8px)",
 				fontSize: 12.5
@@ -114,8 +120,8 @@ function Segment({
 		alignItems: "center",
 		gap: 4,
 		color: accent
-			? "var(--mantine-color-slate-9)"
-			: "var(--mantine-color-slate-6)",
+			? "var(--sqlnest-text-primary)"
+			: "var(--sqlnest-text-secondary)",
 		fontWeight: accent ? 600 : 400
 	};
 	if (onClick === undefined) {
@@ -136,7 +142,7 @@ function Sep() {
 		<IconChevronRight
 			size={12}
 			stroke={2}
-			style={{ color: "var(--mantine-color-slate-3)", flexShrink: 0 }}
+			style={{ color: "var(--sqlnest-text-tertiary)", flexShrink: 0 }}
 			aria-hidden="true"
 		/>
 	);

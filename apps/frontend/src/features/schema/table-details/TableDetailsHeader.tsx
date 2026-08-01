@@ -51,7 +51,7 @@ export function TableDetailsHeader({
 						style={{
 							fontSize: 15,
 							fontWeight: 700,
-							color: "var(--mantine-color-slate-9)",
+							color: "var(--sqlnest-text-primary)",
 							overflow: "hidden",
 							textOverflow: "ellipsis",
 							whiteSpace: "nowrap",
@@ -75,7 +75,7 @@ export function TableDetailsHeader({
 							{" · frame "}
 							<span
 								style={{
-									color: "var(--mantine-color-slate-7)",
+									color: "var(--sqlnest-text-secondary)",
 									fontWeight: 600,
 									textTransform: "uppercase"
 								}}
@@ -98,7 +98,11 @@ export function TableDetailsHeader({
 			>
 				<Button
 					variant="filled"
-					color="dark"
+					// Sur dark, `color="dark"` (grays Mantine) rendait un bouton
+					// quasi-invisible sur la surface #2C2C2C. On passe sur l'accent
+					// bleu Figma — le CTA « get X » est l'action primaire de la
+					// vue détails, elle mérite la couleur d'action.
+					color="brand"
 					radius="md"
 					size="xs"
 					onClick={onGoToEditor}

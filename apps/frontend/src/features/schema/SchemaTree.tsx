@@ -96,7 +96,7 @@ const headerRow: CSSProperties = {
 	cursor: "pointer",
 	userSelect: "none",
 	fontSize: 12.5,
-	color: "var(--mantine-color-slate-8)",
+	color: "var(--sqlnest-text-primary)",
 	fontWeight: 700,
 	border: "none",
 	textAlign: "left",
@@ -178,7 +178,7 @@ export function SchemaTree({
 								<span
 									style={{
 										display: "inline-flex",
-										color: "var(--mantine-color-slate-5)",
+										color: "var(--sqlnest-text-tertiary)",
 										lineHeight: 0
 									}}
 								>
@@ -211,7 +211,7 @@ export function SchemaTree({
 							</span>
 							<span
 								style={{
-									color: "var(--mantine-color-slate-4)",
+									color: "var(--sqlnest-text-tertiary)",
 									fontWeight: 500,
 									fontSize: 12
 								}}

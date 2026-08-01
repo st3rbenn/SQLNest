@@ -165,7 +165,7 @@ export function DrawerPane({
 								alignItems: "center",
 								gap: 4,
 								fontSize: 12.5,
-								color: "var(--mantine-color-slate-6)",
+								color: "var(--sqlnest-text-secondary)",
 								fontWeight: 500
 							}}
 							aria-label="Retour au schéma"

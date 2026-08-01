@@ -31,21 +31,29 @@ export function TableDetailsSuggestion({ table }: TableDetailsSuggestionProps) {
 						width: "100%",
 						padding: 10,
 						borderRadius: 8,
-						background: "var(--mantine-color-brand-0)",
-						border: "1px solid var(--mantine-color-brand-2)",
+						background: "var(--sqlnest-accent-soft)",
+						border: "1px solid var(--sqlnest-accent)",
 						textAlign: "left",
 						cursor: "pointer",
 						transition: "background 120ms ease-out"
 					}}
 				>
-					<Text size="xs" fw={600} c="var(--mantine-color-brand-7)" mb={4}>
+					<Text
+						size="xs"
+						fw={600}
+						mb={4}
+						style={{ color: "var(--sqlnest-accent)" }}
+					>
 						+ Requête suggérée
 					</Text>
 					<Text
 						size="xs"
 						ff="var(--mantine-font-family-monospace)"
-						c="var(--mantine-color-slate-8)"
-						style={{ lineHeight: 1.5, fontSize: 10.5 }}
+						style={{
+							lineHeight: 1.5,
+							fontSize: 10.5,
+							color: "var(--sqlnest-text-secondary)"
+						}}
 					>
 						{`get ${table.name}${suggestPredicate(table)} | count`}
 					</Text>
