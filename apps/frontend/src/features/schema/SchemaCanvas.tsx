@@ -57,6 +57,7 @@ import { DrawerPane, useResizableDrawer } from "./canvas/DrawerPane";
 import { HiddenChip } from "./canvas/HiddenChip";
 import { useCanvasFocus } from "./canvas/useCanvasFocus";
 import { useCanvasSelection } from "./canvas/useCanvasSelection";
+import { useUndoRedoShortcuts } from "./canvas/useUndoRedoShortcuts";
 import { CanvasConsole } from "./CanvasConsole";
 import { CanvasContextMenu } from "./CanvasContextMenu";
 import { CanvasToolbar } from "./CanvasToolbar";
@@ -222,6 +223,13 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 		hiddenIds,
 		setHiddenIds
 	});
+
+	// Shortcuts globaux Cmd/Ctrl+Z (undo) et Cmd/Ctrl+Shift+Z ou Cmd/Ctrl+Y
+	// (redo). preventDefault critique pour bloquer le « restore tab fermée »
+	// de Chrome/Safari. Skip auto quand focus est dans un input/textarea/
+	// contenteditable — l'undo natif du champ (rename inline frame, éditeur
+	// SNQL) reste actif.
+	useUndoRedoShortcuts({ onUndo: history.undo, onRedo: history.redo });
 
 	// Frames : deux chemins d'update qui doivent cohabiter sans se marcher
 	// dessus :
