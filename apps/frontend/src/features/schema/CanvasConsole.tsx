@@ -1,5 +1,5 @@
 import { ActionIcon, Menu, Tooltip } from "@mantine/core";
-import { ResultTable } from "@sqlnest/design-system";
+import { Button, ResultTable } from "@sqlnest/design-system";
 import {
 	IconChevronDown,
 	IconChevronUp,
@@ -244,14 +244,15 @@ export function CanvasConsole({
 						/>
 					</div>
 					<div style={actionsStyle}>
-						<button
-							type="button"
+						<Button
+							size="xs"
 							onClick={execute}
-							disabled={run.isPending || source.trim() === ""}
-							style={runButtonStyle(run.isPending)}
+							disabled={source.trim() === ""}
+							loading={run.isPending}
+							loadingLabel="Exécution…"
 						>
-							{run.isPending ? "Exécution…" : "Exécuter"}
-						</button>
+							Exécuter
+						</Button>
 						<Menu
 							shadow="md"
 							width={440}
@@ -435,19 +436,6 @@ const actionsStyle: CSSProperties = {
 	alignItems: "center",
 	gap: 10
 };
-
-function runButtonStyle(pending: boolean): CSSProperties {
-	return {
-		padding: "6px 14px",
-		borderRadius: 6,
-		border: "none",
-		background: pending ? "#93c5fd" : "#2563eb",
-		color: "#fff",
-		fontWeight: 600,
-		fontSize: 12,
-		cursor: pending ? "default" : "pointer"
-	};
-}
 
 const historyItemStyle: CSSProperties = {
 	fontFamily:

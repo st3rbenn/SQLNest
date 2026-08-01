@@ -1,4 +1,4 @@
-import { ResultTable } from "@sqlnest/design-system";
+import { Button, ResultTable } from "@sqlnest/design-system";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
 import { SnqlEditor } from "../features/query/SnqlEditor";
@@ -192,23 +192,14 @@ function QueryPage() {
 					margin: "12px 0 24px"
 				}}
 			>
-				<button
-					type="button"
+				<Button
 					onClick={execute}
-					disabled={run.isPending || source.trim() === ""}
-					style={{
-						padding: "9px 20px",
-						borderRadius: 8,
-						border: "none",
-						background: run.isPending ? "#93c5fd" : "#2563eb",
-						color: "#fff",
-						fontWeight: 650,
-						fontSize: 14,
-						cursor: run.isPending ? "default" : "pointer"
-					}}
+					disabled={source.trim() === ""}
+					loading={run.isPending}
+					loadingLabel="Exécution…"
 				>
-					{run.isPending ? "Exécution…" : "Exécuter"}
-				</button>
+					Exécuter
+				</Button>
 				<span style={{ fontSize: 12, color: "#94a3b8" }}>
 					Ctrl/⌘ + Entrée pour exécuter · Ctrl + Espace pour compléter
 				</span>
