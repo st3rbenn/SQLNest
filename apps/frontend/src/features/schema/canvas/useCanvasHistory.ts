@@ -20,6 +20,21 @@ export interface UseCanvasHistoryOptions {
 	readonly setHiddenIds: React.Dispatch<
 		React.SetStateAction<ReadonlySet<string>>
 	>;
+	/**
+	 * Callback invoqué APRÈS l'application d'un snapshot restauré (undo/redo).
+	 *
+	 * Pourquoi c'est nécessaire — le hook restore les 4 sources qu'il détient
+	 * (positions/sizes/frames/hiddenIds) via `replaceAll`, mais React Flow
+	 * garde son propre state `nodes` (via `useNodesState` dans SchemaCanvas)
+	 * qui n'est PAS dans l'API du hook. Sans ce callback, restaurer les
+	 * positions ne bouge visuellement rien — les `nodes` RF gardent les
+	 * positions post-drag.
+	 *
+	 * Le consommateur s'en sert typiquement pour appliquer
+	 * `snapshot.positions` / `snapshot.sizes` sur son `setNodes` local, avec
+	 * fallback sur le layout d'origine pour les nodes absents du snapshot.
+	 */
+	readonly onRestore?: (snapshot: CanvasSnapshot) => void;
 }
 
 export interface UseCanvasHistoryReturn extends UseHistoryStackReturn {}
@@ -82,12 +97,16 @@ export function useCanvasHistory(
 
 	const historySnapshot = useCallback(() => prevRef.current, []);
 	const historyRestore = useCallback((s: CanvasSnapshot) => {
-		const { tablePositions, tableSizes, framesApi, setHiddenIds } =
+		const { tablePositions, tableSizes, framesApi, setHiddenIds, onRestore } =
 			optsRef.current;
 		tablePositions.replaceAll(s.positions);
 		tableSizes.replaceAll(s.sizes);
 		framesApi.replaceAll(s.frames);
 		setHiddenIds(new Set(s.hiddenIds));
+		// Après le restore des 4 sources persistées, signale au consommateur
+		// pour qu'il resync ses états externes (typiquement le `nodes` RF).
+		// Voir docblock de `onRestore` — le hook n'a pas la main sur `nodes`.
+		onRestore?.(s);
 	}, []);
 
 	return useHistoryStack<CanvasSnapshot>({

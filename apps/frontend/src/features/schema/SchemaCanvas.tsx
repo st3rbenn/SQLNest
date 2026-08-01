@@ -137,6 +137,12 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 			cancelled = true;
 		};
 	}, [schema]);
+	// Ref sur `base` — lue par le callback `onRestore` de useCanvasHistory
+	// pour retomber sur les positions ELK d'origine quand un node n'a pas
+	// d'override dans le snapshot restauré. Ref (pas dep du useCallback)
+	// pour garder une identité stable et éviter les stale closures.
+	const baseRef = useRef<LayoutResult | null>(null);
+	baseRef.current = base;
 
 	// nodes reflètent les positions vivantes (drag) ; réinitialisés dès qu'ELK rend.
 	const [nodes, setNodes, onNodesChange] = useNodesState<TableNodeType>([]);
@@ -216,12 +222,46 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 	// auto-layout). Le hook maintient l'invariant « past = états
 	// pré-mutation » via un `prevRef` resynchronisé post-commit — voir
 	// `useCanvasHistory` pour l'analyse détaillée du timing.
+	//
+	// `onRestore` : le hook restore positions/sizes/frames/hiddenIds dans
+	// leurs hooks respectifs, mais React Flow garde son propre `nodes` state
+	// (via `useNodesState` plus haut) qui n'était pas resync → Cmd+Z ne
+	// bougeait visuellement rien, seul un reload rendait la vue cohérente.
+	// On applique donc ici les overlays positions/sizes du snapshot sur les
+	// nodes RF, avec fallback sur la position ELK d'origine (`baseRef`)
+	// pour les nodes non présents dans le snapshot (jamais draggés / resizés
+	// à ce moment-là de l'historique).
 	const history = useCanvasHistory({
 		tablePositions,
 		tableSizes,
 		framesApi,
 		hiddenIds,
-		setHiddenIds
+		setHiddenIds,
+		onRestore: useCallback(
+			(snapshot) => {
+				const baseNodes = baseRef.current?.nodes;
+				if (!baseNodes) return;
+				const baseById = new Map(baseNodes.map((n) => [n.id, n]));
+				setNodes((prev) =>
+					prev.map((n) => {
+						const baseNode = baseById.get(n.id);
+						const pos = snapshot.positions[n.id];
+						const size = snapshot.sizes[n.id];
+						return {
+							...n,
+							position: pos ?? baseNode?.position ?? n.position,
+							// Size présent dans le snapshot → override.
+							// Sinon retombe sur la dimension ELK par défaut du base —
+							// PAS sur `n.width/height` courant, qui pourrait porter
+							// un resize user postérieur au snapshot qu'on annule.
+							width: size?.width ?? baseNode?.width ?? n.width,
+							height: size?.height ?? baseNode?.height ?? n.height
+						};
+					})
+				);
+			},
+			[setNodes]
+		)
 	});
 
 	// Shortcuts globaux Cmd/Ctrl+Z (undo) et Cmd/Ctrl+Shift+Z ou Cmd/Ctrl+Y
