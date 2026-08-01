@@ -25,6 +25,10 @@ export {
 	type KindBadgeProps,
 } from "./KindBadge/KindBadge";
 export {
+	ResultTable,
+	type ResultTableProps,
+} from "./ResultTable/ResultTable";
+export {
 	RowItem,
 	type RowItemProps,
 	type RowItemSize,

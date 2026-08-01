@@ -1,11 +1,12 @@
 import { ActionIcon, Menu, Tooltip } from "@mantine/core";
+import { ResultTable } from "@sqlnest/design-system";
 import {
 	IconChevronDown,
 	IconChevronUp,
 	IconHistory,
 	IconTerminal2
 } from "@tabler/icons-react";
-import { type CSSProperties, useEffect, useRef, useState } from "react";
+import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
 import { SnqlEditor } from "../query/SnqlEditor";
 import { type QueryResult, useRunQuery } from "../query/useRunQuery";
 import type { SchemaModel } from "./schema-model";
@@ -314,6 +315,10 @@ export function CanvasConsole({
 }
 
 function ResultView({ result }: { result: QueryResult }) {
+	const columnNames = useMemo(
+		() => result.columns.map((c) => c.name),
+		[result.columns]
+	);
 	if (result.written && result.rows.length === 0) {
 		return (
 			<div style={placeholderStyle}>
@@ -322,55 +327,21 @@ function ResultView({ result }: { result: QueryResult }) {
 			</div>
 		);
 	}
-	if (result.rows.length === 0) {
-		return (
-			<div style={placeholderStyle}>
-				<b>0</b> ligne
-			</div>
-		);
-	}
 	return (
 		<>
 			<div style={resultHeaderStyle}>
 				<b>{result.rowCount}</b> ligne{result.rowCount > 1 ? "s" : ""}
 			</div>
-			<div style={tableWrapperStyle}>
-				<table style={tableStyle}>
-					<thead>
-						<tr>
-							{result.columns.map((c) => (
-								<th key={c.name} style={thStyle}>
-									{c.name}
-								</th>
-							))}
-						</tr>
-					</thead>
-					<tbody>
-						{result.rows.map((row, i) => (
-							// biome-ignore lint/suspicious/noArrayIndexKey: rows n'ont pas d'id stable
-							<tr key={i}>
-								{result.columns.map((c) => (
-									<td key={c.name} style={tdStyle}>
-										{renderCell(row[c.name])}
-									</td>
-								))}
-							</tr>
-						))}
-					</tbody>
-				</table>
+			<div style={resultTableWrapperStyle}>
+				<ResultTable
+					columns={columnNames}
+					rows={result.rows}
+					maxHeight="100%"
+					emptyMessage="0 ligne"
+				/>
 			</div>
 		</>
 	);
-}
-
-function renderCell(value: unknown) {
-	if (value === null || value === undefined) {
-		return <span style={{ color: "#cbd5e1" }}>NULL</span>;
-	}
-	if (typeof value === "object") {
-		return <code style={{ fontSize: 11 }}>{JSON.stringify(value)}</code>;
-	}
-	return String(value);
 }
 
 // ─── styles ──────────────────────────────────────────────────────────
@@ -525,41 +496,12 @@ const resultHeaderStyle: CSSProperties = {
 	padding: "0 4px"
 };
 
-const tableWrapperStyle: CSSProperties = {
-	// Le vrai scroll container : `flex: 1` prend la place restante dans
-	// resultsStyle (flex column), `overflow: auto` scrolle en X et Y.
-	// `<th>` sticky s'attache ici — reste visible pendant le scroll.
+// Wrapper qui donne à <ResultTable maxHeight="100%"> une hauteur bornée dans
+// la flex column parent — sinon `overflow: auto` du composant DS ne scrolle
+// pas (contenu sans borne). `minHeight: 0` casse l'implicit min-content.
+const resultTableWrapperStyle: CSSProperties = {
 	flex: 1,
 	minHeight: 0,
-	overflow: "auto",
-	border: "1px solid var(--mantine-color-slate-2, #e2e8f0)",
-	borderRadius: 6
-};
-
-const tableStyle: CSSProperties = {
-	borderCollapse: "collapse",
-	width: "100%",
-	fontSize: 12
-};
-
-const thStyle: CSSProperties = {
-	textAlign: "left",
-	padding: "6px 10px",
-	background: "#f8fafc",
-	borderBottom: "1px solid #e2e8f0",
-	fontWeight: 650,
-	color: "#334155",
-	whiteSpace: "nowrap",
-	// Sticky header : reste visible pendant le scroll vertical du tableau
-	// (utile pour les gros résultats de plusieurs pages de lignes).
-	position: "sticky",
-	top: 0,
-	zIndex: 1
-};
-
-const tdStyle: CSSProperties = {
-	padding: "5px 10px",
-	borderTop: "1px solid #f1f5f9",
-	color: "#1e293b",
-	whiteSpace: "nowrap"
+	display: "flex",
+	flexDirection: "column"
 };

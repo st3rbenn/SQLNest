@@ -1,5 +1,6 @@
+import { ResultTable } from "@sqlnest/design-system";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { type CSSProperties, useEffect, useRef, useState } from "react";
+import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
 import { SnqlEditor } from "../features/query/SnqlEditor";
 import { useRunQuery } from "../features/query/useRunQuery";
 import { useSchema } from "../features/schema/useSchema";
@@ -48,16 +49,6 @@ function tabStyle(active: boolean): CSSProperties {
 		fontSize: 14,
 		cursor: "pointer"
 	};
-}
-
-function renderCell(value: unknown) {
-	if (value === null || value === undefined) {
-		return <span style={{ color: "#cbd5e1" }}>NULL</span>;
-	}
-	if (typeof value === "object") {
-		return <code style={{ fontSize: 12 }}>{JSON.stringify(value)}</code>;
-	}
-	return String(value);
 }
 
 function QueryPage() {
@@ -115,6 +106,10 @@ function QueryPage() {
 	};
 
 	const result = run.data;
+	const columnNames = useMemo(
+		() => result?.columns.map((c) => c.name) ?? [],
+		[result?.columns]
+	);
 
 	// Défini dans le composant : le code-splitting de route (autoCodeSplitting)
 	// n'embarque pas un const module référencé uniquement dans un JSX conditionnel.
@@ -253,67 +248,7 @@ function QueryPage() {
 					<div style={{ fontSize: 13, color: "#475569", margin: "0 0 10px" }}>
 						<b>{result.rowCount}</b> ligne(s) · moteur <b>{engine}</b>
 					</div>
-					<div
-						style={{
-							overflowX: "auto",
-							border: "1px solid #e2e8f0",
-							borderRadius: 10
-						}}
-					>
-						<table
-							style={{
-								borderCollapse: "collapse",
-								width: "100%",
-								fontSize: 13
-							}}
-						>
-							<thead>
-								<tr>
-									{result.columns.map((col) => (
-										<th
-											key={col.name}
-											style={{
-												textAlign: "left",
-												padding: "10px 14px",
-												background: "#f8fafc",
-												borderBottom: "1px solid #e2e8f0",
-												fontWeight: 650,
-												color: "#334155",
-												whiteSpace: "nowrap"
-											}}
-										>
-											{col.name}
-										</th>
-									))}
-								</tr>
-							</thead>
-							<tbody>
-								{result.rows.map((row, i) => (
-									// biome-ignore lint/suspicious/noArrayIndexKey: rows have no stable id
-									<tr key={i}>
-										{result.columns.map((col) => (
-											<td
-												key={col.name}
-												style={{
-													padding: "9px 14px",
-													borderTop: "1px solid #f1f5f9",
-													color: "#1e293b",
-													whiteSpace: "nowrap"
-												}}
-											>
-												{renderCell(row[col.name])}
-											</td>
-										))}
-									</tr>
-								))}
-							</tbody>
-						</table>
-					</div>
-					{result.rowCount === 0 ? (
-						<p style={{ color: "#94a3b8", fontSize: 13, marginTop: 12 }}>
-							Aucune ligne.
-						</p>
-					) : null}
+					<ResultTable columns={columnNames} rows={result.rows} />
 				</div>
 			) : null}
 		</div>
