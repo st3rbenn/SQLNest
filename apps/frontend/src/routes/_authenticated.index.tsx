@@ -4,7 +4,7 @@ import { SchemaCanvas } from "../features/schema/SchemaCanvas";
 import { SAMPLE_POSTGRES } from "../features/schema/schema-model";
 import { useSchema } from "../features/schema/useSchema";
 
-export const Route = createFileRoute("/")({
+export const Route = createFileRoute("/_authenticated/")({
 	component: SchemaPage
 });
 

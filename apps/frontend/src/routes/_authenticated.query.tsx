@@ -25,7 +25,7 @@ function validateSearch(raw: Record<string, unknown>): QuerySearch {
 	return out;
 }
 
-export const Route = createFileRoute("/query")({
+export const Route = createFileRoute("/_authenticated/query")({
 	component: QueryPage,
 	validateSearch
 });
@@ -261,7 +261,7 @@ function QueryPage() {
 					// Discriminant = `written` (pas la forme du résultat) : une LECTURE à
 					// 0 ligne doit rester une table vide, pas « lignes affectées ».
 					<div style={{ fontSize: 13, color: "var(--sqlnest-text-secondary)" }}>
-						<b>{result.rowCount}</b> ligne(s) affectée(s) · moteur{" "}
+						<b>{result.rowCount}</b>ligne(s) affectée(s) · moteur{" "}
 						<b>{engine}</b>
 						<div
 							style={{ color: "var(--sqlnest-text-tertiary)", marginTop: 6 }}
