@@ -9,8 +9,8 @@ const meta = {
 			<div style={{ width: 280, border: "1px solid #eee", borderRadius: 6 }}>
 				<Story />
 			</div>
-		)
-	]
+		),
+	],
 } satisfies Meta<typeof RowItem>;
 
 export default meta;
@@ -18,22 +18,22 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {
-	args: { label: "orders", color: "#2563eb" }
+	args: { label: "orders", color: "#2563eb" },
 };
 
 export const Active: Story = {
-	args: { label: "orders", color: "#2563eb", active: true }
+	args: { label: "orders", color: "#2563eb", active: true },
 };
 
 export const WithoutColor: Story = {
-	args: { label: "prefix_root" }
+	args: { label: "prefix_root" },
 };
 
 export const LongLabel: Story = {
 	args: {
 		label: "very_long_table_name_that_should_ellipsize_at_some_point",
-		color: "#10b981"
-	}
+		color: "#10b981",
+	},
 };
 
 export const Monospace: Story = {
@@ -41,8 +41,8 @@ export const Monospace: Story = {
 		label: "user_id → users.id",
 		color: "#f59e0b",
 		size: "sm",
-		monospace: true
-	}
+		monospace: true,
+	},
 };
 
 export const List: Story = {
@@ -53,5 +53,5 @@ export const List: Story = {
 			<RowItem label="products" color="#f59e0b" />
 			<RowItem label="prefix_group" />
 		</>
-	)
+	),
 };

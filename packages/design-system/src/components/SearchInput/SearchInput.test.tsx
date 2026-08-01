@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { renderWithProviders, screen, userEvent } from "../../test-utils/render";
+import {
+	renderWithProviders,
+	screen,
+	userEvent,
+} from "../../test-utils/render";
 import { SearchInput } from "./SearchInput";
 
 describe("SearchInput", () => {

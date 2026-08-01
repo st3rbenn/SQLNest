@@ -1,13 +1,5 @@
 export * from "./Buttons";
 export {
-	ContextMenu,
-	type ContextMenuActionItem,
-	type ContextMenuDividerItem,
-	type ContextMenuItem,
-	type ContextMenuProps,
-	type ContextMenuSubmenuItem,
-} from "./ContextMenu/ContextMenu";
-export {
 	ColorDot,
 	type ColorDotProps,
 	type ColorDotSize,
@@ -16,6 +8,14 @@ export {
 	ConfirmModal,
 	type ConfirmModalProps,
 } from "./ConfirmModal/ConfirmModal";
+export {
+	ContextMenu,
+	type ContextMenuActionItem,
+	type ContextMenuDividerItem,
+	type ContextMenuItem,
+	type ContextMenuProps,
+	type ContextMenuSubmenuItem,
+} from "./ContextMenu/ContextMenu";
 export { FrameBadge, type FrameBadgeProps } from "./FrameBadge/FrameBadge";
 export { HintPill, type HintPillProps } from "./HintPill/HintPill";
 export {

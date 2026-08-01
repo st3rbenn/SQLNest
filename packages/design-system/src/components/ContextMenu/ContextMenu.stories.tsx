@@ -1,6 +1,6 @@
+import { Button } from "@mantine/core";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useState } from "react";
-import { Button } from "@mantine/core";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 
 const meta = {

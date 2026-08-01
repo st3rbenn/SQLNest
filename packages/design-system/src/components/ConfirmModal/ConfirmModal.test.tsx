@@ -19,9 +19,7 @@ describe("ConfirmModal", () => {
 		);
 		expect(screen.getByText("Titre")).toBeInTheDocument();
 		expect(screen.getByText("Message important")).toBeInTheDocument();
-		expect(
-			screen.getByRole("button", { name: "Annuler" }),
-		).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Annuler" })).toBeInTheDocument();
 		expect(
 			screen.getByRole("button", { name: "Confirmer" }),
 		).toBeInTheDocument();

@@ -10,7 +10,7 @@ export type ToolbarProps = {
 } & Omit<PaperProps, "children">;
 
 function ToolbarDivider({
-	orientation = "vertical"
+	orientation = "vertical",
 }: {
 	orientation?: ToolbarOrientation;
 }) {

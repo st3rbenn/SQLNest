@@ -1,5 +1,5 @@
-import type { Meta, StoryObj } from "@storybook/react-vite";
 import { Group, Kbd, Text } from "@mantine/core";
+import type { Meta, StoryObj } from "@storybook/react-vite";
 import { FloatingPanel } from "./FloatingPanel";
 
 const meta = {

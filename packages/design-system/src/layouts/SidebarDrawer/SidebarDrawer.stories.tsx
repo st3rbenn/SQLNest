@@ -1,6 +1,6 @@
+import { Stack, Text, TextInput } from "@mantine/core";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useState } from "react";
-import { Stack, Text, TextInput } from "@mantine/core";
 import { SidebarDrawer, type SidebarTab } from "./SidebarDrawer";
 
 const meta = {

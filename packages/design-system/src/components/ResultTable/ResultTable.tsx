@@ -21,7 +21,7 @@ export function ResultTable({
 	columns,
 	rows,
 	maxHeight,
-	emptyMessage = "Aucune ligne"
+	emptyMessage = "Aucune ligne",
 }: ResultTableProps) {
 	if (rows.length === 0) {
 		return (
@@ -29,7 +29,7 @@ export function ResultTable({
 				role="status"
 				style={{
 					...emptyStyle,
-					...(maxHeight !== undefined ? { maxHeight } : {})
+					...(maxHeight !== undefined ? { maxHeight } : {}),
 				}}
 			>
 				{emptyMessage}
@@ -41,7 +41,7 @@ export function ResultTable({
 		<div
 			style={{
 				...wrapperStyle,
-				...(maxHeight !== undefined ? { maxHeight } : {})
+				...(maxHeight !== undefined ? { maxHeight } : {}),
 			}}
 		>
 			<table style={tableStyle}>
@@ -82,14 +82,14 @@ const wrapperStyle: CSSProperties = {
 	overflow: "auto",
 	border: "1px solid var(--sqlnest-border)",
 	borderRadius: 6,
-	background: "var(--sqlnest-surface)"
+	background: "var(--sqlnest-surface)",
 };
 
 const tableStyle: CSSProperties = {
 	borderCollapse: "collapse",
 	width: "100%",
 	fontFamily: "var(--mantine-font-family-monospace)",
-	fontSize: 12
+	fontSize: 12,
 };
 
 const thStyle: CSSProperties = {
@@ -102,14 +102,14 @@ const thStyle: CSSProperties = {
 	whiteSpace: "nowrap",
 	position: "sticky",
 	top: 0,
-	zIndex: 1
+	zIndex: 1,
 };
 
 const tdStyle: CSSProperties = {
 	padding: "5px 10px",
 	borderTop: "1px solid var(--sqlnest-border-subtle)",
 	color: "var(--sqlnest-text-secondary)",
-	whiteSpace: "nowrap"
+	whiteSpace: "nowrap",
 };
 
 const emptyStyle: CSSProperties = {
@@ -121,5 +121,5 @@ const emptyStyle: CSSProperties = {
 	fontSize: 12,
 	border: "1px solid var(--sqlnest-border)",
 	borderRadius: 6,
-	background: "var(--sqlnest-surface)"
+	background: "var(--sqlnest-surface)",
 };

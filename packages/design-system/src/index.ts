@@ -10,7 +10,7 @@ export {
 	spotlight,
 } from "@mantine/spotlight";
 export * from "./components";
-export * from "./layouts";
 export * from "./hooks";
+export * from "./layouts";
 export { DesignSystemProvider } from "./main";
 export { FRAME_HUES, type FrameHueKey, theme } from "./theme";

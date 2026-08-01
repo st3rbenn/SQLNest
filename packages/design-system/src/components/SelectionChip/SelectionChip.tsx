@@ -24,7 +24,7 @@ export function SelectionChip({
 	count,
 	label,
 	actions,
-	onClear
+	onClear,
 }: SelectionChipProps) {
 	const isPlural = count > 1;
 	const feminine = /^table/i.test(label);
@@ -48,7 +48,7 @@ export function SelectionChip({
 				background: "var(--sqlnest-surface)",
 				border: "1px solid var(--sqlnest-border)",
 				color: "var(--sqlnest-text-primary)",
-				padding: "8px 14px"
+				padding: "8px 14px",
 			}}
 		>
 			<Group gap={12} wrap="nowrap">
@@ -58,7 +58,7 @@ export function SelectionChip({
 							width: 6,
 							height: 6,
 							borderRadius: "50%",
-							background: "var(--sqlnest-accent)"
+							background: "var(--sqlnest-accent)",
 						}}
 					/>
 					<Text size="xs" style={{ color: "var(--sqlnest-text-primary)" }}>
@@ -70,7 +70,7 @@ export function SelectionChip({
 						style={{
 							width: 1,
 							height: 14,
-							background: "var(--sqlnest-border)"
+							background: "var(--sqlnest-border)",
 						}}
 					/>
 				) : null}
@@ -92,7 +92,7 @@ export function SelectionChip({
 							borderRadius: 5,
 							display: "inline-flex",
 							alignItems: "center",
-							gap: 6
+							gap: 6,
 						}}
 					>
 						{a.label}

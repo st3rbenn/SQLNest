@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
 	renderWithProviders,
 	screen,
-	userEvent
+	userEvent,
 } from "../../test-utils/render";
 import { RowItem } from "./RowItem";
 
@@ -29,7 +29,7 @@ describe("RowItem", () => {
 
 	it("renders a ColorDot when color is set, and omits it otherwise", () => {
 		const { container: withColor } = renderWithProviders(
-			<RowItem label="orders" color="#123456" />
+			<RowItem label="orders" color="#123456" />,
 		);
 		// ColorDot renders a <span> (styled dot) before the label.
 		const dots = withColor.querySelectorAll("button > span");
@@ -37,7 +37,7 @@ describe("RowItem", () => {
 		expect(dots.length).toBeGreaterThanOrEqual(2);
 
 		const { container: noColor } = renderWithProviders(
-			<RowItem label="orders" />
+			<RowItem label="orders" />,
 		);
 		// only label span → 1 direct <span> child
 		expect(noColor.querySelectorAll("button > span").length).toBe(1);

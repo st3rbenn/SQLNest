@@ -3,7 +3,7 @@ import { ColorDot } from "./ColorDot";
 
 const meta = {
 	title: "Components/ColorDot",
-	component: ColorDot
+	component: ColorDot,
 } satisfies Meta<typeof ColorDot>;
 
 export default meta;
@@ -26,17 +26,17 @@ export const Default: Story = {
 				<span>lg · 12px carré arrondi</span>
 			</div>
 		</div>
-	)
+	),
 };
 
 export const SmallDot: Story = {
-	args: { color: "#2563eb", size: "sm" }
+	args: { color: "#2563eb", size: "sm" },
 };
 
 export const MediumDot: Story = {
-	args: { color: "#10b981", size: "md" }
+	args: { color: "#10b981", size: "md" },
 };
 
 export const LargeSquare: Story = {
-	args: { color: "#f59e0b", size: "lg" }
+	args: { color: "#f59e0b", size: "lg" },
 };

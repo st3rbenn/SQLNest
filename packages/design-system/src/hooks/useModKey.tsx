@@ -30,7 +30,7 @@ function useIsMac(): boolean {
 	return useSyncExternalStore(
 		subscribe,
 		detectIsMac,
-		() => false // server snapshot
+		() => false, // server snapshot
 	);
 }
 

@@ -1,5 +1,5 @@
-import type { Meta, StoryObj } from "@storybook/react-vite";
 import { Stack } from "@mantine/core";
+import type { Meta, StoryObj } from "@storybook/react-vite";
 import { TypePill } from "./TypePill";
 
 const meta = {

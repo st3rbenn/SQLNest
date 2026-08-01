@@ -3,7 +3,7 @@ import { ResultTable } from "./ResultTable";
 
 const meta = {
 	title: "Components/ResultTable",
-	component: ResultTable
+	component: ResultTable,
 } satisfies Meta<typeof ResultTable>;
 
 export default meta;
@@ -16,26 +16,26 @@ const rows = [
 		id: 1,
 		email: "alice@example.com",
 		is_active: true,
-		meta: { role: "admin" }
+		meta: { role: "admin" },
 	},
 	{ id: 2, email: "bob@example.com", is_active: false, meta: null },
-	{ id: 3, email: null, is_active: true, meta: { role: "user", tier: 3 } }
+	{ id: 3, email: null, is_active: true, meta: { role: "user", tier: 3 } },
 ];
 
 export const Default: Story = {
-	args: { columns: [...columns], rows }
+	args: { columns: [...columns], rows },
 };
 
 export const Empty: Story = {
-	args: { columns: [...columns], rows: [] }
+	args: { columns: [...columns], rows: [] },
 };
 
 export const CustomEmpty: Story = {
 	args: {
 		columns: [...columns],
 		rows: [],
-		emptyMessage: "Aucune ligne ne correspond à ce filtre."
-	}
+		emptyMessage: "Aucune ligne ne correspond à ce filtre.",
+	},
 };
 
 export const Scrollable: Story = {
@@ -45,10 +45,10 @@ export const Scrollable: Story = {
 			id: i + 1,
 			email: `user${i + 1}@example.com`,
 			is_active: i % 2 === 0,
-			meta: { idx: i }
+			meta: { idx: i },
 		})),
-		maxHeight: 240
-	}
+		maxHeight: 240,
+	},
 };
 
 export const BigintPreserved: Story = {
@@ -56,7 +56,7 @@ export const BigintPreserved: Story = {
 		columns: ["id", "amount"],
 		rows: [
 			{ id: 1, amount: 9007199254740993n },
-			{ id: 2, amount: 1234567890123456789n }
-		]
-	}
+			{ id: 2, amount: 1234567890123456789n },
+		],
+	},
 };

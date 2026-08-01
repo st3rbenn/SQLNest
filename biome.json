@@ -6,7 +6,7 @@
 		"useIgnoreFile": false
 	},
 	"files": {
-		"includes": ["apps/**/*", "packages/**/*", "!**/*.gen.ts", "!**/generated/**"],
+		"includes": ["apps/**/*", "packages/**/*", "!**/*.gen.ts", "!**/generated"],
 		"experimentalScannerIgnores": ["**/node_modules/**", "**/dist/**"]
 	},
 	"formatter": {

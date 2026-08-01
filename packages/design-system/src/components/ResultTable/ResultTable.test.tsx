@@ -8,7 +8,7 @@ describe("ResultTable", () => {
 			<ResultTable
 				columns={["id", "email"]}
 				rows={[{ id: 1, email: "a@b.co" }]}
-			/>
+			/>,
 		);
 		expect(screen.getByText("id")).toBeInTheDocument();
 		expect(screen.getByText("email")).toBeInTheDocument();
@@ -18,10 +18,7 @@ describe("ResultTable", () => {
 
 	it("renders null/undefined cells as an em dash", () => {
 		renderWithProviders(
-			<ResultTable
-				columns={["a", "b"]}
-				rows={[{ a: null, b: undefined }]}
-			/>
+			<ResultTable columns={["a", "b"]} rows={[{ a: null, b: undefined }]} />,
 		);
 		const dashes = screen.getAllByText("—");
 		expect(dashes.length).toBe(2);
@@ -29,10 +26,7 @@ describe("ResultTable", () => {
 
 	it("preserves bigint as its string form (no exponential notation)", () => {
 		renderWithProviders(
-			<ResultTable
-				columns={["big"]}
-				rows={[{ big: 9007199254740993n }]}
-			/>
+			<ResultTable columns={["big"]} rows={[{ big: 9007199254740993n }]} />,
 		);
 		expect(screen.getByText("9007199254740993")).toBeInTheDocument();
 	});
@@ -42,7 +36,7 @@ describe("ResultTable", () => {
 			<ResultTable
 				columns={["payload"]}
 				rows={[{ payload: { k: "v", n: 2 } }]}
-			/>
+			/>,
 		);
 		expect(screen.getByText('{"k":"v","n":2}')).toBeInTheDocument();
 	});
@@ -56,18 +50,14 @@ describe("ResultTable", () => {
 
 	it("uses a custom empty message when provided", () => {
 		renderWithProviders(
-			<ResultTable columns={["a"]} rows={[]} emptyMessage="Pas de résultat" />
+			<ResultTable columns={["a"]} rows={[]} emptyMessage="Pas de résultat" />,
 		);
 		expect(screen.getByText("Pas de résultat")).toBeInTheDocument();
 	});
 
 	it("applies maxHeight to the wrapper when provided (number → px)", () => {
 		const { container } = renderWithProviders(
-			<ResultTable
-				columns={["a"]}
-				rows={[{ a: 1 }]}
-				maxHeight={200}
-			/>
+			<ResultTable columns={["a"]} rows={[{ a: 1 }]} maxHeight={200} />,
 		);
 		const wrapper = container.querySelector("table")
 			?.parentElement as HTMLElement | null;

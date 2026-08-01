@@ -1,10 +1,10 @@
-import type { Meta, StoryObj } from "@storybook/react-vite";
 import { ActionIcon, Tooltip } from "@mantine/core";
+import type { Meta, StoryObj } from "@storybook/react-vite";
 import { Toolbar } from "./Toolbar";
 
 const meta = {
 	title: "Layouts/Toolbar",
-	component: Toolbar
+	component: Toolbar,
 } satisfies Meta<typeof Toolbar>;
 
 export default meta;
@@ -48,19 +48,43 @@ const ExportIcon = () => (
 
 const items = (dir: "vertical" | "horizontal") => (
 	<>
-		<Tooltip label="Sélection (V)" position={dir === "vertical" ? "right" : "top"}>
-			<ActionIcon variant="light" color="brand" radius={9} size={36} aria-label="Sélection">
+		<Tooltip
+			label="Sélection (V)"
+			position={dir === "vertical" ? "right" : "top"}
+		>
+			<ActionIcon
+				variant="light"
+				color="brand"
+				radius={9}
+				size={36}
+				aria-label="Sélection"
+			>
 				<CursorIcon />
 			</ActionIcon>
 		</Tooltip>
-		<Tooltip label="Créer un frame (F)" position={dir === "vertical" ? "right" : "top"}>
-			<ActionIcon variant="subtle" color="slate" radius={9} size={36} aria-label="Frame">
+		<Tooltip
+			label="Créer un frame (F)"
+			position={dir === "vertical" ? "right" : "top"}
+		>
+			<ActionIcon
+				variant="subtle"
+				color="slate"
+				radius={9}
+				size={36}
+				aria-label="Frame"
+			>
 				<FrameIcon />
 			</ActionIcon>
 		</Tooltip>
 		<Toolbar.Divider orientation={dir} />
 		<Tooltip label="Exporter" position={dir === "vertical" ? "right" : "top"}>
-			<ActionIcon variant="subtle" color="slate" radius={9} size={36} aria-label="Exporter">
+			<ActionIcon
+				variant="subtle"
+				color="slate"
+				radius={9}
+				size={36}
+				aria-label="Exporter"
+			>
 				<ExportIcon />
 			</ActionIcon>
 		</Tooltip>
@@ -69,7 +93,9 @@ const items = (dir: "vertical" | "horizontal") => (
 
 export const Vertical: Story = {
 	args: { "aria-label": "Canvas actions", children: null },
-	render: () => <Toolbar aria-label="Canvas actions">{items("vertical")}</Toolbar>
+	render: () => (
+		<Toolbar aria-label="Canvas actions">{items("vertical")}</Toolbar>
+	),
 };
 
 export const Horizontal: Story = {
@@ -78,5 +104,5 @@ export const Horizontal: Story = {
 		<Toolbar orientation="horizontal" aria-label="Canvas actions">
 			{items("horizontal")}
 		</Toolbar>
-	)
+	),
 };

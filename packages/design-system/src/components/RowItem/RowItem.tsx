@@ -30,7 +30,7 @@ interface SizeSpec {
 
 const SIZES: Record<RowItemSize, SizeSpec> = {
 	md: { paddingY: 6, fontSize: 12.5 },
-	sm: { paddingY: 5, fontSize: 11, labelFontSize: 10.5 }
+	sm: { paddingY: 5, fontSize: 11, labelFontSize: 10.5 },
 };
 
 /**
@@ -49,7 +49,7 @@ export function RowItem({
 	title,
 	size = "md",
 	monospace = false,
-	paddingLeft
+	paddingLeft,
 }: RowItemProps) {
 	const [hover, setHover] = useState(false);
 	const spec = SIZES[size];
@@ -73,12 +73,10 @@ export function RowItem({
 		fontSize: spec.fontSize,
 		background: bg,
 		borderLeft: `3px solid ${active ? "var(--sqlnest-accent)" : "transparent"}`,
-		color: active
-			? "var(--sqlnest-accent)"
-			: "var(--sqlnest-text-secondary)",
+		color: active ? "var(--sqlnest-accent)" : "var(--sqlnest-text-secondary)",
 		fontWeight: active ? 600 : 400,
 		textAlign: "left",
-		transition: "background 100ms ease-out"
+		transition: "background 100ms ease-out",
 	};
 
 	const labelStyle: CSSProperties = {
@@ -86,7 +84,7 @@ export function RowItem({
 		minWidth: 0,
 		overflow: "hidden",
 		textOverflow: "ellipsis",
-		whiteSpace: "nowrap"
+		whiteSpace: "nowrap",
 	};
 	if (monospace) {
 		labelStyle.fontFamily = "var(--mantine-font-family-monospace)";

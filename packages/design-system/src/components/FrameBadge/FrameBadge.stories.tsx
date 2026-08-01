@@ -1,7 +1,7 @@
-import type { Meta, StoryObj } from "@storybook/react-vite";
 import { Group } from "@mantine/core";
-import { FrameBadge } from "./FrameBadge";
+import type { Meta, StoryObj } from "@storybook/react-vite";
 import { FRAME_HUES } from "../../theme";
+import { FrameBadge } from "./FrameBadge";
 
 const meta = {
 	title: "Components/FrameBadge",

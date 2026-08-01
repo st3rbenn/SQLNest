@@ -1,5 +1,5 @@
-import type { Meta, StoryObj } from "@storybook/react-vite";
 import { Badge, Group, Text } from "@mantine/core";
+import type { Meta, StoryObj } from "@storybook/react-vite";
 import { AppShell } from "./AppShell";
 
 const meta = {

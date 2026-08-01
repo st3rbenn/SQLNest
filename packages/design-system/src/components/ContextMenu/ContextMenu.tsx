@@ -96,9 +96,7 @@ function ItemRow({
 				}
 			}}
 		>
-			<span
-				style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
-			>
+			<span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
 				{item.icon}
 				{item.label}
 			</span>
@@ -112,7 +110,7 @@ function ItemRow({
 					size="xs"
 					style={{
 						whiteSpace: "nowrap",
-						color: "var(--sqlnest-text-tertiary)"
+						color: "var(--sqlnest-text-tertiary)",
 					}}
 				>
 					{item.hint}
@@ -193,7 +191,7 @@ export function ContextMenu({
 							pb={2}
 							style={{
 								letterSpacing: 0.5,
-								color: "var(--sqlnest-text-tertiary)"
+								color: "var(--sqlnest-text-tertiary)",
 							}}
 						>
 							{title}

@@ -1,11 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
-import { renderWithProviders, screen, userEvent } from "../../../test-utils/render";
+import {
+	renderWithProviders,
+	screen,
+	userEvent,
+} from "../../../test-utils/render";
 import { SimpleButton } from "./SimpleButton";
 
 describe("SimpleButton", () => {
 	it("renders its label and forwards clicks", async () => {
 		const onClick = vi.fn();
-		renderWithProviders(<SimpleButton onClick={onClick}>Exécuter</SimpleButton>);
+		renderWithProviders(
+			<SimpleButton onClick={onClick}>Exécuter</SimpleButton>,
+		);
 		await userEvent.click(screen.getByRole("button", { name: /exécuter/i }));
 		expect(onClick).toHaveBeenCalledOnce();
 	});

@@ -36,13 +36,7 @@ export function ConfirmModal({
 	};
 
 	return (
-		<Modal
-			opened={opened}
-			onClose={onClose}
-			title={title}
-			centered
-			size="sm"
-		>
+		<Modal opened={opened} onClose={onClose} title={title} centered size="sm">
 			<Text size="sm" mb="md">
 				{message}
 			</Text>
@@ -50,10 +44,7 @@ export function ConfirmModal({
 				<Button variant="default" onClick={onClose}>
 					{cancelLabel}
 				</Button>
-				<Button
-					color={destructive ? "red" : undefined}
-					onClick={handleConfirm}
-				>
+				<Button color={destructive ? "red" : undefined} onClick={handleConfirm}>
 					{confirmLabel}
 				</Button>
 			</Group>

@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
 import { fireEvent } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "../test-utils/render";
 import { useCommandPaletteShortcut } from "./useCommandPaletteShortcut";
 
@@ -37,7 +37,9 @@ describe("useCommandPaletteShortcut", () => {
 
 	it("still fires even when a text input has focus (palette must be reachable from anywhere)", () => {
 		const onOpen = vi.fn();
-		const { getByPlaceholderText } = renderWithProviders(<Harness onOpen={onOpen} />);
+		const { getByPlaceholderText } = renderWithProviders(
+			<Harness onOpen={onOpen} />,
+		);
 		const input = getByPlaceholderText("type-here");
 		input.focus();
 		fireEvent.keyDown(input, { key: "k", metaKey: true, bubbles: true });

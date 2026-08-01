@@ -18,7 +18,7 @@ interface DotSpec {
 const SPECS: Record<ColorDotSize, DotSpec> = {
 	sm: { px: 8, borderRadius: "50%" },
 	md: { px: 10, borderRadius: "50%" },
-	lg: { px: 12, borderRadius: 4 }
+	lg: { px: 12, borderRadius: 4 },
 };
 
 /**
@@ -31,7 +31,7 @@ const SPECS: Record<ColorDotSize, DotSpec> = {
 export function ColorDot({
 	color,
 	size = "sm",
-	"aria-label": ariaLabel
+	"aria-label": ariaLabel,
 }: ColorDotProps) {
 	const spec = SPECS[size];
 	const style: CSSProperties = {
@@ -40,7 +40,7 @@ export function ColorDot({
 		height: spec.px,
 		borderRadius: spec.borderRadius,
 		background: color,
-		flexShrink: 0
+		flexShrink: 0,
 	};
 	return <span style={style} aria-label={ariaLabel} />;
 }

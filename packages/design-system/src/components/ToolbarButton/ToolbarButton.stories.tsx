@@ -1,5 +1,5 @@
-import type { Meta, StoryObj } from "@storybook/react-vite";
 import { Group } from "@mantine/core";
+import type { Meta, StoryObj } from "@storybook/react-vite";
 import { ToolbarButton } from "./ToolbarButton";
 
 const meta = {

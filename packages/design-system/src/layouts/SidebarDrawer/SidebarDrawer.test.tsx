@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { renderWithProviders, screen, userEvent } from "../../test-utils/render";
+import {
+	renderWithProviders,
+	screen,
+	userEvent,
+} from "../../test-utils/render";
 import { SidebarDrawer } from "./SidebarDrawer";
 
 const TABS = [
@@ -51,9 +55,7 @@ describe("SidebarDrawer", () => {
 				<div>body</div>
 			</SidebarDrawer>,
 		);
-		expect(
-			screen.getByPlaceholderText("Rechercher…"),
-		).toBeInTheDocument();
+		expect(screen.getByPlaceholderText("Rechercher…")).toBeInTheDocument();
 		expect(screen.getByText("body")).toBeInTheDocument();
 	});
 

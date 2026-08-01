@@ -26,7 +26,7 @@ describe("ColorDot", () => {
 
 	it("renders a 12px squircle when size is lg", () => {
 		const { container } = renderWithProviders(
-			<ColorDot color="#00ff00" size="lg" />
+			<ColorDot color="#00ff00" size="lg" />,
 		);
 		const dot = getDot(container);
 		expect(dot.style.width).toBe("12px");
@@ -36,7 +36,7 @@ describe("ColorDot", () => {
 
 	it("forwards aria-label", () => {
 		const { container } = renderWithProviders(
-			<ColorDot color="#000" aria-label="couleur table users" />
+			<ColorDot color="#000" aria-label="couleur table users" />,
 		);
 		const dot = getDot(container);
 		expect(dot.getAttribute("aria-label")).toBe("couleur table users");

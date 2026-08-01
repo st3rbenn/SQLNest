@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { renderWithProviders, screen, userEvent } from "../../test-utils/render";
+import {
+	renderWithProviders,
+	screen,
+	userEvent,
+} from "../../test-utils/render";
 import { ToolbarButton } from "./ToolbarButton";
 
 const Icon = () => (
@@ -37,10 +41,7 @@ describe("ToolbarButton", () => {
 				<Icon />
 			</ToolbarButton>,
 		);
-		expect(screen.getByRole("button")).toHaveAttribute(
-			"aria-pressed",
-			"true",
-		);
+		expect(screen.getByRole("button")).toHaveAttribute("aria-pressed", "true");
 	});
 
 	it("shows a status dot when statusDot is set", () => {

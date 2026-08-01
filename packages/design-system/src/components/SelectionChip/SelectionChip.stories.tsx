@@ -3,7 +3,7 @@ import { SelectionChip } from "./SelectionChip";
 
 const meta = {
 	title: "Components/SelectionChip",
-	component: SelectionChip
+	component: SelectionChip,
 } satisfies Meta<typeof SelectionChip>;
 
 export default meta;
@@ -17,9 +17,9 @@ export const ThreeTables: Story = {
 		onClear: () => {},
 		actions: [
 			{ id: "frame", label: "Frame", hint: "F", onClick: () => {} },
-			{ id: "hide", label: "Masquer", onClick: () => {} }
-		]
-	}
+			{ id: "hide", label: "Masquer", onClick: () => {} },
+		],
+	},
 };
 
 export const One: Story = {
@@ -27,6 +27,6 @@ export const One: Story = {
 		count: 1,
 		label: "table",
 		onClear: () => {},
-		actions: [{ id: "frame", label: "Frame", hint: "F", onClick: () => {} }]
-	}
+		actions: [{ id: "frame", label: "Frame", hint: "F", onClick: () => {} }],
+	},
 };

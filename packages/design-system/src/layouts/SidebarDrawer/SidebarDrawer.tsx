@@ -30,7 +30,7 @@ const DOCKED_STYLE: CSSProperties = {
 	borderLeft: "none",
 	// Ombre noire diffuse — Mantine par défaut est faible sur bg dark
 	// (rgba(15,23,42,…) devient invisible sur #1E1E1E). On force du noir.
-	boxShadow: "4px 0 16px rgba(0,0,0,0.4)"
+	boxShadow: "4px 0 16px rgba(0,0,0,0.4)",
 };
 
 export function SidebarDrawer({
@@ -64,7 +64,7 @@ export function SidebarDrawer({
 				overflow: "hidden",
 				borderColor: "var(--sqlnest-border)",
 				...(docked ? DOCKED_STYLE : {}),
-				...(style as CSSProperties | undefined)
+				...(style as CSSProperties | undefined),
 			}}
 			{...paperProps}
 		>
@@ -117,9 +117,7 @@ export function SidebarDrawer({
 				</Box>
 			) : null}
 
-			<Box style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
-				{children}
-			</Box>
+			<Box style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>{children}</Box>
 
 			{footer ? (
 				<Box

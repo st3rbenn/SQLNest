@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { renderWithProviders, screen, userEvent } from "../../test-utils/render";
+import {
+	renderWithProviders,
+	screen,
+	userEvent,
+} from "../../test-utils/render";
 import { SelectionChip } from "./SelectionChip";
 
 describe("SelectionChip", () => {
@@ -17,12 +21,7 @@ describe("SelectionChip", () => {
 
 	it("uses singular label for a single selection", () => {
 		renderWithProviders(
-			<SelectionChip
-				count={1}
-				actions={[]}
-				onClear={() => {}}
-				label="table"
-			/>,
+			<SelectionChip count={1} actions={[]} onClear={() => {}} label="table" />,
 		);
 		expect(screen.getByText(/1 table sélectionnée/i)).toBeInTheDocument();
 	});
@@ -44,12 +43,7 @@ describe("SelectionChip", () => {
 	it("calls onClear when the close button is clicked", async () => {
 		const onClear = vi.fn();
 		renderWithProviders(
-			<SelectionChip
-				count={3}
-				actions={[]}
-				onClear={onClear}
-				label="tables"
-			/>,
+			<SelectionChip count={3} actions={[]} onClear={onClear} label="tables" />,
 		);
 		await userEvent.click(screen.getByRole("button", { name: /fermer/i }));
 		expect(onClear).toHaveBeenCalledOnce();

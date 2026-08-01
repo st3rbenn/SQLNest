@@ -1,5 +1,5 @@
+import { type RenderOptions, render } from "@testing-library/react";
 import type { ReactElement, ReactNode } from "react";
-import { render, type RenderOptions } from "@testing-library/react";
 import { DesignSystemProvider } from "../main";
 
 function AllProviders({ children }: { children: ReactNode }) {
