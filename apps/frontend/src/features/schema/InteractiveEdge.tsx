@@ -1,19 +1,13 @@
 import {
-	EdgeLabelRenderer,
 	type EdgeProps,
 	getSmoothStepPath,
 	Position,
 	useReactFlow
 } from "@xyflow/react";
-import {
-	type CSSProperties,
-	type PointerEvent,
-	useEffect,
-	useRef,
-	useState
-} from "react";
+import { type PointerEvent, useEffect, useRef, useState } from "react";
+import { EdgeHandles } from "./edges/EdgeHandles";
+import { EdgeTooltip } from "./edges/EdgeTooltip";
 import { closestSide, type Side } from "./edgeRouting";
-import { humanFooter, humanRelation, joinPreview } from "./fkFormat";
 import type { Relation } from "./schema-model";
 
 export interface InteractiveEdgeData {
@@ -87,111 +81,6 @@ function offsetAlongSide(
 	if (side === "top" || side === "bottom") return { x: x + ratio * w, y };
 	return { x, y: y + ratio * h };
 }
-
-const SIDES: readonly Side[] = ["top", "right", "bottom", "left"];
-
-const HANDLE_BASE: CSSProperties = {
-	position: "absolute",
-	width: 14,
-	height: 14,
-	borderRadius: "50%",
-	background: "#2563eb",
-	border: "2px solid #fff",
-	boxShadow: "0 0 0 1px #2563eb, 0 1px 3px rgba(15,23,42,0.25)",
-	pointerEvents: "auto",
-	touchAction: "none",
-	zIndex: 10
-};
-
-const ANCHOR_BASE: CSSProperties = {
-	position: "absolute",
-	width: 10,
-	height: 10,
-	borderRadius: "50%",
-	background: "#fff",
-	border: "2px solid #2563eb",
-	opacity: 0.7,
-	pointerEvents: "none",
-	zIndex: 9,
-	transition: "opacity 80ms"
-};
-
-function handleStyle(x: number, y: number, dragging: boolean): CSSProperties {
-	return {
-		...HANDLE_BASE,
-		transform: `translate(-50%, -50%) translate(${x}px, ${y}px)`,
-		cursor: dragging ? "grabbing" : "grab"
-	};
-}
-
-function anchorStyle(x: number, y: number): CSSProperties {
-	return {
-		...ANCHOR_BASE,
-		transform: `translate(-50%, -50%) translate(${x}px, ${y}px)`
-	};
-}
-
-/**
- * Tooltip sombre au midpoint de l'edge — s'affiche au hover pour révéler
- * la relation en langage humain (+ preview SQL discret en pied). Font-family
- * système par défaut, seul le bloc SQL est monospacé. `pointerEvents: none`
- * pour ne pas voler le hover à la ligne d'interaction.
- */
-const TOOLTIP_BASE: CSSProperties = {
-	position: "absolute",
-	background: "#0f172a",
-	color: "#f1f5f9",
-	padding: "10px 14px",
-	borderRadius: 8,
-	fontSize: 13,
-	lineHeight: 1.5,
-	fontFamily: "ui-sans-serif, system-ui, -apple-system, sans-serif",
-	boxShadow: "0 6px 20px rgba(15,23,42,0.35)",
-	whiteSpace: "nowrap",
-	pointerEvents: "none",
-	zIndex: 11,
-	minWidth: 220
-};
-
-function tooltipStyle(
-	x: number,
-	y: number,
-	revealed: boolean
-): CSSProperties {
-	// Opacity + petit slide vers le haut pour un fade-in soigné (translate
-	// combine offset de position + décalage d'entrée). Transition dure 220ms.
-	const enterOffset = revealed ? "0px" : "6px";
-	return {
-		...TOOLTIP_BASE,
-		transform: `translate(-50%, calc(-100% - 6px + ${enterOffset})) translate(${x}px, ${y}px)`,
-		opacity: revealed ? 1 : 0,
-		transition: "opacity 220ms ease-out, transform 220ms ease-out"
-	};
-}
-
-const TOOLTIP_TABLE: CSSProperties = {
-	fontWeight: 700,
-	color: "#fff",
-	background: "rgba(255,255,255,0.08)",
-	padding: "1px 6px",
-	borderRadius: 4
-};
-
-const TOOLTIP_FOOTER: CSSProperties = {
-	marginTop: 4,
-	fontSize: 11,
-	color: "#94a3b8"
-};
-
-const TOOLTIP_SQL: CSSProperties = {
-	marginTop: 8,
-	padding: "6px 8px",
-	background: "rgba(255,255,255,0.05)",
-	borderRadius: 4,
-	fontSize: 10.5,
-	color: "#94a3b8",
-	fontFamily: "var(--mantine-font-family-monospace)"
-};
 
 /**
  * Edge FK personnalisé avec endpoints déplaçables.
@@ -416,59 +305,28 @@ export function InteractiveEdge(props: EdgeProps) {
 				onMouseEnter={show}
 				onMouseLeave={hide}
 			/>
-			{showTooltip && relation !== undefined
-				? (() => {
-						const s = humanRelation(relation);
-						return (
-							<EdgeLabelRenderer>
-								<div style={tooltipStyle(labelX, labelY, tooltipRevealed)}>
-									<div>
-										{s.prefix}
-										<span style={TOOLTIP_TABLE}>{s.from}</span>
-										{s.middle}
-										<span style={TOOLTIP_TABLE}>{s.to}</span>
-									</div>
-									<div style={TOOLTIP_FOOTER}>{humanFooter(relation)}</div>
-									<div style={TOOLTIP_SQL}>
-										{joinPreview(relation.from, relation.to)}
-									</div>
-								</div>
-							</EdgeLabelRenderer>
-						);
-					})()
-				: null}
+			{showTooltip && relation !== undefined ? (
+				<EdgeTooltip
+					relation={relation}
+					labelX={labelX}
+					labelY={labelY}
+					revealed={tooltipRevealed}
+				/>
+			) : null}
 			{showHandles ? (
-				<EdgeLabelRenderer>
-					{/* Anchors sur les 3 côtés autres que le snapped (pointer-events
-					 * none → ne volent pas la capture du handle). */}
-					{dragEnd !== null && anchors !== null
-						? SIDES.filter((s) => s !== snapped).map((s) => (
-								<div key={s} style={anchorStyle(anchors[s].x, anchors[s].y)} />
-							))
-						: null}
-					<div
-						style={handleStyle(srcXY.x, srcXY.y, dragEnd === "source")}
-						onPointerDown={onDown("source")}
-						onPointerMove={onMove}
-						onPointerUp={onUp}
-						onDoubleClick={onDoubleClick}
-						onMouseEnter={show}
-						onMouseLeave={hide}
-						aria-label="Déplacer l'ancre source"
-						title="Glisser pour changer de côté · double-clic pour réinitialiser"
-					/>
-					<div
-						style={handleStyle(tgtXY.x, tgtXY.y, dragEnd === "target")}
-						onPointerDown={onDown("target")}
-						onPointerMove={onMove}
-						onPointerUp={onUp}
-						onDoubleClick={onDoubleClick}
-						onMouseEnter={show}
-						onMouseLeave={hide}
-						aria-label="Déplacer l'ancre target"
-						title="Glisser pour changer de côté · double-clic pour réinitialiser"
-					/>
-				</EdgeLabelRenderer>
+				<EdgeHandles
+					srcXY={srcXY}
+					tgtXY={tgtXY}
+					dragEnd={dragEnd}
+					snapped={snapped}
+					anchors={anchors}
+					onDown={onDown}
+					onMove={onMove}
+					onUp={onUp}
+					onDoubleClick={onDoubleClick}
+					onEnter={show}
+					onLeave={hide}
+				/>
 			) : null}
 		</>
 	);
