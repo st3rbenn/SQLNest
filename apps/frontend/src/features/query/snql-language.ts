@@ -173,14 +173,24 @@ function classifyWord(word: string): string {
 	return "variableName";
 }
 
+/**
+ * Palette de coloration syntaxique dark-first.
+ * - keyword (verbes SNQL, connecteurs) : accent Figma — mise en avant du
+ *   squelette de la requête.
+ * - string : vert clair (readable sur #2C2C2C).
+ * - number : jaune warning Figma — chiffres sortent visuellement du texte.
+ * - atom (true/false/null) : mauve pastel.
+ * - operator (`|`) + comment : text-tertiary — décor, pas de bruit.
+ * - variableName (identifiants) : text-primary — c'est le corps de la requête.
+ */
 const highlightStyle = HighlightStyle.define([
-	{ tag: t.keyword, color: "#2563eb", fontWeight: "600" },
-	{ tag: t.string, color: "#047857" },
-	{ tag: t.number, color: "#b45309" },
-	{ tag: t.atom, color: "#7c3aed" },
-	{ tag: t.operator, color: "#94a3b8" },
-	{ tag: t.comment, color: "#94a3b8", fontStyle: "italic" },
-	{ tag: t.variableName, color: "#0f172a" }
+	{ tag: t.keyword, color: "#0d99ff", fontWeight: "600" },
+	{ tag: t.string, color: "#4ddb99" },
+	{ tag: t.number, color: "#ffc933" },
+	{ tag: t.atom, color: "#c084fc" },
+	{ tag: t.operator, color: "#7a7a7a" },
+	{ tag: t.comment, color: "#7a7a7a", fontStyle: "italic" },
+	{ tag: t.variableName, color: "#ffffff" }
 ]);
 
 /** Coloration syntaxique SNQL (Token Dictionary partagé). */

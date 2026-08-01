@@ -19,28 +19,67 @@ interface SnqlEditorProps {
 	readonly placeholder?: string;
 }
 
-const theme = EditorView.theme({
-	"&": {
-		fontSize: "14px",
-		border: "1px solid #e2e8f0",
-		borderRadius: "10px",
-		backgroundColor: "#fff",
-		color: "#0f172a"
+/**
+ * Thème dark de l'éditeur SNQL — aligné sur les tokens Figma.
+ *
+ * CodeMirror ne consomme pas nos CSS vars directement dans les valeurs
+ * `EditorView.theme()` (StyleModule les traite comme des chaînes opaques),
+ * mais `var(--...)` en tant que valeur CSS fonctionne quand elle est
+ * appliquée sur un élément DOM — donc on peut les utiliser ici. La
+ * sélection utilise une teinte fixe (rgba direct) parce que CodeMirror
+ * gère le highlight via un pseudo-element où les CSS vars nous ont posé
+ * problème historiquement.
+ */
+const theme = EditorView.theme(
+	{
+		"&": {
+			fontSize: "14px",
+			border: "1px solid var(--sqlnest-border)",
+			borderRadius: "10px",
+			backgroundColor: "var(--sqlnest-surface)",
+			color: "var(--sqlnest-text-primary)"
+		},
+		"&.cm-focused": {
+			outline: "none",
+			borderColor: "var(--sqlnest-accent)"
+		},
+		".cm-content": {
+			fontFamily: "var(--mantine-font-family-monospace)",
+			padding: "12px 14px",
+			minHeight: "84px",
+			caretColor: "var(--sqlnest-accent)"
+		},
+		".cm-scroller": { lineHeight: "1.6" },
+		// Sélection texte : accent Figma translucide. `::selection` seul
+		// suffit ; les sélections multi-cursor de CM passent aussi par des
+		// spans `.cm-selectionBackground` qu'on colore identiquement pour
+		// homogénéité.
+		"&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection":
+			{
+				backgroundColor: "rgba(13, 153, 255, 0.28)"
+			},
+		// Placeholder : muted mais lisible.
+		".cm-placeholder": {
+			color: "var(--sqlnest-text-tertiary)"
+		},
+		// Popup d'autocomplétion : surface Figma + border, shadow noire.
+		".cm-tooltip-autocomplete": {
+			background: "var(--sqlnest-surface)",
+			border: "1px solid var(--sqlnest-border)",
+			borderRadius: "8px",
+			color: "var(--sqlnest-text-primary)",
+			boxShadow: "0 8px 24px rgba(0,0,0,0.5)"
+		},
+		".cm-tooltip-autocomplete > ul > li[aria-selected]": {
+			background: "var(--sqlnest-accent-soft)",
+			color: "var(--sqlnest-accent)"
+		},
+		".cm-tooltip-autocomplete > ul > li": {
+			padding: "3px 8px"
+		}
 	},
-	"&.cm-focused": { outline: "none", borderColor: "#93c5fd" },
-	".cm-content": {
-		fontFamily: "var(--mantine-font-family-monospace)",
-		padding: "12px 14px",
-		minHeight: "84px",
-		caretColor: "#2563eb"
-	},
-	".cm-scroller": { lineHeight: "1.6" },
-	".cm-tooltip-autocomplete": {
-		border: "1px solid #e2e8f0",
-		borderRadius: "8px",
-		boxShadow: "0 8px 24px rgba(15,23,42,0.12)"
-	}
-});
+	{ dark: true }
+);
 
 /**
  * Éditeur SNQL basé sur CodeMirror 6 : complétion schema-aware (via le language

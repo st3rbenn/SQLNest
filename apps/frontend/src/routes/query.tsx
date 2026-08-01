@@ -31,20 +31,29 @@ const EXAMPLES: Record<Engine, string> = {
 	mongodb: 'get orders | where status = "paid" | pick user_id, total_cents'
 };
 
+// Wrapper full-height + bg canvas — sur cette page les colonnes centrales
+// respirent, mais le fond doit rester `--sqlnest-canvas-bg` pour cohérence
+// avec le canvas principal (l'utilisateur navigue entre les deux).
+const pageWrapperStyle: CSSProperties = {
+	minHeight: "100vh",
+	background: "var(--sqlnest-canvas-bg)",
+	fontFamily: "ui-sans-serif, system-ui, sans-serif",
+	color: "var(--sqlnest-text-primary)"
+};
+
 const pageStyle: CSSProperties = {
 	padding: "32px 28px 64px",
-	fontFamily: "ui-sans-serif, system-ui, sans-serif",
-	color: "#0f172a",
-	maxWidth: 980
+	maxWidth: 980,
+	margin: "0 auto"
 };
 
 function tabStyle(active: boolean): CSSProperties {
 	return {
 		padding: "8px 16px",
 		borderRadius: 8,
-		border: `1px solid ${active ? "#2563eb" : "#e2e8f0"}`,
-		background: active ? "#2563eb" : "#fff",
-		color: active ? "#fff" : "#475569",
+		border: `1px solid ${active ? "var(--sqlnest-accent)" : "var(--sqlnest-border)"}`,
+		background: active ? "var(--sqlnest-accent)" : "var(--sqlnest-surface)",
+		color: active ? "var(--sqlnest-text-primary)" : "var(--sqlnest-text-secondary)",
 		fontWeight: 600,
 		fontSize: 14,
 		cursor: "pointer"
@@ -116,132 +125,136 @@ function QueryPage() {
 	const schemaInputStyle: CSSProperties = {
 		padding: "7px 10px",
 		borderRadius: 8,
-		border: "1px solid #e2e8f0",
+		border: "1px solid var(--sqlnest-border)",
 		fontSize: 13,
 		fontFamily: "var(--mantine-font-family-monospace)",
-		color: "#0f172a",
+		background: "var(--sqlnest-surface)",
+		color: "var(--sqlnest-text-primary)",
 		width: 130
 	};
 
 	return (
-		<div style={pageStyle}>
-			<h1 style={{ fontSize: 26, margin: "0 0 6px" }}>Requête SNQL</h1>
-			<p style={{ color: "#475569", margin: "0 0 20px", lineHeight: 1.5 }}>
-				Un langage, deux moteurs. Tape une requête SNQL, exécute-la contre la
-				vraie base (Postgres ou MongoDB) et vois les lignes.
-			</p>
+		<div style={pageWrapperStyle}>
+			<div style={pageStyle}>
+				<h1 style={{ fontSize: 26, margin: "0 0 6px", color: "var(--sqlnest-text-primary)" }}>Requête SNQL</h1>
+				<p style={{ color: "var(--sqlnest-text-secondary)", margin: "0 0 20px", lineHeight: 1.5 }}>
+					Un langage, deux moteurs. Tape une requête SNQL, exécute-la contre la
+					vraie base (Postgres ou MongoDB) et vois les lignes.
+				</p>
 
-			<div
-				style={{
-					display: "flex",
-					alignItems: "center",
-					gap: 8,
-					marginBottom: 12
-				}}
-			>
-				<button
-					type="button"
-					style={tabStyle(engine === "postgres")}
-					onClick={() => selectEngine("postgres")}
-				>
-					PostgreSQL
-				</button>
-				<button
-					type="button"
-					style={tabStyle(engine === "mongodb")}
-					onClick={() => selectEngine("mongodb")}
-				>
-					MongoDB
-				</button>
-				{engine === "postgres" ? (
-					<label
-						style={{
-							display: "flex",
-							alignItems: "center",
-							gap: 6,
-							marginLeft: 8,
-							fontSize: 13,
-							color: "#64748b"
-						}}
-					>
-						schéma
-						<input
-							value={pgSchema}
-							onChange={(e) => setPgSchema(e.target.value)}
-							placeholder="public"
-							spellCheck={false}
-							style={schemaInputStyle}
-						/>
-					</label>
-				) : null}
-			</div>
-
-			<SnqlEditor
-				value={source}
-				onChange={setSource}
-				onRun={execute}
-				schema={schemaQuery.data}
-				placeholder="get users | where is_active = true | pick email"
-			/>
-
-			<div
-				style={{
-					display: "flex",
-					alignItems: "center",
-					gap: 14,
-					margin: "12px 0 24px"
-				}}
-			>
-				<Button
-					onClick={execute}
-					disabled={source.trim() === ""}
-					loading={run.isPending}
-					loadingLabel="Exécution…"
-				>
-					Exécuter
-				</Button>
-				<span style={{ fontSize: 12, color: "#94a3b8" }}>
-					Ctrl/⌘ + Entrée pour exécuter · Ctrl + Espace pour compléter
-				</span>
-			</div>
-
-			{run.error ? (
 				<div
 					style={{
-						background: "#fef2f2",
-						color: "#b91c1c",
-						padding: "12px 14px",
-						borderRadius: 8,
-						fontSize: 14,
-						fontFamily: "var(--mantine-font-family-monospace)"
+						display: "flex",
+						alignItems: "center",
+						gap: 8,
+						marginBottom: 12
 					}}
 				>
-					{run.error.message}
+					<button
+						type="button"
+						style={tabStyle(engine === "postgres")}
+						onClick={() => selectEngine("postgres")}
+					>
+						PostgreSQL
+					</button>
+					<button
+						type="button"
+						style={tabStyle(engine === "mongodb")}
+						onClick={() => selectEngine("mongodb")}
+					>
+						MongoDB
+					</button>
+					{engine === "postgres" ? (
+						<label
+							style={{
+								display: "flex",
+								alignItems: "center",
+								gap: 6,
+								marginLeft: 8,
+								fontSize: 13,
+								color: "var(--sqlnest-text-secondary)"
+							}}
+						>
+							schéma
+							<input
+								value={pgSchema}
+								onChange={(e) => setPgSchema(e.target.value)}
+								placeholder="public"
+								spellCheck={false}
+								style={schemaInputStyle}
+							/>
+						</label>
+					) : null}
 				</div>
-			) : null}
 
-			{result?.written && result.rows.length === 0 ? (
-				// Écriture dont le moteur ne renvoie pas les lignes (update/delete
-				// MongoDB : pas d'équivalent RETURNING multi-documents). Un tableau
-				// vide passerait pour un bug — on annonce le nombre de lignes touchées.
-				// Discriminant = `written` (pas la forme du résultat) : une LECTURE à
-				// 0 ligne doit rester une table vide, pas « lignes affectées ».
-				<div style={{ fontSize: 13, color: "#475569" }}>
-					<b>{result.rowCount}</b> ligne(s) affectée(s) · moteur <b>{engine}</b>
-					<div style={{ color: "#94a3b8", marginTop: 6 }}>
-						Ce moteur ne renvoie pas les documents modifiés.
-					</div>
-				</div>
-			) : null}
+				<SnqlEditor
+					value={source}
+					onChange={setSource}
+					onRun={execute}
+					schema={schemaQuery.data}
+					placeholder="get users | where is_active = true | pick email"
+				/>
 
-			{result && !(result.written && result.rows.length === 0) ? (
-				<div>
-					<div style={{ fontSize: 13, color: "#475569", margin: "0 0 10px" }}>
-						<b>{result.rowCount}</b> ligne(s) · moteur <b>{engine}</b>
-					</div>
-					<ResultTable columns={columnNames} rows={result.rows} />
+				<div
+					style={{
+						display: "flex",
+						alignItems: "center",
+						gap: 14,
+						margin: "12px 0 24px"
+					}}
+				>
+					<Button
+						onClick={execute}
+						disabled={source.trim() === ""}
+						loading={run.isPending}
+						loadingLabel="Exécution…"
+					>
+						Exécuter
+					</Button>
+					<span style={{ fontSize: 12, color: "var(--sqlnest-text-tertiary)" }}>
+						Ctrl/⌘ + Entrée pour exécuter · Ctrl + Espace pour compléter
+					</span>
 				</div>
-			) : null}
+
+				{run.error ? (
+					<div
+						style={{
+							background: "var(--sqlnest-danger-soft)",
+							color: "var(--sqlnest-danger)",
+							padding: "12px 14px",
+							borderRadius: 8,
+							fontSize: 14,
+							border: "1px solid var(--sqlnest-danger)",
+							fontFamily: "var(--mantine-font-family-monospace)"
+						}}
+					>
+						{run.error.message}
+					</div>
+				) : null}
+
+				{result?.written && result.rows.length === 0 ? (
+					// Écriture dont le moteur ne renvoie pas les lignes (update/delete
+					// MongoDB : pas d'équivalent RETURNING multi-documents). Un tableau
+					// vide passerait pour un bug — on annonce le nombre de lignes touchées.
+					// Discriminant = `written` (pas la forme du résultat) : une LECTURE à
+					// 0 ligne doit rester une table vide, pas « lignes affectées ».
+					<div style={{ fontSize: 13, color: "var(--sqlnest-text-secondary)" }}>
+						<b>{result.rowCount}</b> ligne(s) affectée(s) · moteur <b>{engine}</b>
+						<div style={{ color: "var(--sqlnest-text-tertiary)", marginTop: 6 }}>
+							Ce moteur ne renvoie pas les documents modifiés.
+						</div>
+					</div>
+				) : null}
+
+				{result && !(result.written && result.rows.length === 0) ? (
+					<div>
+						<div style={{ fontSize: 13, color: "var(--sqlnest-text-secondary)", margin: "0 0 10px" }}>
+							<b>{result.rowCount}</b> ligne(s) · moteur <b>{engine}</b>
+						</div>
+						<ResultTable columns={columnNames} rows={result.rows} />
+					</div>
+				) : null}
+			</div>
 		</div>
 	);
 }
