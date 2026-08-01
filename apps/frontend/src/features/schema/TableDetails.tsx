@@ -1,6 +1,11 @@
 import { ActionIcon, Box, Button, Menu, Text, UnstyledButton } from "@mantine/core";
-import { IconChevronRight, IconDots, IconMenu2 } from "@tabler/icons-react";
-import { ColorDot, KindBadge, showNotification } from "@sqlnest/design-system";
+import { IconDots, IconMenu2 } from "@tabler/icons-react";
+import {
+	ColorDot,
+	KindBadge,
+	RowItem,
+	showNotification
+} from "@sqlnest/design-system";
 import { useNavigate } from "@tanstack/react-router";
 import { colorFor } from "./colors";
 import type { SchemaModel } from "./schema-model";
@@ -235,12 +240,15 @@ export function TableDetails({
 				<>
 					<SectionTitle prefix="→">Références</SectionTitle>
 					{outgoing.map((r, i) => (
-						<RelationLink
+						<RowItem
 							// biome-ignore lint/suspicious/noArrayIndexKey: relation identity is (from,to,fields) — index suffices here
 							key={`out-${i}`}
 							label={`${r.from.fields.join(",")} → ${r.to.collection}.${r.to.fields.join(",")}`}
-							target={r.to.collection}
-							onSelect={onSelect}
+							color={colorFor(r.to.collection).border}
+							onClick={() => onSelect(r.to.collection)}
+							title={`Aller à ${r.to.collection}`}
+							size="sm"
+							monospace
 						/>
 					))}
 				</>
@@ -250,12 +258,15 @@ export function TableDetails({
 				<>
 					<SectionTitle prefix="←">Référencée par</SectionTitle>
 					{incoming.map((r, i) => (
-						<RelationLink
+						<RowItem
 							// biome-ignore lint/suspicious/noArrayIndexKey: relation identity is (from,to,fields) — index suffices here
 							key={`in-${i}`}
 							label={`${r.from.collection}.${r.from.fields.join(",")} → ${r.to.fields.join(",")}`}
-							target={r.from.collection}
-							onSelect={onSelect}
+							color={colorFor(r.from.collection).border}
+							onClick={() => onSelect(r.from.collection)}
+							title={`Aller à ${r.from.collection}`}
+							size="sm"
+							monospace
 						/>
 					))}
 				</>
@@ -321,55 +332,6 @@ function SectionTitle({
 			{prefix !== undefined ? `${prefix} ` : ""}
 			{children}
 		</Text>
-	);
-}
-
-function RelationLink({
-	label,
-	target,
-	onSelect
-}: {
-	readonly label: string;
-	readonly target: string;
-	readonly onSelect: (id: string) => void;
-}) {
-	const color = colorFor(target);
-	return (
-		<UnstyledButton
-			onClick={() => onSelect(target)}
-			title={`Aller à ${target}`}
-			style={{
-				display: "flex",
-				alignItems: "center",
-				gap: 8,
-				width: "100%",
-				padding: "5px 12px",
-				fontSize: 11,
-				background: "#fff",
-				textAlign: "left",
-				transition: "background 100ms ease-out"
-			}}
-		>
-			<ColorDot color={color.border} size="sm" />
-			<span
-				style={{
-					flex: 1,
-					fontFamily: "var(--mantine-font-family-monospace)",
-					fontSize: 10.5,
-					color: "var(--mantine-color-slate-8)",
-					overflow: "hidden",
-					textOverflow: "ellipsis",
-					whiteSpace: "nowrap"
-				}}
-			>
-				{label}
-			</span>
-			<IconChevronRight
-				size={12}
-				stroke={2}
-				style={{ color: "var(--mantine-color-slate-4)", flexShrink: 0 }}
-			/>
-		</UnstyledButton>
 	);
 }
 

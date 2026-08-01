@@ -1,6 +1,6 @@
 import { Box, Text, UnstyledButton } from "@mantine/core";
 import { IconChevronDown, IconChevronRight } from "@tabler/icons-react";
-import { ColorDot } from "@sqlnest/design-system";
+import { RowItem } from "@sqlnest/design-system";
 import { type CSSProperties, useMemo, useState } from "react";
 import { colorFor } from "./colors";
 import type { Frame } from "./frames";
@@ -102,24 +102,6 @@ const headerRow: CSSProperties = {
 	textAlign: "left",
 	fontFamily: "inherit",
 	letterSpacing: 0.2
-};
-
-const itemBase: CSSProperties = {
-	display: "flex",
-	alignItems: "center",
-	justifyContent: "space-between",
-	gap: 8,
-	width: "100%",
-	padding: "6px 10px 6px 32px",
-	fontSize: 12.5,
-	cursor: "pointer",
-	borderLeft: "3px solid transparent",
-	borderTop: "none",
-	borderRight: "none",
-	borderBottom: "none",
-	textAlign: "left",
-	fontFamily: "inherit",
-	transition: "background 100ms ease-out"
 };
 
 export function SchemaTree({
@@ -238,50 +220,17 @@ export function SchemaTree({
 							</span>
 						</UnstyledButton>
 						{showChildren
-							? g.tables.map((t) => {
-									const color = colorFor(t);
-									const isFocus = t === focusId;
-									return (
-										<UnstyledButton
-											key={t}
-											style={{
-												...itemBase,
-												background: isFocus
-													? "var(--mantine-color-brand-0)"
-													: "transparent",
-												borderLeftColor: isFocus
-													? "var(--mantine-color-brand-6)"
-													: "transparent",
-												color: isFocus
-													? "var(--mantine-color-brand-7)"
-													: "var(--mantine-color-slate-7)",
-												fontWeight: isFocus ? 600 : 400
-											}}
-											onClick={() => onSelect(t)}
-											title={t}
-										>
-											<span
-												style={{
-													display: "flex",
-													alignItems: "center",
-													gap: 8,
-													minWidth: 0
-												}}
-											>
-												<ColorDot color={color.border} size="sm" />
-												<span
-													style={{
-														overflow: "hidden",
-														textOverflow: "ellipsis",
-														whiteSpace: "nowrap"
-													}}
-												>
-													{t}
-												</span>
-											</span>
-										</UnstyledButton>
-									);
-								})
+							? g.tables.map((t) => (
+									<RowItem
+										key={t}
+										label={t}
+										color={colorFor(t).border}
+										active={t === focusId}
+										onClick={() => onSelect(t)}
+										title={t}
+										paddingLeft={32}
+									/>
+								))
 							: null}
 					</div>
 				);

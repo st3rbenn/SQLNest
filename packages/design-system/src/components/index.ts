@@ -24,6 +24,11 @@ export {
 	type KindBadgeKind,
 	type KindBadgeProps,
 } from "./KindBadge/KindBadge";
+export {
+	RowItem,
+	type RowItemProps,
+	type RowItemSize,
+} from "./RowItem/RowItem";
 export { SearchInput, type SearchInputProps } from "./SearchInput/SearchInput";
 export {
 	SelectionChip,

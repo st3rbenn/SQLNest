@@ -1,11 +1,6 @@
-import { ActionIcon, Box, Menu, Text, UnstyledButton } from "@mantine/core";
-import {
-	IconCheck,
-	IconChevronRight,
-	IconDots,
-	IconX
-} from "@tabler/icons-react";
-import { ColorDot, showNotification } from "@sqlnest/design-system";
+import { ActionIcon, Box, Menu, Text } from "@mantine/core";
+import { IconCheck, IconDots, IconX } from "@tabler/icons-react";
+import { RowItem, showNotification } from "@sqlnest/design-system";
 import { useState } from "react";
 import { colorFor } from "./colors";
 import type { Frame } from "./frames";
@@ -216,48 +211,15 @@ export function FrameDetails({
 				frame.collections
 					.slice()
 					.sort()
-					.map((name) => {
-						const c = colorFor(name);
-						return (
-							<UnstyledButton
-								key={name}
-								onClick={() => onSelectTable(name)}
-								title={`Aller à ${name}`}
-								style={{
-									display: "flex",
-									alignItems: "center",
-									gap: 8,
-									width: "100%",
-									padding: "6px 12px",
-									fontSize: 12.5,
-									color: "var(--mantine-color-slate-8)",
-									textAlign: "left",
-									background: "transparent",
-									transition: "background 100ms ease-out"
-								}}
-							>
-								<ColorDot color={c.border} size="sm" />
-								<span
-									style={{
-										flex: 1,
-										overflow: "hidden",
-										textOverflow: "ellipsis",
-										whiteSpace: "nowrap"
-									}}
-								>
-									{name}
-								</span>
-								<IconChevronRight
-									size={12}
-									stroke={2}
-									style={{
-										color: "var(--mantine-color-slate-4)",
-										flexShrink: 0
-									}}
-								/>
-							</UnstyledButton>
-						);
-					})
+					.map((name) => (
+						<RowItem
+							key={name}
+							label={name}
+							color={colorFor(name).border}
+							onClick={() => onSelectTable(name)}
+							title={`Aller à ${name}`}
+						/>
+					))
 			)}
 		</Box>
 	);
