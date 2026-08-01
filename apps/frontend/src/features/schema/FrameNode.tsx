@@ -18,6 +18,9 @@ export interface FrameNodeData {
 	/** Callback appelé au right-click sur le badge du frame — supprime
 	 * l'entrée. Fourni par SchemaCanvas — closure sur `useFrames.removeFrame`. */
 	readonly onDelete?: () => void;
+	/** Callback appelé au clic gauche sur le badge du frame — ouvre la vue
+	 * FrameDetails dans le drawer gauche (liste des tables du frame). */
+	readonly onFocus?: () => void;
 	readonly [key: string]: unknown;
 }
 
@@ -43,7 +46,7 @@ export function FrameNode({
 	positionAbsoluteX,
 	positionAbsoluteY
 }: NodeProps<FrameNodeType>) {
-	const { frame, onResizeEnd, onRename, onDelete } = data;
+	const { frame, onResizeEnd, onRename, onDelete, onFocus } = data;
 
 	// Rename inline : double-clic sur le badge → input, Enter/blur commit,
 	// Escape cancel. Un `draft` local évite d'écrire dans le state parent
@@ -104,12 +107,12 @@ export function FrameNode({
 					// Suit les dimensions React (width/height du node), mises à
 					// jour en direct par `SchemaCanvas.handleNodesChange` qui
 					// route les `dimensions` NodeChange RF vers setFrameRect.
+					// Pas de bordure propre — c'est `NodeResizer.lineStyle` qui
+					// dessine les 4 côtés (sinon double bordure avec halo).
 					width,
 					height,
 					borderRadius: 14,
-					border: `2px solid hsl(${frame.hue}, 55%, 60%)`,
 					background: `hsla(${frame.hue}, 60%, 90%, 0.35)`,
-					boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.6)",
 					position: "relative",
 					pointerEvents: "none"
 				}}
@@ -121,6 +124,15 @@ export function FrameNode({
 						left: 12,
 						pointerEvents: "auto",
 						cursor: editing ? "text" : "grab"
+					}}
+					onClick={(e) => {
+						// Clic gauche sur le badge → ouvre FrameDetails (liste des
+						// tables du frame) dans le drawer gauche. Stop-prop pour
+						// éviter que RF ait à re-router — évite aussi les conflits
+						// avec le drag du frame déclenché par un mousedown sur le
+						// wrapper RF quand on ne bouge pas la souris (tiny threshold).
+						e.stopPropagation();
+						onFocus?.();
 					}}
 					onDoubleClick={(e) => {
 						// Empêche RF `onNodeDoubleClick` de faire son travail

@@ -12,41 +12,31 @@
 }
 
 /*
- * Contour de sélection multi (Shift+click ou lasso) — visuellement fort pour
- * qu'on distingue clairement quelles tables sont dans la sélection courante,
- * avant d'appuyer sur F (frame) ou Masquer. Le contour est OUTSIDE la carte
- * (offset positif) → n'écrase pas la bordure colorée du type de table.
- * Frames pas concernés — `selectable: false` côté SchemaCanvas.
+ * Contour de sélection (`.selected`) : PAS de règle CSS ici — le rendu est
+ * porté par le composant `TableNode` (border interne bleu + shadow diffuse),
+ * unifié avec le style `focused` pour n'avoir qu'un seul indicateur visuel
+ * quel que soit le geste (click simple, Cmd/Shift+click, lasso).
  */
-.react-flow__node-table.selected {
-	outline: 2.5px solid var(--mantine-color-brand-6);
-	outline-offset: 3px;
-	border-radius: 12px;
-	box-shadow:
-		0 0 0 3px rgba(37, 99, 235, 0.15),
-		0 4px 12px rgba(37, 99, 235, 0.18);
-}
 
 /*
- * Handles NodeResizer des tables : masqués par défaut, révélés au hover.
- * Évite un canvas encombré de petits carrés sur toutes les tables au repos.
- * La bordure `line` (les 4 côtés) reste visible et signale la cible du drag.
+ * Handles NodeResizer des tables : masqués par défaut, révélés au hover
+ * quand la table n'est PAS déjà sélectionnée. Quand la table est
+ * `.selected`, l'outline CSS ci-dessus fait le contour → afficher aussi la
+ * `line` du NodeResizer donnerait un double contour parallèle (chevauchement
+ * de 2 lignes à ~3 px d'écart) — visuellement bruité. Un seul indicateur à
+ * la fois : hover OU selection.
+ *
  * Les frames gardent leurs handles toujours visibles (règle plus spécifique
  * ciblée sur `.react-flow__node-table` uniquement).
  */
-.react-flow__node-table .react-flow__resize-control.handle {
-	opacity: 0;
-	transition: opacity 120ms ease-out;
-}
-.react-flow__node-table:hover .react-flow__resize-control.handle,
-.react-flow__node-table.selected .react-flow__resize-control.handle {
-	opacity: 1;
-}
+.react-flow__node-table .react-flow__resize-control.handle,
 .react-flow__node-table .react-flow__resize-control.line {
 	opacity: 0;
 	transition: opacity 120ms ease-out;
 }
-.react-flow__node-table:hover .react-flow__resize-control.line,
-.react-flow__node-table.selected .react-flow__resize-control.line {
+.react-flow__node-table:not(.selected):hover .react-flow__resize-control.handle {
+	opacity: 1;
+}
+.react-flow__node-table:not(.selected):hover .react-flow__resize-control.line {
 	opacity: 0.6;
 }

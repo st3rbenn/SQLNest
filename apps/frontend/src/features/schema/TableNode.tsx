@@ -37,9 +37,15 @@ export interface TableNodeData {
 	/** Correspond à la recherche courante. */
 	readonly matched: boolean;
 	/** Callback au release du resize (n'importe quel côté ou coin). Fourni par
-	 * SchemaCanvas → persist localStorage via `useTableSizes`. Absent = table
-	 * non resizable (rendu externe / test). */
-	readonly onResizeEnd?: (size: { width: number; height: number }) => void;
+	 * SchemaCanvas → persist localStorage via `useTableSizes` (dimensions) et
+	 * `useTablePositions` (origine, quand elle a bougé depuis un handle
+	 * gauche/haut). Absent = table non resizable (rendu externe / test). */
+	readonly onResizeEnd?: (size: {
+		width: number;
+		height: number;
+		x: number;
+		y: number;
+	}) => void;
 	readonly [key: string]: unknown;
 }
 
@@ -97,6 +103,7 @@ const levelSelector = (s: {
 
 export function TableNode({
 	data,
+	selected,
 	width,
 	height: heightProp
 }: NodeProps<TableNodeType>) {
@@ -110,6 +117,14 @@ export function TableNode({
 	const effectiveWidth = width ?? NODE_WIDTH;
 	const effectiveHeight = heightProp ?? contentHeight;
 
+	// Un SEUL indicateur visuel de mise en avant. `focused` (data.focused —
+	// click simple pilote le drawer détails) et `selected` (RF store — geste
+	// multi via Cmd/Shift/lasso) reçoivent le même traitement : border
+	// interne bleu vif + shadow diffuse bleu. Sans ça, les deux stacks CSS
+	// se cumulaient (contour interne + outline exterieur `.selected`) et
+	// donnaient des styles mixtes selon comment la table était mise en avant.
+	const highlighted = focused || selected;
+
 	// Enveloppe commune : border colorée (bleu/ambre override en focus/match),
 	// ombre focus/match, gestion `dimmed`. LOD variants remplissent l'enveloppe
 	// à la taille RÉELLE — sinon les handles (aux bords du wrapper RF) ne
@@ -119,8 +134,8 @@ export function TableNode({
 		height: effectiveHeight,
 		borderRadius: 10,
 		background: "#fff",
-		border: `2px solid ${matched ? "#f59e0b" : focused ? "#2563eb" : color.border}`,
-		boxShadow: focused
+		border: `2px solid ${matched ? "#f59e0b" : highlighted ? "#2563eb" : color.border}`,
+		boxShadow: highlighted
 			? "0 0 0 3px rgba(37,99,235,0.25), 0 8px 24px rgba(15,23,42,0.12)"
 			: matched
 				? "0 0 0 3px rgba(245,158,11,0.3)"
@@ -172,7 +187,12 @@ export function TableNode({
 					minHeight={60}
 					maxHeight={1600}
 					onResizeEnd={(_, p) =>
-						onResizeEnd({ width: p.width, height: p.height })
+						onResizeEnd({
+							width: p.width,
+							height: p.height,
+							x: p.x,
+							y: p.y
+						})
 					}
 					lineStyle={{
 						borderColor: color.border,

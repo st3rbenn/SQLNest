@@ -6,10 +6,19 @@ import {
 	SidebarDrawer,
 	Spotlight,
 	spotlight,
-	useCommandPaletteShortcut
+	useCommandPaletteShortcut,
+	useModKeyLabel
 } from "@sqlnest/design-system";
 import { buildCanvasCommands } from "./commands";
-import { ActionIcon, Box, UnstyledButton } from "@mantine/core";
+import {
+	ActionIcon,
+	Box,
+	Button,
+	Group,
+	Modal,
+	Text,
+	UnstyledButton
+} from "@mantine/core";
 import {
 	IconChevronLeft,
 	IconLayoutSidebarLeftCollapse,
@@ -47,6 +56,7 @@ import { bestHandles, type Side, spreadOffsets } from "./edgeRouting";
 import { FrameNode, type FrameNodeType } from "./FrameNode";
 import { type Frame, type FrameRect, rectContainsPoint } from "./frames";
 import { InteractiveEdge, type InteractiveEdgeData } from "./InteractiveEdge";
+import { FrameDetails } from "./FrameDetails";
 import { buildLayout, type LayoutResult } from "./layout";
 import { SchemaTree } from "./SchemaTree";
 import type { SchemaModel } from "./schema-model";
@@ -325,7 +335,8 @@ function computeFrameNodes(
 	tableNodes: readonly TableNodeType[],
 	onFrameResizeEnd: (key: string, rect: FrameRect) => void,
 	onFrameRename: (key: string, label: string) => void,
-	onFrameDelete: (key: string) => void
+	onFrameDelete: (key: string) => void,
+	onFrameFocus: (key: string) => void
 ): FrameNodeType[] {
 	if (frames.length === 0) return [];
 	const byId = new Map(tableNodes.map((n) => [n.id, n]));
@@ -351,7 +362,8 @@ function computeFrameNodes(
 					frame,
 					onResizeEnd: (r: FrameRect) => onFrameResizeEnd(frame.key, r),
 					onRename: (label: string) => onFrameRename(frame.key, label),
-					onDelete: () => onFrameDelete(frame.key)
+					onDelete: () => onFrameDelete(frame.key),
+					onFocus: () => onFrameFocus(frame.key)
 				},
 				// Draggable pour déplacer le frame + ses tables ensemble
 				// (handler `onNodeDrag` applique le delta aux membres).
@@ -419,6 +431,11 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 	}, [base, setNodes]);
 
 	const [focusId, setFocusId] = useState<string | null>(null);
+	// Focus « frame » — exclusif avec focusId. Clic sur un frame → montre la
+	// liste des tables du frame dans le drawer gauche (FrameDetails). Clic sur
+	// une table → revient à focusId (TableDetails). Un seul des deux à la
+	// fois : ils partagent le même slot drawer.
+	const [focusFrameKey, setFocusFrameKey] = useState<string | null>(null);
 	const [search, setSearch] = useState("");
 	const [hiddenIds, setHiddenIds] = useState<ReadonlySet<string>>(
 		() => new Set()
@@ -464,45 +481,53 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 		(changes: NodeChange[]) => {
 			const restChanges: NodeChange[] = [];
 			const api = framesApiRef.current;
+			// RF émet dimensions ET position dans le MÊME batch pour un resize
+			// depuis un corner top/left. On doit fusionner par frame avant l'écriture
+			// — sinon deux `setFrameRect` séquentiels lisent `frame.rect` frozen
+			// avant le premier setState (async), et le 2e écrase le 1er.
+			// Bug symptomatique : tire vers la gauche → seule `position.x` s'applique,
+			// la nouvelle `width` est perdue → visuellement le frame « pousse à droite ».
+			const perFrame = new Map<
+				string,
+				{ x?: number; y?: number; width?: number; height?: number }
+			>();
 			for (const c of changes) {
 				if (!c.id?.startsWith("frame:")) {
 					restChanges.push(c);
 					continue;
 				}
 				const key = c.id.slice("frame:".length);
-				const frame = api.frames.find((f) => f.key === key);
-				if (!frame?.rect) continue;
-
 				if (c.type === "dimensions" && c.dimensions) {
-					// RF émet AUSSI des `dimensions` changes en dehors de tout geste
-					// (mesure DOM automatique au mount, après re-render). Ces changes
-					// arrivent avec `resizing !== true` — les ignorer, sinon on écrit
-					// à chaque render la même dimension et on peut casser le rect
-					// (feedback loop avec computeFrameNodes qui lit puis réécrit).
+					// RF émet AUSSI des `dimensions` en dehors de tout geste (mesure
+					// DOM auto). `resizing !== true` = mesure → on ignore, sinon on
+					// écrit à chaque render la même dimension et on peut casser le rect.
 					if (c.resizing !== true) continue;
-					api.setFrameRect(key, {
-						x: frame.rect.x,
-						y: frame.rect.y,
-						width: c.dimensions.width,
-						height: c.dimensions.height
-					});
+					const entry = perFrame.get(key) ?? {};
+					entry.width = c.dimensions.width;
+					entry.height = c.dimensions.height;
+					perFrame.set(key, entry);
 				} else if (c.type === "position" && c.position) {
-					// `position` change pour un frame — deux origines possibles :
-					//   1) resize d'un corner top/left → RF émet position (le coin
-					//      bouge). `dragging` est false ici. On l'écrit.
-					//   2) drag manuel du frame (`onNodeDrag` custom) → RF émet
-					//      position avec `dragging: true`. Notre handler custom
-					//      gère déjà en shiftant les membres — SKIP pour éviter
-					//      la double-update.
+					// `position` sur un frame — deux origines :
+					//   1) resize corner top/left → RF émet position (`dragging: false`)
+					//   2) drag manuel → `dragging: true`, géré par `onNodeDrag` custom
+					//      qui shift les membres. SKIP ici pour éviter la double-update.
 					if (c.dragging === true) continue;
-					api.setFrameRect(key, {
-						x: c.position.x,
-						y: c.position.y,
-						width: frame.rect.width,
-						height: frame.rect.height
-					});
+					const entry = perFrame.get(key) ?? {};
+					entry.x = c.position.x;
+					entry.y = c.position.y;
+					perFrame.set(key, entry);
 				}
 				// select/remove/… pour les frames → ignorés (non-selectable).
+			}
+			for (const [key, entry] of perFrame) {
+				const frame = api.frames.find((f) => f.key === key);
+				if (!frame?.rect) continue;
+				api.setFrameRect(key, {
+					x: entry.x ?? frame.rect.x,
+					y: entry.y ?? frame.rect.y,
+					width: entry.width ?? frame.rect.width,
+					height: entry.height ?? frame.rect.height
+				});
 			}
 			if (restChanges.length > 0) onNodesChange(restChanges);
 		},
@@ -525,6 +550,15 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 				.filter((n) => (n as { type?: string }).type !== "frame")
 				.map((n) => n.id);
 			setSelectedTables(ids);
+			// Multi-sélection active (≥ 2 tables) → clear le focus. Sinon les
+			// styles `focused` (bord interne bleu foncé + shadow opacité 0.25)
+			// et `.selected` (outline exterior + shadow opacité 0.15) coexistent
+			// sur des tables différentes → l'user voit une 1re table « bleu
+			// foncé » et les suivantes « bleu clair », visuellement confus.
+			if (ids.length >= 2) {
+				setFocusId(null);
+				setFocusFrameKey(null);
+			}
 		}, [])
 	});
 
@@ -569,11 +603,16 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 	}, [focusId, base]);
 
 	// Callback stable pour le NodeResizer d'une table : persist les nouvelles
-	// dimensions au release. `setSize` est stable (useCallback dans useTableSizes).
+	// dimensions ET la nouvelle position au release. La position CHANGE quand
+	// le user tire depuis un handle top ou left (RF déplace l'origine pour
+	// garder l'opposé fixe). Sans persister x/y, un refresh remettait la table
+	// à l'ancienne origine → elle semblait grossir uniquement vers la droite.
 	const handleTableResize = useCallback(
-		(name: string, size: { width: number; height: number }) =>
-			tableSizes.setSize(name, size),
-		[tableSizes]
+		(name: string, size: { width: number; height: number; x: number; y: number }) => {
+			tableSizes.setSize(name, { width: size.width, height: size.height });
+			tablePositions.setPosition(name, { x: size.x, y: size.y });
+		},
+		[tableSizes, tablePositions]
 	);
 
 	// Nœuds table affichés : positions vivantes (drag) + drapeaux focus + masqués.
@@ -593,8 +632,12 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 							dimmed: neighbors !== null && !inFocus,
 							focused: n.id === focusId,
 							matched: false,
-							onResizeEnd: (s: { width: number; height: number }) =>
-								handleTableResize(n.id, s)
+							onResizeEnd: (s: {
+								width: number;
+								height: number;
+								x: number;
+								y: number;
+							}) => handleTableResize(n.id, s)
 						}
 					};
 				}),
@@ -667,6 +710,11 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 		[framesApi]
 	);
 
+	const handleFrameFocus = useCallback(
+		(key: string) => focusFrame(key),
+		// biome-ignore lint/correctness/useExhaustiveDependencies: focusFrame stable (setState setter closure)
+		[]
+	);
 	const frameNodes = useMemo(
 		() =>
 			computeFrameNodes(
@@ -674,7 +722,8 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 				nodes.filter((n) => !hiddenIds.has(n.id)),
 				handleFrameResize,
 				handleFrameRename,
-				handleFrameDelete
+				handleFrameDelete,
+				handleFrameFocus
 			),
 		[
 			framesApi.frames,
@@ -682,7 +731,8 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 			hiddenIds,
 			handleFrameResize,
 			handleFrameRename,
-			handleFrameDelete
+			handleFrameDelete,
+			handleFrameFocus
 		]
 	);
 
@@ -977,7 +1027,17 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 	 * SANS recadrer la vue. Comportement par défaut du clic gauche sur canvas et
 	 * du clic-droit (menu contextuel). L'utilisateur choisit quand zoomer via
 	 * `focusAndZoom` (double-clic, menu Détails, entrées distantes). */
-	const focusNode = (id: string) => setFocusId(id);
+	const focusNode = (id: string) => {
+		setFocusId(id);
+		setFocusFrameKey(null);
+	};
+
+	/** Focus « frame » — ouvre FrameDetails dans le drawer avec la liste des
+	 * tables du frame. Exclusif avec focusId (une seule vue à la fois). */
+	const focusFrame = (key: string) => {
+		setFocusFrameKey(key);
+		setFocusId(null);
+	};
 
 	/** Focus + recadrage sur la table. Utilisé par les points d'entrée
 	 * « distants » — arbre, palette Cmd+K, menu Détails, FK cliquables du
@@ -1041,19 +1101,51 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 
 	const clearFocus = () => {
 		setFocusId(null);
+		setFocusFrameKey(null);
 		applyOverview();
 	};
 
+	// Frame courant (si le drawer affiche FrameDetails). Recalculé à chaque
+	// re-render — passe à undefined si le frame a été supprimé pendant qu'on
+	// l'affichait ; l'effet ci-dessous clear alors focusFrameKey.
+	const focusedFrame = useMemo(
+		() =>
+			focusFrameKey !== null
+				? framesApi.frames.find((f) => f.key === focusFrameKey)
+				: undefined,
+		[focusFrameKey, framesApi.frames]
+	);
+	useEffect(() => {
+		if (focusFrameKey !== null && focusedFrame === undefined) {
+			setFocusFrameKey(null);
+		}
+	}, [focusFrameKey, focusedFrame]);
+
 	// « Auto-layout » : forcer les positions ELK et les persister par-dessus
-	// les sauvegardes user (sinon un refresh restaurerait l'ancien layout
-	// manuel). Le rect des frames n'est pas touché — c'est un problème
-	// distinct qui devra suivre l'action `Réinitialiser` du menu.
+	// les sauvegardes user + RECOMPUTER le rect des frames pour qu'ils
+	// suivent la nouvelle disposition (sans ça, les frames restent à leur
+	// ancien rect → tables « fantômes » qui suivent le frame au drag alors
+	// qu'elles sont visuellement dehors, souvenir cuisant du user).
+	// Modal de confirmation obligatoire (`layoutConfirmOpen`) parce que le
+	// geste est massif et non-trivialement réversible tant qu'on n'a pas
+	// d'historique undo.
+	const [layoutConfirmOpen, setLayoutConfirmOpen] = useState(false);
 	const relayoutAll = () => {
-		if (base !== null) {
-			setNodes(base.nodes);
-			const entries: Record<string, XY> = {};
-			for (const n of base.nodes) entries[n.id] = n.position;
-			tablePositions.setManyPositions(entries);
+		if (base === null) return;
+		setNodes(base.nodes);
+		const entries: Record<string, XY> = {};
+		for (const n of base.nodes) entries[n.id] = n.position;
+		tablePositions.setManyPositions(entries);
+		// Recompute chaque frame rect depuis les nouvelles positions ELK de
+		// ses membres. Frames sans membres → laissés en l'état (rare, cas
+		// dégénéré). `boundsOfTables` inclut déjà le pad.
+		const byId = new Map(base.nodes.map((n) => [n.id, n]));
+		for (const frame of framesApi.frames) {
+			const members = frame.collections
+				.map((c) => byId.get(c))
+				.filter((n): n is TableNodeType => n !== undefined);
+			const rect = boundsOfTables(members, FRAME_PAD);
+			if (rect !== null) framesApi.setFrameRect(frame.key, rect);
 		}
 		applyOverview();
 	};
@@ -1134,6 +1226,7 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 
 	// ─── palette Cmd+K (tour 1c) ──────────────────────────────────────────
 	useCommandPaletteShortcut(spotlight.open);
+	const modKey = useModKeyLabel();
 	const soon = (title: string) =>
 		showNotification({
 			title,
@@ -1196,17 +1289,34 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 				selectionOnDrag
 				selectionMode={SelectionMode.Partial}
 				panOnDrag={[1]}
-				// Shift+click ajoute/retire une table de la sélection multi (au lieu
-				// du défaut RF Meta/Ctrl+click, moins intuitif). Le lasso reste
-				// dispo via drag sur le vide.
-				multiSelectionKeyCode="Shift"
+				// Multi-select via click : accepte Shift OU le modifier natif de
+				// l'OS (Cmd sur Mac, Ctrl sur Win/Linux). RF prend un array de
+				// key codes — n'importe lequel matche. Ça couvre :
+				//  - Shift+click (intuitif, cross-platform, comme Figma/Notion)
+				//  - Cmd+click (attendu sur Mac — convention Finder / natif)
+				//  - Ctrl+click (attendu sur Win/Linux — convention Explorer)
+				multiSelectionKeyCode={["Shift", "Meta", "Control"]}
 				onPaneContextMenu={(event) => event.preventDefault()}
 				// Clic gauche seul = focus visuel (drawer détails + ring + estompage).
-				// Shift+clic = laisser RF gérer la sélection multi (pas de focus,
-				// sinon le drawer switch en mode détails et masque le SelectionChip).
+				// Clic avec modifier (Shift / Cmd / Ctrl) = sélection multi RF, on
+				// n'ouvre PAS le drawer détails (sinon il masque le SelectionChip)
+				// ET on clear un focus éventuel (sinon la table précédemment focus
+				// garde son ring bleu foncé pendant que les autres ont juste le
+				// contour selected bleu clair → styles mixtes visibles).
 				// Double-clic = recadre sur la table (comme Figma).
+				// Clic sur un frame → ouvre FrameDetails (liste des tables du frame)
+				// dans le même drawer, avec back button vers l'arborescence.
 				onNodeClick={(event, node) => {
-					if (event.shiftKey) return;
+					if (event.shiftKey || event.metaKey || event.ctrlKey) {
+						setFocusId(null);
+						setFocusFrameKey(null);
+						return;
+					}
+					if ((node as { type?: string }).type === "frame") {
+						const frameKey = node.id.replace(/^frame:/, "");
+						focusFrame(frameKey);
+						return;
+					}
 					focusNode(node.id);
 				}}
 				onNodeDoubleClick={(_, node) => {
@@ -1391,11 +1501,43 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 			</ReactFlow>
 
 			{/* Toolbar horizontale bas-centre — remonte au-dessus de la console
-			 * SNQL quand elle est ouverte pour rester accessible. */}
+			 * SNQL quand elle est ouverte pour rester accessible. Auto-layout
+			 * passe par une confirmation (destructif — écrase la disposition
+			 * user, historique undo pas encore branché). */}
 			<CanvasToolbar
-				onAutoLayout={relayoutAll}
+				onAutoLayout={() => setLayoutConfirmOpen(true)}
 				bottomOffset={consoleHeight + CONSOLE_GAP}
 			/>
+			<Modal
+				opened={layoutConfirmOpen}
+				onClose={() => setLayoutConfirmOpen(false)}
+				title="Réappliquer le layout automatique ?"
+				centered
+				size="sm"
+			>
+				<Text size="sm" mb="md">
+					Toutes les positions des tables et les rects des frames seront
+					remplacés par la disposition calculée automatiquement. Cette action
+					n'est pas annulable pour l'instant.
+				</Text>
+				<Group justify="flex-end" gap="xs">
+					<Button
+						variant="default"
+						onClick={() => setLayoutConfirmOpen(false)}
+					>
+						Annuler
+					</Button>
+					<Button
+						color="red"
+						onClick={() => {
+							setLayoutConfirmOpen(false);
+							relayoutAll();
+						}}
+					>
+						Réappliquer
+					</Button>
+				</Group>
+			</Modal>
 
 			{/* Console SNQL escamotable (bas-droit, à droite du drawer). */}
 			<CanvasConsole
@@ -1455,9 +1597,11 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 					<SidebarDrawer
 						variant="docked"
 						width={leftDrawerWidth}
-						{...(focusId === null ? { title: "Schéma" } : {})}
+						{...(focusId === null && focusFrameKey === null
+							? { title: "Schéma" }
+							: {})}
 						header={
-							focusId === null ? (
+							focusId === null && focusFrameKey === null ? (
 								<SearchInput
 									value={search}
 									onChange={(e) => setSearch(e.currentTarget.value)}
@@ -1488,7 +1632,7 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 								style={{ width: "100%" }}
 							>
 								<HintPill
-									keys={["⌘K"]}
+									keys={[`${modKey}K`]}
 									bg="transparent"
 									withBorder={false}
 									shadow="none"
@@ -1503,19 +1647,31 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 						}
 						style={{ height: "100%" }}
 					>
-						{focusId === null ? (
+						{focusFrameKey !== null && focusedFrame !== undefined ? (
+							<FrameDetails
+								frame={focusedFrame}
+								onSelectTable={focusAndZoom}
+								onRename={(label) =>
+									framesApi.renameFrame(focusedFrame.key, label)
+								}
+								onDelete={() => {
+									framesApi.removeFrame(focusedFrame.key);
+									setFocusFrameKey(null);
+								}}
+							/>
+						) : focusId !== null ? (
+							<TableDetails
+								schema={schema}
+								tableName={focusId}
+								frameLabel={framesApi.frameOfTable(focusId)?.label ?? null}
+								onSelect={focusAndZoom}
+							/>
+						) : (
 							<SchemaTree
 								schema={schema}
 								frames={framesApi.frames}
 								focusId={focusId}
 								search={search}
-								onSelect={focusAndZoom}
-							/>
-						) : (
-							<TableDetails
-								schema={schema}
-								tableName={focusId}
-								frameLabel={framesApi.frameOfTable(focusId)?.label ?? null}
 								onSelect={focusAndZoom}
 							/>
 						)}
