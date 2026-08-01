@@ -109,6 +109,11 @@ interface DrawerPaneProps {
 	readonly onClearFocus: () => void;
 	readonly onClearFocusFrame: () => void;
 	readonly onFocusTable: (name: string) => void;
+	/** Rename/delete d'un frame depuis FrameDetails. Passés depuis SchemaCanvas
+	 * pour partager le même handler que le badge du frame (inclut la
+	 * notification + le checkpoint d'historique). */
+	readonly onFrameRename?: (key: string, label: string) => void;
+	readonly onFrameDelete?: (key: string) => void;
 }
 
 /**
@@ -129,7 +134,9 @@ export function DrawerPane({
 	focusedFrame,
 	onClearFocus,
 	onClearFocusFrame,
-	onFocusTable
+	onFocusTable,
+	onFrameRename,
+	onFrameDelete
 }: DrawerPaneProps) {
 	const modKey = useModKeyLabel();
 	const isDetailsView = focusId !== null || focusFrameKey !== null;
@@ -197,11 +204,13 @@ export function DrawerPane({
 					<FrameDetails
 						frame={focusedFrame}
 						onSelectTable={onFocusTable}
-						onRename={(label) =>
-							framesApi.renameFrame(focusedFrame.key, label)
-						}
+						onRename={(label) => {
+							if (onFrameRename) onFrameRename(focusedFrame.key, label);
+							else framesApi.renameFrame(focusedFrame.key, label);
+						}}
 						onDelete={() => {
-							framesApi.removeFrame(focusedFrame.key);
+							if (onFrameDelete) onFrameDelete(focusedFrame.key);
+							else framesApi.removeFrame(focusedFrame.key);
 							onClearFocusFrame();
 						}}
 					/>

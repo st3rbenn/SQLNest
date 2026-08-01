@@ -22,7 +22,7 @@ function schemaKey(schema: SchemaModel): string {
 	return `sqlnest:positions:${schema.engine}:${names}`;
 }
 
-interface PositionsApi {
+export interface PositionsApi {
 	readonly positions: PositionsMap;
 	readonly setPosition: (name: string, xy: XY) => void;
 	readonly setManyPositions: (entries: Readonly<Record<string, XY>>) => void;

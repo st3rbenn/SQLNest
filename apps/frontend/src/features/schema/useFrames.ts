@@ -55,7 +55,7 @@ export function nextLabel(frames: readonly Frame[]): string {
 	return `Frame ${Date.now()}`;
 }
 
-interface FramesApi {
+export interface FramesApi {
 	readonly frames: readonly Frame[];
 	readonly frameOfTable: (name: string) => Frame | null;
 	readonly createFrame: (

@@ -47,6 +47,7 @@ import {
 	type Viewport
 } from "./canvas/viewport";
 import { AutoLayoutModal } from "./canvas/AutoLayoutModal";
+import { useCanvasHistory } from "./canvas/useCanvasHistory";
 import {
 	boundsOfTables,
 	computeFrameNodes,
@@ -208,6 +209,20 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 	// via lasso + F et le menu contextuel « Retirer du frame ».
 	const framesApi = useFrames(schema);
 
+	// Historique undo/redo — capture positions + sizes + frames + hiddenIds.
+	// `history.push()` doit être appelé APRÈS chaque geste user notable
+	// (drag stop, resize end, create/remove/rename frame, hide/unhide,
+	// auto-layout). Le hook maintient l'invariant « past = états
+	// pré-mutation » via un `prevRef` resynchronisé post-commit — voir
+	// `useCanvasHistory` pour l'analyse détaillée du timing.
+	const history = useCanvasHistory({
+		tablePositions,
+		tableSizes,
+		framesApi,
+		hiddenIds,
+		setHiddenIds
+	});
+
 	// Frames : deux chemins d'update qui doivent cohabiter sans se marcher
 	// dessus :
 	//   (A) DRAG du frame — le user attrape le corps → `onNodeDrag` custom
@@ -356,8 +371,9 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 		(name: string, size: { width: number; height: number; x: number; y: number }) => {
 			tableSizes.setSize(name, { width: size.width, height: size.height });
 			tablePositions.setPosition(name, { x: size.x, y: size.y });
+			history.push();
 		},
-		[tableSizes, tablePositions]
+		[tableSizes, tablePositions, history]
 	);
 
 	// Nœuds table affichés : positions vivantes (drag) + drapeaux focus + masqués.
@@ -411,30 +427,40 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 	// rect final tel que reçu du NodeResizer (précision floats + timing) et
 	// qui semblait provoquer des jumps + un état bancal empêchant le drag
 	// suivant.
-	const handleFrameResize = useCallback((key: string, newRect: FrameRect) => {
-		const api = framesApiRef.current;
-		const frame = api.frames.find((f) => f.key === key);
-		if (!frame) return;
-		const byId = new Map(nodesRef.current.map((n) => [n.id, n]));
-		for (const memberName of frame.collections) {
-			const node = byId.get(memberName);
-			if (!node) continue;
-			const w = node.width ?? NODE_WIDTH;
-			const h = node.height ?? nodeHeight(node.data.collection);
-			const center = {
-				x: node.position.x + w / 2,
-				y: node.position.y + h / 2
-			};
-			if (!rectContainsPoint(newRect, center)) {
-				api.removeTableFromFrame(memberName);
+	const handleFrameResize = useCallback(
+		(key: string, newRect: FrameRect) => {
+			const api = framesApiRef.current;
+			const frame = api.frames.find((f) => f.key === key);
+			if (!frame) return;
+			const byId = new Map(nodesRef.current.map((n) => [n.id, n]));
+			for (const memberName of frame.collections) {
+				const node = byId.get(memberName);
+				if (!node) continue;
+				const w = node.width ?? NODE_WIDTH;
+				const h = node.height ?? nodeHeight(node.data.collection);
+				const center = {
+					x: node.position.x + w / 2,
+					y: node.position.y + h / 2
+				};
+				if (!rectContainsPoint(newRect, center)) {
+					api.removeTableFromFrame(memberName);
+				}
 			}
-		}
-	}, []);
+			// Le rect final a déjà été persisté en direct par `handleNodesChange`
+			// (intercept live des dimensions). On checkpoint ici, une seule fois
+			// au release — pas pendant le drag continu du handle.
+			history.push();
+		},
+		[history]
+	);
 
 	// Rename inline depuis le badge d'un frame (double-clic → input → Enter).
 	const handleFrameRename = useCallback(
-		(key: string, label: string) => framesApi.renameFrame(key, label),
-		[framesApi]
+		(key: string, label: string) => {
+			framesApi.renameFrame(key, label);
+			history.push();
+		},
+		[framesApi, history]
 	);
 
 	// Right-click sur le badge d'un frame → supprime (l'auto-delete a été
@@ -451,8 +477,9 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 					autoClose: 2500
 				});
 			}
+			history.push();
 		},
-		[framesApi]
+		[framesApi, history]
 	);
 
 	const handleFrameFocus = useCallback(
@@ -817,6 +844,7 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 			if (rect !== null) framesApi.setFrameRect(frame.key, rect);
 		}
 		applyOverview();
+		history.push();
 	};
 
 	const hideTable = (name: string) => {
@@ -832,9 +860,13 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 			color: "blue",
 			autoClose: 2000
 		});
+		history.push();
 	};
 
-	const unhideAll = () => setHiddenIds(new Set());
+	const unhideAll = () => {
+		setHiddenIds(new Set());
+		history.push();
+	};
 
 	// ─── frames user-defined (tour 1d) ────────────────────────────────────
 	// Shortcut `F` : crée un frame à partir de la sélection courante.
@@ -852,7 +884,8 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 			color: "green",
 			autoClose: 2500
 		});
-	}, [selectedTables, nodes, framesApi]);
+		history.push();
+	}, [selectedTables, nodes, framesApi, history]);
 
 	const hideSelected = useCallback(() => {
 		if (selectedTables.length === 0) return;
@@ -861,7 +894,8 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 			for (const t of selectedTables) next.add(t);
 			return next;
 		});
-	}, [selectedTables]);
+		history.push();
+	}, [selectedTables, history]);
 
 	useEffect(() => {
 		function onKey(e: KeyboardEvent) {
@@ -1062,6 +1096,8 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 						if (Object.keys(entries).length > 0) {
 							tablePositions.setManyPositions(entries);
 						}
+						// Checkpoint après drag frame (rect + positions membres).
+						history.push();
 						return;
 					}
 					// Une table posée : recalcule son appartenance à un frame en
@@ -1094,6 +1130,9 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 					}
 					// Persiste la position finale (survit au refresh).
 					tablePositions.setPosition(node.id, node.position);
+					// Checkpoint après drag stop d'une table (position + éventuel
+					// changement de membership frame).
+					history.push();
 				}}
 				onPaneClick={() => {
 					setFocusId(null);
@@ -1232,6 +1271,8 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 					onClearFocus={clearFocus}
 					onClearFocusFrame={() => setFocusFrameKey(null)}
 					onFocusTable={focusAndZoom}
+					onFrameRename={handleFrameRename}
+					onFrameDelete={handleFrameDelete}
 				/>
 			) : null}
 
@@ -1294,12 +1335,14 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 					onClose={() => setMenu(null)}
 					onHide={hideTable}
 					onFocus={focusAndZoom}
-					onAddToFrame={(frameKey) =>
-						framesApi.addTableToFrame(frameKey, menu.tableName)
-					}
-					onRemoveFromFrame={() =>
-						framesApi.removeTableFromFrame(menu.tableName)
-					}
+					onAddToFrame={(frameKey) => {
+						framesApi.addTableToFrame(frameKey, menu.tableName);
+						history.push();
+					}}
+					onRemoveFromFrame={() => {
+						framesApi.removeTableFromFrame(menu.tableName);
+						history.push();
+					}}
 				/>
 			) : null}
 

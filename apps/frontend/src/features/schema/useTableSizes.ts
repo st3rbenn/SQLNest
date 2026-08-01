@@ -22,7 +22,7 @@ function schemaKey(schema: SchemaModel): string {
 	return `sqlnest:sizes:${schema.engine}:${names}`;
 }
 
-interface SizesApi {
+export interface SizesApi {
 	readonly sizes: SizesMap;
 	readonly setSize: (name: string, size: TableSize) => void;
 	readonly replaceAll: (sizes: SizesMap) => void;
