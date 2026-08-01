@@ -26,7 +26,7 @@ function detectIsMac(): boolean {
 // retourne false, le client peut retourner true au mount.
 const subscribe = (): (() => void) => () => {};
 
-export function useIsMac(): boolean {
+function useIsMac(): boolean {
 	return useSyncExternalStore(
 		subscribe,
 		detectIsMac,

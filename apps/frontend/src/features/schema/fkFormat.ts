@@ -41,20 +41,6 @@ export function joinPreview(from: FieldRef, to: FieldRef): string {
 }
 
 /**
- * Ligne d'en-tête compacte pour le tooltip : kind + origine + confidence
- * si non-triviale (< 1). "N:1 · FK déclarée" ou "N:1 · inférée (nommage) · 60%".
- */
-export function formatHeader(rel: Relation): string {
-	const kind = formatKind(rel.kind);
-	const origin = formatOrigin(rel.origin);
-	const parts = [kind, origin];
-	if (rel.origin !== "foreign-key" && rel.confidence < 1) {
-		parts.push(`${Math.round(rel.confidence * 100)}%`);
-	}
-	return parts.join(" · ");
-}
-
-/**
  * Phrase humaine décrivant la relation, structurée pour permettre au
  * consommateur (tooltip UI) de mettre les noms de tables en gras.
  * - many-to-one → "Chaque {from} appartient à un {to}"

@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
 	formatColumns,
-	formatHeader,
 	formatKind,
 	formatOrigin,
 	humanFooter,
@@ -9,7 +8,6 @@ import {
 	humanRelation,
 	joinPreview
 } from "./fkFormat";
-import type { Relation } from "./schema-model";
 
 describe("formatColumns", () => {
 	it("single field → collection.field", () => {
@@ -77,46 +75,6 @@ describe("joinPreview", () => {
 			{ collection: "b", fields: ["id"] }
 		);
 		expect(sql).toBe("JOIN b ON a.x = b.id AND a.y = b.id");
-	});
-});
-
-describe("formatHeader", () => {
-	const base: Omit<Relation, "kind" | "origin" | "confidence"> = {
-		from: { collection: "orders", fields: ["user_id"] },
-		to: { collection: "users", fields: ["id"] }
-	};
-
-	it("FK déclarée (confidence 1) → kind · origine, sans %", () => {
-		expect(
-			formatHeader({
-				...base,
-				kind: "many-to-one",
-				origin: "foreign-key",
-				confidence: 1
-			})
-		).toBe("N:1 · FK déclarée");
-	});
-
-	it("inférée nommage confidence 0.6 → montre le %", () => {
-		expect(
-			formatHeader({
-				...base,
-				kind: "many-to-one",
-				origin: "naming-heuristic",
-				confidence: 0.6
-			})
-		).toBe("N:1 · inférée (nommage) · 60%");
-	});
-
-	it("inférée confidence 1 → pas de % (trivial)", () => {
-		expect(
-			formatHeader({
-				...base,
-				kind: "one-to-many",
-				origin: "ai",
-				confidence: 1
-			})
-		).toBe("1:N · inférée (IA)");
 	});
 });
 

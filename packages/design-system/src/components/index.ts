@@ -16,11 +16,6 @@ export {
 	ConfirmModal,
 	type ConfirmModalProps,
 } from "./ConfirmModal/ConfirmModal";
-export {
-	EngineTabs,
-	type EngineTabsProps,
-	type EngineValue,
-} from "./EngineTabs/EngineTabs";
 export { FrameBadge, type FrameBadgeProps } from "./FrameBadge/FrameBadge";
 export { HintPill, type HintPillProps } from "./HintPill/HintPill";
 export {

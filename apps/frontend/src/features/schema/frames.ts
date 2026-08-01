@@ -52,7 +52,7 @@ const SAMPLE_TABLES: ReadonlySet<string> = new Set(
 
 /**
  * Regroupe les tables en frames colorés pour l'aperçu macro. Minimum viable
- * 1a : la fixture d'exemple (`SAMPLE_POSTGRES`/`SAMPLE_MONGODB`) porte deux
+ * 1a : la fixture d'exemple (`SAMPLE_POSTGRES`) porte deux
  * frames statiques ; toute base introspectée avec des tables **hors sample**
  * renvoie une liste vide (les frames sont visuellement trompeurs si une
  * partie des tables du canvas n'est couverte par aucun frame — un frame
