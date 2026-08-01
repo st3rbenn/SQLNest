@@ -79,8 +79,11 @@ import { useFrames } from "./useFrames";
 import { useTablePositions, type XY } from "./useTablePositions";
 import { useTableSizes } from "./useTableSizes";
 
-const DECLARED = "#2563eb";
-const INFERRED = "#d97706";
+// Couleurs des edges — accent bleu Figma pour les FK déclarées, jaune
+// warning pour les FK inférées (jamais confirmées par la DB). Toutes deux
+// choisies pour rester lisibles sur `#1E1E1E`.
+const DECLARED = "#0d99ff";
+const INFERRED = "#ffc933";
 const nodeTypes = { table: TableNode, frame: FrameNode };
 const edgeTypes = { fk: InteractiveEdge };
 
@@ -669,9 +672,12 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 				...(targetHandle !== undefined ? { targetHandle } : {}),
 				style: {
 					...e.style,
-					stroke: dim ? "#cbd5e1" : inferred ? INFERRED : DECLARED,
+					// Sur bg #1E1E1E, un gris clair « pop » plus qu'il ne s'estompe.
+					// On utilise text-tertiary (#7A7A7A) qui reste lisible sans voler
+					// l'attention au chemin focus.
+					stroke: dim ? "#7a7a7a" : inferred ? INFERRED : DECLARED,
 					strokeWidth: touchesFocus ? 2.5 : 1.5,
-					opacity: dim ? 0.35 : 1
+					opacity: dim ? 0.5 : 1
 				},
 				zIndex: touchesFocus ? 10 : 0,
 				data: {
@@ -1012,7 +1018,7 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 						alignItems: "center",
 						justifyContent: "center",
 						fontSize: 13,
-						color: "#64748b",
+						color: "var(--sqlnest-text-secondary)",
 						pointerEvents: "none",
 						zIndex: 3
 					}}
@@ -1209,7 +1215,11 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 				onlyRenderVisibleElements
 				proOptions={{ hideAttribution: false }}
 			>
-				<Background color="#e2e8f0" gap={20} />
+				{/* Grille de points fine sur bg #1E1E1E — couleur pilotée par
+				 * `--sqlnest-canvas-dot` (rgba blanc à 8% pour rester discrète).
+				 * `gap` conservé à 20 px : trop fin devient trop sale au zoom
+				 * large, trop large casse la sensation de « papier millimétré ». */}
+				<Background color="var(--sqlnest-canvas-dot)" gap={20} />
 				{/* Contrôles RF (+/−, fit) et minimap remontés au-dessus de la
 				 * console SNQL — sans ça ils passent derrière quand elle est
 				 * ouverte. Bottom = hauteur console + gap standard. */}
@@ -1228,8 +1238,11 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 							: DECLARED;
 					}}
 					nodeStrokeWidth={0}
+					// Bg + maskColor gérés par `canvas-overrides.css` (règles
+					// `.react-flow__minimap*`) pour rester cohérent avec le reste des
+					// surfaces dark. Seul le `bottom` est calculé dynamiquement ici
+					// (dépend de la console SNQL).
 					style={{
-						background: "#f8fafc",
 						bottom: consoleHeight + CONSOLE_GAP + 4
 					}}
 				/>
@@ -1239,15 +1252,15 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 							type="button"
 							onClick={clearFocus}
 							style={{
-								border: "none",
-								background: "#eff6ff",
-								color: "#2563eb",
+								border: "1px solid var(--sqlnest-border)",
+								background: "var(--sqlnest-surface)",
+								color: "var(--sqlnest-accent)",
 								fontWeight: 600,
 								fontSize: 12,
 								padding: "6px 12px",
 								borderRadius: 8,
 								cursor: "pointer",
-								boxShadow: "0 2px 8px rgba(15,23,42,0.10)"
+								boxShadow: "0 2px 8px rgba(0,0,0,0.32)"
 							}}
 						>
 							↺ tout afficher
@@ -1295,10 +1308,10 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 					top: 12,
 					left: leftDrawerVisible ? leftDrawerWidth - 18 : 8,
 					zIndex: 5,
-					background: "#fff",
-					color: "#475569",
-					border: "1px solid #e2e8f0",
-					boxShadow: "0 2px 6px rgba(15,23,42,0.10)"
+					background: "var(--sqlnest-surface)",
+					color: "var(--sqlnest-text-secondary)",
+					border: "1px solid var(--sqlnest-border)",
+					boxShadow: "0 2px 6px rgba(0,0,0,0.32)"
 				}}
 			>
 				{leftDrawerVisible ? (

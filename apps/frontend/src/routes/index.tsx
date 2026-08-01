@@ -20,11 +20,12 @@ const ENGINE = "postgres" as const;
 
 // Canvas plein écran : viewport complet (plus de top nav depuis App.tsx).
 // Les contrôles sont des panels FLOTTANTS par-dessus — le visualizer EST
-// la page, à la Figma.
+// la page, à la Figma. Bg via token — pilote la couleur du canvas RF, la
+// grille de points est peinte par `Background` de RF au-dessus.
 const pageStyle: CSSProperties = {
 	position: "relative",
 	height: "100vh",
-	background: "#fafbfc",
+	background: "var(--sqlnest-canvas-bg)",
 	overflow: "hidden"
 };
 

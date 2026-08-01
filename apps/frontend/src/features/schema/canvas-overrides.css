@@ -12,11 +12,61 @@
 }
 
 /*
+ * Sélection au lasso — RF dessine un rectangle bleu par défaut, on aligne
+ * l'accent au bleu Figma (--sqlnest-accent). Fond très translucide pour ne
+ * pas masquer les tables sous le rectangle en cours de dessin.
+ */
+.react-flow__selection {
+	background: rgba(13, 153, 255, 0.08) !important;
+	border: 1px solid var(--sqlnest-accent) !important;
+}
+
+/*
  * Contour de sélection (`.selected`) : PAS de règle CSS ici — le rendu est
  * porté par le composant `TableNode` (border interne bleu + shadow diffuse),
  * unifié avec le style `focused` pour n'avoir qu'un seul indicateur visuel
  * quel que soit le geste (click simple, Cmd/Shift+click, lasso).
  */
+
+/*
+ * MiniMap — bg surface Figma + masque nodes en accent bleu (couleur pilotée
+ * par la prop `nodeColor` côté React). Bordure discrète.
+ */
+.react-flow__minimap {
+	background: var(--sqlnest-surface) !important;
+	border: 1px solid var(--sqlnest-border) !important;
+	border-radius: 8px !important;
+}
+.react-flow__minimap-mask {
+	fill: rgba(13, 153, 255, 0.12) !important;
+	stroke: var(--sqlnest-accent) !important;
+}
+
+/*
+ * Controls (+/−, fit) — surface Figma. Les boutons individuels reprennent
+ * la teinte via les overrides ci-dessous.
+ */
+.react-flow__controls {
+	background: var(--sqlnest-surface) !important;
+	border: 1px solid var(--sqlnest-border) !important;
+	border-radius: 8px !important;
+	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.32) !important;
+	overflow: hidden;
+}
+.react-flow__controls-button {
+	background: var(--sqlnest-surface) !important;
+	color: var(--sqlnest-text-secondary) !important;
+	border-bottom: 1px solid var(--sqlnest-border-subtle) !important;
+	fill: var(--sqlnest-text-secondary) !important;
+}
+.react-flow__controls-button:hover {
+	background: var(--sqlnest-surface-hover) !important;
+	color: var(--sqlnest-text-primary) !important;
+	fill: var(--sqlnest-text-primary) !important;
+}
+.react-flow__controls-button:last-child {
+	border-bottom: none !important;
+}
 
 /*
  * Handles NodeResizer des tables : masqués par défaut, révélés au hover
@@ -47,4 +97,17 @@
 .react-flow__node-table:not(.selected):hover .react-flow__resize-control.line {
 	opacity: 0.6;
 	pointer-events: auto;
+}
+
+/*
+ * Attribution React Flow (proOptions.hideAttribution=false). Texte trop
+ * sombre sur bg noir → couleur secondary + bg transparent pour rester
+ * discret sans se fondre.
+ */
+.react-flow__attribution {
+	background: rgba(44, 44, 44, 0.85) !important;
+	color: var(--sqlnest-text-tertiary) !important;
+}
+.react-flow__attribution a {
+	color: var(--sqlnest-text-secondary) !important;
 }
