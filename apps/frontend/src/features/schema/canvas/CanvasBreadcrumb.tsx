@@ -1,5 +1,9 @@
 import { UnstyledButton } from "@mantine/core";
-import { IconDatabase, IconLeaf } from "@tabler/icons-react";
+import {
+	IconChevronRight,
+	IconDatabase,
+	IconLeaf
+} from "@tabler/icons-react";
 import type { CSSProperties } from "react";
 
 export type CanvasBreadcrumbProps = {
@@ -14,13 +18,14 @@ export type CanvasBreadcrumbProps = {
 };
 
 /**
- * Breadcrumb du canvas — haut-centre, permanent. Affiche `[icon] Postgres ·
- * public · N tables`. Les segments sont cliquables si un callback est fourni ;
- * sinon rendus en texte simple (v1 = affichage informatif, l'interactivité
- * vient dans les prochains tours — voir [[UX Canvas — Backlog]]).
+ * Breadcrumb du canvas — haut-centre, permanent. Style « moderne » façon
+ * Linear/Vercel : texte plat, chevrons entre segments, dernier segment
+ * accentué. Fond blanc légèrement translucide + blur backdrop pour rester
+ * lisible au-dessus du contenu coloré du canvas sans faire pill imposante.
  *
- * Positionné en `top: 12` — le `SelectionChip` (et le `HiddenChip` transitoire)
- * sont décalés à `top: 60` pour cohabiter sans chevauchement.
+ * Segments cliquables si un callback est fourni ; sinon rendus en texte
+ * simple. Le SelectionChip et HiddenChip transitoires sont à `top: 60`
+ * pour cohabiter.
  */
 export function CanvasBreadcrumb({
 	engine,
@@ -36,6 +41,11 @@ export function CanvasBreadcrumb({
 			? "var(--mantine-color-mint-6, #10b981)"
 			: "var(--mantine-color-brand-6, #2563eb)";
 
+	// Le dernier segment reçoit l'accent visuel (fw:600, slate-9) — les
+	// précédents sont estompés (fw:400, slate-6). Priorité au « où je suis ».
+	const hasSchema = schemaLabel !== undefined;
+	const lastIsCount = true; // count est toujours le dernier segment
+
 	return (
 		<div
 			style={{
@@ -46,33 +56,38 @@ export function CanvasBreadcrumb({
 				zIndex: 5,
 				display: "inline-flex",
 				alignItems: "center",
-				gap: 8,
-				padding: "6px 12px",
-				borderRadius: 999,
-				background: "#fff",
-				border: "1px solid var(--mantine-color-slate-2)",
-				boxShadow: "var(--mantine-shadow-md)",
-				fontSize: 12,
-				color: "var(--mantine-color-slate-7)"
+				gap: 6,
+				padding: "6px 10px",
+				borderRadius: 8,
+				background: "rgba(255, 255, 255, 0.85)",
+				backdropFilter: "blur(8px)",
+				WebkitBackdropFilter: "blur(8px)",
+				fontSize: 12.5
 			}}
 			aria-label="Contexte du canvas"
 		>
-			<Segment onClick={onEngineClick}>
-				<Icon size={14} stroke={2} style={{ color: engineColor }} />
-				<span style={{ fontWeight: 600 }}>{engineLabel}</span>
+			<Segment onClick={onEngineClick} accent={false}>
+				<Icon
+					size={14}
+					stroke={2}
+					style={{ color: engineColor, flexShrink: 0 }}
+				/>
+				<span>{engineLabel}</span>
 			</Segment>
-			{schemaLabel !== undefined ? (
+			{hasSchema ? (
 				<>
 					<Sep />
-					<Segment onClick={onSchemaClick}>
+					<Segment onClick={onSchemaClick} accent={false}>
 						<code style={codeStyle}>{schemaLabel}</code>
 					</Segment>
 				</>
 			) : null}
 			<Sep />
-			<span style={{ color: "var(--mantine-color-slate-5)" }}>
-				{tableCount} table{tableCount > 1 ? "s" : ""}
-			</span>
+			<Segment accent={lastIsCount}>
+				<span>
+					{tableCount} table{tableCount > 1 ? "s" : ""}
+				</span>
+			</Segment>
 		</div>
 	);
 }
@@ -80,31 +95,37 @@ export function CanvasBreadcrumb({
 const codeStyle: CSSProperties = {
 	fontFamily: "var(--mantine-font-family-monospace)",
 	fontSize: 11.5,
-	color: "var(--mantine-color-slate-8)",
-	background: "var(--mantine-color-slate-0)",
-	padding: "1px 6px",
-	borderRadius: 4
-};
-
-const segmentBaseStyle: CSSProperties = {
-	display: "inline-flex",
-	alignItems: "center",
-	gap: 4,
-	color: "inherit"
+	color: "inherit",
+	background: "transparent",
+	padding: 0
 };
 
 function Segment({
 	onClick,
+	accent,
 	children
 }: {
 	onClick?: () => void;
+	accent: boolean;
 	children: React.ReactNode;
 }) {
+	const style: CSSProperties = {
+		display: "inline-flex",
+		alignItems: "center",
+		gap: 4,
+		color: accent
+			? "var(--mantine-color-slate-9)"
+			: "var(--mantine-color-slate-6)",
+		fontWeight: accent ? 600 : 400
+	};
 	if (onClick === undefined) {
-		return <span style={segmentBaseStyle}>{children}</span>;
+		return <span style={style}>{children}</span>;
 	}
 	return (
-		<UnstyledButton onClick={onClick} style={segmentBaseStyle}>
+		<UnstyledButton
+			onClick={onClick}
+			style={{ ...style, cursor: "pointer" }}
+		>
 			{children}
 		</UnstyledButton>
 	);
@@ -112,8 +133,11 @@ function Segment({
 
 function Sep() {
 	return (
-		<span style={{ color: "var(--mantine-color-slate-3)" }} aria-hidden="true">
-			·
-		</span>
+		<IconChevronRight
+			size={12}
+			stroke={2}
+			style={{ color: "var(--mantine-color-slate-3)", flexShrink: 0 }}
+			aria-hidden="true"
+		/>
 	);
 }
