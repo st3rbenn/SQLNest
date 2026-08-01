@@ -4,7 +4,7 @@ import {
 	focusZoom,
 	overviewViewport,
 	tablesBounds
-} from "./SchemaCanvas";
+} from "./canvas/viewport";
 import type { TableNodeType } from "./TableNode";
 
 function n(id: string, x: number, y: number, w: number, h: number): TableNodeType {
