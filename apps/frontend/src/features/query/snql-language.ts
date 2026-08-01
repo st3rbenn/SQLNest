@@ -37,14 +37,14 @@ const CM_TYPE: Readonly<Record<SnqlCompletionType, string>> = {
 const IDENT_CONTINUE = /^[A-Za-z0-9_]*$/;
 
 /**
- * Source de complétion CodeMirror déléguant au language service pur `completeSnql`
- * de `@sqlnest/snql`. Le SchemaModel courant est lu paresseusement (`getSchema`)
- * pour ne pas recréer l'éditeur au changement de moteur/schéma.
+ * Source CodeMirror pure — délègue au language service `completeSnql` du cœur et
+ * mappe les catégories SNQL vers les types d'icônes CM. Exportée séparément pour
+ * pouvoir la tester sans instancier un `EditorView`.
  */
-export function snqlCompletion(
+export function snqlCompletionSource(
 	getSchema: () => SchemaModel | undefined
-): Extension {
-	const source = (ctx: CompletionContext): CompletionResult | null => {
+): (ctx: CompletionContext) => CompletionResult | null {
+	return (ctx) => {
 		const schema = getSchema();
 		if (schema === undefined) {
 			return null;
@@ -72,8 +72,20 @@ export function snqlCompletion(
 			validFor: IDENT_CONTINUE
 		};
 	};
+}
 
-	return autocompletion({ override: [source], activateOnTyping: true });
+/**
+ * Extension CodeMirror : câble `snqlCompletionSource` dans le pipeline
+ * `autocompletion`. Le SchemaModel courant est lu paresseusement (`getSchema`)
+ * pour ne pas recréer l'éditeur au changement de moteur/schéma.
+ */
+export function snqlCompletion(
+	getSchema: () => SchemaModel | undefined
+): Extension {
+	return autocompletion({
+		override: [snqlCompletionSource(getSchema)],
+		activateOnTyping: true
+	});
 }
 
 // --- Coloration syntaxique (StreamLanguage, tokens = Token Dictionary) --------
