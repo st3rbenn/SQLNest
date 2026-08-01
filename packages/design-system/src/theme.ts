@@ -1,68 +1,88 @@
 import { createTheme, type MantineColorsTuple } from "@mantine/core";
 
+/**
+ * Palette dark-first alignée sur les tokens Figma (voir `tokens.css`).
+ *
+ * Les slate/brand sont générés autour de la surface `#2C2C2C` — Mantine
+ * consomme ces tuples pour tous ses composants (Text `c="dimmed"`, Paper,
+ * Menu, Tooltip, …). L'index 6 est le shade « primary » utilisé par défaut,
+ * l'index 4 le shade dark équivalent (Mantine bascule automatiquement selon
+ * `colorScheme`). On aligne les deux (nous n'avons qu'un thème dark) pour
+ * garder un rendu cohérent quel que soit le shade demandé.
+ */
 const slate: MantineColorsTuple = [
-	"#f8fafc",
-	"#f1f5f9",
-	"#e2e8f0",
-	"#cbd5e1",
-	"#94a3b8",
-	"#64748b",
-	"#475569",
-	"#334155",
-	"#1e293b",
-	"#0f172a",
+	"#ffffff", // 0 — text-primary
+	"#f0f0f0",
+	"#d9d9d9",
+	"#b3b3b3", // 3 — text-secondary
+	"#8a8a8a",
+	"#7a7a7a", // 5 — text-tertiary
+	"#5a5a5a",
+	"#444444", // 7 — border
+	"#363636", // 8 — surface-hover
+	"#2c2c2c", // 9 — surface
 ];
 
-const blue: MantineColorsTuple = [
-	"#eff6ff",
-	"#dbeafe",
-	"#bfdbfe",
-	"#93c5fd",
-	"#60a5fa",
-	"#3b82f6",
-	"#2563eb",
-	"#1d4ed8",
-	"#1e40af",
-	"#1e3a8a",
+/**
+ * Brand = accent Figma `#0D99FF`. On construit les shades autour pour que
+ * Mantine puisse dériver les hover / press states.
+ */
+const brand: MantineColorsTuple = [
+	"#e6f5ff",
+	"#cceaff",
+	"#99d5ff",
+	"#66c0ff",
+	"#3aabff", // hover
+	"#0d99ff", // 5 — accent Figma
+	"#0b85e0",
+	"#0971bf",
+	"#075c9f",
+	"#04487f",
 ];
 
+/**
+ * Amber = warning Figma `#FFC933`. Utilisé pour les PK badges + les tags
+ * « bientôt disponible » côté notifications.
+ */
 const amber: MantineColorsTuple = [
-	"#fffbeb",
-	"#fef3c7",
-	"#fde68a",
-	"#fcd34d",
-	"#fbbf24",
-	"#f59e0b",
-	"#d97706",
-	"#b45309",
-	"#92400e",
-	"#78350f",
+	"#fff8e0",
+	"#fff0b8",
+	"#ffe485",
+	"#ffd85c",
+	"#ffce42",
+	"#ffc933", // 5 — warning Figma
+	"#d9aa2b",
+	"#b38c23",
+	"#8c6e1b",
+	"#665013",
 ];
 
+/** Emerald = success (statut live). Dark-tuned pour rester lisible sur `#2C2C2C`. */
 const emerald: MantineColorsTuple = [
-	"#ecfdf5",
-	"#d1fae5",
-	"#a7f3d0",
-	"#6ee7b7",
-	"#34d399",
-	"#10b981",
-	"#059669",
-	"#047857",
-	"#065f46",
-	"#064e3b",
+	"#e6fbf3",
+	"#c8f5e2",
+	"#8be8bd",
+	"#4ddb99",
+	"#22cc7e",
+	"#10b981", // 5 — success
+	"#0e9c6d",
+	"#0b7e58",
+	"#086144",
+	"#054530",
 ];
 
+/** Red = danger (erreurs de requête, actions destructives). */
 const red: MantineColorsTuple = [
-	"#fef2f2",
-	"#fee2e2",
-	"#fecaca",
-	"#fca5a5",
-	"#f87171",
-	"#ef4444",
-	"#dc2626",
-	"#b91c1c",
-	"#991b1b",
-	"#7f1d1d",
+	"#fdecec",
+	"#fbd0d0",
+	"#f8a5a5",
+	"#f47a7a",
+	"#f14f4f",
+	"#ef4444", // 5 — danger
+	"#cc3939",
+	"#a82f2f",
+	"#852525",
+	"#621b1b",
 ];
 
 // Hues used by frames + table headers on the canvas (mockup 1a).
@@ -77,11 +97,17 @@ export const FRAME_HUES = {
 
 export type FrameHueKey = keyof typeof FRAME_HUES;
 
+/**
+ * Thème Mantine — dark-only. `primaryShade` figé à 5 (l'accent Figma) pour
+ * light et dark : nous n'exposons pas de toggle, mais Mantine peut demander
+ * le shade en interne (SegmentedControl, focus rings…). Aligner évite les
+ * variations dépendantes du mode calculé.
+ */
 export const theme = createTheme({
 	primaryColor: "brand",
-	primaryShade: { light: 6, dark: 5 },
+	primaryShade: { light: 5, dark: 5 },
 	colors: {
-		brand: blue,
+		brand,
 		slate,
 		amber,
 		emerald,
@@ -105,15 +131,15 @@ export const theme = createTheme({
 		fontWeight: "700",
 	},
 	shadows: {
-		xs: "0 1px 3px rgba(15,23,42,0.08)",
-		sm: "0 2px 6px rgba(15,23,42,0.10)",
-		md: "0 4px 16px rgba(15,23,42,0.10)",
-		lg: "0 8px 24px rgba(15,23,42,0.12)",
-		xl: "0 24px 60px -20px rgba(15,23,42,0.25), 0 2px 6px rgba(15,23,42,0.06)",
+		xs: "0 1px 3px rgba(0,0,0,0.24)",
+		sm: "0 2px 6px rgba(0,0,0,0.28)",
+		md: "0 4px 16px rgba(0,0,0,0.32)",
+		lg: "0 8px 24px rgba(0,0,0,0.4)",
+		xl: "0 24px 60px -20px rgba(0,0,0,0.55), 0 2px 6px rgba(0,0,0,0.3)",
 	},
 	other: {
 		frameHues: FRAME_HUES,
-		canvasBg: "#eef1f5",
-		canvasSurface: "#fafbfc",
+		canvasBg: "#1E1E1E",
+		canvasSurface: "#2C2C2C",
 	},
 });

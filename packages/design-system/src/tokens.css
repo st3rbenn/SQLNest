@@ -1,0 +1,51 @@
+/*
+ * Tokens Figma — palette dark-first du canvas SQLNest.
+ *
+ * On les expose comme CSS variables globales pour deux raisons :
+ *  - être consommables depuis les styles inline React (une seule source de
+ *    vérité), depuis les CSS override (canvas RF), et depuis les composants
+ *    DS qui posent leurs propres surfaces / bordures.
+ *  - permettre à un futur toggle (light) de ré-écrire ces mêmes variables
+ *    sur `:root[data-theme="light"]` sans toucher au code — c'est ici que se
+ *    branche la migration inverse. Aujourd'hui il n'y a QU'UN thème dark.
+ *
+ * Convention de nommage : `--sqlnest-*` pour distinguer nos tokens des
+ * variables Mantine (`--mantine-color-*`) et éviter tout risque de collision.
+ */
+:root {
+	/* Surfaces */
+	--sqlnest-canvas-bg: #1e1e1e;
+	--sqlnest-surface: #2c2c2c;
+	/* Surface légèrement plus claire pour hover / rows actives. */
+	--sqlnest-surface-hover: #363636;
+
+	/* Bordures */
+	--sqlnest-border: #444444;
+	/* Border subtile pour séparateurs internes (< contrastée que --border). */
+	--sqlnest-border-subtle: #333333;
+
+	/* Texte */
+	--sqlnest-text-primary: #ffffff;
+	--sqlnest-text-secondary: #b3b3b3;
+	--sqlnest-text-tertiary: #7a7a7a;
+
+	/* Accent (liens, focus, selection, primary CTAs) — bleu Figma. */
+	--sqlnest-accent: #0d99ff;
+	--sqlnest-accent-hover: #3aabff;
+	--sqlnest-accent-soft: rgba(13, 153, 255, 0.15);
+
+	/* PK / warning — jaune Figma. */
+	--sqlnest-warning: #ffc933;
+	--sqlnest-warning-soft: rgba(255, 201, 51, 0.15);
+
+	/* Danger — utilisé pour les erreurs de requête, actions destructives. */
+	--sqlnest-danger: #ef4444;
+	--sqlnest-danger-soft: rgba(239, 68, 68, 0.15);
+
+	/* Succès — connexion live, notif positive. */
+	--sqlnest-success: #10b981;
+	--sqlnest-success-soft: rgba(16, 185, 129, 0.15);
+
+	/* Grille de points du canvas (React Flow Background). */
+	--sqlnest-canvas-dot: rgba(255, 255, 255, 0.08);
+}
