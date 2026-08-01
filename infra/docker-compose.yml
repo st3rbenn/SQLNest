@@ -25,6 +25,27 @@ services:
       timeout: 3s
       retries: 15
 
+  # Postgres APPLICATIF — isolé du Postgres démo. Stocke les données SQLNest
+  # (users, sessions, canvas_state — au fur et à mesure des phases auth).
+  # Port hôte 5434 pour ne pas entrer en conflit avec le Postgres démo (5433)
+  # ni un Postgres natif (5432). Identifiants DEV uniquement.
+  postgres-app:
+    image: postgres:16-alpine
+    container_name: sqlnest-postgres-app
+    environment:
+      POSTGRES_USER: sqlnest_app
+      POSTGRES_PASSWORD: sqlnest_app_dev
+      POSTGRES_DB: sqlnest_app
+    ports:
+      - "5434:5432"
+    volumes:
+      - pgdata_app:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sqlnest_app -d sqlnest_app"]
+      interval: 3s
+      timeout: 3s
+      retries: 15
+
   mongo:
     image: mongo:7
     container_name: sqlnest-mongo
@@ -45,4 +66,5 @@ services:
 
 volumes:
   pgdata:
+  pgdata_app:
   mongodata:

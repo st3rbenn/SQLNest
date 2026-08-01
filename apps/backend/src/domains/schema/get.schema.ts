@@ -31,14 +31,14 @@ const FieldSchema = z.object({
 
 const CollectionSchema = z.object({
 	name: z.string(),
-	fields: z.array(FieldSchema),
-	primaryKey: z.array(z.string()).optional(),
+	fields: z.array(FieldSchema).readonly(),
+	primaryKey: z.array(z.string()).readonly().optional(),
 	source: Source
 });
 
 const FieldRefSchema = z.object({
 	collection: z.string(),
-	fields: z.array(z.string())
+	fields: z.array(z.string()).readonly()
 });
 
 const RelationSchema = z.object({
@@ -51,8 +51,8 @@ const RelationSchema = z.object({
 
 export const GetSchemaResponseSchema = z.object({
 	engine: z.string(),
-	collections: z.array(CollectionSchema),
-	relations: z.array(RelationSchema)
+	collections: z.array(CollectionSchema).readonly(),
+	relations: z.array(RelationSchema).readonly()
 });
 
 export const GetSchemaQuerySchema = z.object({
