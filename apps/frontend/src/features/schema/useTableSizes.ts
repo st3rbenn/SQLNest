@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { SchemaModel } from "./schema-model";
 
 export interface TableSize {
@@ -34,43 +34,45 @@ interface SizesApi {
  * user peut vouloir aplatir une table ou l'agrandir pour aligner visuellement
  * plusieurs cartes).
  */
-export function useTableSizes(schema: SchemaModel): SizesApi {
-	const [sizes, setSizes] = useState<SizesMap>(() => {
-		if (typeof window === "undefined") return {};
-		try {
-			const raw = window.localStorage.getItem(schemaKey(schema));
-			if (raw !== null) return JSON.parse(raw) as SizesMap;
-		} catch {
-			/* storage indispo / JSON corrompu */
-		}
-		return {};
-	});
+function loadSizes(key: string): SizesMap {
+	if (typeof window === "undefined") return {};
+	try {
+		const raw = window.localStorage.getItem(key);
+		if (raw !== null) return JSON.parse(raw) as SizesMap;
+	} catch {
+		/* storage indispo / JSON corrompu */
+	}
+	return {};
+}
 
-	// Persist à chaque mutation.
+export function useTableSizes(schema: SchemaModel): SizesApi {
+	const key = schemaKey(schema);
+	const [sizes, setSizes] = useState<SizesMap>(() => loadSizes(key));
+
+	// Track quel `key` est actuellement représenté par `sizes` en state.
+	// Sert à distinguer un vrai mutate (persist OK) d'un pending re-seed après
+	// changement de schéma (persist SKIP, sinon on corrompt le nouveau key).
+	const loadedKey = useRef(key);
+
+	// Re-seed quand la signature change (nouvelle base).
+	useEffect(() => {
+		if (loadedKey.current === key) return;
+		const loaded = loadSizes(key);
+		loadedKey.current = key;
+		setSizes(loaded);
+	}, [key]);
+
+	// Persist — seulement si le key en état matche le key courant (voir
+	// commentaire dans `useTablePositions` pour l'analyse détaillée du bug).
 	useEffect(() => {
 		if (typeof window === "undefined") return;
+		if (loadedKey.current !== key) return;
 		try {
-			window.localStorage.setItem(schemaKey(schema), JSON.stringify(sizes));
+			window.localStorage.setItem(key, JSON.stringify(sizes));
 		} catch {
 			/* quota / private mode */
 		}
-	}, [sizes, schema]);
-
-	// Re-seed quand la signature change (nouvelle base).
-	const key = schemaKey(schema);
-	useEffect(() => {
-		if (typeof window === "undefined") return;
-		const raw = window.localStorage.getItem(key);
-		if (raw !== null) {
-			try {
-				setSizes(JSON.parse(raw) as SizesMap);
-				return;
-			} catch {
-				/* fallthrough */
-			}
-		}
-		setSizes({});
-	}, [key]);
+	}, [key, sizes]);
 
 	const setSize = useCallback((name: string, size: TableSize) => {
 		setSizes((prev) => ({ ...prev, [name]: size }));

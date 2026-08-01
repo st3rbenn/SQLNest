@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { SchemaModel } from "./schema-model";
 
 export interface XY {
@@ -37,46 +37,51 @@ interface PositionsApi {
  * Contrat : c'est un SNAPSHOT read-only côté API + deux setters. On ne
  * fournit pas de reset — l'utilisateur clear en supprimant `localStorage`.
  */
-export function useTablePositions(schema: SchemaModel): PositionsApi {
-	const [positions, setPositions] = useState<PositionsMap>(() => {
-		if (typeof window === "undefined") return {};
-		try {
-			const raw = window.localStorage.getItem(schemaKey(schema));
-			if (raw !== null) return JSON.parse(raw) as PositionsMap;
-		} catch {
-			/* storage indispo / JSON corrompu */
-		}
-		return {};
-	});
+function loadPositions(key: string): PositionsMap {
+	if (typeof window === "undefined") return {};
+	try {
+		const raw = window.localStorage.getItem(key);
+		if (raw !== null) return JSON.parse(raw) as PositionsMap;
+	} catch {
+		/* storage indispo / JSON corrompu */
+	}
+	return {};
+}
 
-	// Persist à chaque mutation.
+export function useTablePositions(schema: SchemaModel): PositionsApi {
+	const key = schemaKey(schema);
+	const [positions, setPositions] = useState<PositionsMap>(() => loadPositions(key));
+
+	// Track quel `key` est actuellement représenté par `positions` en state.
+	// Sert à distinguer un vrai mutate user (persist OK) d'un pending re-seed
+	// après un changement de schéma (persist SKIP, sinon on écraserait le
+	// nouveau key avec les vieilles positions avant que le re-seed effect
+	// n'ait eu le temps de fire).
+	const loadedKey = useRef(key);
+
+	// Re-seed quand la signature change (nouvelle base) : lit le nouveau key
+	// puis met à jour `loadedKey` — l'effet de persist ci-dessous devient alors
+	// autorisé sur ce nouveau key.
+	useEffect(() => {
+		if (loadedKey.current === key) return;
+		const loaded = loadPositions(key);
+		loadedKey.current = key;
+		setPositions(loaded);
+	}, [key]);
+
+	// Persist positions au localStorage — SEULEMENT si le key en état matche
+	// le key courant. Sinon (transition de schéma), le re-seed ci-dessus n'a
+	// pas encore tourné, et écrire les vieilles positions au nouveau key
+	// corromprait le storage.
 	useEffect(() => {
 		if (typeof window === "undefined") return;
+		if (loadedKey.current !== key) return;
 		try {
-			window.localStorage.setItem(
-				schemaKey(schema),
-				JSON.stringify(positions)
-			);
+			window.localStorage.setItem(key, JSON.stringify(positions));
 		} catch {
 			/* quota / private mode */
 		}
-	}, [positions, schema]);
-
-	// Re-seed quand la signature change (nouvelle base).
-	const key = schemaKey(schema);
-	useEffect(() => {
-		if (typeof window === "undefined") return;
-		const raw = window.localStorage.getItem(key);
-		if (raw !== null) {
-			try {
-				setPositions(JSON.parse(raw) as PositionsMap);
-				return;
-			} catch {
-				/* fallthrough */
-			}
-		}
-		setPositions({});
-	}, [key]);
+	}, [key, positions]);
 
 	const setPosition = useCallback((name: string, xy: XY) => {
 		setPositions((prev) => ({ ...prev, [name]: xy }));

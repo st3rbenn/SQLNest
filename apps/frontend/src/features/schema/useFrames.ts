@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { FRAME_HUES } from "@sqlnest/design-system";
 import type { Frame, FrameRect } from "./frames";
 import { framesFor } from "./frames";
@@ -75,43 +75,45 @@ interface FramesApi {
  * schéma. Semé par `framesFor(schema)` au 1er accès (compat avec les
  * frames statiques du sample). Toutes les mutations ré-écrivent le storage.
  */
-export function useFrames(schema: SchemaModel): FramesApi {
-	const [frames, setFrames] = useState<readonly Frame[]>(() => {
-		if (typeof window === "undefined") return framesFor(schema);
-		try {
-			const raw = window.localStorage.getItem(schemaKey(schema));
-			if (raw !== null) return JSON.parse(raw) as Frame[];
-		} catch {
-			// storage indisponible ou JSON corrompu — repart des seeds.
-		}
-		return framesFor(schema);
-	});
+function loadFrames(schema: SchemaModel): readonly Frame[] {
+	if (typeof window === "undefined") return framesFor(schema);
+	try {
+		const raw = window.localStorage.getItem(schemaKey(schema));
+		if (raw !== null) return JSON.parse(raw) as Frame[];
+	} catch {
+		// storage indispo / JSON corrompu — repart des seeds.
+	}
+	return framesFor(schema);
+}
 
-	// Persist à chaque mutation.
+export function useFrames(schema: SchemaModel): FramesApi {
+	const key = schemaKey(schema);
+	const [frames, setFrames] = useState<readonly Frame[]>(() => loadFrames(schema));
+
+	// Track quel `key` est actuellement représenté par `frames` en state.
+	// Sert à distinguer un vrai mutate (persist OK) d'un pending re-seed après
+	// changement de schéma (persist SKIP, sinon on corromprait le nouveau key
+	// avec les vieux frames avant que le re-seed effect ne fire).
+	const loadedKey = useRef(key);
+
+	// Re-seed quand la signature de schéma change (nouvelle base).
+	useEffect(() => {
+		if (loadedKey.current === key) return;
+		const loaded = loadFrames(schema);
+		loadedKey.current = key;
+		setFrames(loaded);
+	}, [key, schema]);
+
+	// Persist — seulement quand le key en état matche le key courant.
 	useEffect(() => {
 		if (typeof window === "undefined") return;
+		if (loadedKey.current !== key) return;
 		try {
-			window.localStorage.setItem(schemaKey(schema), JSON.stringify(frames));
+			window.localStorage.setItem(key, JSON.stringify(frames));
 		} catch {
 			/* quota / private mode */
 		}
-	}, [frames, schema]);
-
-	// Re-seed quand la signature de schéma change (nouvelle base).
-	const key = schemaKey(schema);
-	useEffect(() => {
-		if (typeof window === "undefined") return;
-		const raw = window.localStorage.getItem(key);
-		if (raw !== null) {
-			try {
-				setFrames(JSON.parse(raw) as Frame[]);
-				return;
-			} catch {
-				/* fallthrough */
-			}
-		}
-		setFrames(framesFor(schema));
-	}, [key, schema]);
+	}, [key, frames]);
 
 	const frameOfTable = useCallback(
 		(name: string): Frame | null =>

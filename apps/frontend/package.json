@@ -33,6 +33,7 @@
 	"devDependencies": {
 		"@biomejs/biome": "catalog:",
 		"@tanstack/router-plugin": "^1.132.37",
+		"@testing-library/react": "^16.3.2",
 		"@types/react": "^19.1.13",
 		"@types/react-dom": "^19.1.9",
 		"@vitejs/plugin-react": "^5.0.3",
