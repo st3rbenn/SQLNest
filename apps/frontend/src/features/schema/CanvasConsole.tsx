@@ -9,28 +9,16 @@ import {
 import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
 import { SnqlEditor } from "../query/SnqlEditor";
 import { type QueryResult, useRunQuery } from "../query/useRunQuery";
+import { ConsoleResizeHandle } from "./console/ConsoleResizeHandle";
+import {
+	consoleExampleFor,
+	useConsolePersistence
+} from "./console/useConsolePersistence";
 import type { SchemaModel } from "./schema-model";
 
 type Engine = "postgres" | "mongodb";
 
-const CONSOLE_LS_KEY = "sqlnest:canvas-console:source";
-const CONSOLE_HEIGHT_LS_KEY = "sqlnest:canvas-console:height";
-const CONSOLE_HISTORY_LS_KEY = "sqlnest:canvas-console:history";
-const HISTORY_MAX = 20;
 const CONSOLE_HEIGHT_COLLAPSED = 38;
-const CONSOLE_HEIGHT_EXPANDED_DEFAULT = 340;
-const CONSOLE_HEIGHT_MIN = 180;
-// Max = presque tout le viewport (laisse ~80 px pour la toolbar + marges).
-// Calculé au drag time pour suivre les changements de fenêtre.
-function maxHeight(): number {
-	if (typeof window === "undefined") return 800;
-	return Math.max(CONSOLE_HEIGHT_MIN, window.innerHeight - 80);
-}
-
-const EXAMPLES: Record<Engine, string> = {
-	postgres: "get users | where is_active = true | pick email, display_name",
-	mongodb: 'get orders | where status = "paid" | pick user_id, total_cents'
-};
 
 interface Props {
 	readonly engine: Engine;
@@ -51,9 +39,8 @@ interface Props {
  * - `onHeightChange` informe le parent (SchemaCanvas) de la hauteur
  *   courante — pour ajuster le bottom-offset de la toolbar afin qu'elle
  *   reste au-dessus quand la console s'ouvre.
- * - Le source est persisté en localStorage (une seule slot globale ; pas
- *   d'historique — c'est une console rapide, la page /query reste
- *   l'endroit pour les vraies sessions).
+ * - Source / hauteur / historique persistés en localStorage via
+ *   `useConsolePersistence` — une seule slot globale.
  */
 export function CanvasConsole({
 	engine,
@@ -63,55 +50,19 @@ export function CanvasConsole({
 }: Props) {
 	// État `expanded` volatile — reset au refresh. La persistance était
 	// plus embêtante qu'utile : à chaque refresh la console revenait ouverte
-	// même si l'utilisateur ne voulait pas la voir. La hauteur/source/histo
-	// restent persistés (contenu, pas chrome).
+	// même si l'utilisateur ne voulait pas la voir.
 	const [expanded, setExpanded] = useState(false);
+	const [isResizing, setIsResizing] = useState(false);
 
-	// Hauteur `expanded` persistée : l'utilisateur peut redimensionner via
-	// la poignée en haut de la console. Clampée entre MIN et MAX.
-	const [expandedHeight, setExpandedHeight] = useState<number>(() => {
-		if (typeof window === "undefined") return CONSOLE_HEIGHT_EXPANDED_DEFAULT;
-		try {
-			const raw = window.localStorage.getItem(CONSOLE_HEIGHT_LS_KEY);
-			if (raw !== null) {
-				const n = Number(raw);
-				if (
-					Number.isFinite(n) &&
-					n >= CONSOLE_HEIGHT_MIN &&
-					n <= maxHeight()
-				)
-					return n;
-			}
-		} catch {
-			/* storage indispo */
-		}
-		return CONSOLE_HEIGHT_EXPANDED_DEFAULT;
-	});
-	useEffect(() => {
-		if (typeof window === "undefined") return;
-		try {
-			window.localStorage.setItem(CONSOLE_HEIGHT_LS_KEY, String(expandedHeight));
-		} catch {
-			/* quota / private mode */
-		}
-	}, [expandedHeight]);
-
-	const [source, setSource] = useState<string>(() => {
-		if (typeof window === "undefined") return EXAMPLES[engine];
-		try {
-			return window.localStorage.getItem(CONSOLE_LS_KEY) ?? EXAMPLES[engine];
-		} catch {
-			return EXAMPLES[engine];
-		}
-	});
-	useEffect(() => {
-		if (typeof window === "undefined") return;
-		try {
-			window.localStorage.setItem(CONSOLE_LS_KEY, source);
-		} catch {
-			/* quota / private mode */
-		}
-	}, [source]);
+	const {
+		source,
+		setSource,
+		height: expandedHeight,
+		setHeight: setExpandedHeight,
+		history,
+		addHistory,
+		clearHistory
+	} = useConsolePersistence(engine);
 
 	const run = useRunQuery();
 	const result = run.data;
@@ -119,41 +70,8 @@ export function CanvasConsole({
 
 	const height = expanded ? expandedHeight : CONSOLE_HEIGHT_COLLAPSED;
 
-	// Drag pour redimensionner : dragger la poignée du haut vers le haut
-	// agrandit, vers le bas réduit. Ref pour l'état du drag (immune aux
-	// closures stales entre pointermove). `isResizing` désactive la
-	// transition height pendant le drag — sinon lag visible (transition
-	// chase constamment le nouveau setState toutes les ~16 ms).
-	const dragRef = useRef<{ startY: number; startHeight: number } | null>(null);
-	const [isResizing, setIsResizing] = useState(false);
-	const onResizeDown = (e: import("react").PointerEvent<HTMLDivElement>) => {
-		e.preventDefault();
-		(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-		dragRef.current = { startY: e.clientY, startHeight: expandedHeight };
-		setIsResizing(true);
-	};
-	const onResizeMove = (e: import("react").PointerEvent<HTMLDivElement>) => {
-		if (!dragRef.current) return;
-		const delta = dragRef.current.startY - e.clientY;
-		const next = Math.max(
-			CONSOLE_HEIGHT_MIN,
-			Math.min(maxHeight(), dragRef.current.startHeight + delta)
-		);
-		setExpandedHeight(next);
-	};
-	const onResizeUp = (e: import("react").PointerEvent<HTMLDivElement>) => {
-		if (!dragRef.current) return;
-		try {
-			(e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-		} catch {
-			/* pointer déjà relâché */
-		}
-		dragRef.current = null;
-		setIsResizing(false);
-	};
 	// Publie la hauteur au parent pour qu'il pousse la toolbar au-dessus.
-	// Ref d'égalité pour éviter de re-fire si la hauteur ne change pas
-	// (React n'appelle le callback qu'après commit, donc c'est safe).
+	// Ref d'égalité pour éviter de re-fire si la hauteur ne change pas.
 	const lastHeightRef = useRef(height);
 	useEffect(() => {
 		if (lastHeightRef.current !== height) {
@@ -162,58 +80,20 @@ export function CanvasConsole({
 		}
 	}, [height, onHeightChange]);
 
-	// Historique local des requêtes exécutées — dedup + cap MAX. Persiste
-	// en localStorage → survit au refresh. Utilisé par le menu déroulant à
-	// côté du bouton Exécuter.
-	const [history, setHistory] = useState<readonly string[]>(() => {
-		if (typeof window === "undefined") return [];
-		try {
-			const raw = window.localStorage.getItem(CONSOLE_HISTORY_LS_KEY);
-			if (raw !== null) {
-				const parsed = JSON.parse(raw);
-				if (Array.isArray(parsed)) {
-					return parsed.filter((x): x is string => typeof x === "string");
-				}
-			}
-		} catch {
-			/* storage indispo / JSON corrompu */
-		}
-		return [];
-	});
-	useEffect(() => {
-		if (typeof window === "undefined") return;
-		try {
-			window.localStorage.setItem(
-				CONSOLE_HISTORY_LS_KEY,
-				JSON.stringify(history)
-			);
-		} catch {
-			/* quota / private mode */
-		}
-	}, [history]);
-
 	const execute = () => {
 		const q = source.trim();
 		if (q === "" || run.isPending) return;
-		setHistory((prev) => {
-			const dedup = prev.filter((x) => x !== q);
-			return [q, ...dedup].slice(0, HISTORY_MAX);
-		});
+		addHistory(q);
 		run.mutate({ engine, source });
 	};
 
 	return (
 		<div style={containerStyle(leftOffset, height, isResizing)}>
 			{expanded ? (
-				<div
-					style={resizeHandleStyle}
-					onPointerDown={onResizeDown}
-					onPointerMove={onResizeMove}
-					onPointerUp={onResizeUp}
-					onPointerCancel={onResizeUp}
-					role="separator"
-					aria-orientation="horizontal"
-					aria-label="Redimensionner la console"
+				<ConsoleResizeHandle
+					height={expandedHeight}
+					onHeightChange={setExpandedHeight}
+					onResizingChange={setIsResizing}
 				/>
 			) : null}
 			<button
@@ -240,7 +120,7 @@ export function CanvasConsole({
 							onChange={setSource}
 							onRun={execute}
 							schema={schema}
-							placeholder={EXAMPLES[engine]}
+							placeholder={consoleExampleFor(engine)}
 						/>
 					</div>
 					<div style={actionsStyle}>
@@ -292,7 +172,7 @@ export function CanvasConsole({
 									</Menu.Item>
 								))}
 								<Menu.Divider />
-								<Menu.Item color="red" onClick={() => setHistory([])}>
+								<Menu.Item color="red" onClick={clearHistory}>
 									Vider l'historique
 								</Menu.Item>
 							</Menu.Dropdown>
@@ -368,21 +248,6 @@ function containerStyle(
 		flexDirection: "column"
 	};
 }
-
-// Poignée de resize collée en haut — overlap sur les 6 premiers px du header
-// (z-index supérieur). Curseur ns-resize signale l'affordance. Fond transparent
-// pour ne pas encombrer visuellement.
-const resizeHandleStyle: CSSProperties = {
-	position: "absolute",
-	top: 0,
-	left: 0,
-	right: 0,
-	height: 6,
-	cursor: "ns-resize",
-	background: "transparent",
-	zIndex: 6,
-	touchAction: "none"
-};
 
 const headerStyle: CSSProperties = {
 	all: "unset",
