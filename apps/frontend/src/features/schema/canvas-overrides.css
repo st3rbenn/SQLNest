@@ -12,6 +12,22 @@
 }
 
 /*
+ * Contour de sélection multi (Shift+click ou lasso) — visuellement fort pour
+ * qu'on distingue clairement quelles tables sont dans la sélection courante,
+ * avant d'appuyer sur F (frame) ou Masquer. Le contour est OUTSIDE la carte
+ * (offset positif) → n'écrase pas la bordure colorée du type de table.
+ * Frames pas concernés — `selectable: false` côté SchemaCanvas.
+ */
+.react-flow__node-table.selected {
+	outline: 2.5px solid var(--mantine-color-brand-6);
+	outline-offset: 3px;
+	border-radius: 12px;
+	box-shadow:
+		0 0 0 3px rgba(37, 99, 235, 0.15),
+		0 4px 12px rgba(37, 99, 235, 0.18);
+}
+
+/*
  * Handles NodeResizer des tables : masqués par défaut, révélés au hover.
  * Évite un canvas encombré de petits carrés sur toutes les tables au repos.
  * La bordure `line` (les 4 côtés) reste visible et signale la cible du drag.

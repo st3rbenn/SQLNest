@@ -1196,10 +1196,19 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 				selectionOnDrag
 				selectionMode={SelectionMode.Partial}
 				panOnDrag={[1]}
+				// Shift+click ajoute/retire une table de la sélection multi (au lieu
+				// du défaut RF Meta/Ctrl+click, moins intuitif). Le lasso reste
+				// dispo via drag sur le vide.
+				multiSelectionKeyCode="Shift"
 				onPaneContextMenu={(event) => event.preventDefault()}
-				// Clic gauche = focus visuel (ring + estompage voisins + drawer) sans
-				// bouger la vue. Double-clic = recadre sur la table (comme Figma).
-				onNodeClick={(_, node) => focusNode(node.id)}
+				// Clic gauche seul = focus visuel (drawer détails + ring + estompage).
+				// Shift+clic = laisser RF gérer la sélection multi (pas de focus,
+				// sinon le drawer switch en mode détails et masque le SelectionChip).
+				// Double-clic = recadre sur la table (comme Figma).
+				onNodeClick={(event, node) => {
+					if (event.shiftKey) return;
+					focusNode(node.id);
+				}}
 				onNodeDoubleClick={(_, node) => {
 					if ((node as { type?: string }).type === "frame") return;
 					focusAndZoom(node.id);
@@ -1539,14 +1548,16 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 			{/* Chip de sélection multi-tables (tour 1d) — visible dès qu'une
 			 * table est sélectionnée (Shift+click ou lasso). Actions : Frame (F)
 			 * → crée un frame ; Masquer → cache les tables sélectionnées ;
-			 * ✕ → clear. Anchored au-dessus de la toolbar horizontale. */}
+			 * ✕ → clear. Ancré haut-centre, sous le futur breadcrumb canvas
+			 * (engine + schema info) qui prendra `top: 12` — d'où le décalage
+			 * à ~60 px pour lui laisser la place quand il arrivera. */}
 			{selectedTables.length > 0 ? (
 				<Box
 					style={{
 						position: "absolute",
 						left: "50%",
 						transform: "translateX(-50%)",
-						bottom: 90,
+						top: 60,
 						zIndex: 6
 					}}
 				>
