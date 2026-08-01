@@ -54,6 +54,7 @@ import {
 	FRAME_PAD
 } from "./canvas/computeFrameNodes";
 import { DrawerPane, useResizableDrawer } from "./canvas/DrawerPane";
+import { CanvasBreadcrumb } from "./canvas/CanvasBreadcrumb";
 import { HiddenChip } from "./canvas/HiddenChip";
 import { useCanvasFocus } from "./canvas/useCanvasFocus";
 import { useCanvasSelection } from "./canvas/useCanvasSelection";
@@ -124,7 +125,14 @@ function makeEdge(rel: SchemaModel["relations"][number], i: number): Edge {
 	};
 }
 
-function CanvasInner({ schema }: { schema: SchemaModel }) {
+interface CanvasInnerProps {
+	schema: SchemaModel;
+	/** Nom du schéma cible (ex : `public` pour Postgres). Affiché dans le
+	 * breadcrumb — omis pour Mongo. */
+	schemaLabel?: string;
+}
+
+function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 	// Layout ELK — async. Le composant est **remonté** au changement de schéma
 	// (clé sur ReactFlowProvider), donc pas de course entre deux layouts.
 	const [base, setBase] = useState<LayoutResult | null>(null);
@@ -1367,6 +1375,15 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 				</Box>
 			) : null}
 
+			{/* Breadcrumb permanent haut-centre : engine + schéma cible + N tables. */}
+			<CanvasBreadcrumb
+				engine={schema.engine as "postgres" | "mongodb"}
+				schemaLabel={
+					schema.engine === "postgres" ? (schemaLabel ?? "public") : undefined
+				}
+				tableCount={schema.collections.length}
+			/>
+
 			{/* Chip « masqués — tout réafficher » quand ≥1 table est cachée. */}
 			{hiddenIds.size > 0 ? (
 				<HiddenChip count={hiddenIds.size} onUnhideAll={unhideAll} />
@@ -1409,7 +1426,13 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 }
 
 /** Canvas ER interactif — dompte les grands schémas via drawers + focus + recherche. */
-export function SchemaCanvas({ schema }: { schema: SchemaModel }) {
+export function SchemaCanvas({
+	schema,
+	schemaLabel
+}: {
+	schema: SchemaModel;
+	schemaLabel?: string;
+}) {
 	// Remonte tout le flow au changement de schéma : état React Flow réinitialisé
 	// proprement, le graphe se recadre au montage. Clé combinant moteur, taille et
 	// première/dernière table — assez discriminante pour deux schémas distincts.
@@ -1417,7 +1440,7 @@ export function SchemaCanvas({ schema }: { schema: SchemaModel }) {
 	const key = `${schema.engine}:${cols.length}:${cols[0]?.name ?? ""}:${cols[cols.length - 1]?.name ?? ""}`;
 	return (
 		<ReactFlowProvider key={key}>
-			<CanvasInner schema={schema} />
+			<CanvasInner schema={schema} schemaLabel={schemaLabel} />
 		</ReactFlowProvider>
 	);
 }

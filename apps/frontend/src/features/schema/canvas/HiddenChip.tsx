@@ -17,7 +17,8 @@ export function HiddenChip({ count, onUnhideAll }: HiddenChipProps) {
 			onClick={onUnhideAll}
 			style={{
 				position: "absolute",
-				top: 12,
+				// 60 px = sous le CanvasBreadcrumb (top: 12, ~34 px de haut + gap).
+				top: 60,
 				left: "50%",
 				transform: "translateX(-50%)",
 				zIndex: 5,

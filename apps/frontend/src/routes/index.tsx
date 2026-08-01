@@ -93,7 +93,7 @@ function SchemaPage() {
 				</StatusPill>
 			</FloatingPanel>
 
-			<SchemaCanvas schema={schema} />
+			<SchemaCanvas schema={schema} schemaLabel={schemaLabel} />
 		</div>
 	);
 }
