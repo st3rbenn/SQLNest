@@ -32,7 +32,6 @@ import {
 	ReactFlowProvider,
 	SelectionMode,
 	useNodesState,
-	useOnSelectionChange,
 	useReactFlow
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
@@ -63,6 +62,8 @@ import {
 	FRAME_PAD
 } from "./canvas/computeFrameNodes";
 import { HiddenChip } from "./canvas/HiddenChip";
+import { useCanvasFocus } from "./canvas/useCanvasFocus";
+import { useCanvasSelection } from "./canvas/useCanvasSelection";
 import { CanvasConsole } from "./CanvasConsole";
 import { CanvasContextMenu } from "./CanvasContextMenu";
 import { CanvasToolbar } from "./CanvasToolbar";
@@ -183,12 +184,22 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 		}
 	}, [base, setNodes]);
 
-	const [focusId, setFocusId] = useState<string | null>(null);
-	// Focus « frame » — exclusif avec focusId. Clic sur un frame → montre la
-	// liste des tables du frame dans le drawer gauche (FrameDetails). Clic sur
-	// une table → revient à focusId (TableDetails). Un seul des deux à la
-	// fois : ils partagent le même slot drawer.
-	const [focusFrameKey, setFocusFrameKey] = useState<string | null>(null);
+	// Focus canvas — table OU frame, mutuellement exclusifs (un seul drawer
+	// détails à la fois). Extrait dans `useCanvasFocus`. `onClear` réapplique
+	// l'overview ; `applyOverview` étant défini plus bas dans ce composant,
+	// on passe une closure stable qui lit la version courante via ref.
+	const applyOverviewRef = useRef<() => void>(() => {});
+	const {
+		focusId,
+		focusFrameKey,
+		setFocusId,
+		setFocusFrameKey,
+		focusNode,
+		focusFrame,
+		clearFocus
+	} = useCanvasFocus({
+		onClear: useCallback(() => applyOverviewRef.current(), [])
+	});
 	const [search, setSearch] = useState("");
 	const [hiddenIds, setHiddenIds] = useState<ReadonlySet<string>>(
 		() => new Set()
@@ -293,26 +304,18 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 	// posé. Setters passés aux edges via `data` (voir InteractiveEdge).
 	const edgeAnchors = useEdgeAnchors(schema);
 
-	// Sélection multi-tables tenue à jour par RF. Alimente le chip bas-centre
-	// et le raccourci `F`. Filtre les frame-nodes (non sélectionnables mais
-	// robuste face à un futur changement).
-	const [selectedTables, setSelectedTables] = useState<readonly string[]>([]);
-	useOnSelectionChange({
-		onChange: useCallback(({ nodes: sel }) => {
-			const ids = sel
-				.filter((n) => (n as { type?: string }).type !== "frame")
-				.map((n) => n.id);
-			setSelectedTables(ids);
-			// Multi-sélection active (≥ 2 tables) → clear le focus. Sinon les
-			// styles `focused` (bord interne bleu foncé + shadow opacité 0.25)
-			// et `.selected` (outline exterior + shadow opacité 0.15) coexistent
-			// sur des tables différentes → l'user voit une 1re table « bleu
-			// foncé » et les suivantes « bleu clair », visuellement confus.
-			if (ids.length >= 2) {
-				setFocusId(null);
-				setFocusFrameKey(null);
-			}
-		}, [])
+	// Sélection multi-tables — alimente le chip bas-centre et le raccourci `F`.
+	// Extrait dans `useCanvasSelection` ; le callback `onMultiSelect` clear le
+	// focus dès qu'on passe à ≥2 sélectionnés (sinon les styles `focused` (bord
+	// interne bleu foncé + shadow opacité 0.25) et `.selected` (outline
+	// extérieur + shadow opacité 0.15) coexistent sur des tables différentes →
+	// mix visuellement confus).
+	const { selectedTables, clearSelection } = useCanvasSelection<TableNodeType>({
+		setNodes,
+		onMultiSelect: useCallback(() => {
+			setFocusId(null);
+			setFocusFrameKey(null);
+		}, [setFocusId, setFocusFrameKey])
 	});
 
 	// Post-ELK : fige le rect des frames-seed depuis les positions ELK. Un
@@ -776,22 +779,6 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 		};
 	}, []);
 
-	/** Focus visuel : isole une table, estompe le reste, ouvre le drawer d'infos —
-	 * SANS recadrer la vue. Comportement par défaut du clic gauche sur canvas et
-	 * du clic-droit (menu contextuel). L'utilisateur choisit quand zoomer via
-	 * `focusAndZoom` (double-clic, menu Détails, entrées distantes). */
-	const focusNode = (id: string) => {
-		setFocusId(id);
-		setFocusFrameKey(null);
-	};
-
-	/** Focus « frame » — ouvre FrameDetails dans le drawer avec la liste des
-	 * tables du frame. Exclusif avec focusId (une seule vue à la fois). */
-	const focusFrame = (key: string) => {
-		setFocusFrameKey(key);
-		setFocusId(null);
-	};
-
 	/** Focus + recadrage sur la table. Utilisé par les points d'entrée
 	 * « distants » — arbre, palette Cmd+K, menu Détails, FK cliquables du
 	 * drawer — où l'utilisateur cherche activement une table et veut être
@@ -851,12 +838,9 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 			{ duration: OVERVIEW_FIT.duration }
 		);
 	};
-
-	const clearFocus = () => {
-		setFocusId(null);
-		setFocusFrameKey(null);
-		applyOverview();
-	};
+	// Injecte la version courante de `applyOverview` dans la ref lue par le
+	// callback `onClear` de `useCanvasFocus` (déclaré plus haut).
+	applyOverviewRef.current = applyOverview;
 
 	// Frame courant (si le drawer affiche FrameDetails). Recalculé à chaque
 	// re-render — passe à undefined si le frame a été supprimé pendant qu'on
@@ -946,13 +930,6 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 			return next;
 		});
 	}, [selectedTables]);
-
-	const { deleteElements } = useReactFlow();
-	const clearSelection = useCallback(() => {
-		void deleteElements({ nodes: [] }); // no-op API access to bind
-		// Le vrai clear : reset selected flag sur tous les nodes.
-		setNodes((ns) => ns.map((n) => ({ ...n, selected: false })));
-	}, [deleteElements, setNodes]);
 
 	useEffect(() => {
 		function onKey(e: KeyboardEvent) {
