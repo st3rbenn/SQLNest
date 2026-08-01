@@ -1,22 +1,13 @@
 import {
-	HintPill,
-	SearchInput,
 	SelectionChip,
 	showNotification,
-	SidebarDrawer,
 	Spotlight,
 	spotlight,
-	useCommandPaletteShortcut,
-	useModKeyLabel
+	useCommandPaletteShortcut
 } from "@sqlnest/design-system";
 import { buildCanvasCommands } from "./commands";
+import { ActionIcon, Box } from "@mantine/core";
 import {
-	ActionIcon,
-	Box,
-	UnstyledButton
-} from "@mantine/core";
-import {
-	IconChevronLeft,
 	IconLayoutSidebarLeftCollapse,
 	IconLayoutSidebarLeftExpand
 } from "@tabler/icons-react";
@@ -61,6 +52,7 @@ import {
 	computeFrameNodes,
 	FRAME_PAD
 } from "./canvas/computeFrameNodes";
+import { DrawerPane, useResizableDrawer } from "./canvas/DrawerPane";
 import { HiddenChip } from "./canvas/HiddenChip";
 import { useCanvasFocus } from "./canvas/useCanvasFocus";
 import { useCanvasSelection } from "./canvas/useCanvasSelection";
@@ -71,11 +63,8 @@ import { bestHandles, type Side, spreadOffsets } from "./edgeRouting";
 import { FrameNode, type FrameNodeType } from "./FrameNode";
 import { type Frame, type FrameRect, rectContainsPoint } from "./frames";
 import { InteractiveEdge, type InteractiveEdgeData } from "./InteractiveEdge";
-import { FrameDetails } from "./FrameDetails";
 import { buildLayout, type LayoutResult } from "./layout";
-import { SchemaTree } from "./SchemaTree";
 import type { SchemaModel } from "./schema-model";
-import { TableDetails } from "./TableDetails";
 import {
 	NODE_WIDTH,
 	nodeHeight,
@@ -626,69 +615,12 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 	// à chaque rechargement, plus prévisible que "ce qu'il était avant").
 	const [leftDrawerVisible, setLeftDrawerVisible] = useState(true);
 
-	// Largeur du drawer — resizable via le handle droit. PERSISTÉE en
-	// localStorage (contrairement à la visibilité) : la largeur exprime une
-	// préférence forte (« mes noms de tables sont longs »), tandis que la
-	// visibilité est une action ponctuelle.
-	const DRAWER_MIN_WIDTH = 260;
-	const DRAWER_MAX_WIDTH = 600;
-	const DRAWER_STORAGE_KEY = "sqlnest:leftDrawer:width";
-	const [leftDrawerWidth, setLeftDrawerWidth] = useState<number>(() => {
-		if (typeof window === "undefined") return 320;
-		const raw = window.localStorage.getItem(DRAWER_STORAGE_KEY);
-		const parsed = raw !== null ? Number.parseInt(raw, 10) : Number.NaN;
-		if (!Number.isFinite(parsed)) return 320;
-		return Math.min(DRAWER_MAX_WIDTH, Math.max(DRAWER_MIN_WIDTH, parsed));
-	});
-	useEffect(() => {
-		if (typeof window === "undefined") return;
-		try {
-			window.localStorage.setItem(
-				DRAWER_STORAGE_KEY,
-				String(leftDrawerWidth)
-			);
-		} catch {
-			/* quota / private mode — no-op */
-		}
-	}, [leftDrawerWidth]);
-
-	// Drag-to-resize : capture le pointer au down, update en live au move,
-	// release au up. Ref pour l'origine du geste — immune au batching (le
-	// state React `leftDrawerWidth` peut lagger derrière plusieurs move).
-	const drawerDragRef = useRef<{
-		startX: number;
-		startWidth: number;
-	} | null>(null);
-	const onDrawerHandlePointerDown = useCallback(
-		(e: React.PointerEvent<HTMLDivElement>) => {
-			e.currentTarget.setPointerCapture(e.pointerId);
-			drawerDragRef.current = {
-				startX: e.clientX,
-				startWidth: leftDrawerWidth
-			};
-			e.preventDefault();
-		},
-		[leftDrawerWidth]
-	);
-	const onDrawerHandlePointerMove = useCallback(
-		(e: React.PointerEvent<HTMLDivElement>) => {
-			const state = drawerDragRef.current;
-			if (!state) return;
-			const next = Math.min(
-				DRAWER_MAX_WIDTH,
-				Math.max(DRAWER_MIN_WIDTH, state.startWidth + (e.clientX - state.startX))
-			);
-			setLeftDrawerWidth(next);
-		},
-		[]
-	);
-	const onDrawerHandlePointerUp = useCallback(
-		(e: React.PointerEvent<HTMLDivElement>) => {
-			e.currentTarget.releasePointerCapture(e.pointerId);
-			drawerDragRef.current = null;
-		},
-		[]
-	);
+	// Largeur du drawer — resizable via le handle droit. State + handlers
+	// encapsulés dans `useResizableDrawer` (persistance localStorage,
+	// clamp MIN/MAX). Largeur remontée ici pour dériver `leftPadding`
+	// (safeArea + console leftOffset) et positionner le toggle button.
+	const { width: leftDrawerWidth, handleProps: drawerHandleProps } =
+		useResizableDrawer();
 
 	// `leftPadding` dérivé — sert au safeArea (fit initial) et à la console
 	// SNQL (leftOffset). Suit la largeur courante du drawer + gap.
@@ -956,7 +888,6 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 
 	// ─── palette Cmd+K (tour 1c) ──────────────────────────────────────────
 	useCommandPaletteShortcut(spotlight.open);
-	const modKey = useModKeyLabel();
 	const soon = (title: string) =>
 		showNotification({
 			title,
@@ -1283,127 +1214,25 @@ function CanvasInner({ schema }: { schema: SchemaModel }) {
 			</ActionIcon>
 
 			{/* Drawer gauche docké — UN SEUL drawer qui switch entre l'arborescence
-			 * (par défaut) et la vue détails d'une table (quand focusId set).
-			 * Le back button « ← Schéma » du header détails clear focusId → retour
-			 * automatique à l'arborescence dans le même conteneur.
-			 * La pill Cmd+K du footer et la largeur restent identiques dans les
-			 * deux modes → pas de resize/reflow du canvas au focus. */}
+			 * (par défaut) et la vue détails d'une table/frame (quand focusId /
+			 * focusFrameKey set). Le back button du header détails clear le focus →
+			 * retour automatique à l'arborescence dans le même conteneur. Largeur
+			 * et pill Cmd+K identiques dans les deux modes → pas de reflow au focus. */}
 			{leftDrawerVisible ? (
-				<Box
-					style={{
-						position: "absolute",
-						top: 0,
-						left: 0,
-						bottom: 0,
-						width: leftDrawerWidth,
-						zIndex: 4
-					}}
-				>
-					<SidebarDrawer
-						variant="docked"
-						width={leftDrawerWidth}
-						{...(focusId === null && focusFrameKey === null
-							? { title: "Schéma" }
-							: {})}
-						header={
-							focusId === null && focusFrameKey === null ? (
-								<SearchInput
-									value={search}
-									onChange={(e) => setSearch(e.currentTarget.value)}
-									placeholder={`Rechercher parmi ${schema.collections.length} tables…`}
-								/>
-							) : (
-								<UnstyledButton
-									onClick={clearFocus}
-									style={{
-										display: "inline-flex",
-										alignItems: "center",
-										gap: 4,
-										fontSize: 12.5,
-										color: "var(--mantine-color-slate-6)",
-										fontWeight: 500
-									}}
-									aria-label="Retour au schéma"
-								>
-									<IconChevronLeft size={14} stroke={2} />
-									<span>Schéma</span>
-								</UnstyledButton>
-							)
-						}
-						footer={
-							<UnstyledButton
-								onClick={() => spotlight.open()}
-								aria-label="Ouvrir la palette de commandes"
-								style={{ width: "100%" }}
-							>
-								<HintPill
-									keys={[`${modKey}K`]}
-									bg="transparent"
-									withBorder={false}
-									shadow="none"
-									style={{
-										display: "flex",
-										justifyContent: "center"
-									}}
-								>
-									Actions rapides
-								</HintPill>
-							</UnstyledButton>
-						}
-						style={{ height: "100%" }}
-					>
-						{focusFrameKey !== null && focusedFrame !== undefined ? (
-							<FrameDetails
-								frame={focusedFrame}
-								onSelectTable={focusAndZoom}
-								onRename={(label) =>
-									framesApi.renameFrame(focusedFrame.key, label)
-								}
-								onDelete={() => {
-									framesApi.removeFrame(focusedFrame.key);
-									setFocusFrameKey(null);
-								}}
-							/>
-						) : focusId !== null ? (
-							<TableDetails
-								schema={schema}
-								tableName={focusId}
-								frameLabel={framesApi.frameOfTable(focusId)?.label ?? null}
-								onSelect={focusAndZoom}
-							/>
-						) : (
-							<SchemaTree
-								schema={schema}
-								frames={framesApi.frames}
-								focusId={focusId}
-								search={search}
-								onSelect={focusAndZoom}
-							/>
-						)}
-					</SidebarDrawer>
-					{/* Handle draggable — barre verticale fine sur le bord droit.
-					 * Overlay au-dessus du chevron du drawer content. `touchAction:none`
-					 * évite les gestes tactiles concurrents (scroll page). */}
-					<Box
-						onPointerDown={onDrawerHandlePointerDown}
-						onPointerMove={onDrawerHandlePointerMove}
-						onPointerUp={onDrawerHandlePointerUp}
-						onPointerCancel={onDrawerHandlePointerUp}
-						role="separator"
-						aria-orientation="vertical"
-						aria-label="Redimensionner le drawer"
-						style={{
-							position: "absolute",
-							top: 0,
-							bottom: 0,
-							right: -3,
-							width: 6,
-							cursor: "col-resize",
-							touchAction: "none",
-							zIndex: 6
-						}}
-					/>
-				</Box>
+				<DrawerPane
+					schema={schema}
+					width={leftDrawerWidth}
+					handleProps={drawerHandleProps}
+					search={search}
+					onSearchChange={setSearch}
+					framesApi={framesApi}
+					focusId={focusId}
+					focusFrameKey={focusFrameKey}
+					focusedFrame={focusedFrame}
+					onClearFocus={clearFocus}
+					onClearFocusFrame={() => setFocusFrameKey(null)}
+					onFocusTable={focusAndZoom}
+				/>
 			) : null}
 
 			{/* Chip de sélection multi-tables (tour 1d) — visible dès qu'une
