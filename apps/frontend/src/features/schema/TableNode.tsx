@@ -14,18 +14,42 @@ import type { Side } from "./edgeRouting";
 import type { Collection } from "./schema-model";
 import { levelForZoom, type ZoomLevel } from "./zoomLevel";
 
-/** Nombre de champs affichés avant repli (garde des nœuds de hauteur bornée). */
+/** Nombre de champs affichés dans la hauteur par défaut (avant que l'user
+ * ne resize verticalement). Passé cette limite, la carte affiche `+N champs…`
+ * qui devient cliquable → l'user tire le handle bas pour révéler plus. */
 export const MAX_FIELDS = 12;
 export const NODE_WIDTH = 240;
 const HEADER_H = 44;
 const ROW_H = 20;
-const PAD = 10;
+/** Padding vertical dans le body (`padding: "4px 0"` = 8 px total). */
+const BODY_PAD = 8;
 
-/** Hauteur d'un nœud table, dérivée du nombre de champs (stable → layout stable). */
+/** Hauteur d'un nœud table, dérivée du nombre de champs (stable → layout stable).
+ * Sert de valeur par défaut au mount ELK — user peut resize après (voir
+ * `visibleFieldCount`). */
 export function nodeHeight(collection: Collection): number {
 	const shown = Math.min(collection.fields.length, MAX_FIELDS);
 	const more = collection.fields.length > MAX_FIELDS ? ROW_H : 0;
-	return HEADER_H + shown * ROW_H + more + PAD;
+	return HEADER_H + shown * ROW_H + more + BODY_PAD;
+}
+
+/**
+ * Combien de fields peuvent tenir dans une hauteur donnée. Pure → testable.
+ * - Si tous les fields rentrent : `shown = total`, `hidden = 0` (pas de « +N »).
+ * - Sinon : `shown = maxRows - 1` (une ligne réservée à `+N champs…`),
+ *   `hidden = total - shown`.
+ * L'utilisateur voit exactement ce qu'il a la place de voir — le nombre
+ * s'adapte au resize vertical.
+ */
+export function visibleFieldCount(
+	availableHeight: number,
+	totalFields: number
+): { shown: number; hidden: number } {
+	const available = availableHeight - HEADER_H - BODY_PAD;
+	const maxRows = Math.max(0, Math.floor(available / ROW_H));
+	if (maxRows >= totalFields) return { shown: totalFields, hidden: 0 };
+	const shown = Math.max(0, maxRows - 1);
+	return { shown, hidden: totalFields - shown };
 }
 
 export interface TableNodeData {
@@ -169,8 +193,14 @@ export function TableNode({
 
 	// ── LOD level 1 : full (zoom ≥ FULL_MIN) ──────────────────────────
 	const pk = new Set(collection.primaryKey ?? []);
-	const shown = collection.fields.slice(0, MAX_FIELDS);
-	const hidden = collection.fields.length - shown.length;
+	// Combien de fields tiennent dans la hauteur COURANTE (adaptatif au resize
+	// vertical). Sur une table à peine ouverte : cap à MAX_FIELDS. User agrandit
+	// → révèle plus. User rétrécit → cache et compte dans « +N champs… ».
+	const { shown: shownCount, hidden } = visibleFieldCount(
+		effectiveHeight,
+		collection.fields.length
+	);
+	const shown = collection.fields.slice(0, shownCount);
 	return (
 		<div style={shellStyle}>
 			<AllHandles />
