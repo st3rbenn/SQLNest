@@ -24,11 +24,14 @@ describe("colorFor", () => {
 		}
 	});
 
-	it("returns header/border/text strings referencing the same hue", () => {
+	it("returns header/border/text strings referencing the same hue (dark palette)", () => {
 		const { hue, header, border, text } = colorFor("commerce");
-		expect(header).toBe(`hsl(${hue}, 62%, 94%)`);
-		expect(border).toBe(`hsl(${hue}, 55%, 60%)`);
-		expect(text).toBe(`hsl(${hue}, 40%, 26%)`);
+		// Header : tint SOMBRE + alpha (le shell est #2C2C2C — un pastel clair
+		// serait criard). Border : vive, dérivée à L=55 pour rester lisible en
+		// pastille comme en contour. Text : nuance claire (compat API).
+		expect(header).toBe(`hsla(${hue}, 45%, 22%, 0.85)`);
+		expect(border).toBe(`hsl(${hue}, 55%, 55%)`);
+		expect(text).toBe(`hsl(${hue}, 45%, 80%)`);
 	});
 
 	it("distinct names produce distinct hues (sanity check)", () => {

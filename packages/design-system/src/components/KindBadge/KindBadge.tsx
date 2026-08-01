@@ -13,18 +13,24 @@ const DEFAULT_LABELS: Record<KindBadgeKind, string> = {
 	pk: "PK",
 };
 
+/**
+ * Palette dark-first — tokens Figma. Fond translucide (soft) pour poser le
+ * badge sur n'importe quelle surface (`#2C2C2C` shell d'une table, header
+ * teinté, …) sans faire tache. Couleur pleine pour le texte, qui garde le
+ * message le plus visible.
+ */
 const PALETTE: Record<KindBadgeKind, { bg: string; color: string }> = {
 	declared: {
-		bg: "var(--mantine-color-brand-1)",
-		color: "var(--mantine-color-brand-7)",
+		bg: "var(--sqlnest-accent-soft)",
+		color: "var(--sqlnest-accent)",
 	},
 	inferred: {
-		bg: "var(--mantine-color-amber-1)",
-		color: "var(--mantine-color-amber-7)",
+		bg: "var(--sqlnest-warning-soft)",
+		color: "var(--sqlnest-warning)",
 	},
 	pk: {
-		bg: "var(--mantine-color-amber-1)",
-		color: "var(--mantine-color-amber-7)",
+		bg: "var(--sqlnest-warning-soft)",
+		color: "var(--sqlnest-warning)",
 	},
 };
 

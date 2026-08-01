@@ -149,21 +149,22 @@ export function TableNode({
 	// donnaient des styles mixtes selon comment la table était mise en avant.
 	const highlighted = focused || selected;
 
-	// Enveloppe commune : border colorée (bleu/ambre override en focus/match),
-	// ombre focus/match, gestion `dimmed`. LOD variants remplissent l'enveloppe
-	// à la taille RÉELLE — sinon les handles (aux bords du wrapper RF) ne
+	// Enveloppe commune : shell surface Figma, border colorée par hue
+	// (accent bleu / warning jaune override en focus / match), shadow noir
+	// diffuse, gestion `dimmed`. LOD variants remplissent l'enveloppe à la
+	// taille RÉELLE — sinon les handles (aux bords du wrapper RF) ne
 	// s'alignent plus avec le visuel à faible zoom.
 	const shellStyle: CSSProperties = {
 		width: effectiveWidth,
 		height: effectiveHeight,
 		borderRadius: 10,
-		background: "#fff",
-		border: `2px solid ${matched ? "#f59e0b" : highlighted ? "#2563eb" : color.border}`,
+		background: "var(--sqlnest-surface)",
+		border: `2px solid ${matched ? "#ffc933" : highlighted ? "#0d99ff" : color.border}`,
 		boxShadow: highlighted
-			? "0 0 0 3px rgba(37,99,235,0.25), 0 8px 24px rgba(15,23,42,0.12)"
+			? "0 0 0 3px rgba(13,153,255,0.35), 0 8px 24px rgba(0,0,0,0.45)"
 			: matched
-				? "0 0 0 3px rgba(245,158,11,0.3)"
-				: "0 1px 3px rgba(15,23,42,0.08)",
+				? "0 0 0 3px rgba(255,201,51,0.4)"
+				: "0 1px 3px rgba(0,0,0,0.35)",
 		opacity: dimmed ? 0.28 : 1,
 		transition: "opacity 120ms, box-shadow 120ms",
 		overflow: "hidden",
@@ -232,7 +233,7 @@ export function TableNode({
 						width: 8,
 						height: 8,
 						borderRadius: 2,
-						background: "#fff",
+						background: "var(--sqlnest-surface)",
 						borderColor: color.border,
 						borderWidth: 2
 					}}
@@ -245,7 +246,7 @@ export function TableNode({
 					justifyContent: "space-between",
 					gap: 8,
 					padding: "10px 12px",
-					borderBottom: `1px solid ${color.border}`,
+					borderBottom: "1px solid var(--sqlnest-border)",
 					background: color.header
 				}}
 			>
@@ -253,7 +254,7 @@ export function TableNode({
 					style={{
 						fontWeight: 700,
 						fontSize: 13,
-						color: color.text,
+						color: "var(--sqlnest-text-primary)",
 						whiteSpace: "nowrap",
 						overflow: "hidden",
 						textOverflow: "ellipsis"
@@ -282,7 +283,7 @@ export function TableNode({
 								display: "flex",
 								alignItems: "center",
 								gap: 5,
-								color: "#334155",
+								color: "var(--sqlnest-text-secondary)",
 								whiteSpace: "nowrap",
 								overflow: "hidden",
 								textOverflow: "ellipsis"
@@ -300,7 +301,7 @@ export function TableNode({
 							height: ROW_H,
 							padding: "0 12px",
 							fontSize: 10.5,
-							color: "#cbd5e1",
+							color: "var(--sqlnest-text-tertiary)",
 							display: "flex",
 							alignItems: "center"
 						}}

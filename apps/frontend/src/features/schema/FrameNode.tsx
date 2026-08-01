@@ -89,7 +89,9 @@ export function FrameNode({
 					width: 10,
 					height: 10,
 					borderRadius: 3,
-					background: "#fff",
+					// Match surface Figma — un blanc pur ferait « oeuf sur canvas noir »
+					// et brûlerait la teinte du frame.
+					background: "var(--sqlnest-surface)",
 					borderColor: `hsl(${frame.hue}, 55%, 55%)`,
 					borderWidth: 2
 				}}
@@ -112,7 +114,11 @@ export function FrameNode({
 					width,
 					height,
 					borderRadius: 14,
-					background: `hsla(${frame.hue}, 60%, 90%, 0.35)`,
+					// Pastel translucide sombre-adapté : sur bg #1E1E1E, un tint
+					// L=90 (Figma light) ferait tache. On descend à L=45 (nuance
+					// moyenne de la hue) et on baisse l'alpha à 12 % — teinte
+					// discernable des tables du frame sans écraser leur shell.
+					background: `hsla(${frame.hue}, 60%, 45%, 0.12)`,
 					position: "relative",
 					pointerEvents: "none"
 				}}
@@ -172,8 +178,8 @@ export function FrameNode({
 							onMouseDown={(e) => e.stopPropagation()}
 							onClick={(e) => e.stopPropagation()}
 							style={{
-								background: `hsl(${frame.hue}, 55%, 45%)`,
-								color: "#fff",
+								background: `hsl(${frame.hue}, 55%, 35%)`,
+								color: "var(--sqlnest-text-primary)",
 								border: "none",
 								padding: "3px 10px",
 								borderRadius: 999,
