@@ -152,4 +152,47 @@ describe("useCanvasHistory", () => {
 			expect.objectContaining({ positions: { a: { x: 1, y: 2 } } })
 		);
 	});
+
+	it("un geste continu (N commits avant le push) checkpoint bien l'état PRÉ-geste", () => {
+		// Reproduction du bug 2 : pendant un drag de frame, `setFrameRect`
+		// fire à chaque mousemove — chaque mousemove est un commit React
+		// séparé (pas batchable puisque origines DOM distinctes). Avant le
+		// fix, `prevRef` était resync par un useEffect à chaque commit, donc
+		// au push final (drag-stop) `prevRef` portait le dernier rect
+		// INTERMÉDIAIRE, pas l'état pré-drag → undo ne rejouait pas le geste.
+		//
+		// On simule des commits séparés via des act() distincts. Après le
+		// push final, undo doit revenir à l'état initial (0,0) — pas à un
+		// intermédiaire (10,0), (20,0) ou (30,0).
+		const { result } = renderHook(() => useHarness());
+
+		// Snapshot initial : une position à (0,0), pushé au « geste 0 ».
+		act(() => {
+			result.current.mutate.setPositions({ users: { x: 0, y: 0 } });
+			result.current.history.push();
+		});
+
+		// Drag continu : 3 mousemoves, chacun dans son propre commit.
+		act(() => {
+			result.current.mutate.setPositions({ users: { x: 10, y: 0 } });
+		});
+		act(() => {
+			result.current.mutate.setPositions({ users: { x: 20, y: 0 } });
+		});
+		act(() => {
+			result.current.mutate.setPositions({ users: { x: 30, y: 0 } });
+		});
+		// Drag-stop → push final.
+		act(() => {
+			result.current.history.push();
+		});
+
+		// Undo doit revenir à (0,0) — état PRÉ-drag.
+		act(() => {
+			result.current.history.undo();
+		});
+		expect(result.current.snapshot.positions).toEqual({
+			users: { x: 0, y: 0 }
+		});
+	});
 });
