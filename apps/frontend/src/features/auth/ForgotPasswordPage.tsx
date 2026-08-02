@@ -96,7 +96,7 @@ export function ForgotPasswordPage() {
 						type="email"
 						value={email}
 						onChange={(e) => setEmail(e.currentTarget.value)}
-						autoComplete="email"
+						autoComplete="off"
 						required
 						disabled={isSubmitting}
 					/>

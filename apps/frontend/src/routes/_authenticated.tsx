@@ -1,9 +1,6 @@
-import { showNotification, updateNotification } from "@sqlnest/design-system";
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
-import { useEffect } from "react";
 import { sessionQueryOptions } from "../features/auth/sessionQuery";
 import { UserMenu } from "../features/auth/UserMenu";
-import { useHealthCheck } from "../features/healthcheck/useHealthCheck";
 
 /**
  * Layout pathless des pages **authentifiées** (canvas Schéma `/`, `/query`,
@@ -15,13 +12,13 @@ import { useHealthCheck } from "../features/healthcheck/useHealthCheck";
  * conservant l'URL d'origine dans `search.redirect` (F8 la relit après
  * connexion pour renvoyer l'utilisateur d'où il vient).
  *
- * F10 — healthcheck : le side-effect de notification "API OK / KO" vit
- * MAINTENANT ici (et non plus dans `App.tsx`) — il n'a plus de sens sur
- * les pages `_auth` (login/signup/…), qui affichent leur propre UI de
- * connexion et n'ont rien à faire d'un ping API récurrent.
+ * `UserMenu` : bouton flottant top-right monté ICI (donc uniquement sur
+ * pages authentifiées).
  *
- * F11 — `UserMenu` : bouton flottant top-right monté ICI (donc uniquement
- * sur pages authentifiées).
+ * Note : ce layout n'appelle PAS `useHealthCheck` — la notification "API
+ * OK" en boucle 10s était intrusive (feedback user 2026-08-02). Un état
+ * "backend down" est déjà couvert par les erreurs des queries de contenu
+ * (canvas-state, schema introspection) qui affichent leur propre message.
  */
 export const Route = createFileRoute("/_authenticated")({
 	beforeLoad: async ({ context, location }) => {
@@ -39,40 +36,6 @@ export const Route = createFileRoute("/_authenticated")({
 });
 
 function AuthenticatedLayout() {
-	const { data, error, isLoading } = useHealthCheck();
-
-	useEffect(() => {
-		if (isLoading) {
-			showNotification({
-				id: "health-check",
-				title: "Vérification API",
-				message: `Connexion à l'API en cours... (${new Date().toLocaleTimeString()})`,
-				color: "blue",
-				loading: true,
-				autoClose: false,
-				closeButtonProps: { style: { display: "none" } }
-			});
-		} else if (error) {
-			updateNotification({
-				id: "health-check",
-				title: "Erreur API",
-				message: `Impossible de joindre l'API à ${new Date().toLocaleTimeString()}`,
-				color: "red",
-				autoClose: 5000,
-				loading: false
-			});
-		} else if (data) {
-			updateNotification({
-				id: "health-check",
-				title: "API OK",
-				message: `Connexion à l'API réussie à ${new Date().toLocaleTimeString()}`,
-				color: "green",
-				autoClose: 5000,
-				loading: false
-			});
-		}
-	}, [isLoading, error, data]);
-
 	return (
 		<>
 			<Outlet />

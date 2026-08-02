@@ -5,7 +5,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { type CSSProperties, type FormEvent, useState } from "react";
 import { signUp } from "./authClient";
 import { OAuthButtons } from "./OAuthButtons";
-import { AUTH_SESSION_QUERY_KEY } from "./sessionQuery";
+import { sessionQueryOptions } from "./sessionQuery";
 
 const PASSWORD_ERROR_RE = /password/i;
 
@@ -101,7 +101,12 @@ export function SignupPage() {
 			setIsSubmitting(false);
 			return;
 		}
-		await queryClient.invalidateQueries({ queryKey: AUTH_SESSION_QUERY_KEY });
+		// fetchQuery (pas invalidate) : sur /signup il n'y a aucun observer
+		// actif sur AUTH_SESSION_QUERY_KEY, donc invalidate marque juste
+		// stale sans refetch → beforeLoad(_authenticated) sert cache stale
+		// (null) → redirect /login → boucle. fetchQuery force le fetch et
+		// met en cache la nouvelle session AVANT navigate.
+		await queryClient.fetchQuery(sessionQueryOptions());
 		void navigate({ to: "/" });
 	};
 
@@ -123,7 +128,7 @@ export function SignupPage() {
 					label="Nom (optionnel)"
 					value={name}
 					onChange={(e) => setName(e.currentTarget.value)}
-					autoComplete="name"
+					autoComplete="off"
 					disabled={isSubmitting}
 				/>
 				<TextInput
@@ -131,7 +136,7 @@ export function SignupPage() {
 					type="email"
 					value={email}
 					onChange={(e) => setEmail(e.currentTarget.value)}
-					autoComplete="email"
+					autoComplete="off"
 					required
 					disabled={isSubmitting}
 				/>
@@ -139,7 +144,7 @@ export function SignupPage() {
 					label="Mot de passe"
 					value={password}
 					onChange={(e) => setPassword(e.currentTarget.value)}
-					autoComplete="new-password"
+					autoComplete="off"
 					required
 					disabled={isSubmitting}
 					description="Au moins 8 caractères."
@@ -148,7 +153,7 @@ export function SignupPage() {
 					label="Confirmer le mot de passe"
 					value={confirm}
 					onChange={(e) => setConfirm(e.currentTarget.value)}
-					autoComplete="new-password"
+					autoComplete="off"
 					required
 					disabled={isSubmitting}
 					error={passwordsMismatch ? "Les mots de passe diffèrent." : undefined}

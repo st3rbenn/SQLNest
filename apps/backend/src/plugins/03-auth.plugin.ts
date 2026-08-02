@@ -83,7 +83,16 @@ export default fp(
 		}
 
 		// ─── Trusted origins + cookie domain ──────────────────────────────
-		const trustedOrigins = (process.env.TRUSTED_ORIGINS ?? "")
+		// Fallback dev "http://localhost:3000" : les defaults du JSON schema
+		// @fastify/env peuplent `fastify.config` mais PAS `process.env` — si
+		// l'utilisateur n'a pas explicitement TRUSTED_ORIGINS dans .env, on
+		// retombe sur un dev-safe. En prod, cette liste DOIT être overridée
+		// via env sinon Better Auth rejette toute origin (403 sign-up).
+		const trustedOriginsRaw =
+			process.env.TRUSTED_ORIGINS && process.env.TRUSTED_ORIGINS.length > 0
+				? process.env.TRUSTED_ORIGINS
+				: "http://localhost:3000";
+		const trustedOrigins = trustedOriginsRaw
 			.split(",")
 			.map((s) => s.trim())
 			.filter(Boolean);

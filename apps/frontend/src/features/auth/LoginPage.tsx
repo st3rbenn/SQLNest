@@ -6,7 +6,7 @@ import { type CSSProperties, type FormEvent, useState } from "react";
 import { isSafePath, Route as LoginRoute } from "../../routes/_auth.login";
 import { signIn } from "./authClient";
 import { OAuthButtons } from "./OAuthButtons";
-import { AUTH_SESSION_QUERY_KEY } from "./sessionQuery";
+import { sessionQueryOptions } from "./sessionQuery";
 
 const titleStyle: CSSProperties = {
 	fontSize: 20,
@@ -84,10 +84,14 @@ export function LoginPage() {
 			setIsSubmitting(false);
 			return;
 		}
-		// Session posée côté backend → on invalide le cache pour que
-		// `useCurrentUser` / le guard `_authenticated` voient la nouvelle
-		// session immédiatement, sans race sur le fetch précédent.
-		await queryClient.invalidateQueries({ queryKey: AUTH_SESSION_QUERY_KEY });
+		// Session posée côté backend (cookie Set-Cookie de la réponse). On
+		// force un REFETCH (fetchQuery, pas invalidateQueries) : sur cette
+		// page il n'y a aucun observer actif sur AUTH_SESSION_QUERY_KEY,
+		// donc invalidateQueries marque juste stale sans refetch — puis
+		// beforeLoad(_authenticated) sert le cache stale (null) → redirect
+		// /login → boucle. fetchQuery force le fetch et met en cache la
+		// nouvelle session AVANT le navigate.
+		await queryClient.fetchQuery(sessionQueryOptions());
 		void navigate({ to: redirectTo });
 	};
 
@@ -108,7 +112,7 @@ export function LoginPage() {
 					type="email"
 					value={email}
 					onChange={(e) => setEmail(e.currentTarget.value)}
-					autoComplete="email"
+					autoComplete="off"
 					required
 					disabled={isSubmitting}
 				/>
@@ -116,7 +120,7 @@ export function LoginPage() {
 					label="Mot de passe"
 					value={password}
 					onChange={(e) => setPassword(e.currentTarget.value)}
-					autoComplete="current-password"
+					autoComplete="off"
 					required
 					disabled={isSubmitting}
 				/>

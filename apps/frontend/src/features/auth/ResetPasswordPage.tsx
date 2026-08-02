@@ -146,7 +146,7 @@ function ResetPasswordInner({ token }: { token: string }) {
 					label="Nouveau mot de passe"
 					value={password}
 					onChange={(e) => setPassword(e.currentTarget.value)}
-					autoComplete="new-password"
+					autoComplete="off"
 					required
 					disabled={isSubmitting}
 					description="Au moins 8 caractères."
@@ -155,7 +155,7 @@ function ResetPasswordInner({ token }: { token: string }) {
 					label="Confirmer le mot de passe"
 					value={confirm}
 					onChange={(e) => setConfirm(e.currentTarget.value)}
-					autoComplete="new-password"
+					autoComplete="off"
 					required
 					disabled={isSubmitting}
 					error={passwordsMismatch ? "Les mots de passe diffèrent." : undefined}

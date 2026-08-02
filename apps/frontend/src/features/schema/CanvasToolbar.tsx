@@ -75,7 +75,7 @@ export function CanvasToolbar({
 					<IconPointer {...ICON} />
 				</ToolbarButton>
 				<ToolbarButton
-					label="Créer un frame — dessine un rectangle (F)"
+					label="Créer un frame (F)"
 					active={displayTool === "frame"}
 					onClick={() => selectCanvasTool("frame")}
 				>

@@ -77,6 +77,15 @@ export interface UseCanvasSyncOptions extends CanvasSources {
 export interface UseCanvasSyncReturn {
 	readonly syncStatus: SyncStatus;
 	readonly lastSavedAt: string | null;
+	/**
+	 * `true` quand le canvas est prêt à s'afficher sans flick :
+	 *   - user anonyme → true immédiatement (pas de fetch server)
+	 *   - user loggé → true dès que le GET /canvas-state a settle (200/404/erreur)
+	 *     ET que replaceAll (ou skip si divergence) a été appelé.
+	 * Le parent gate le rendu du canvas visuel sur ce flag — sans ça on voit
+	 * brièvement l'état localStorage puis un saut vers l'état serveur.
+	 */
+	readonly ready: boolean;
 }
 
 /** Sérialisation stable d'un payload vide (baseline post-404). */
@@ -464,5 +473,11 @@ export function useCanvasSync(opts: UseCanvasSyncOptions): UseCanvasSyncReturn {
 		};
 	}, []);
 
-	return { syncStatus, lastSavedAt };
+	// `ready` : true quand plus rien ne peut modifier le state canvas via
+	// hydration server. Un anonyme est ready immédiatement (pas de query,
+	// pas de bascule state possible). Un user loggé est ready dès que
+	// `hydrated` passe à true — que le settle soit 200 (replaceAll appliqué),
+	// 404 (baseline vide), erreur (offline, garde le local).
+	const ready = !enabled || hydrated;
+	return { syncStatus, lastSavedAt, ready };
 }

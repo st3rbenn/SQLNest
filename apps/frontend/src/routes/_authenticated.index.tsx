@@ -1,7 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import type { CSSProperties } from "react";
 import { SchemaCanvas } from "../features/schema/SchemaCanvas";
-import { SAMPLE_POSTGRES } from "../features/schema/schema-model";
 import { useSchema } from "../features/schema/useSchema";
 
 export const Route = createFileRoute("/_authenticated/")({
@@ -24,19 +23,41 @@ const pageStyle: CSSProperties = {
 	overflow: "hidden"
 };
 
+const loadingStyle: CSSProperties = {
+	position: "absolute",
+	inset: 0,
+	display: "flex",
+	alignItems: "center",
+	justifyContent: "center",
+	fontSize: 12,
+	color: "var(--sqlnest-text-tertiary)"
+};
+
 function SchemaPage() {
 	// Le sélecteur de schéma Postgres (input "schéma public") a été retiré
 	// de cette page — cette info remontera dans le breadcrumb en haut du
 	// canvas (cf. memory `todo-canvas-breadcrumbs`). En attendant, on
 	// interroge le schéma par défaut (`public`).
 	const targetSchema: string | undefined = undefined;
-	const { data } = useSchema(ENGINE, targetSchema);
-	const schema = data ?? SAMPLE_POSTGRES;
+	const { data, error } = useSchema(ENGINE, targetSchema);
 	const schemaLabel = targetSchema ?? "public";
 
+	// PAS de fallback SAMPLE_POSTGRES : rendre le sample puis basculer sur
+	// la vraie data provoque un flick visible (les 4 tables demo sautent,
+	// puis N tables apparaissent avec un layout tout autre). Tant que la
+	// query n'a pas settle, on rend un écran vide sur bg canvas — la
+	// signature localStorage `postgres:sortedNames` change AUSSI entre
+	// sample et real data, donc hydrater le canvas sur le sample pollue
+	// la persistance avec une signature parasite.
 	return (
 		<div style={pageStyle}>
-			<SchemaCanvas schema={schema} schemaLabel={schemaLabel} />
+			{data ? (
+				<SchemaCanvas schema={data} schemaLabel={schemaLabel} />
+			) : (
+				<div style={loadingStyle}>
+					{error ? "Base injoignable" : "Introspection…"}
+				</div>
+			)}
 		</div>
 	);
 }

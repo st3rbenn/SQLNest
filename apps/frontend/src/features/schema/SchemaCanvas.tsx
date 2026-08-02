@@ -322,7 +322,7 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 		}),
 		[tablePositions.replaceAll, tableSizes.replaceAll, framesApi.replaceAll]
 	);
-	useCanvasSync({
+	const { ready: canvasReady } = useCanvasSync({
 		signature: canvasSignature,
 		positions: tablePositions.positions,
 		sizes: tableSizes.sizes,
@@ -1163,6 +1163,28 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 					Calcul du layout…
 				</div>
 			) : null}
+
+			{/* Overlay OPAQUE tant que useCanvasSync n'a pas hydraté depuis le
+			 * serveur. Sans ça on voit brièvement l'état localStorage (frames
+			 * résiduelles, positions old) puis un saut quand `replaceAll`
+			 * applique le payload serveur. L'overlay masque cette fenêtre. */}
+			{canvasReady ? null : (
+				<div
+					style={{
+						position: "absolute",
+						inset: 0,
+						display: "flex",
+						alignItems: "center",
+						justifyContent: "center",
+						fontSize: 12,
+						color: "var(--sqlnest-text-tertiary)",
+						background: "var(--sqlnest-canvas-bg)",
+						zIndex: 100
+					}}
+				>
+					Chargement du canvas…
+				</div>
+			)}
 
 			<ReactFlow
 				nodes={displayNodes as unknown as TableNodeType[]}

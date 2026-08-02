@@ -20,20 +20,22 @@ import z from "zod/v4";
  *   - Interdit : `\x00` (null-byte — casse Postgres text), `$` (préfixe
  *     réservé Mongo opérateurs, casse un query), CR / LF / TAB (safe pour
  *     logs single-line).
- * - Longueur bornée `[3, 200]` pour éviter les injections DoS via
- *   signatures géantes tout en laissant de la place pour un schéma avec
- *   plusieurs dizaines de tables.
+ * - Longueur bornée `[3, 8000]` pour laisser passer un vrai schéma Postgres
+ *   avec beaucoup de tables (identifier max = 63 chars, ~100 tables = ~6.5 KB)
+ *   tout en gardant une borne haute anti-DoS. La borne initiale de 200
+ *   rejetait 400 tout schéma de ~15 tables réelles (ex : Apollon = 30 tables,
+ *   signature 510 chars).
  *
  * ─── Regex hoistée (biome useTopLevelRegex) ──────────────────────────────
  * Extraction top-level pour éviter la recompilation à chaque validation.
  */
 // biome-ignore lint/suspicious/noControlCharactersInRegex: null-byte bloqué volontairement.
-const CANVAS_SIGNATURE_RE = /^[a-z]+:[^\x00$\n\r\t]{1,200}$/;
+const CANVAS_SIGNATURE_RE = /^[a-z]+:[^\x00$\n\r\t]{1,8000}$/;
 
 export const CanvasSignature = z
 	.string()
 	.min(3)
-	.max(200)
+	.max(8000)
 	.regex(CANVAS_SIGNATURE_RE);
 
 /**
