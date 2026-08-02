@@ -50,6 +50,7 @@ import { HiddenChip } from "./canvas/HiddenChip";
 import { useCanvasFocus } from "./canvas/useCanvasFocus";
 import { useCanvasHistory } from "./canvas/useCanvasHistory";
 import { useCanvasSelection } from "./canvas/useCanvasSelection";
+import { useCanvasSync } from "./canvas/useCanvasSync";
 import { useUndoRedoShortcuts } from "./canvas/useUndoRedoShortcuts";
 import {
 	animateViewport,
@@ -288,6 +289,47 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 	// contenteditable — l'undo natif du champ (rename inline frame, éditeur
 	// SNQL) reste actif.
 	useUndoRedoShortcuts({ onUndo: history.undo, onRedo: history.redo });
+
+	// ─── Sync serveur du state canvas (Bloc 4) ────────────────────────────
+	// Signature `engine:sortedCollectionNames` — miroir de celle utilisée par
+	// les 4 hooks localStorage (sans le préfixe `sqlnest:*:`, format attendu
+	// côté backend `^[a-z]+:[a-zA-Z0-9_,.-]+$`). Au mount le hook fetch
+	// `/canvas-state?signature=…`, applique le payload serveur si dispo
+	// (200) ou garde le localStorage (404/erreur). Puis observe les 4 slices
+	// et debounce 2 s avant un PUT complet. Le flush pré-unmount +
+	// beforeunload garantit qu'un geste en attente part avant navigation.
+	//
+	// Gate : anonyme = no-op, on retombe sur le localStorage-only (les 4
+	// hooks continuent de fonctionner normalement, ce hook ne fait rien).
+	const canvasSignature = useMemo(() => {
+		const names = schema.collections
+			.map((c) => c.name)
+			.slice()
+			.sort()
+			.join(",");
+		return `${schema.engine}:${names}`;
+	}, [schema]);
+	// `replaceAll` combiné — regroupe les 4 setters atomiques des hooks +
+	// un adaptateur pour `hiddenIds` (setState React). Mémoïsé pour rester
+	// stable entre les renders (chaque replaceAll sous-jacent est déjà stable
+	// via useCallback dans son hook).
+	const canvasSyncReplaceAll = useMemo(
+		() => ({
+			positions: tablePositions.replaceAll,
+			sizes: tableSizes.replaceAll,
+			frames: framesApi.replaceAll,
+			hidden: (ids: ReadonlySet<string>) => setHiddenIds(new Set(ids))
+		}),
+		[tablePositions.replaceAll, tableSizes.replaceAll, framesApi.replaceAll]
+	);
+	useCanvasSync({
+		signature: canvasSignature,
+		positions: tablePositions.positions,
+		sizes: tableSizes.sizes,
+		frames: framesApi.frames,
+		hidden: hiddenIds,
+		replaceAll: canvasSyncReplaceAll
+	});
 
 	// Frames : deux chemins d'update qui doivent cohabiter sans se marcher
 	// dessus :
