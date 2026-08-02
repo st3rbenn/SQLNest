@@ -23,7 +23,7 @@ function schemaKey(schema: SchemaModel): string {
 	return `sqlnest:edge-anchors:${schema.engine}:${names}`;
 }
 
-interface AnchorsApi {
+export interface AnchorsApi {
 	readonly overrides: AnchorMap;
 	readonly setOverride: (
 		edgeId: string,
@@ -31,19 +31,34 @@ interface AnchorsApi {
 		side: Side
 	) => void;
 	readonly clearOverride: (edgeId: string) => void;
+	/** Remplacement atomique — utilisé par l'hydratation serveur
+	 * (`useCanvasSync.replaceAll.edgeAnchors`). */
+	readonly replaceAll: (next: AnchorMap) => void;
+}
+
+export interface UseEdgeAnchorsOptions {
+	/** Voir `useTablePositions.persistLocal` — même sémantique. */
+	readonly persistLocal?: boolean;
 }
 
 /**
  * Overrides utilisateur pour les endpoints d'edges — clé edge.id, valeur
  * `{source?, target?}` (chaque bout peut ou non être forcé). Persistés
- * en localStorage. `SchemaCanvas.displayEdges` lit ces overrides avec
+ * en localStorage quand anonyme, server-only quand loggé (via
+ * `useCanvasSync`). `SchemaCanvas.displayEdges` lit ces overrides avec
  * fallback sur l'auto-routing (`bestHandles`).
  */
-export function useEdgeAnchors(schema: SchemaModel): AnchorsApi {
+export function useEdgeAnchors(
+	schema: SchemaModel,
+	options: UseEdgeAnchorsOptions = {}
+): AnchorsApi {
+	const persistLocal = options.persistLocal ?? true;
+	const key = schemaKey(schema);
 	const [overrides, setOverrides] = useState<AnchorMap>(() => {
+		if (!persistLocal) return {};
 		if (typeof window === "undefined") return {};
 		try {
-			const raw = window.localStorage.getItem(schemaKey(schema));
+			const raw = window.localStorage.getItem(key);
 			if (raw !== null) return JSON.parse(raw) as AnchorMap;
 		} catch {
 			/* storage indispo / JSON corrompu */
@@ -51,19 +66,23 @@ export function useEdgeAnchors(schema: SchemaModel): AnchorsApi {
 		return {};
 	});
 
-	// Persist à chaque mutation.
+	// Persist à chaque mutation — skip complet en mode server-only.
 	useEffect(() => {
+		if (!persistLocal) return;
 		if (typeof window === "undefined") return;
 		try {
-			window.localStorage.setItem(schemaKey(schema), JSON.stringify(overrides));
+			window.localStorage.setItem(key, JSON.stringify(overrides));
 		} catch {
 			/* quota / private mode */
 		}
-	}, [overrides, schema]);
+	}, [key, overrides, persistLocal]);
 
 	// Re-seed quand la signature change (nouvelle base).
-	const key = schemaKey(schema);
 	useEffect(() => {
+		if (!persistLocal) {
+			setOverrides({});
+			return;
+		}
 		if (typeof window === "undefined") return;
 		const raw = window.localStorage.getItem(key);
 		if (raw !== null) {
@@ -75,7 +94,7 @@ export function useEdgeAnchors(schema: SchemaModel): AnchorsApi {
 			}
 		}
 		setOverrides({});
-	}, [key]);
+	}, [key, persistLocal]);
 
 	const setOverride = useCallback(
 		(edgeId: string, end: "source" | "target", side: Side) => {
@@ -96,5 +115,9 @@ export function useEdgeAnchors(schema: SchemaModel): AnchorsApi {
 		});
 	}, []);
 
-	return { overrides, setOverride, clearOverride };
+	const replaceAll = useCallback((next: AnchorMap) => {
+		setOverrides(next);
+	}, []);
+
+	return { overrides, setOverride, clearOverride, replaceAll };
 }

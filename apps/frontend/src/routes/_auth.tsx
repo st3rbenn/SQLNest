@@ -61,7 +61,10 @@ const cardStyle: CSSProperties = {
 	background: "var(--sqlnest-surface)",
 	border: "1px solid var(--sqlnest-border)",
 	borderRadius: 12,
-	padding: 32,
+	// `clamp(min, preferred, max)` : sur un écran mobile étroit le padding
+	// fixe 32px mangeait ~60% de la largeur ; sur desktop on garde 32px pour
+	// respirer.
+	padding: "clamp(20px, 6vw, 32px)",
 	boxShadow: "0 8px 24px rgba(0, 0, 0, 0.35)"
 };
 

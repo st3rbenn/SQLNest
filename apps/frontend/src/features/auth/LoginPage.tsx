@@ -1,10 +1,11 @@
-import { Alert, PasswordInput, TextInput } from "@mantine/core";
+import { PasswordInput, TextInput } from "@mantine/core";
 import { Button } from "@sqlnest/design-system";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { type CSSProperties, type FormEvent, useState } from "react";
 import { isSafePath, Route as LoginRoute } from "../../routes/_auth.login";
 import { signIn } from "./authClient";
+import { DismissibleAlert } from "./DismissibleAlert";
 import { OAuthButtons } from "./OAuthButtons";
 import { sessionQueryOptions } from "./sessionQuery";
 
@@ -101,9 +102,15 @@ export function LoginPage() {
 			<p style={subtitleStyle}>Ravi de te revoir.</p>
 
 			{error ? (
-				<Alert color="red" variant="light" mb="md" title="Connexion refusée">
+				<DismissibleAlert
+					color="red"
+					variant="light"
+					mb="md"
+					title="Connexion refusée"
+					onDismiss={() => setError(null)}
+				>
 					{error}
-				</Alert>
+				</DismissibleAlert>
 			) : null}
 
 			<form style={formStyle} onSubmit={handleSubmit} noValidate>
@@ -115,6 +122,7 @@ export function LoginPage() {
 					autoComplete="off"
 					required
 					disabled={isSubmitting}
+					autoFocus
 				/>
 				<PasswordInput
 					label="Mot de passe"

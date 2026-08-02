@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { isSafePath } from "../features/auth/isSafe";
 import { LoginPage } from "../features/auth/LoginPage";
 
 /**
@@ -11,20 +12,6 @@ import { LoginPage } from "../features/auth/LoginPage";
  */
 interface LoginSearch {
 	redirect?: string;
-}
-
-/**
- * Protection contre open redirect : on n'accepte QUE des chemins internes
- * commençant par `/` et sans les formes ambiguës `//host` ou `/\host` qui
- * seraient interprétées comme protocol-relative / windows-path par certains
- * navigateurs et permettraient un redirect off-origin.
- */
-function isSafePath(v: unknown): v is string {
-	if (typeof v !== "string" || v.length === 0) return false;
-	if (!v.startsWith("/")) return false;
-	if (v.startsWith("//")) return false;
-	if (v.startsWith("/\\")) return false;
-	return true;
 }
 
 function validateSearch(raw: Record<string, unknown>): LoginSearch {

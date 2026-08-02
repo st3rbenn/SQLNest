@@ -9,15 +9,17 @@
  */
 
 import type { Frame } from "../frames";
+import type { AnchorMap } from "../useEdgeAnchors";
 import type { PositionsMap } from "../useTablePositions";
 import type { SizesMap } from "../useTableSizes";
 
-/** État canvas vivant (celui manipulé par les 4 hooks). */
+/** État canvas vivant (celui manipulé par les 5 hooks). */
 export interface CanvasSources {
 	readonly positions: PositionsMap;
 	readonly sizes: SizesMap;
 	readonly frames: readonly Frame[];
 	readonly hidden: ReadonlySet<string>;
+	readonly edgeAnchors: AnchorMap;
 }
 
 /** État canvas remis en forme JSON-safe (Set → Array). */
@@ -26,6 +28,7 @@ export interface CanvasPayload {
 	readonly sizes: SizesMap;
 	readonly frames: readonly Frame[];
 	readonly hidden: readonly string[];
+	readonly edgeAnchors: AnchorMap;
 }
 
 /**
@@ -39,7 +42,8 @@ export function serialize(sources: CanvasSources): CanvasPayload {
 		positions: sources.positions,
 		sizes: sources.sizes,
 		frames: sources.frames,
-		hidden: Array.from(sources.hidden)
+		hidden: Array.from(sources.hidden),
+		edgeAnchors: sources.edgeAnchors
 	};
 }
 
@@ -64,11 +68,15 @@ export function deserialize(payload: Record<string, unknown>): CanvasSources {
 				(x): x is string => typeof x === "string"
 			)
 		: [];
+	const edgeAnchors = isPlainRecord(payload.edgeAnchors)
+		? (payload.edgeAnchors as AnchorMap)
+		: ({} as AnchorMap);
 	return {
 		positions,
 		sizes,
 		frames,
-		hidden: new Set(hiddenList)
+		hidden: new Set(hiddenList),
+		edgeAnchors
 	};
 }
 

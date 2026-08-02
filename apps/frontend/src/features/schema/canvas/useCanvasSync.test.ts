@@ -11,6 +11,7 @@ import {
 	vi
 } from "vitest";
 import type { Frame } from "../frames";
+import type { AnchorMap } from "../useEdgeAnchors";
 import type { PositionsMap } from "../useTablePositions";
 import type { SizesMap } from "../useTableSizes";
 import {
@@ -66,11 +67,13 @@ function makeOpts(
 		sizes: {} as SizesMap,
 		frames: [] as readonly Frame[],
 		hidden: new Set<string>(),
+		edgeAnchors: {} as AnchorMap,
 		replaceAll: {
 			positions: vi.fn(),
 			sizes: vi.fn(),
 			frames: vi.fn(),
-			hidden: vi.fn()
+			hidden: vi.fn(),
+			edgeAnchors: vi.fn()
 		},
 		...overrides
 	};

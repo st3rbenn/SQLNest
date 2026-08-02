@@ -167,6 +167,24 @@ export default fp(
 					}
 				}
 			},
+			// ─── Politique de session (mitigation Policy B) ───────────────
+			// Better Auth 1.6.x stocke `session.token` en clair et fait le
+			// lookup par égalité (`SELECT ... WHERE token = ?` dans
+			// `internalAdapter.findSession`). Hasher casserait le lookup et
+			// il n'y a pas d'API pour override sans forker le core.
+			//
+			// À défaut de hashing, on RÉDUIT LA SURFACE d'un dump DB :
+			//   - `expiresIn: 7j` (défaut BA = 30j) → un token exfiltré meurt
+			//     en 7j au pire.
+			//   - `updateAge: 1j` → le token n'est refresh que toutes les 24h
+			//     (limite les writes DB inutiles ; sans ça BA rewrite à
+			//     chaque request).
+			// Reprendre Policy B dès qu'un upstream API permet le hashing
+			// (ou secondaryStorage layer si un jour on ajoute Redis).
+			session: {
+				expiresIn: 60 * 60 * 24 * 7,
+				updateAge: 60 * 60 * 24
+			},
 			advanced: {
 				// Préfixe distinctif des cookies pour éviter les collisions en dev
 				// (plusieurs apps sur localhost) et faciliter le debug.

@@ -3,6 +3,7 @@ import { Button } from "@sqlnest/design-system";
 import { Link } from "@tanstack/react-router";
 import { type CSSProperties, type FormEvent, useState } from "react";
 import { requestPasswordReset } from "./authClient";
+import { DismissibleAlert } from "./DismissibleAlert";
 
 const titleStyle: CSSProperties = {
 	fontSize: 20,
@@ -79,9 +80,14 @@ export function ForgotPasswordPage() {
 			</p>
 
 			{error ? (
-				<Alert color="red" variant="light" mb="md">
+				<DismissibleAlert
+					color="red"
+					variant="light"
+					mb="md"
+					onDismiss={() => setError(null)}
+				>
 					{error}
-				</Alert>
+				</DismissibleAlert>
 			) : null}
 
 			{submitted ? (
@@ -99,6 +105,7 @@ export function ForgotPasswordPage() {
 						autoComplete="off"
 						required
 						disabled={isSubmitting}
+						autoFocus
 					/>
 					<Button
 						type="submit"

@@ -2,6 +2,7 @@ import { Button } from "@sqlnest/design-system";
 import { IconBrandGithub, IconBrandGoogle } from "@tabler/icons-react";
 import { type CSSProperties, useState } from "react";
 import { signIn } from "./authClient";
+import { isSafeCallback } from "./isSafe";
 
 /**
  * Boutons OAuth Google + GitHub.
@@ -21,18 +22,6 @@ import { signIn } from "./authClient";
  */
 export interface OAuthButtonsProps {
 	callbackURL?: string;
-}
-
-/**
- * Protection contre open redirect (voir aussi `_auth.login.tsx`).
- * On n'accepte que des chemins internes non ambigus.
- */
-function isSafeCallback(v: string): boolean {
-	if (v.length === 0) return false;
-	if (!v.startsWith("/")) return false;
-	if (v.startsWith("//")) return false;
-	if (v.startsWith("/\\")) return false;
-	return true;
 }
 
 const containerStyle: CSSProperties = {

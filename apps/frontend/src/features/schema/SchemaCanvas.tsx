@@ -183,18 +183,17 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 	const persistLocal = session?.user == null;
 	const hookOpts = useMemo(() => ({ persistLocal }), [persistLocal]);
 
-	// Purge des entrées `sqlnest:positions:*`, `sqlnest:sizes:*`,
-	// `sqlnest:frames:*` du localStorage dès qu'on détecte un user loggé.
-	// Sans ça, les keys anonymes restent sur disque et peuvent réapparaître
-	// à un logout futur ou à un swap de compte. edgeAnchors reste local pour
-	// l'instant (pas encore syncé côté serveur — TODO à part).
+	// Purge des entrées `sqlnest:*:*` des slices canvas dès qu'on détecte
+	// un user loggé. Sans ça, les keys anonymes restent sur disque et
+	// peuvent réapparaître à un logout futur ou à un swap de compte.
 	useEffect(() => {
 		if (persistLocal) return;
 		if (typeof window === "undefined") return;
 		const prefixes = [
 			"sqlnest:positions:",
 			"sqlnest:sizes:",
-			"sqlnest:frames:"
+			"sqlnest:frames:",
+			"sqlnest:edge-anchors:"
 		];
 		try {
 			const stale = Object.keys(window.localStorage).filter((k) =>
@@ -276,6 +275,13 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 	// `framesFor(schema)` statique — l'utilisateur crée/retire ses frames
 	// via lasso + F et le menu contextuel « Retirer du frame ».
 	const framesApi = useFrames(schema, hookOpts);
+
+	// Overrides d'ancres par edge (source-side / target-side). Persistés
+	// en localStorage quand anonyme, server-only quand loggé (via
+	// `useCanvasSync` — payload sync inclut edgeAnchors depuis 2026-08).
+	// Déclaré ICI pour que `useCanvasSync` (juste après) puisse les
+	// observer + les remplacer via `canvasSyncReplaceAll.edgeAnchors`.
+	const edgeAnchors = useEdgeAnchors(schema, hookOpts);
 
 	// Historique undo/redo — capture positions + sizes + frames + hiddenIds.
 	// `history.push()` doit être appelé APRÈS chaque geste user notable
@@ -414,12 +420,14 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 				);
 			},
 			frames: framesApi.replaceAll,
-			hidden: (ids: ReadonlySet<string>) => setHiddenIds(new Set(ids))
+			hidden: (ids: ReadonlySet<string>) => setHiddenIds(new Set(ids)),
+			edgeAnchors: edgeAnchors.replaceAll
 		}),
 		[
 			tablePositions.replaceAll,
 			tableSizes.replaceAll,
 			framesApi.replaceAll,
+			edgeAnchors.replaceAll,
 			setNodes
 		]
 	);
@@ -429,6 +437,7 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 		sizes: tableSizes.sizes,
 		frames: framesApi.frames,
 		hidden: hiddenIds,
+		edgeAnchors: edgeAnchors.overrides,
 		replaceAll: canvasSyncReplaceAll
 	});
 
@@ -519,11 +528,7 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 		[onNodesChange]
 	);
 
-	// Overrides d'ancres par edge (source-side / target-side). Persistés en
-	// localStorage par signature de schéma. Lus dans `displayEdges` avec
-	// fallback sur l'auto-routing (`bestHandles`) quand aucun override n'est
-	// posé. Setters passés aux edges via `data` (voir InteractiveEdge).
-	const edgeAnchors = useEdgeAnchors(schema);
+	// (`edgeAnchors` déclaré plus haut — cohabitation avec useCanvasSync.)
 
 	// Sélection multi-tables — alimente le chip bas-centre et le raccourci `F`.
 	// Extrait dans `useCanvasSelection` ; le callback `onMultiSelect` clear le

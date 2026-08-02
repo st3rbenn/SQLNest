@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import z from "zod/v4";
 import {
@@ -31,6 +31,57 @@ class QuotaExceededError extends Error {
 const CANVAS_BODY_LIMIT_BYTES = 100_000;
 const MAX_CANVAS_PER_USER = 50;
 const MAX_JSON_DEPTH = 10;
+
+/**
+ * Défense CSRF sur les mutations canvas — check explicite du header
+ * `Origin` contre la liste `TRUSTED_ORIGINS`. C'est une ceinture sur la
+ * bretelle : le cookie de session Better Auth est déjà `SameSite=Lax`
+ * (bloque les fetch cross-origin) ET nos mutations PUT/DELETE avec
+ * `Content-Type: application/json` déclenchent un CORS preflight
+ * (bloqué par TRUSTED_ORIGINS allowlist). Cette validation en preHandler :
+ *   - rend la protection VISIBLE au diff / à l'audit,
+ *   - loggée en cas de refus (détection d'anomalies),
+ *   - continue de protéger si un jour CORS est mal configuré.
+ *
+ * `Origin` est un header que le browser attache automatiquement sur les
+ * requêtes cross-origin (et sur toutes les mutations same-origin en
+ * pratique). Il n'est PAS forgeable depuis du JS browser — le browser
+ * l'ignore si le code utilisateur essaie de le set via `fetch({ headers })`.
+ *
+ * Note : le TRUSTED_ORIGINS lu ici est le MÊME que celui utilisé par
+ * Better Auth (env var) et CORS (index.ts). Une seule source de vérité.
+ */
+function assertTrustedOrigin(request: FastifyRequest, reply: FastifyReply):
+	| { ok: true }
+	| { ok: false; response: FastifyReply } {
+	const origin = request.headers.origin;
+	if (typeof origin !== "string" || origin.length === 0) {
+		request.log.warn(
+			{ path: request.url, method: request.method },
+			"canvas-state mutation refusée : header Origin manquant"
+		);
+		return {
+			ok: false,
+			response: reply.code(403).send({ message: "Origin manquant" })
+		};
+	}
+	const trustedRaw = process.env.TRUSTED_ORIGINS ?? "http://localhost:3000";
+	const trusted = trustedRaw
+		.split(",")
+		.map((s) => s.trim())
+		.filter(Boolean);
+	if (!trusted.includes(origin)) {
+		request.log.warn(
+			{ origin, path: request.url, method: request.method },
+			"canvas-state mutation refusée : Origin non autorisé"
+		);
+		return {
+			ok: false,
+			response: reply.code(403).send({ message: "Origin non autorisé" })
+		};
+	}
+	return { ok: true };
+}
 
 // Schéma minimal pour les réponses d'erreur — nommé pour l'OpenAPI et
 // réutilisé pour les 404 (`GET /api/canvas-state?signature=X` inconnu).
@@ -117,6 +168,9 @@ export default function canvasStateRoute(fastify: FastifyInstance) {
 		async (request, reply) => {
 			assertAuthenticated(request);
 
+			const csrfCheck = assertTrustedOrigin(request, reply);
+			if (!csrfCheck.ok) return csrfCheck.response;
+
 			if (jsonDepthExceeds(request.body.payload, MAX_JSON_DEPTH)) {
 				return reply.code(400).send({ message: "Payload JSON trop profond" });
 			}
@@ -180,6 +234,10 @@ export default function canvasStateRoute(fastify: FastifyInstance) {
 		},
 		async (request, reply) => {
 			assertAuthenticated(request);
+
+			const csrfCheck = assertTrustedOrigin(request, reply);
+			if (!csrfCheck.ok) return csrfCheck.response;
+
 			try {
 				await delCanvasState(
 					fastify.db,

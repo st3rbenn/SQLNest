@@ -7,6 +7,7 @@ import { queryClient } from "../../api/queryClient";
 import { Route as VerifyRoute } from "../../routes/_auth.verify-email";
 import { authClient } from "./authClient";
 import { AUTH_SESSION_QUERY_KEY } from "./sessionQuery";
+import { useNoReferrerMeta } from "./useNoReferrerMeta";
 
 const titleStyle: CSSProperties = {
 	fontSize: 20,
@@ -92,6 +93,8 @@ export function VerifyEmailPage() {
 }
 
 function VerifyEmailInner({ token }: { token: string }) {
+	// Bloque le leak du `?token=` en Referer sur les tiers.
+	useNoReferrerMeta();
 	const { isLoading, isSuccess, isError } = useQuery({
 		queryKey: ["auth", "verify-email", token],
 		queryFn: async () => {

@@ -201,7 +201,7 @@ describe.skipIf(!DATABASE_URL)("/api/canvas-state integration", () => {
 		const response = await app.inject({
 			method: "PUT",
 			url: "/api/canvas-state",
-			headers: { cookie, "content-type": "application/json" },
+			headers: { cookie, "content-type": "application/json", origin: "http://localhost:3000" },
 			payload: { signature: "postgres:users", payload }
 		});
 
@@ -237,7 +237,7 @@ describe.skipIf(!DATABASE_URL)("/api/canvas-state integration", () => {
 		const first = await app.inject({
 			method: "PUT",
 			url: "/api/canvas-state",
-			headers: { cookie, "content-type": "application/json" },
+			headers: { cookie, "content-type": "application/json", origin: "http://localhost:3000" },
 			payload: {
 				signature: "postgres:users",
 				payload: { version: 1 }
@@ -254,7 +254,7 @@ describe.skipIf(!DATABASE_URL)("/api/canvas-state integration", () => {
 		const second = await app.inject({
 			method: "PUT",
 			url: "/api/canvas-state",
-			headers: { cookie, "content-type": "application/json" },
+			headers: { cookie, "content-type": "application/json", origin: "http://localhost:3000" },
 			payload: {
 				signature: "postgres:users",
 				payload: { version: 2, extra: "data" }
@@ -292,7 +292,7 @@ describe.skipIf(!DATABASE_URL)("/api/canvas-state integration", () => {
 		const putResp = await app.inject({
 			method: "PUT",
 			url: "/api/canvas-state",
-			headers: { cookie, "content-type": "application/json" },
+			headers: { cookie, "content-type": "application/json", origin: "http://localhost:3000" },
 			payload: { signature: "postgres:orders,products", payload }
 		});
 		expect(putResp.statusCode).toBe(200);
@@ -321,7 +321,7 @@ describe.skipIf(!DATABASE_URL)("/api/canvas-state integration", () => {
 		await app.inject({
 			method: "PUT",
 			url: "/api/canvas-state",
-			headers: { cookie, "content-type": "application/json" },
+			headers: { cookie, "content-type": "application/json", origin: "http://localhost:3000" },
 			payload: {
 				signature: "postgres:users",
 				payload: { foo: "bar" }
@@ -332,7 +332,7 @@ describe.skipIf(!DATABASE_URL)("/api/canvas-state integration", () => {
 		const delResp = await app.inject({
 			method: "DELETE",
 			url: "/api/canvas-state?signature=postgres:users",
-			headers: { cookie }
+			headers: { cookie, origin: "http://localhost:3000" }
 		});
 		expect(delResp.statusCode).toBe(204);
 		// 204 ne doit renvoyer aucun body.
@@ -371,7 +371,7 @@ describe.skipIf(!DATABASE_URL)("/api/canvas-state integration", () => {
 		await app.inject({
 			method: "PUT",
 			url: "/api/canvas-state",
-			headers: { cookie: alice.cookie, "content-type": "application/json" },
+			headers: { cookie: alice.cookie, "content-type": "application/json", origin: "http://localhost:3000" },
 			payload: { signature: "postgres:users", payload: alicePayload }
 		});
 
@@ -388,7 +388,7 @@ describe.skipIf(!DATABASE_URL)("/api/canvas-state integration", () => {
 		const malloryDel = await app.inject({
 			method: "DELETE",
 			url: "/api/canvas-state?signature=postgres:users",
-			headers: { cookie: mallory.cookie }
+			headers: { cookie: mallory.cookie, origin: "http://localhost:3000" }
 		});
 		expect(malloryDel.statusCode).toBe(204);
 
@@ -410,5 +410,42 @@ describe.skipIf(!DATABASE_URL)("/api/canvas-state integration", () => {
 		expect(aliceGet.statusCode).toBe(200);
 		const body = aliceGet.json() as { payload: unknown };
 		expect(body.payload).toEqual(alicePayload);
+	});
+
+	// ─── 8. CSRF — Origin manquant ou non-whitelist ───────────────────
+	test("PUT sans Origin → 403 (CSRF defense-in-depth)", async () => {
+		const { cookie } = await createTestUser(
+			app,
+			"origin-none@example.com",
+			"password-strong-1234"
+		);
+		const response = await app.inject({
+			method: "PUT",
+			url: "/api/canvas-state",
+			headers: { cookie, "content-type": "application/json" },
+			payload: {
+				signature: "postgres:users",
+				payload: { positions: {} }
+			}
+		});
+		expect(response.statusCode).toBe(403);
+		const body = response.json() as { message?: string };
+		expect(body.message).toBe("Origin manquant");
+	});
+
+	test("DELETE avec Origin hostile → 403 (CSRF defense-in-depth)", async () => {
+		const { cookie } = await createTestUser(
+			app,
+			"origin-evil@example.com",
+			"password-strong-5678"
+		);
+		const response = await app.inject({
+			method: "DELETE",
+			url: "/api/canvas-state?signature=postgres:users",
+			headers: { cookie, origin: "https://evil.com" }
+		});
+		expect(response.statusCode).toBe(403);
+		const body = response.json() as { message?: string };
+		expect(body.message).toBe("Origin non autorisé");
 	});
 });

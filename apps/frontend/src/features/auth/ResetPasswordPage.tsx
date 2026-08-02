@@ -1,9 +1,11 @@
-import { Alert, PasswordInput } from "@mantine/core";
+import { PasswordInput } from "@mantine/core";
 import { Button, showNotification } from "@sqlnest/design-system";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { type CSSProperties, type FormEvent, useState } from "react";
 import { Route as ResetRoute } from "../../routes/_auth.reset-password";
 import { resetPassword } from "./authClient";
+import { DismissibleAlert } from "./DismissibleAlert";
+import { useNoReferrerMeta } from "./useNoReferrerMeta";
 
 const titleStyle: CSSProperties = {
 	fontSize: 20,
@@ -92,6 +94,9 @@ export function ResetPasswordPage() {
 }
 
 function ResetPasswordInner({ token }: { token: string }) {
+	// Bloque le leak du `?token=` en Referer sur les tiers chargés depuis
+	// cette page (fonts, images, analytics, iframes).
+	useNoReferrerMeta();
 	const navigate = useNavigate();
 	const [password, setPassword] = useState("");
 	const [confirm, setConfirm] = useState("");
@@ -136,9 +141,14 @@ function ResetPasswordInner({ token }: { token: string }) {
 			<p style={subtitleStyle}>Choisis un mot de passe pour ton compte.</p>
 
 			{error ? (
-				<Alert color="red" variant="light" mb="md">
+				<DismissibleAlert
+					color="red"
+					variant="light"
+					mb="md"
+					onDismiss={() => setError(null)}
+				>
 					{error}
-				</Alert>
+				</DismissibleAlert>
 			) : null}
 
 			<form style={formStyle} onSubmit={handleSubmit} noValidate>
@@ -150,6 +160,7 @@ function ResetPasswordInner({ token }: { token: string }) {
 					required
 					disabled={isSubmitting}
 					description="Au moins 8 caractères."
+					autoFocus
 				/>
 				<PasswordInput
 					label="Confirmer le mot de passe"

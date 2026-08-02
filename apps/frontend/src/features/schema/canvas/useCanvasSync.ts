@@ -36,6 +36,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useCurrentUser } from "../../auth/sessionQuery";
 import type { Frame } from "../frames";
+import type { AnchorMap } from "../useEdgeAnchors";
 import type { PositionsMap } from "../useTablePositions";
 import type { SizesMap } from "../useTableSizes";
 import { type CanvasSources, deserialize, serialize } from "./canvasPayload";
@@ -67,6 +68,7 @@ export interface CanvasSyncReplaceAll {
 	readonly sizes: (sizes: SizesMap) => void;
 	readonly frames: (frames: readonly Frame[]) => void;
 	readonly hidden: (hidden: ReadonlySet<string>) => void;
+	readonly edgeAnchors: (overrides: AnchorMap) => void;
 }
 
 export interface UseCanvasSyncOptions extends CanvasSources {
@@ -94,7 +96,8 @@ const EMPTY_SERIALIZED = JSON.stringify(
 		positions: {} as PositionsMap,
 		sizes: {} as SizesMap,
 		frames: [] as readonly Frame[],
-		hidden: new Set<string>()
+		hidden: new Set<string>(),
+		edgeAnchors: {} as AnchorMap
 	})
 );
 
@@ -218,10 +221,11 @@ export function useCanvasSync(opts: UseCanvasSyncOptions): UseCanvasSyncReturn {
 					positions: opts.positions,
 					sizes: opts.sizes,
 					frames: opts.frames,
-					hidden: opts.hidden
+					hidden: opts.hidden,
+					edgeAnchors: opts.edgeAnchors
 				})
 			),
-		[opts.positions, opts.sizes, opts.frames, opts.hidden]
+		[opts.positions, opts.sizes, opts.frames, opts.hidden, opts.edgeAnchors]
 	);
 	const currentSerializedRef = useRef(currentSerialized);
 	currentSerializedRef.current = currentSerialized;
@@ -294,6 +298,7 @@ export function useCanvasSync(opts: UseCanvasSyncOptions): UseCanvasSyncReturn {
 			replaceAllRef.current.sizes(state.sizes);
 			replaceAllRef.current.frames(state.frames);
 			replaceAllRef.current.hidden(state.hidden);
+			replaceAllRef.current.edgeAnchors(state.edgeAnchors);
 			// Baseline = ce qu'on vient d'appliquer. Le prochain render aura
 			// `currentSerialized` égal à cette valeur → pas de push spurious.
 			lastSyncedSerializedRef.current = JSON.stringify(serialize(state));

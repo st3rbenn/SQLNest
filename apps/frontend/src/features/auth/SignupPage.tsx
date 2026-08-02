@@ -1,9 +1,10 @@
-import { Alert, PasswordInput, TextInput } from "@mantine/core";
+import { PasswordInput, TextInput } from "@mantine/core";
 import { Button } from "@sqlnest/design-system";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { type CSSProperties, type FormEvent, useState } from "react";
 import { signUp } from "./authClient";
+import { DismissibleAlert } from "./DismissibleAlert";
 import { OAuthButtons } from "./OAuthButtons";
 import { sessionQueryOptions } from "./sessionQuery";
 
@@ -118,9 +119,15 @@ export function SignupPage() {
 			</p>
 
 			{error ? (
-				<Alert color="red" variant="light" mb="md" title="Inscription refusée">
+				<DismissibleAlert
+					color="red"
+					variant="light"
+					mb="md"
+					title="Inscription refusée"
+					onDismiss={() => setError(null)}
+				>
 					{error}
-				</Alert>
+				</DismissibleAlert>
 			) : null}
 
 			<form style={formStyle} onSubmit={handleSubmit} noValidate>
@@ -130,6 +137,7 @@ export function SignupPage() {
 					onChange={(e) => setName(e.currentTarget.value)}
 					autoComplete="off"
 					disabled={isSubmitting}
+					autoFocus
 				/>
 				<TextInput
 					label="Email"
