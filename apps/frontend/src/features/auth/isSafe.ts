@@ -14,11 +14,23 @@
  * - lu à nouveau côté page `LoginPage` avant tout `navigate`.
  */
 
+/** Regex hoistée (bilan biome useTopLevelRegex — évite la recompile
+ * à chaque appel). Matche %0A / %0a (LF) et %0D / %0d (CR) encodés,
+ * qui permettraient une CRLF injection dans un header si le path est
+ * réinjecté ailleurs qu'un `navigate()` TanStack Router (par ex.
+ * `window.location.assign`, `fetch(url)`, `img src`). */
+const CRLF_ENCODED_RE = /%0[ad]/i;
+
 export function isSafePath(v: unknown): v is string {
 	if (typeof v !== "string" || v.length === 0) return false;
 	if (!v.startsWith("/")) return false;
 	if (v.startsWith("//")) return false;
 	if (v.startsWith("/\\")) return false;
+	// CR/LF littéraux (rejette une URL brute avec un vrai \n).
+	if (v.includes("\r") || v.includes("\n")) return false;
+	// CR/LF encodés %0A/%0D — évite l'injection de headers si le path
+	// finit dans une location.assign ou un fetch (defense-in-depth).
+	if (CRLF_ENCODED_RE.test(v)) return false;
 	return true;
 }
 

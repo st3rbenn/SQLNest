@@ -45,8 +45,9 @@ const linkStyle: CSSProperties = {
 /**
  * Sous-composant "Lien invalide" — token absent dans le search.
  * On propose deux CTA actionnables plutôt qu'un errorBoundary muet.
+ * Exporté pour test unitaire isolé.
  */
-function TokenMissing() {
+export function TokenMissing() {
 	return (
 		<div>
 			<h2 style={titleStyle}>Lien invalide</h2>
@@ -92,7 +93,8 @@ export function VerifyEmailPage() {
 	return <VerifyEmailInner token={token} />;
 }
 
-function VerifyEmailInner({ token }: { token: string }) {
+/** Exporté pour test unitaire (state machine loading/success/error). */
+export function VerifyEmailInner({ token }: { token: string }) {
 	// Bloque le leak du `?token=` en Referer sur les tiers.
 	useNoReferrerMeta();
 	const { isLoading, isSuccess, isError } = useQuery({

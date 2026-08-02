@@ -2,6 +2,7 @@ import { schema as dbSchema } from "@sqlnest/db";
 import { type Auth, type BetterAuthOptions, betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import fp from "fastify-plugin";
+import { createHashedSessionStorage } from "./03-auth/hashedSessionStorage";
 
 // Regex top-level — Vite/Vitest injecte `process.env.BASE_URL = "/"` par
 // défaut, on veut ignorer toute valeur qui n'est pas une URL http(s).
@@ -167,24 +168,29 @@ export default fp(
 					}
 				}
 			},
-			// ─── Politique de session (mitigation Policy B) ───────────────
-			// Better Auth 1.6.x stocke `session.token` en clair et fait le
-			// lookup par égalité (`SELECT ... WHERE token = ?` dans
-			// `internalAdapter.findSession`). Hasher casserait le lookup et
-			// il n'y a pas d'API pour override sans forker le core.
+			// ─── Politique de session + Policy B (hashing) ────────────────
+			// `storeSessionInDatabase: false` désactive l'écriture BA dans la
+			// table `session` — tout passe par notre `secondaryStorage` custom
+			// (voir `03-auth/hashedSessionStorage.ts`) qui hash SHA-256 le
+			// token et chiffre AES-256-GCM le payload. Un dump DB ne fuit ni
+			// tokens de session actifs (préimage-résistance) ni les user data
+			// dans les payloads.
 			//
-			// À défaut de hashing, on RÉDUIT LA SURFACE d'un dump DB :
-			//   - `expiresIn: 7j` (défaut BA = 30j) → un token exfiltré meurt
-			//     en 7j au pire.
-			//   - `updateAge: 1j` → le token n'est refresh que toutes les 24h
-			//     (limite les writes DB inutiles ; sans ça BA rewrite à
-			//     chaque request).
-			// Reprendre Policy B dès qu'un upstream API permet le hashing
-			// (ou secondaryStorage layer si un jour on ajoute Redis).
+			// Expirations conservatives :
+			//   - `expiresIn: 7j` (défaut BA = 30j) — plus courte durée =
+			//     moindre fenêtre d'exploitation d'un cookie volé côté client
+			//     (XSS, ordi partagé).
+			//   - `updateAge: 1j` — refresh limité 1×/24h (évite les writes
+			//     KV inutiles).
 			session: {
+				storeSessionInDatabase: false,
 				expiresIn: 60 * 60 * 24 * 7,
 				updateAge: 60 * 60 * 24
 			},
+			secondaryStorage: createHashedSessionStorage(
+				fastify.db,
+				process.env.AUTH_SECRET as string
+			),
 			advanced: {
 				// Préfixe distinctif des cookies pour éviter les collisions en dev
 				// (plusieurs apps sur localhost) et faciliter le debug.

@@ -268,11 +268,17 @@ describe.skipIf(!DATABASE_URL)("Better Auth integration", () => {
 		const cookie = extractSessionCookie(getSetCookies(signUp.headers));
 		expect(cookie.length).toBeGreaterThan(0);
 
-		// Vérifie qu'il y a 1 session en DB.
+		// La table `session` n'est PLUS écrite (Policy B — cf. plugin
+		// `03-auth`, `session.storeSessionInDatabase: false`). Toutes les
+		// sessions vivent dans `session_kv` avec key = SHA-256(token) et
+		// value = AES-256-GCM(payload).
+		// Sign-up crée la session principale + la liste
+		// `active-sessions-<userId>` → 2 rows attendues (parfois plus si BA
+		// pousse d'autres clés auxiliaires).
 		const beforeSignOut = await app.db.execute(
-			sql`SELECT COUNT(*)::int AS n FROM "session"`
+			sql`SELECT COUNT(*)::int AS n FROM "session_kv"`
 		);
-		expect((beforeSignOut[0] as { n: number }).n).toBe(1);
+		expect((beforeSignOut[0] as { n: number }).n).toBeGreaterThanOrEqual(1);
 
 		// Sign-out avec le cookie. Better Auth 1.6.25 attend un body JSON
 		// même vide (`{}`) — un POST sans body avec content-type json est
@@ -287,11 +293,66 @@ describe.skipIf(!DATABASE_URL)("Better Auth integration", () => {
 		// Better Auth renvoie 200 sur sign-out (idempotent-ish).
 		expect(signOut.statusCode).toBe(200);
 
-		// La session doit avoir été supprimée en DB.
-		const afterSignOut = await app.db.execute(
-			sql`SELECT COUNT(*)::int AS n FROM "session"`
-		);
-		expect((afterSignOut[0] as { n: number }).n).toBe(0);
+		// La session principale doit avoir disparu de `session_kv`. La liste
+		// `active-sessions-<userId>` peut rester (vidée mais non
+		// nécessairement supprimée — BA log en debug si elle est vide).
+		// On vérifie que get-session retourne bien null pour ce cookie.
+		const getSession = await app.inject({
+			method: "GET",
+			url: "/api/auth/get-session",
+			headers: { cookie }
+		});
+		expect(getSession.statusCode).toBe(200);
+		const body = getSession.json() as unknown;
+		expect(body).toBeNull();
+	});
+
+	// ─── Policy B — Session token hashing (defense-in-depth) ──────────
+	test("session_kv stocke token HASHÉ (SHA-256) et payload CHIFFRÉ (AES-256-GCM)", async () => {
+		// Sign-up crée une session — on inspecte ensuite la row DB.
+		const signUp = await app.inject({
+			method: "POST",
+			url: "/api/auth/sign-up/email",
+			headers: { "content-type": "application/json" },
+			payload: {
+				email: "hash-check@example.com",
+				password: "verify-hashing-policy-b",
+				name: "Hash Check"
+			}
+		});
+		const cookie = extractSessionCookie(getSetCookies(signUp.headers));
+		expect(cookie.length).toBeGreaterThan(0);
+
+		// Le cookie session est signé par Fastify — la partie post-`.` (
+		// signature) précède la valeur post-`=`. On récupère la valeur du
+		// cookie `sqlnest.session_token` telle qu'envoyée au client.
+		const match = /sqlnest\.session_token=([^;]+)/.exec(cookie);
+		expect(match).not.toBeNull();
+		const cookieValue = decodeURIComponent(match?.[1] ?? "");
+		expect(cookieValue.length).toBeGreaterThan(0);
+
+		// Lire toutes les rows session_kv.
+		const rows = (await app.db.execute(
+			sql`SELECT key, value FROM "session_kv"`
+		)) as { key: string; value: string }[];
+		expect(rows.length).toBeGreaterThan(0);
+
+		// (a) Aucune clé DB ne doit égaler le token du cookie (preuve du
+		//     hashing — le cookie contient le token clair, la DB non).
+		for (const r of rows) {
+			expect(r.key).not.toBe(cookieValue);
+			// Toutes les clés doivent être des hex 64-chars (SHA-256).
+			expect(r.key).toMatch(/^[0-9a-f]{64}$/);
+		}
+
+		// (b) Aucune value DB ne doit contenir l'email en clair (preuve du
+		//     chiffrement — un dump DB ne fuit ni user data ni tokens).
+		for (const r of rows) {
+			expect(r.value).not.toContain("hash-check@example.com");
+			expect(r.value).not.toContain("Hash Check");
+			// Format ciphertext attendu : iv.tag.enc (3 blocs base64).
+			expect(r.value.split(".").length).toBe(3);
+		}
 	});
 
 	// ─── get-session ──────────────────────────────────────────────────

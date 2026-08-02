@@ -157,6 +157,43 @@ export const verification = pgTable(
 	]
 );
 
+// ─── session_kv ──────────────────────────────────────────────────────────
+// Stockage KV des sessions Better Auth, avec token HASHÉ (SHA-256) en clé
+// et payload CHIFFRÉ (AES-256-GCM avec AUTH_SECRET) en valeur.
+//
+// Pourquoi : Better Auth 1.6.x stocke `session.token` en clair dans la
+// table `session` et fait le lookup par égalité — un dump DB expose donc
+// tous les tokens actifs, un attaquant peut forger n'importe quel cookie.
+//
+// Cette table sert de backend au `secondaryStorage` custom (voir
+// `apps/backend/src/plugins/03-auth/hashedSessionStorage.ts`). Better Auth
+// est configuré avec `session.storeSessionInDatabase: false` — il n'écrit
+// PLUS dans la table `session` (qui devient inutilisée mais garde son
+// schéma pour compat future / migration retour).
+//
+// - `key` : SHA-256(clearToken) — 64 chars hex. Non-reversible, l'attaquant
+//   avec un dump DB ne peut pas reconstruire le clearToken pour forger un
+//   cookie (préimage-résistance SHA-256).
+// - `value` : AES-256-GCM(JSON) — le payload `{session, user}` chiffré.
+//   Un dump DB ne fuite ni les user data (email, nom) ni le contenu.
+// - `expires_at` : TTL fourni par Better Auth. Purge périodique
+//   recommandée (query cron / trigger DB).
+//
+// La table `session` existante n'est PLUS écrite. Elle est conservée par
+// prudence (rollback rapide en cas de bug hashing) — à drop après quelques
+// releases stables.
+export const sessionKv = pgTable(
+	"session_kv",
+	{
+		key: text("key").primaryKey(),
+		value: text("value").notNull(),
+		// Index pour purge des rows expirées (cron / trigger). `null` =
+		// pas d'expiration (rare pour Better Auth mais accepté).
+		expiresAt: timestamp("expires_at", { withTimezone: true })
+	},
+	(t) => [index("session_kv_expires_at_idx").on(t.expiresAt)]
+);
+
 // ─── canvas_state ────────────────────────────────────────────────────────
 // Snapshot serveur du canvas d'un utilisateur pour un schéma donné.
 // Unique par (user_id, schema_signature) — un canvas par (user × schéma).

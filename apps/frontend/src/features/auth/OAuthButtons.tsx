@@ -1,8 +1,9 @@
-import { Button } from "@sqlnest/design-system";
+import { Button, showNotification } from "@sqlnest/design-system";
 import { IconBrandGithub, IconBrandGoogle } from "@tabler/icons-react";
 import { type CSSProperties, useState } from "react";
 import { signIn } from "./authClient";
 import { isSafeCallback } from "./isSafe";
+import { useOAuthProviders } from "./useOAuthProviders";
 
 /**
  * Boutons OAuth Google + GitHub.
@@ -50,6 +51,12 @@ type OAuthProvider = "google" | "github";
 
 export function OAuthButtons({ callbackURL = "/" }: OAuthButtonsProps) {
 	const [loading, setLoading] = useState<OAuthProvider | null>(null);
+	const providers = useOAuthProviders();
+
+	// Si AUCUN provider n'est configuré (env vars absentes backend, ou
+	// backend HS), on n'affiche RIEN — pas de séparateur "ou avec", pas
+	// de boutons cliqués dans le vide.
+	if (!providers.google && !providers.github) return null;
 
 	// Defense-in-depth : si l'appelant passe une URL non same-origin, on
 	// retombe sur "/". Le premier filet est `validateSearch` de `/login`.
@@ -59,11 +66,38 @@ export function OAuthButtons({ callbackURL = "/" }: OAuthButtonsProps) {
 		setLoading(provider);
 		try {
 			// `signIn.social` déclenche un `window.location` vers le provider —
-			// pas besoin de gérer navigate() côté React, ni d'invalider la
-			// session (le callback OAuth atterrit sur `callbackURL` avec cookie
-			// déjà posé, et le beforeLoad du layout `_authenticated` refetch
-			// la session).
-			await signIn.social({ provider, callbackURL: safeCallback });
+			// dans le happy path, la page navigue et ce composant est unmounté
+			// avant que le `finally` s'exécute. Si `signIn.social` retourne
+			// une erreur (provider non configuré backend, réseau, config
+			// invalide) sans faire de window.location, la page reste montée
+			// et l'user ne voit RIEN → cliquer 3× sans feedback. On surface
+			// l'erreur via notification.
+			const result = await signIn.social({
+				provider,
+				callbackURL: safeCallback
+			});
+			if (result?.error) {
+				showNotification({
+					title:
+						provider === "google"
+							? "Connexion Google indisponible"
+							: "Connexion GitHub indisponible",
+					message:
+						result.error.message ??
+						"Ce provider n'est pas configuré côté serveur.",
+					color: "red",
+					autoClose: 5000
+				});
+			}
+		} catch (err) {
+			// Erreur réseau ou throw inattendu → surface aussi.
+			showNotification({
+				title: "Erreur de connexion",
+				message:
+					err instanceof Error ? err.message : "Réessaie dans un instant.",
+				color: "red",
+				autoClose: 5000
+			});
 		} finally {
 			setLoading(null);
 		}
@@ -79,32 +113,36 @@ export function OAuthButtons({ callbackURL = "/" }: OAuthButtonsProps) {
 				<div style={dividerLineStyle} />
 			</div>
 			<div style={containerStyle}>
-				<Button
-					variant="secondary"
-					fullWidth
-					leftSection={<IconBrandGoogle size={16} />}
-					loading={loading === "google"}
-					loadingLabel="Redirection…"
-					disabled={isBusy}
-					onClick={() => {
-						void handleClick("google");
-					}}
-				>
-					Continuer avec Google
-				</Button>
-				<Button
-					variant="secondary"
-					fullWidth
-					leftSection={<IconBrandGithub size={16} />}
-					loading={loading === "github"}
-					loadingLabel="Redirection…"
-					disabled={isBusy}
-					onClick={() => {
-						void handleClick("github");
-					}}
-				>
-					Continuer avec GitHub
-				</Button>
+				{providers.google ? (
+					<Button
+						variant="secondary"
+						fullWidth
+						leftSection={<IconBrandGoogle size={16} />}
+						loading={loading === "google"}
+						loadingLabel="Redirection…"
+						disabled={isBusy}
+						onClick={() => {
+							void handleClick("google");
+						}}
+					>
+						Continuer avec Google
+					</Button>
+				) : null}
+				{providers.github ? (
+					<Button
+						variant="secondary"
+						fullWidth
+						leftSection={<IconBrandGithub size={16} />}
+						loading={loading === "github"}
+						loadingLabel="Redirection…"
+						disabled={isBusy}
+						onClick={() => {
+							void handleClick("github");
+						}}
+					>
+						Continuer avec GitHub
+					</Button>
+				) : null}
 			</div>
 		</div>
 	);

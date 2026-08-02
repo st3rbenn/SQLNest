@@ -73,13 +73,25 @@ export function SignupPage() {
 			return;
 		}
 		setIsSubmitting(true);
-		// `name` est requis par Better Auth pour signUp.email — on passe
-		// l'email comme fallback si l'utilisateur n'a rien saisi (le champ
-		// est libellé optionnel côté UI, mais la contrainte backend reste).
+		// `name` est requis par Better Auth pour signUp.email — si l'user
+		// n'en a pas saisi, on prend la partie locale de l'email (ce qui
+		// est avant le `@`), PAS l'email complet. Utiliser l'email complet
+		// comme display name le rend visible dans l'UI (UserMenu top-right,
+		// éventuellement futurs partages) → leak PII gratuit. Local-part
+		// suffit à identifier de façon lisible.
+		//
+		// Chaîne `||` (pas `??`) : `??` ne catch que `null`/`undefined`.
+		// Un email sans `@` (validation browser contournée / client HTTP
+		// direct) donnerait `split("@")[0]` = `""` (string vide) → `finalName`
+		// resterait `""` → BA renvoie une 400 "name too short" sans indice.
+		// `||` attrape les strings vides et retombe sur `"user"`.
+		const trimmedName = name.trim();
+		const fallbackName = email.split("@")[0]?.trim();
+		const finalName = trimmedName || fallbackName || "user";
 		const result = await signUp.email({
 			email,
 			password,
-			name: name.trim() !== "" ? name.trim() : email
+			name: finalName
 		});
 		if (result.error) {
 			// Protection contre énumération de comptes : on ne différencie

@@ -45,7 +45,14 @@ describe("isSafePath / isSafeCallback — anti open-redirect", () => {
 		"file:///etc/passwd",
 		"mailto:x@example.com",
 		"ftp://evil.com",
-		"vbscript:msgbox(1)"
+		"vbscript:msgbox(1)",
+		// CRLF injection — encodés ou littéraux.
+		"/canvas?redirect=%0aSet-Cookie:%20evil=1",
+		"/canvas%0d%0aX-Injected:%201",
+		"/canvas%0A/evil",
+		"/canvas%0D/evil",
+		"/canvas\n/evil",
+		"/canvas\r/evil"
 	];
 	for (const p of rejectedForBoth) {
 		it(`refuse "${p}"`, () => {

@@ -34,8 +34,16 @@ export const Route = createFileRoute("/_auth")({
 			session = await context.queryClient.ensureQueryData(
 				sessionQueryOptions()
 			);
-		} catch {
-			// Anonyme par défaut si session indéterminable.
+		} catch (err) {
+			// Anonyme par défaut si session indéterminable — mais en dev
+			// on veut voir l'erreur pour ne pas masquer un backend HS.
+			if (import.meta.env.DEV) {
+				// eslint-disable-next-line no-console
+				console.warn(
+					"[_auth beforeLoad] Session indéterminable — fail-open vers /login. Vérifie que le backend tourne.",
+					err
+				);
+			}
 			session = null;
 		}
 		if (session) {

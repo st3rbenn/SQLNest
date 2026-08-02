@@ -108,7 +108,7 @@ export async function truncateAuthTables(app: FastifyInstance): Promise<void> {
 	}
 	assertTestDatabase();
 	await app.db.execute(
-		sql`TRUNCATE TABLE "session", "account", "verification", "user" RESTART IDENTITY CASCADE`
+		sql`TRUNCATE TABLE "session_kv", "session", "account", "verification", "user" RESTART IDENTITY CASCADE`
 	);
 }
 
@@ -126,6 +126,6 @@ export async function truncateCanvasAndAuth(
 	}
 	assertTestDatabase();
 	await app.db.execute(
-		sql`TRUNCATE TABLE "canvas_state", "session", "account", "verification", "user" RESTART IDENTITY CASCADE`
+		sql`TRUNCATE TABLE "canvas_state", "session_kv", "session", "account", "verification", "user" RESTART IDENTITY CASCADE`
 	);
 }

@@ -7,6 +7,30 @@ import type { CSSProperties } from "react";
 import { signOut } from "./authClient";
 import { AUTH_SESSION_QUERY_KEY, useCurrentUser } from "./sessionQuery";
 
+/**
+ * Allowlist des hosts d'images OAuth. `user.image` vient de Google / GitHub
+ * (via Better Auth OAuth), donc contrôlé — mais un jour un provider pourrait
+ * renvoyer une URL vers un CDN tiers qu'on ne veut pas fetch (tracking
+ * pixel, fingerprinting). On garde une allowlist stricte.
+ *
+ * Google sert les avatars via `lh3`/`lh4`/`lh5`/`lh6` (round-robin de
+ * sous-domaines historiques, tous encore actifs — un user peut recevoir
+ * n'importe lequel selon son compte). GitHub utilise un unique host.
+ */
+const AVATAR_HOST_RE = /^(lh[3-6]\.googleusercontent\.com|avatars\.githubusercontent\.com)$/;
+
+function safeAvatarSrc(v: unknown): string | null {
+	if (typeof v !== "string" || v.length === 0) return null;
+	try {
+		const u = new URL(v);
+		if (u.protocol !== "https:") return null;
+		if (!AVATAR_HOST_RE.test(u.hostname)) return null;
+		return u.toString();
+	} catch {
+		return null;
+	}
+}
+
 const wrapperStyle: CSSProperties = {
 	position: "fixed",
 	top: 12,
@@ -72,7 +96,7 @@ export function UserMenu() {
 						aria-label={`Menu de ${displayName}`}
 					>
 						<Avatar
-							src={user.image ?? null}
+							src={safeAvatarSrc(user.image)}
 							alt={displayName}
 							radius="xl"
 							size={32}

@@ -9,7 +9,13 @@ if (typeof window !== "undefined") {
 	const w = window as unknown as {
 		CONTEXT?: { apiBaseUrl?: string };
 	};
-	if (w.CONTEXT === undefined) w.CONTEXT = { apiBaseUrl: "" };
+	// URL absolue OBLIGATOIRE : Better Auth valide baseURL au parse et
+	// throw sur une URL relative (ex: `/api/auth` → "Invalid base URL").
+	// L'authClient est importé transitivement par plusieurs composants
+	// (VerifyEmailPage, OAuthButtons…) → un test qui monte un de ceux-ci
+	// crashe au module-load sans URL absolue.
+	if (w.CONTEXT === undefined)
+		w.CONTEXT = { apiBaseUrl: "http://localhost:4000" };
 }
 
 // Vitest n'injecte pas les globals par défaut (`globals: false` implicite) —
