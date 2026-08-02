@@ -49,10 +49,23 @@ function loadPositions(key: string): PositionsMap {
 	return {};
 }
 
-export function useTablePositions(schema: SchemaModel): PositionsApi {
+export interface UseTablePositionsOptions {
+	/** `true` (défaut) : lecture initiale + écriture dans localStorage —
+	 * comportement historique, correct pour un user anonyme. `false` : skip
+	 * complet du localStorage. À passer quand l'user est loggé — le serveur
+	 * est alors source of truth (hydraté via `useCanvasSync`), et le
+	 * localStorage n'apporte qu'un risque de stale state cross-device. */
+	readonly persistLocal?: boolean;
+}
+
+export function useTablePositions(
+	schema: SchemaModel,
+	options: UseTablePositionsOptions = {}
+): PositionsApi {
+	const persistLocal = options.persistLocal ?? true;
 	const key = schemaKey(schema);
 	const [positions, setPositions] = useState<PositionsMap>(() =>
-		loadPositions(key)
+		persistLocal ? loadPositions(key) : {}
 	);
 
 	// Track quel `key` est actuellement représenté par `positions` en state.
@@ -64,19 +77,21 @@ export function useTablePositions(schema: SchemaModel): PositionsApi {
 
 	// Re-seed quand la signature change (nouvelle base) : lit le nouveau key
 	// puis met à jour `loadedKey` — l'effet de persist ci-dessous devient alors
-	// autorisé sur ce nouveau key.
+	// autorisé sur ce nouveau key. Quand persistLocal=false, on re-seed vide
+	// (le serveur hydratera via useCanvasSync).
 	useEffect(() => {
 		if (loadedKey.current === key) return;
-		const loaded = loadPositions(key);
+		const loaded = persistLocal ? loadPositions(key) : {};
 		loadedKey.current = key;
 		setPositions(loaded);
-	}, [key]);
+	}, [key, persistLocal]);
 
 	// Persist positions au localStorage — SEULEMENT si le key en état matche
 	// le key courant. Sinon (transition de schéma), le re-seed ci-dessus n'a
 	// pas encore tourné, et écrire les vieilles positions au nouveau key
-	// corromprait le storage.
+	// corromprait le storage. Skip complet quand persistLocal=false (loggé).
 	useEffect(() => {
+		if (!persistLocal) return;
 		if (typeof window === "undefined") return;
 		if (loadedKey.current !== key) return;
 		try {
@@ -84,7 +99,7 @@ export function useTablePositions(schema: SchemaModel): PositionsApi {
 		} catch {
 			/* quota / private mode */
 		}
-	}, [key, positions]);
+	}, [key, positions, persistLocal]);
 
 	const setPosition = useCallback((name: string, xy: XY) => {
 		setPositions((prev) => ({ ...prev, [name]: xy }));

@@ -4,7 +4,13 @@ import {
 	Position,
 	useReactFlow
 } from "@xyflow/react";
-import { type PointerEvent, useEffect, useRef, useState } from "react";
+import {
+	type MouseEvent,
+	type PointerEvent,
+	useEffect,
+	useRef,
+	useState
+} from "react";
 import { closestSide, type Side } from "./edgeRouting";
 import { EdgeHandles } from "./edges/EdgeHandles";
 import { EdgeTooltip } from "./edges/EdgeTooltip";
@@ -284,7 +290,7 @@ export function InteractiveEdge(props: EdgeProps) {
 		setDragEnd(null);
 	};
 
-	const onDoubleClick = (e: PointerEvent) => {
+	const onDoubleClick = (e: MouseEvent<HTMLDivElement>) => {
 		e.stopPropagation();
 		api?.clearOverride?.(id);
 	};

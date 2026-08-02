@@ -36,7 +36,7 @@ import {
 	vi
 } from "vitest";
 import canvasStateRoute from "../../routes/api/canvas-state/root";
-import { createTestApp } from "../../utils/testapp";
+import { createTestApp, truncateCanvasAndAuth } from "../../utils/testapp";
 
 // ─── Chargement du .env RACINE ───────────────────────────────────────
 // Vitest ne charge PAS `.env` automatiquement. Réplique la stratégie
@@ -149,11 +149,9 @@ describe.skipIf(!DATABASE_URL)("/api/canvas-state integration", () => {
 	beforeEach(async () => {
 		// TRUNCATE inclut explicitement canvas_state — le CASCADE via
 		// user.id le viderait aussi, mais l'ordre explicite documente
-		// l'intent et permet de vider canvas_state sans toucher aux users
-		// si besoin plus tard.
-		await app.db.execute(
-			sql`TRUNCATE TABLE "canvas_state", "session", "account", "verification", "user" RESTART IDENTITY CASCADE`
-		);
+		// l'intent. Le helper enforce la garde "DATABASE_URL doit contenir
+		// 'test'" pour éviter de wiper la DB dev.
+		await truncateCanvasAndAuth(app);
 	});
 
 	// ─── 1. Guard : requireUser ───────────────────────────────────────

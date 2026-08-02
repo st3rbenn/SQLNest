@@ -4,6 +4,11 @@ export default defineConfig({
 	test: {
 		globals: true,
 		environment: "node",
+		// Setup file : force DATABASE_URL = DATABASE_URL_TEST AVANT tout
+		// import de plugin (`02-db` lit process.env.DATABASE_URL au register).
+		// Guard fatal si DATABASE_URL_TEST est absent ou ne contient pas
+		// "test" — évite qu'un TRUNCATE des tests int cible la DB dev.
+		setupFiles: ["./src/test-setup.ts"],
 		// Les fichiers `.int.test.ts` (auth, canvas-state) TRUNCATE la même
 		// base Postgres — en parallèle, ils se marchent dessus (FK violations,
 		// duplicate emails). Sérialiser l'exécution par FICHIER est la

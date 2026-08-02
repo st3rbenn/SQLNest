@@ -89,13 +89,43 @@ export function createTestApp(
  * `session.user_id` / `account.user_id` / `canvas_state.user_id` vide
  * déjà les rows dépendantes lorsque `user` est vidé.
  */
+/** Garde runtime commune : refuse tout TRUNCATE hors d'une DB _test.
+ * Historique : deux fois où les tests int ont wipé la DB dev — plus jamais. */
+function assertTestDatabase(): void {
+	const dbUrl = process.env.DATABASE_URL;
+	if (!dbUrl || !/test/i.test(dbUrl)) {
+		throw new Error(
+			`Refuse d'exécuter TRUNCATE contre une DB dont l'URL ne contient pas "test" (DATABASE_URL="${dbUrl ?? "<undefined>"}"). Configure DATABASE_URL_TEST dans .env et charge le setup file vitest (apps/backend/src/test-setup.ts).`
+		);
+	}
+}
+
 export async function truncateAuthTables(app: FastifyInstance): Promise<void> {
 	if (app.db == null) {
 		throw new Error(
 			"truncateAuthTables: fastify.db introuvable — appelle createTestApp({ withAuth: true }) et await app.ready() d'abord."
 		);
 	}
+	assertTestDatabase();
 	await app.db.execute(
 		sql`TRUNCATE TABLE "session", "account", "verification", "user" RESTART IDENTITY CASCADE`
+	);
+}
+
+/** TRUNCATE canvas_state + auth tables. À utiliser dans les tests
+ * `canvas-state.int.test.ts` qui ont besoin d'un `canvas_state` vide en
+ * plus des tables auth. Le CASCADE via `user_id` aurait suffi, mais
+ * l'ordre explicite documente l'intent. */
+export async function truncateCanvasAndAuth(
+	app: FastifyInstance
+): Promise<void> {
+	if (app.db == null) {
+		throw new Error(
+			"truncateCanvasAndAuth: fastify.db introuvable — appelle createTestApp({ withAuth: true }) et await app.ready() d'abord."
+		);
+	}
+	assertTestDatabase();
+	await app.db.execute(
+		sql`TRUNCATE TABLE "canvas_state", "session", "account", "verification", "user" RESTART IDENTITY CASCADE`
 	);
 }

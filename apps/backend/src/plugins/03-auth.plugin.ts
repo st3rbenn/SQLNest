@@ -196,96 +196,129 @@ export default fp(
 		// racine `Auth`.
 		fastify.decorate("auth", auth as unknown as Auth);
 
+		// ─── Handler partagé forward vers Better Auth ─────────────────────
+		// Extrait comme fonction pour être réutilisé par le catch-all ET par
+		// les routes explicites qui ont un rate-limit strict (voir plus bas).
+		const forwardToBetterAuth = async (
+			request: import("fastify").FastifyRequest,
+			reply: import("fastify").FastifyReply
+		) => {
+			const fwdProtoHdr = request.headers["x-forwarded-proto"];
+			const fwdHostHdr = request.headers["x-forwarded-host"];
+			const forwardedProto = Array.isArray(fwdProtoHdr)
+				? fwdProtoHdr[0]
+				: fwdProtoHdr;
+			const forwardedHost = Array.isArray(fwdHostHdr)
+				? fwdHostHdr[0]
+				: fwdHostHdr;
+			const proto = forwardedProto ?? request.protocol ?? "http";
+			const host = forwardedHost ?? request.headers.host ?? "localhost";
+			const url = new URL(request.url, `${proto}://${host}`);
+
+			const headers = new Headers();
+			for (const [key, value] of Object.entries(request.headers)) {
+				if (typeof value === "string") {
+					headers.append(key, value);
+				} else if (Array.isArray(value)) {
+					for (const v of value) {
+						headers.append(key, v);
+					}
+				}
+			}
+
+			const hasBody = !["GET", "HEAD"].includes(request.method);
+			const body =
+				hasBody && request.body !== undefined
+					? JSON.stringify(request.body)
+					: undefined;
+
+			const webRequest = new Request(url.toString(), {
+				method: request.method,
+				headers,
+				body
+			});
+
+			let response: Response;
+			try {
+				response = await auth.handler(webRequest);
+			} catch (err) {
+				request.log.error({ err, url: url.toString() }, "auth handler failed");
+				return reply.status(500).send({
+					error: "auth_handler_error",
+					message: "Auth internal error"
+				});
+			}
+
+			reply.status(response.status);
+
+			const setCookies =
+				typeof response.headers.getSetCookie === "function"
+					? response.headers.getSetCookie()
+					: [];
+
+			response.headers.forEach((value, key) => {
+				if (key.toLowerCase() === "set-cookie") return;
+				reply.header(key, value);
+			});
+
+			if (setCookies.length > 0) {
+				reply.raw.setHeader("set-cookie", setCookies);
+			}
+
+			const text = await response.text();
+			return reply.send(text.length > 0 ? text : null);
+		};
+
+		// ─── Routes POST sensibles au brute-force (rate-limit strict) ─────
+		// Scope de la limite 10/min :
+		//   - UNIQUEMENT sur les POST qui acceptent un mot de passe ou email
+		//     (sign-in/email, sign-up/email, forget-password, reset-password).
+		//   - Key = `ip + email` du body — un IP partagé (NAT bureau, mobile
+		//     carrier) n'atteint pas la limite juste parce que plusieurs
+		//     utilisateurs se connectent en même temps ; en revanche, un
+		//     attaquant qui brute-force UN compte est capé même en rotant
+		//     l'IP (dans la mesure où la victime a un seul email).
+		//   - `hook: "preHandler"` obligatoire pour lire `request.body`
+		//     (défaut `onRequest` = trop tôt, body pas encore parsé).
+		const AUTH_STRICT_LIMIT = {
+			max: 10,
+			timeWindow: "1 minute",
+			hook: "preHandler" as const,
+			keyGenerator: (request: import("fastify").FastifyRequest) => {
+				const body = request.body as { email?: unknown } | undefined;
+				const email =
+					body && typeof body.email === "string" ? body.email : "anon";
+				return `auth-strict:${request.ip}:${email}`;
+			}
+		};
+
+		const SENSITIVE_POSTS = [
+			"/api/auth/sign-in/email",
+			"/api/auth/sign-up/email",
+			"/api/auth/request-password-reset",
+			"/api/auth/reset-password"
+		];
+		for (const path of SENSITIVE_POSTS) {
+			fastify.route({
+				method: "POST",
+				url: path,
+				config: { rateLimit: AUTH_STRICT_LIMIT },
+				handler: forwardToBetterAuth
+			});
+		}
+
 		// ─── Catch-all Better Auth ────────────────────────────────────────
-		// PAS de withTypeProvider ici : Zod serializer casserait la réponse
-		// de Better Auth (qui renvoie du JSON déjà sérialisé + Set-Cookie).
+		// PAS de config.rateLimit ici : les routes plus spécifiques
+		// ci-dessus captent les POST brute-forceables ; le reste (dont
+		// GET /api/auth/get-session qui est appelé à chaque navigation avec
+		// staleTime:0) tombe sur le rate-limit GLOBAL 100/min appliqué par
+		// `01-rate-limit.plugin.ts`.
+		// PAS de withTypeProvider : Zod serializer casserait la réponse
+		// Better Auth (JSON déjà sérialisé + Set-Cookie).
 		fastify.route({
 			method: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"],
 			url: "/api/auth/*",
-			handler: async (request, reply) => {
-				// Reconstruit une URL absolue — Better Auth en a besoin pour ses
-				// vérifs d'origin/redirect + OAuth callbacks. Honore les headers
-				// de reverse proxy (x-forwarded-proto/host) sinon le scheme reste
-				// figé à http:// et les redirects OAuth cassent derrière un
-				// TLS-terminator (nginx/Caddy/ALB en prod).
-				const fwdProtoHdr = request.headers["x-forwarded-proto"];
-				const fwdHostHdr = request.headers["x-forwarded-host"];
-				const forwardedProto = Array.isArray(fwdProtoHdr)
-					? fwdProtoHdr[0]
-					: fwdProtoHdr;
-				const forwardedHost = Array.isArray(fwdHostHdr)
-					? fwdHostHdr[0]
-					: fwdHostHdr;
-				const proto = forwardedProto ?? request.protocol ?? "http";
-				const host = forwardedHost ?? request.headers.host ?? "localhost";
-				const url = new URL(request.url, `${proto}://${host}`);
-
-				// Node headers (Record<string, string | string[]>) → Web Headers.
-				const headers = new Headers();
-				for (const [key, value] of Object.entries(request.headers)) {
-					if (typeof value === "string") {
-						headers.append(key, value);
-					} else if (Array.isArray(value)) {
-						for (const v of value) {
-							headers.append(key, v);
-						}
-					}
-				}
-
-				// Fastify parse le body JSON par défaut — on le re-sérialise pour
-				// le passer à Better Auth qui attend un Request Web API standard.
-				const hasBody = !["GET", "HEAD"].includes(request.method);
-				const body =
-					hasBody && request.body !== undefined
-						? JSON.stringify(request.body)
-						: undefined;
-
-				const webRequest = new Request(url.toString(), {
-					method: request.method,
-					headers,
-					body
-				});
-
-				// try/catch défensif : une exception BA non catchée = 500 sans
-				// log structuré. On log via request.log (Pino contextuel) puis
-				// on renvoie un 500 JSON minimal sans leak d'internals.
-				let response: Response;
-				try {
-					response = await auth.handler(webRequest);
-				} catch (err) {
-					request.log.error(
-						{ err, url: url.toString() },
-						"auth handler failed"
-					);
-					return reply.status(500).send({
-						error: "auth_handler_error",
-						message: "Auth internal error"
-					});
-				}
-
-				reply.status(response.status);
-
-				// Set-Cookie : on isole ces headers pour préserver les valeurs
-				// multiples (Response.headers.getSetCookie() est le seul moyen
-				// robuste — .forEach() combine avec virgules et casse la date des
-				// cookies).
-				const setCookies =
-					typeof response.headers.getSetCookie === "function"
-						? response.headers.getSetCookie()
-						: [];
-
-				response.headers.forEach((value, key) => {
-					if (key.toLowerCase() === "set-cookie") return;
-					reply.header(key, value);
-				});
-
-				if (setCookies.length > 0) {
-					reply.raw.setHeader("set-cookie", setCookies);
-				}
-
-				const text = await response.text();
-				return reply.send(text.length > 0 ? text : null);
-			}
+			handler: forwardToBetterAuth
 		});
 	},
 	{

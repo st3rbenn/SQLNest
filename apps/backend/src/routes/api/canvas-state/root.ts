@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import z from "zod/v4";
@@ -5,6 +6,7 @@ import {
 	assertAuthenticated,
 	requireUser
 } from "../../../domains/auth/require";
+import { countCanvasStates } from "../../../domains/canvas-state/count";
 import { delCanvasState } from "../../../domains/canvas-state/del";
 import { getCanvasState } from "../../../domains/canvas-state/get";
 import { putCanvasState } from "../../../domains/canvas-state/put";
@@ -14,11 +16,21 @@ import {
 	PutCanvasBody,
 	PutCanvasResponse
 } from "../../../domains/canvas-state/schema";
+import { jsonDepthExceeds } from "../../../utils/json-depth";
 
-// Limite volontaire à 100 KB (~200 tables avec positions/sizes/frames) — assez
-// pour tous les cas réalistes du canvas actuel, mais protège contre un push
-// pathologique. Fastify renvoie 413 (Payload Too Large) au-delà.
+/** Marker interne — un throw d'une erreur avec ce flag est rethrow depuis
+ * la transaction pour aborter le upsert, puis intercepté par le handler
+ * pour renvoyer un 403 quota. */
+class QuotaExceededError extends Error {
+	constructor() {
+		super("QUOTA_EXCEEDED");
+		this.name = "QuotaExceededError";
+	}
+}
+
 const CANVAS_BODY_LIMIT_BYTES = 100_000;
+const MAX_CANVAS_PER_USER = 50;
+const MAX_JSON_DEPTH = 10;
 
 // Schéma minimal pour les réponses d'erreur — nommé pour l'OpenAPI et
 // réutilisé pour les 404 (`GET /api/canvas-state?signature=X` inconnu).
@@ -96,23 +108,58 @@ export default function canvasStateRoute(fastify: FastifyInstance) {
 				body: PutCanvasBody,
 				response: {
 					200: PutCanvasResponse,
+					400: ErrorResponse,
+					403: ErrorResponse,
 					500: ErrorResponse
 				}
 			}
 		},
 		async (request, reply) => {
 			assertAuthenticated(request);
+
+			if (jsonDepthExceeds(request.body.payload, MAX_JSON_DEPTH)) {
+				return reply.code(400).send({ message: "Payload JSON trop profond" });
+			}
+
+			// Transaction avec advisory lock sérialisé sur userId : sans ça,
+			// deux PUT concurrents avec des signatures différentes peuvent
+			// tous deux voir count=49 et tous deux insérer → user dépasse le
+			// quota (TOCTOU). `pg_advisory_xact_lock` prend un lock exclusif
+			// dans la transaction ; deux PUT en parallèle pour le même user
+			// s'exécutent en série sur ce chemin critique.
+			const userId = request.user.id;
 			try {
-				return await putCanvasState(
-					fastify.db,
-					request.user.id,
-					request.body.signature,
-					request.body.payload
-				);
+				return await fastify.db.transaction(async (tx) => {
+					await tx.execute(
+						sql`SELECT pg_advisory_xact_lock(hashtext(${userId}))`
+					);
+
+					const existing = await getCanvasState(
+						tx,
+						userId,
+						request.body.signature
+					);
+					if (existing == null) {
+						const total = await countCanvasStates(tx, userId);
+						if (total >= MAX_CANVAS_PER_USER) {
+							throw new QuotaExceededError();
+						}
+					}
+
+					return await putCanvasState(
+						tx,
+						userId,
+						request.body.signature,
+						request.body.payload
+					);
+				});
 			} catch (err) {
+				if (err instanceof QuotaExceededError) {
+					return reply.code(403).send({
+						message: `Quota atteint (${MAX_CANVAS_PER_USER} canvas max)`
+					});
+				}
 				request.log.error({ err }, "canvas-state PUT failed");
-				// Renvoie 500 explicitement via reply.send — évite qu'un throw
-				// non-catché renvoie du HTML default Fastify.
 				return reply
 					.code(500)
 					.send({ message: "Erreur interne lors de la sauvegarde" });

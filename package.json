@@ -11,7 +11,8 @@
 		"db:seed:shop": "node infra/scripts/seed-shop.mjs",
 		"app:db:generate": "pnpm --filter @sqlnest/db db:generate",
 		"app:db:migrate": "pnpm --filter @sqlnest/db db:migrate",
-		"app:db:studio": "pnpm --filter @sqlnest/db db:studio"
+		"app:db:studio": "pnpm --filter @sqlnest/db db:studio",
+		"app:db:test:migrate": "DATABASE_URL=postgres://sqlnest_test:sqlnest_test_dev@localhost:5435/sqlnest_test pnpm --filter @sqlnest/db db:migrate"
 	},
 	"author": "Anthonin COLAS <anthonincolaspro@gmail.com>",
 	"packageManager": "pnpm@10.17.1",

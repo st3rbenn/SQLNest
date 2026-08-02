@@ -46,9 +46,20 @@ function loadSizes(key: string): SizesMap {
 	return {};
 }
 
-export function useTableSizes(schema: SchemaModel): SizesApi {
+export interface UseTableSizesOptions {
+	/** Voir `useTablePositions.persistLocal` — même sémantique. */
+	readonly persistLocal?: boolean;
+}
+
+export function useTableSizes(
+	schema: SchemaModel,
+	options: UseTableSizesOptions = {}
+): SizesApi {
+	const persistLocal = options.persistLocal ?? true;
 	const key = schemaKey(schema);
-	const [sizes, setSizes] = useState<SizesMap>(() => loadSizes(key));
+	const [sizes, setSizes] = useState<SizesMap>(() =>
+		persistLocal ? loadSizes(key) : {}
+	);
 
 	// Track quel `key` est actuellement représenté par `sizes` en state.
 	// Sert à distinguer un vrai mutate (persist OK) d'un pending re-seed après
@@ -58,14 +69,16 @@ export function useTableSizes(schema: SchemaModel): SizesApi {
 	// Re-seed quand la signature change (nouvelle base).
 	useEffect(() => {
 		if (loadedKey.current === key) return;
-		const loaded = loadSizes(key);
+		const loaded = persistLocal ? loadSizes(key) : {};
 		loadedKey.current = key;
 		setSizes(loaded);
-	}, [key]);
+	}, [key, persistLocal]);
 
 	// Persist — seulement si le key en état matche le key courant (voir
 	// commentaire dans `useTablePositions` pour l'analyse détaillée du bug).
+	// Skip complet quand persistLocal=false (loggé, server-only).
 	useEffect(() => {
+		if (!persistLocal) return;
 		if (typeof window === "undefined") return;
 		if (loadedKey.current !== key) return;
 		try {
@@ -73,7 +86,7 @@ export function useTableSizes(schema: SchemaModel): SizesApi {
 		} catch {
 			/* quota / private mode */
 		}
-	}, [key, sizes]);
+	}, [key, sizes, persistLocal]);
 
 	const setSize = useCallback((name: string, size: TableSize) => {
 		setSizes((prev) => ({ ...prev, [name]: size }));

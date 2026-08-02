@@ -2,7 +2,7 @@ import { Alert, TextInput } from "@mantine/core";
 import { Button } from "@sqlnest/design-system";
 import { Link } from "@tanstack/react-router";
 import { type CSSProperties, type FormEvent, useState } from "react";
-import { forgetPassword } from "./authClient";
+import { requestPasswordReset } from "./authClient";
 
 const titleStyle: CSSProperties = {
 	fontSize: 20,
@@ -40,7 +40,7 @@ const linkStyle: CSSProperties = {
  *
  * Contrat enumeration-safe : on affiche **toujours** le même message succès
  * (« Si cet email existe, un lien a été envoyé »), qu'un compte existe ou
- * pas. Better Auth fait déjà le boulot côté backend (`forgetPassword`
+ * pas. Better Auth fait déjà le boulot côté backend (`requestPasswordReset`
  * répond 200 dans les deux cas), on ne relaie pas non plus l'erreur métier
  * si elle contient un signal — on ne s'en préoccupe que pour les erreurs
  * réseau/500 (`result.error && status >= 500`).
@@ -59,7 +59,7 @@ export function ForgotPasswordPage() {
 		setError(null);
 		setIsSubmitting(true);
 		const redirectTo = `${window.location.origin}/reset-password`;
-		const result = await forgetPassword({ email, redirectTo });
+		const result = await requestPasswordReset({ email, redirectTo });
 		setIsSubmitting(false);
 		// Cas 5xx uniquement — on affiche l'erreur pour débug. Un 4xx sur
 		// email inconnu ne devrait pas remonter ici (Better Auth renvoie

@@ -20,6 +20,8 @@
 		"@fastify/cookie": "^11.0.2",
 		"@fastify/cors": "^11.1.0",
 		"@fastify/env": "^5.0.3",
+		"@fastify/helmet": "^13.1.0",
+		"@fastify/rate-limit": "^11.2.0",
 		"@fastify/request-context": "^6.2.1",
 		"@fastify/swagger": "^9.5.2",
 		"@scalar/fastify-api-reference": "^1.37.0",

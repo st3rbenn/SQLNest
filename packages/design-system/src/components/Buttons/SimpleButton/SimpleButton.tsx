@@ -14,6 +14,11 @@ export type ButtonProps = {
 	/** Libellé affiché à la place des `children` pendant `loading`. Sans valeur,
 	 *  les `children` restent visibles. */
 	loadingLabel?: ReactNode;
+	/** HTML `type` attribut natif — utile pour `type="submit"` dans les formulaires
+	 *  (auth pages, dialogs). Non exposé par MantineButtonProps qui filtre les
+	 *  attributs HTML natifs. Default `"button"` côté DOM (comme n'importe quel
+	 *  `<button>` sans attribut). */
+	type?: "button" | "submit" | "reset";
 } & MantineButtonProps;
 
 // Inline `style` (spécificité 1000) supplante les classes `:disabled` de

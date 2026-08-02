@@ -87,10 +87,22 @@ function loadFrames(schema: SchemaModel): readonly Frame[] {
 	return framesFor(schema);
 }
 
-export function useFrames(schema: SchemaModel): FramesApi {
+export interface UseFramesOptions {
+	/** Voir `useTablePositions.persistLocal` — même sémantique. En mode
+	 * server-only (`false`), on ne seed PAS non plus les frames statiques
+	 * `framesFor(schema)` : le serveur (via `useCanvasSync`) est source of
+	 * truth, un canvas neuf commence sans frame. */
+	readonly persistLocal?: boolean;
+}
+
+export function useFrames(
+	schema: SchemaModel,
+	options: UseFramesOptions = {}
+): FramesApi {
+	const persistLocal = options.persistLocal ?? true;
 	const key = schemaKey(schema);
 	const [frames, setFrames] = useState<readonly Frame[]>(() =>
-		loadFrames(schema)
+		persistLocal ? loadFrames(schema) : []
 	);
 
 	// Track quel `key` est actuellement représenté par `frames` en state.
@@ -102,13 +114,15 @@ export function useFrames(schema: SchemaModel): FramesApi {
 	// Re-seed quand la signature de schéma change (nouvelle base).
 	useEffect(() => {
 		if (loadedKey.current === key) return;
-		const loaded = loadFrames(schema);
+		const loaded = persistLocal ? loadFrames(schema) : [];
 		loadedKey.current = key;
 		setFrames(loaded);
-	}, [key, schema]);
+	}, [key, schema, persistLocal]);
 
 	// Persist — seulement quand le key en état matche le key courant.
+	// Skip complet quand persistLocal=false (loggé, server-only).
 	useEffect(() => {
+		if (!persistLocal) return;
 		if (typeof window === "undefined") return;
 		if (loadedKey.current !== key) return;
 		try {
@@ -116,7 +130,7 @@ export function useFrames(schema: SchemaModel): FramesApi {
 		} catch {
 			/* quota / private mode */
 		}
-	}, [key, frames]);
+	}, [key, frames, persistLocal]);
 
 	const frameOfTable = useCallback(
 		(name: string): Frame | null =>

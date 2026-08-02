@@ -1,5 +1,5 @@
 import { EdgeLabelRenderer } from "@xyflow/react";
-import type { CSSProperties, PointerEvent } from "react";
+import type { CSSProperties, MouseEvent, PointerEvent } from "react";
 import type { Side } from "../edgeRouting";
 
 const SIDES: readonly Side[] = ["top", "right", "bottom", "left"];
@@ -54,7 +54,10 @@ export interface EdgeHandlesProps {
 	readonly onDown: (end: "source" | "target") => (e: PointerEvent) => void;
 	readonly onMove: (e: PointerEvent) => void;
 	readonly onUp: (e: PointerEvent) => void;
-	readonly onDoubleClick: (e: PointerEvent) => void;
+	// React dispatche un `MouseEvent` sur `onDoubleClick` (pas un
+	// `PointerEvent` — le double-click natif du browser reste sur l'API
+	// mouse). Typé en conséquence pour matcher la signature RF/DOM.
+	readonly onDoubleClick: (e: MouseEvent<HTMLDivElement>) => void;
 	readonly onEnter: () => void;
 	readonly onLeave: () => void;
 }

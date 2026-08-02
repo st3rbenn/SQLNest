@@ -4,13 +4,15 @@ import type { CSSProperties } from "react";
 
 export type CanvasBreadcrumbProps = {
 	engine: "postgres" | "mongodb";
-	/** Nom du schéma cible (Postgres) — pour Mongo, laisser vide. */
-	schemaLabel?: string;
+	/** Nom du schéma cible (Postgres) — pour Mongo, laisser vide. `| undefined`
+	 * explicite pour compat `exactOptionalPropertyTypes` avec callers qui
+	 * passent une valeur potentiellement undefined. */
+	schemaLabel?: string | undefined;
 	tableCount: number;
 	/** Placeholder pour un futur switch d'engine (page Connexion). */
-	onEngineClick?: () => void;
+	onEngineClick?: (() => void) | undefined;
 	/** Placeholder pour un futur changement de schéma cible (input inline). */
-	onSchemaClick?: () => void;
+	onSchemaClick?: (() => void) | undefined;
 };
 
 /**
@@ -100,7 +102,11 @@ function Segment({
 	accent,
 	children
 }: {
-	onClick?: () => void;
+	// `| undefined` explicite : les callers reçoivent un `Handler | undefined`
+	// via CanvasBreadcrumbProps (props optionnelles) et le passent en cascade.
+	// Sous `exactOptionalPropertyTypes`, un `field?: T` refuserait la valeur
+	// undefined explicite au caller — plus permissif ici.
+	onClick?: (() => void) | undefined;
 	accent: boolean;
 	children: React.ReactNode;
 }) {

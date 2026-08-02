@@ -80,7 +80,7 @@ export function useHistoryStack<S>(
 	const push = useCallback(() => {
 		if (isRestoringRef.current) return;
 		const snap = optsRef.current.snapshot();
-		const { past, future } = stackRef.current;
+		const { past } = stackRef.current;
 		const top = past.length > 0 ? past[past.length - 1] : undefined;
 		if (past.length > 0 && top !== undefined && eq(top, snap)) return;
 		const cap = optsRef.current.max ?? DEFAULT_MAX;

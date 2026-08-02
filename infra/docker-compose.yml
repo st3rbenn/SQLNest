@@ -46,6 +46,34 @@ services:
       timeout: 3s
       retries: 15
 
+  # Postgres de TEST — dédié aux tests d'intégration Vitest (auth,
+  # canvas-state). ISOLÉ du postgres-app (dev) : le beforeEach des tests
+  # int fait `TRUNCATE user, session, account, verification, canvas_state`,
+  # ce qui doit ABSOLUMENT ne jamais toucher les données dev.
+  #
+  # Port hôte 5435 pour rester distinct de 5432/5433/5434.
+  # Nom/user/pwd contiennent explicitement `test` — pattern qu'on assert
+  # côté code (guard runtime dans `truncateAuthTables`) : impossible de
+  # TRUNCATE une DB dont l'URL ne matche pas `_test`.
+  postgres-test:
+    image: postgres:16-alpine
+    container_name: sqlnest-postgres-test
+    environment:
+      POSTGRES_USER: sqlnest_test
+      POSTGRES_PASSWORD: sqlnest_test_dev
+      POSTGRES_DB: sqlnest_test
+    ports:
+      - "5435:5432"
+    # Pas de volume persistant : la DB test est éphémère, elle est
+    # recréée à chaque `db:up` et migrée au démarrage des tests.
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sqlnest_test -d sqlnest_test"]
+      interval: 3s
+      timeout: 3s
+      retries: 15
+
   mongo:
     image: mongo:7
     container_name: sqlnest-mongo

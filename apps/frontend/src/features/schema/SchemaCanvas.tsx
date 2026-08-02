@@ -75,10 +75,15 @@ import {
 	TableNode,
 	type TableNodeType
 } from "./TableNode";
+import { useCurrentUser } from "../auth/sessionQuery";
 import { useEdgeAnchors } from "./useEdgeAnchors";
 import { useFrames } from "./useFrames";
-import { useTablePositions, type XY } from "./useTablePositions";
-import { useTableSizes } from "./useTableSizes";
+import {
+	type PositionsMap,
+	useTablePositions,
+	type XY
+} from "./useTablePositions";
+import { type SizesMap, useTableSizes } from "./useTableSizes";
 
 // Couleurs des edges — accent bleu Figma pour les FK déclarées, jaune
 // warning pour les FK inférées (jamais confirmées par la DB). Toutes deux
@@ -132,8 +137,11 @@ function makeEdge(rel: SchemaModel["relations"][number], i: number): Edge {
 interface CanvasInnerProps {
 	schema: SchemaModel;
 	/** Nom du schéma cible (ex : `public` pour Postgres). Affiché dans le
-	 * breadcrumb — omis pour Mongo. */
-	schemaLabel?: string;
+	 * breadcrumb — omis pour Mongo. `| undefined` explicite pour permettre
+	 * un pass-through depuis un caller dont le prop est optionnel (sous
+	 * `exactOptionalPropertyTypes`, `schemaLabel?: string` n'accepterait pas
+	 * une valeur `string | undefined`). */
+	schemaLabel?: string | undefined;
 }
 
 function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
@@ -165,13 +173,46 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 	// nettoyer par le filtre post-layout). Lu via ref dans l'effet ci-dessous
 	// pour NE PAS re-déclencher `setNodes(base.nodes)` à chaque persistance —
 	// sinon chaque drag-stop réappliquerait l'overlay et pourrait clignoter.
-	const tablePositions = useTablePositions(schema);
+	// ─── Persistance : server-only quand loggé, localStorage quand anonyme ─
+	// Le user loggé a un canvas serveur (hydraté par useCanvasSync) — le
+	// localStorage n'apporte alors qu'un risque de stale state cross-device
+	// (logout ici, changement là-bas, refresh → vieux state réinjecté). Le
+	// user anonyme n'a pas de compte, on garde le localStorage comme unique
+	// persistance (comportement historique).
+	const { data: session } = useCurrentUser();
+	const persistLocal = session?.user == null;
+	const hookOpts = useMemo(() => ({ persistLocal }), [persistLocal]);
+
+	// Purge des entrées `sqlnest:positions:*`, `sqlnest:sizes:*`,
+	// `sqlnest:frames:*` du localStorage dès qu'on détecte un user loggé.
+	// Sans ça, les keys anonymes restent sur disque et peuvent réapparaître
+	// à un logout futur ou à un swap de compte. edgeAnchors reste local pour
+	// l'instant (pas encore syncé côté serveur — TODO à part).
+	useEffect(() => {
+		if (persistLocal) return;
+		if (typeof window === "undefined") return;
+		const prefixes = [
+			"sqlnest:positions:",
+			"sqlnest:sizes:",
+			"sqlnest:frames:"
+		];
+		try {
+			const stale = Object.keys(window.localStorage).filter((k) =>
+				prefixes.some((p) => k.startsWith(p))
+			);
+			for (const k of stale) window.localStorage.removeItem(k);
+		} catch {
+			/* quota / private mode */
+		}
+	}, [persistLocal]);
+
+	const tablePositions = useTablePositions(schema, hookOpts);
 	const tablePositionsRef = useRef(tablePositions.positions);
 	tablePositionsRef.current = tablePositions.positions;
 	// Sizes user persistées (NodeResizer 4 côtés de chaque table) — même
 	// pattern d'overlay que positions : ref pour éviter le re-seed en boucle.
 	// Stocke width ET height : le user peut resize dans les 2 axes.
-	const tableSizes = useTableSizes(schema);
+	const tableSizes = useTableSizes(schema, hookOpts);
 	const tableSizesRef = useRef(tableSizes.sizes);
 	tableSizesRef.current = tableSizes.sizes;
 	useEffect(() => {
@@ -230,10 +271,11 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 	// Handle du tween en cours — annulé si un nouveau focus arrive.
 	const tweenRef = useRef<{ cancel: () => void } | null>(null);
 
-	// Frames user-defined (persistés en localStorage). Remplace le
+	// Frames user-defined (persistés en localStorage quand anonyme,
+	// server-only quand loggé — cf. `hookOpts` plus haut). Remplace le
 	// `framesFor(schema)` statique — l'utilisateur crée/retire ses frames
 	// via lasso + F et le menu contextuel « Retirer du frame ».
-	const framesApi = useFrames(schema);
+	const framesApi = useFrames(schema, hookOpts);
 
 	// Historique undo/redo — capture positions + sizes + frames + hiddenIds.
 	// `history.push()` doit être appelé APRÈS chaque geste user notable
@@ -266,15 +308,16 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 						const baseNode = baseById.get(n.id);
 						const pos = snapshot.positions[n.id];
 						const size = snapshot.sizes[n.id];
+						// Fallback chaîné : snapshot → ELK base → keep. Spread
+						// conditionnel pour width/height afin de respecter
+						// `exactOptionalPropertyTypes` (jamais `width: undefined`).
+						const w = size?.width ?? baseNode?.width;
+						const h = size?.height ?? baseNode?.height;
 						return {
 							...n,
 							position: pos ?? baseNode?.position ?? n.position,
-							// Size présent dans le snapshot → override.
-							// Sinon retombe sur la dimension ELK par défaut du base —
-							// PAS sur `n.width/height` courant, qui pourrait porter
-							// un resize user postérieur au snapshot qu'on annule.
-							width: size?.width ?? baseNode?.width ?? n.width,
-							height: size?.height ?? baseNode?.height ?? n.height
+							...(w !== undefined ? { width: w } : {}),
+							...(h !== undefined ? { height: h } : {})
 						};
 					})
 				);
@@ -313,14 +356,72 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 	// un adaptateur pour `hiddenIds` (setState React). Mémoïsé pour rester
 	// stable entre les renders (chaque replaceAll sous-jacent est déjà stable
 	// via useCallback dans son hook).
+	//
+	// ⚠️ `positions` et `sizes` re-injectent aussi le résultat dans le state
+	// RF `nodes`. Sans ça, l'hydration serveur (login → payload server →
+	// replaceAll(positions serveur)) update le hook mais PAS les nodes RF :
+	// l'useEffect ligne ~177 qui applique l'overlay lit `tablePositionsRef`
+	// via ref (pour ne pas re-seed en boucle à chaque drag) et n'est pas
+	// re-fired par un changement de positions. Résultat visible : tables au
+	// mauvais endroit après login canvas fresh (frames OK car rendus depuis
+	// `framesApi.frames` en deps de useMemo, pas depuis le state RF).
+	//
+	// Pour un node ABSENT de `next` ou dont un axe (width/height) est
+	// undefined dans le payload serveur, on retombe sur les valeurs `base`
+	// ELK — PAS sur les valeurs courantes du node RF, qui peuvent être
+	// stales d'un seed pré-login (session=undefined a fait `persistLocal=true`
+	// et le useEffect ~211 a chargé le localStorage résiduel). Sans ce
+	// fallback, RF continue d'afficher les vieilles dimensions locales tandis
+	// que `tableSizes.sizes` (source of truth pour `useCanvasSync`
+	// `currentSerialized`) est vide — divergence permanente, aucun push, et
+	// un jump au prochain reload quand loadSizes retourne `{}`.
 	const canvasSyncReplaceAll = useMemo(
 		() => ({
-			positions: tablePositions.replaceAll,
-			sizes: tableSizes.replaceAll,
+			positions: (next: PositionsMap) => {
+				tablePositions.replaceAll(next);
+				const baseById = new Map(
+					(baseRef.current?.nodes ?? []).map((n) => [n.id, n])
+				);
+				setNodes((prev) =>
+					prev.map((n) => {
+						const p = next[n.id];
+						if (p !== undefined) return { ...n, position: p };
+						const bn = baseById.get(n.id);
+						return bn ? { ...n, position: bn.position } : n;
+					})
+				);
+			},
+			sizes: (next: SizesMap) => {
+				tableSizes.replaceAll(next);
+				const baseById = new Map(
+					(baseRef.current?.nodes ?? []).map((n) => [n.id, n])
+				);
+				setNodes((prev) =>
+					prev.map((n) => {
+						const s = next[n.id];
+						const bn = baseById.get(n.id);
+						// Fallback chaîné : serveur → ELK base → keep existing
+						// (spread conditionnel — respecte `exactOptionalPropertyTypes`
+						// en n'écrivant JAMAIS `width: undefined`/`height: undefined`).
+						const w = s?.width ?? bn?.width;
+						const h = s?.height ?? bn?.height;
+						return {
+							...n,
+							...(w !== undefined ? { width: w } : {}),
+							...(h !== undefined ? { height: h } : {})
+						};
+					})
+				);
+			},
 			frames: framesApi.replaceAll,
 			hidden: (ids: ReadonlySet<string>) => setHiddenIds(new Set(ids))
 		}),
-		[tablePositions.replaceAll, tableSizes.replaceAll, framesApi.replaceAll]
+		[
+			tablePositions.replaceAll,
+			tableSizes.replaceAll,
+			framesApi.replaceAll,
+			setNodes
+		]
 	);
 	const { ready: canvasReady } = useCanvasSync({
 		signature: canvasSignature,
@@ -354,8 +455,8 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 		memberOrigins: Map<string, { x: number; y: number }>;
 	} | null>(null);
 	const handleNodesChange = useCallback(
-		(changes: NodeChange[]) => {
-			const restChanges: NodeChange[] = [];
+		(changes: NodeChange<TableNodeType>[]) => {
+			const restChanges: NodeChange<TableNodeType>[] = [];
 			const api = framesApiRef.current;
 			// RF émet dimensions ET position dans le MÊME batch pour un resize
 			// depuis un corner top/left. On doit fusionner par frame avant l'écriture
@@ -368,7 +469,15 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 				{ x?: number; y?: number; width?: number; height?: number }
 			>();
 			for (const c of changes) {
-				if (!c.id?.startsWith("frame:")) {
+				// NodeChange est une union discriminée : `NodeAddChange` porte
+				// l'id sur `c.item.id`, pas `c.id`. On ignore les `add` pour le
+				// framing (RF ne crée jamais un frame côté runtime — les frames
+				// viennent tous de `framesApi.frames` via `computeFrameNodes`).
+				if (c.type === "add") {
+					restChanges.push(c);
+					continue;
+				}
+				if (!c.id.startsWith("frame:")) {
 					restChanges.push(c);
 					continue;
 				}
@@ -674,40 +783,44 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 			return { edge: e, sourceHandle, targetHandle };
 		});
 
-		// Pass 2 : groupe les edges par (nodeId, side) — pour source ET target —
-		// pour distribuer leurs endpoints le long du côté partagé (sans ça,
-		// plusieurs arrows convergent au mid-side et se superposent, impossibles
-		// à cibler individuellement).
-		const srcGroups = new Map<string, string[]>();
-		const tgtGroups = new Map<string, string[]>();
+		// Pass 2 : groupe TOUS les endpoints qui touchent le même (nodeId, side),
+		// SOURCE ET TARGET CONFONDUS. Un edge sortant et un edge rentrant du
+		// même côté d'un même node doivent s'écarter comme deux edges du même
+		// sens — sinon chacun se retrouve seul dans son groupe (SRC ou TGT) et
+		// atterrit au mid-side, ce qui les fait se superposer visuellement.
+		type HandleEntry = { edgeId: string; end: "source" | "target" };
+		const handleGroups = new Map<string, HandleEntry[]>();
 		for (const { edge, sourceHandle, targetHandle } of resolved) {
 			if (sourceHandle) {
 				const key = `${edge.source}:${sourceHandle}`;
-				const list = srcGroups.get(key) ?? [];
-				list.push(edge.id);
-				srcGroups.set(key, list);
+				const list = handleGroups.get(key) ?? [];
+				list.push({ edgeId: edge.id, end: "source" });
+				handleGroups.set(key, list);
 			}
 			if (targetHandle) {
 				const key = `${edge.target}:${targetHandle}`;
-				const list = tgtGroups.get(key) ?? [];
-				list.push(edge.id);
-				tgtGroups.set(key, list);
+				const list = handleGroups.get(key) ?? [];
+				list.push({ edgeId: edge.id, end: "target" });
+				handleGroups.set(key, list);
 			}
 		}
-		// Pass 3 : calcule le ratio d'offset par edge/end.
+		// Pass 3 : distribue les ratios sur le groupe unifié (l'ordre reflète
+		// l'ordre d'itération des edges — déterministe depuis ELK).
 		const offsets = new Map<string, { source?: number; target?: number }>();
-		for (const [, ids] of srcGroups) {
-			const ratios = spreadOffsets(ids.length);
-			ids.forEach((id, i) => {
-				const prev = offsets.get(id) ?? {};
-				offsets.set(id, { ...prev, source: ratios[i] });
-			});
-		}
-		for (const [, ids] of tgtGroups) {
-			const ratios = spreadOffsets(ids.length);
-			ids.forEach((id, i) => {
-				const prev = offsets.get(id) ?? {};
-				offsets.set(id, { ...prev, target: ratios[i] });
+		for (const [, entries] of handleGroups) {
+			const ratios = spreadOffsets(entries.length);
+			entries.forEach((entry, i) => {
+				const r = ratios[i];
+				// `spreadOffsets(n)` renvoie exactement n éléments — guard TS car
+				// l'index-access sur array est typé `T | undefined`.
+				if (r === undefined) return;
+				const prev = offsets.get(entry.edgeId) ?? {};
+				offsets.set(
+					entry.edgeId,
+					entry.end === "source"
+						? { ...prev, source: r }
+						: { ...prev, target: r }
+				);
 			});
 		}
 

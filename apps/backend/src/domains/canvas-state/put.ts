@@ -1,6 +1,6 @@
 import { schema as dbSchema } from "@sqlnest/db";
 import { sql } from "drizzle-orm";
-import type { FastifyInstance } from "fastify";
+import type { DbOrTx } from "./db";
 import type { CanvasPayloadT, CanvasSignatureT } from "./schema";
 
 export interface PutCanvasResult {
@@ -28,7 +28,7 @@ export interface PutCanvasResult {
  * un mécanisme de version optimiste).
  */
 export async function putCanvasState(
-	db: FastifyInstance["db"],
+	db: DbOrTx,
 	userId: string,
 	signature: CanvasSignatureT,
 	payload: CanvasPayloadT

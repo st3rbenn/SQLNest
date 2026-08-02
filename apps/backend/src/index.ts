@@ -22,6 +22,7 @@ loadEnv({ path: rootEnv, quiet: true });
 // ─── Imports Fastify + plugins (APRÈS loadEnv) ────────────────────────────
 import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
+import helmet from "@fastify/helmet";
 import defaultRequestContext from "@fastify/request-context";
 import Fastify from "fastify";
 import {
@@ -30,14 +31,33 @@ import {
 } from "fastify-type-provider-zod";
 import { app } from "./app";
 
+const isProduction = process.env.NODE_ENV === "production";
+
 const fastify = Fastify({
 	logger: {
-		transport: {
-			target: "pino-pretty",
-			options: {
-				colorize: true
-			}
-		}
+		level: isProduction ? "info" : "debug",
+		redact: {
+			paths: [
+				"req.headers.authorization",
+				"req.headers.cookie",
+				"req.headers['set-cookie']",
+				"body.password",
+				"body.currentPassword",
+				"body.newPassword",
+				"body.token",
+				"body.secret",
+				"err.config.secret"
+			],
+			censor: "[REDACTED]"
+		},
+		...(isProduction
+			? {}
+			: {
+					transport: {
+						target: "pino-pretty",
+						options: { colorize: true }
+					}
+				})
 	}
 });
 
@@ -56,7 +76,20 @@ fastify.register(cookie);
 // backend Fastify localhost:4000).
 //
 // PATCH ajouté au preflight — les futures routes canvas utilisent PATCH.
-const trustedOrigins = (process.env.TRUSTED_ORIGINS ?? "http://localhost:3000")
+// ─── Prod guard : TRUSTED_ORIGINS obligatoire ────────────────────────────
+// En production, pas question de tomber sur le fallback localhost — ça
+// ouvrirait un trou CORS + Better Auth. On crash au boot pour forcer
+// l'opérateur à configurer proprement.
+const trustedOriginsRaw = process.env.TRUSTED_ORIGINS;
+if (
+	isProduction &&
+	(!trustedOriginsRaw || trustedOriginsRaw.includes("localhost"))
+) {
+	throw new Error(
+		"TRUSTED_ORIGINS must be set explicitly in production (no localhost)"
+	);
+}
+const trustedOrigins = (trustedOriginsRaw ?? "http://localhost:3000")
 	.split(",")
 	.map((s) => s.trim())
 	.filter(Boolean);
@@ -65,6 +98,15 @@ fastify.register(cors, {
 	origin: trustedOrigins,
 	credentials: true,
 	methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
+});
+
+// ─── Security headers ────────────────────────────────────────────────────
+// @fastify/helmet ajoute les headers de sécurité HTTP standards
+// (X-Content-Type-Options, Referrer-Policy, Strict-Transport-Security, …).
+// CSP désactivé car c'est une API JSON (pas de HTML servi directement).
+fastify.register(helmet, {
+	contentSecurityPolicy: false,
+	crossOriginEmbedderPolicy: false
 });
 
 fastify.register(defaultRequestContext);

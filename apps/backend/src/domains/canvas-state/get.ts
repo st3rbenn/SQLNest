@@ -1,6 +1,6 @@
 import { schema as dbSchema } from "@sqlnest/db";
 import { and, eq } from "drizzle-orm";
-import type { FastifyInstance } from "fastify";
+import type { DbOrTx } from "./db";
 import type { CanvasPayloadT, CanvasSignatureT } from "./schema";
 
 export interface GetCanvasResult {
@@ -21,7 +21,7 @@ export interface GetCanvasResult {
  * plusieurs rows silencieusement).
  */
 export async function getCanvasState(
-	db: FastifyInstance["db"],
+	db: DbOrTx,
 	userId: string,
 	signature: CanvasSignatureT
 ): Promise<GetCanvasResult | null> {
