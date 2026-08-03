@@ -1,4 +1,5 @@
 import { Box, Portal, Stack, Text, UnstyledButton } from "@mantine/core";
+import { useHotkeys } from "@mantine/hooks";
 import {
 	type CSSProperties,
 	type ReactNode,
@@ -140,23 +141,31 @@ export function ContextMenu({
 		y: number;
 	} | null>(null);
 
+	// Escape : useHotkeys monté inconditionnellement (règle React) ; le
+	// handler no-op si le menu est fermé — équivalent au listener
+	// conditionnel d'avant, sans coût réel.
+	useHotkeys([
+		[
+			"Escape",
+			() => {
+				if (open) onClose();
+			}
+		]
+	]);
 	useEffect(() => {
 		if (!open) {
 			setSubmenu(null);
 			return;
 		}
-		function onKey(e: KeyboardEvent) {
-			if (e.key === "Escape") onClose();
-		}
+		// Click-outside : reste sur addEventListener natif — pas d'API
+		// Mantine simple pour un check via `containerRef.current.contains`.
 		function onDown(e: MouseEvent) {
 			if (!containerRef.current) return;
 			if (containerRef.current.contains(e.target as Node)) return;
 			onClose();
 		}
-		document.addEventListener("keydown", onKey);
 		document.addEventListener("mousedown", onDown);
 		return () => {
-			document.removeEventListener("keydown", onKey);
 			document.removeEventListener("mousedown", onDown);
 		};
 	}, [open, onClose]);

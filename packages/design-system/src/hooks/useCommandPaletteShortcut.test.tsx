@@ -3,6 +3,13 @@ import { describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "../test-utils/render";
 import { useCommandPaletteShortcut } from "./useCommandPaletteShortcut";
 
+/**
+ * NOTE : `@mantine/hooks.useHotkeys` attache son listener sur
+ * `document.documentElement` (le `<html>`), pas `document` lui-même.
+ * Un `fireEvent.keyDown(document, …)` ne bubble PAS vers l'html — il
+ * faut dispatch sur un enfant (body ou input) avec `bubbles: true`
+ * pour que le listener capture l'event.
+ */
 function Harness({ onOpen }: { onOpen: () => void }) {
 	useCommandPaletteShortcut(onOpen);
 	return (
@@ -17,21 +24,21 @@ describe("useCommandPaletteShortcut", () => {
 	it("fires the callback on Cmd+K (mac)", () => {
 		const onOpen = vi.fn();
 		renderWithProviders(<Harness onOpen={onOpen} />);
-		fireEvent.keyDown(document, { key: "k", metaKey: true });
+		fireEvent.keyDown(document.body, { key: "k", metaKey: true });
 		expect(onOpen).toHaveBeenCalledOnce();
 	});
 
 	it("fires the callback on Ctrl+K (windows/linux)", () => {
 		const onOpen = vi.fn();
 		renderWithProviders(<Harness onOpen={onOpen} />);
-		fireEvent.keyDown(document, { key: "k", ctrlKey: true });
+		fireEvent.keyDown(document.body, { key: "k", ctrlKey: true });
 		expect(onOpen).toHaveBeenCalledOnce();
 	});
 
 	it("does not fire on plain k", () => {
 		const onOpen = vi.fn();
 		renderWithProviders(<Harness onOpen={onOpen} />);
-		fireEvent.keyDown(document, { key: "k" });
+		fireEvent.keyDown(document.body, { key: "k" });
 		expect(onOpen).not.toHaveBeenCalled();
 	});
 
@@ -55,7 +62,7 @@ describe("useCommandPaletteShortcut", () => {
 			cancelable: true,
 			bubbles: true,
 		});
-		document.dispatchEvent(evt);
+		document.body.dispatchEvent(evt);
 		expect(evt.defaultPrevented).toBe(true);
 	});
 
@@ -63,7 +70,7 @@ describe("useCommandPaletteShortcut", () => {
 		const onOpen = vi.fn();
 		const { unmount } = renderWithProviders(<Harness onOpen={onOpen} />);
 		unmount();
-		fireEvent.keyDown(document, { key: "k", metaKey: true });
+		fireEvent.keyDown(document.body, { key: "k", metaKey: true });
 		expect(onOpen).not.toHaveBeenCalled();
 	});
 });
