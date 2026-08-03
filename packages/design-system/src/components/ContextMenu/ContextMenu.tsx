@@ -97,12 +97,40 @@ function ItemRow({
 				}
 			}}
 		>
-			<span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+			{/* Label span : `minWidth: 0` + `flex: 1` obligatoire pour que la
+			 * troncature s'applique dans un flex parent — sinon `flex-shrink`
+			 * par défaut ne kick pas, le label wrappe sur plusieurs lignes et
+			 * le hint se retrouve écrasé (bug visible avec des labels ou hints
+			 * longs, ex : contextmenu d'une table nommée `resource_software_link`). */}
+			<span
+				style={{
+					display: "inline-flex",
+					alignItems: "center",
+					gap: 8,
+					minWidth: 0,
+					flex: 1,
+					overflow: "hidden",
+				}}
+			>
 				{item.icon}
-				{item.label}
+				<span
+					style={{
+						overflow: "hidden",
+						textOverflow: "ellipsis",
+						whiteSpace: "nowrap",
+					}}
+				>
+					{item.label}
+				</span>
 			</span>
 			{isSubmenu ? (
-				<span aria-hidden style={{ color: "var(--sqlnest-text-tertiary)" }}>
+				<span
+					aria-hidden
+					style={{
+						color: "var(--sqlnest-text-tertiary)",
+						flexShrink: 0,
+					}}
+				>
 					›
 				</span>
 			) : "hint" in item && item.hint ? (
@@ -112,6 +140,10 @@ function ItemRow({
 					style={{
 						whiteSpace: "nowrap",
 						color: "var(--sqlnest-text-tertiary)",
+						flexShrink: 0,
+						maxWidth: "40%",
+						overflow: "hidden",
+						textOverflow: "ellipsis",
 					}}
 				>
 					{item.hint}
@@ -251,10 +283,10 @@ export function ContextMenu({
 							left: submenu.x + 4,
 							top: submenu.y,
 							width,
-							background: "#fff",
-							border: "1px solid var(--mantine-color-slate-2)",
+							background: "var(--sqlnest-surface)",
+							border: "1px solid var(--sqlnest-border)",
 							borderRadius: 10,
-							boxShadow: "0 16px 40px rgba(15,23,42,0.18)",
+							boxShadow: "0 16px 40px rgba(0,0,0,0.55)",
 							padding: 6,
 							zIndex: 10000,
 						}}

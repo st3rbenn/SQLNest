@@ -7,6 +7,13 @@
 			"runtimeArgs": ["--filter", "@sqlnest/frontend", "dev"],
 			"port": 3000,
 			"autoPort": true
+		},
+		{
+			"name": "storybook",
+			"runtimeExecutable": "pnpm",
+			"runtimeArgs": ["--filter", "@sqlnest/design-system", "storybook"],
+			"port": 6006,
+			"autoPort": true
 		}
 	]
 }

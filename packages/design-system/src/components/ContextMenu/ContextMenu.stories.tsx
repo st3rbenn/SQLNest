@@ -13,19 +13,9 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 const items: ContextMenuItem[] = [
-	{
-		kind: "action",
-		id: "open",
-		label: "Ouvrir dans l'éditeur",
-		hint: "get orders",
-		active: true,
-	},
-	{
-		kind: "action",
-		id: "data",
-		label: "Voir les données",
-		hint: "limit 100",
-	},
+	{ kind: "action", id: "details", label: "Détails" },
+	{ kind: "action", id: "open", label: "Ouvrir dans l'éditeur" },
+	{ kind: "action", id: "data", label: "Voir les 100 premières lignes" },
 	{
 		kind: "submenu",
 		id: "frame",
@@ -33,14 +23,11 @@ const items: ContextMenuItem[] = [
 		items: [
 			{ kind: "action", id: "u", label: "Utilisateurs" },
 			{ kind: "action", id: "c", label: "Commerce" },
-			{ kind: "divider" },
-			{ kind: "action", id: "new", label: "Nouveau frame…" },
 		],
 	},
 	{ kind: "divider" },
 	{ kind: "action", id: "copy", label: "Copier le nom" },
 	{ kind: "action", id: "hide", label: "Masquer" },
-	{ kind: "action", id: "details", label: "Détails" },
 ];
 
 export const Default: Story = {
@@ -49,6 +36,32 @@ export const Default: Story = {
 		position: { x: 24, y: 24 },
 		items,
 		title: "orders",
+		onClose: () => {},
+	},
+};
+
+// Preuve visuelle du fix layout : un label + hint tous deux longs ne
+// doivent PAS wrapper le label — les deux sont tronqués proprement avec
+// ellipsis, la row reste sur une ligne.
+export const LongLabelAndHint: Story = {
+	args: {
+		open: true,
+		position: { x: 24, y: 24 },
+		title: "resource_software_link",
+		items: [
+			{
+				kind: "action",
+				id: "long",
+				label: "Ouvrir cette table extrêmement longue dans l'éditeur SNQL",
+				hint: "get resource_software_link | limit 100",
+			},
+			{
+				kind: "action",
+				id: "short",
+				label: "Court",
+				hint: "⌘K",
+			},
+		],
 		onClose: () => {},
 	},
 };
