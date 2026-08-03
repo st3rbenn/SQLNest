@@ -1,26 +1,36 @@
+import { Box, Kbd, Text } from "@mantine/core";
 import {
+	ColorDot,
 	ContextMenu,
 	type ContextMenuItem,
+	KindBadge,
 	showNotification
 } from "@sqlnest/design-system";
 import {
 	IconCopy,
-	IconEditCircle,
 	IconEyeOff,
+	IconHash,
 	IconInfoCircle,
 	IconSquareDashed,
 	IconSquareOff,
-	IconTable
+	IconTable,
+	IconTerminal2
 } from "@tabler/icons-react";
 import { useNavigate } from "@tanstack/react-router";
+import { colorFor } from "./colors";
 import type { Frame } from "./frames";
+import type { SchemaModel } from "./schema-model";
 
-const ICON = { size: 15, stroke: 1.8 } as const;
+const ICON = { size: 16, stroke: 1.8 } as const;
 
 interface Props {
 	readonly open: boolean;
 	readonly position: { x: number; y: number };
 	readonly tableName: string;
+	readonly schema: SchemaModel;
+	/** Label du schéma cible (postgres → `public`, mongo → undefined). Affiché
+	 * dans la ligne metadata du header. */
+	readonly schemaLabel?: string | undefined;
 	readonly frames: readonly Frame[];
 	readonly frameOfTable?: Frame | null;
 	readonly onClose: () => void;
@@ -33,27 +43,28 @@ interface Props {
 /**
  * Menu contextuel du canvas — actions pour une table.
  *
- * Ordre pensé pour la priorité d'usage :
- *   1. Détails         — découverte : « qu'est-ce que c'est ? »
- *   2. Ouvrir éditeur  — écrire une requête à partir de la table
- *   3. Voir données    — lire les 100 premières lignes direct
- *   ─ divider ─
- *   4. Frame           — regrouper / dégrouper (action directe si dans un
- *                        frame, submenu sinon ; item complètement caché
- *                        si aucun frame n'existe encore)
- *   ─ divider ─
- *   5. Copier          — meta
- *   6. Masquer         — nettoyage visuel canvas
+ * Header riche : ColorDot (couleur groupe) + nom en gros + metadata
+ * (`{schemaLabel} · N champs · N FK`) + KindBadge (DÉCLARÉ / INFÉRÉ).
+ * Rendu via le slot `header` du DS ContextMenu — permet une identité
+ * visuelle immédiate de la table sans lire l'item du dessous.
  *
- * Labels : terses, action + éventuellement quantité intégrée. Pas de
- * sub-messages descriptifs (« get resource_software_link », « limit 100 »)
- * — ces hints étaient de la note-de-service pour développeur, pas de
- * l'aide utilisateur.
+ * Items groupés en 3 sections séparées par des dividers :
+ *   1. Actions primaires — Ouvrir éditeur (actif, défaut Enter), Voir 100
+ *      lignes, Détails.
+ *   2. STRUCTURE — regroupement/relation : frame + voir relations (count).
+ *   3. Meta/canvas — copier, masquer.
+ *
+ * Hints = Kbd shortcuts (`⌘C`, `⌘H`, `I`, `↵`, `get {name}`) — cosmétiques
+ * pour l'apprentissage (afficher que ces actions ont des raccourcis). Le
+ * wiring des raccourcis globaux (⌘C copier le nom de la table hover, etc.)
+ * est une feature séparée à décider — conflicts natifs macOS à gérer.
  */
 export function CanvasContextMenu({
 	open,
 	position,
 	tableName,
+	schema,
+	schemaLabel,
 	frames,
 	frameOfTable,
 	onClose,
@@ -63,6 +74,7 @@ export function CanvasContextMenu({
 	onRemoveFromFrame
 }: Props) {
 	const navigate = useNavigate();
+	const collection = schema.collections.find((c) => c.name === tableName);
 
 	const goToEditor = (source: string, autorun: boolean) => {
 		void navigate({
@@ -90,11 +102,64 @@ export function CanvasContextMenu({
 		}
 	};
 
-	// Frames disponibles = ceux dont la table n'est PAS déjà membre. On
-	// n'affiche l'item Frame que si un choix utile est possible : soit la
-	// table est dans un frame (→ action « Retirer »), soit d'autres frames
-	// existent (→ submenu « Ajouter à »). Sinon on cache — l'utilisateur
-	// crée un frame via F/lasso, pas via ce menu.
+	// ─── Header ──────────────────────────────────────────────────────────
+	// Metadata : schema (si postgres) · N champs · N FK. `FK` compte les
+	// relations DONT la table est source OU cible (les 2 sens comptent pour
+	// « avec combien d'autres tables je suis reliée »).
+	const fieldCount = collection?.fields.length ?? 0;
+	const fkCount = schema.relations.filter(
+		(r) => r.from.collection === tableName || r.to.collection === tableName
+	).length;
+	const kind: "declared" | "inferred" =
+		collection?.source === "inferred" ? "inferred" : "declared";
+	const color = colorFor(tableName);
+
+	const metaParts = [
+		schemaLabel,
+		`${fieldCount} champ${fieldCount > 1 ? "s" : ""}`,
+		`${fkCount} FK`
+	].filter(Boolean);
+
+	const header = (
+		<Box
+			style={{
+				display: "flex",
+				alignItems: "flex-start",
+				gap: 10,
+				padding: "10px 12px"
+			}}
+		>
+			<Box pt={4}>
+				<ColorDot color={color.border} size="lg" />
+			</Box>
+			<Box style={{ flex: 1, minWidth: 0 }}>
+				<Text
+					fw={600}
+					size="sm"
+					style={{
+						color: "var(--sqlnest-text-primary)",
+						overflow: "hidden",
+						textOverflow: "ellipsis",
+						whiteSpace: "nowrap"
+					}}
+				>
+					{tableName}
+				</Text>
+				<Text
+					size="xs"
+					ff="monospace"
+					style={{ color: "var(--sqlnest-text-tertiary)" }}
+				>
+					{metaParts.join(" · ")}
+				</Text>
+			</Box>
+			<KindBadge kind={kind} />
+		</Box>
+	);
+
+	// ─── Frame section (STRUCTURE) ───────────────────────────────────────
+	// Item Frame caché si aucun frame n'existe et table pas dans un frame
+	// (le user crée un frame via F/lasso, pas via ce menu).
 	const otherFrames = frames.filter(
 		(f) => !frameOfTable || f.key !== frameOfTable.key
 	);
@@ -139,19 +204,15 @@ export function CanvasContextMenu({
 					]
 				};
 
+	// ─── Items ───────────────────────────────────────────────────────────
 	const items: ContextMenuItem[] = [
-		{
-			kind: "action",
-			id: "details",
-			label: "Détails",
-			icon: <IconInfoCircle {...ICON} />,
-			onClick: () => onFocus(tableName)
-		},
 		{
 			kind: "action",
 			id: "open",
 			label: "Ouvrir dans l'éditeur",
-			icon: <IconEditCircle {...ICON} />,
+			icon: <IconTerminal2 {...ICON} />,
+			hint: <Kbd size="xs">get {tableName}</Kbd>,
+			active: true,
 			onClick: () => goToEditor(`get ${tableName}`, false)
 		},
 		{
@@ -159,24 +220,45 @@ export function CanvasContextMenu({
 			id: "data",
 			label: "Voir les 100 premières lignes",
 			icon: <IconTable {...ICON} />,
+			hint: <Kbd size="xs">↵</Kbd>,
 			onClick: () => goToEditor(`get ${tableName} | limit 100`, true)
 		},
-		...(frameItem
-			? [{ kind: "divider" as const }, frameItem]
-			: []),
+		{
+			kind: "action",
+			id: "details",
+			label: "Détails",
+			icon: <IconInfoCircle {...ICON} />,
+			hint: <Kbd size="xs">I</Kbd>,
+			onClick: () => onFocus(tableName)
+		},
+		{ kind: "divider" },
+		{ kind: "section-label", label: "STRUCTURE" },
+		...(frameItem ? [frameItem] : []),
+		{
+			kind: "action",
+			id: "relations",
+			label: "Voir les relations",
+			icon: <IconHash {...ICON} />,
+			hint: fkCount > 0 ? String(fkCount) : undefined,
+			// Même comportement que Détails pour l'instant — future itération :
+			// scroll le drawer TableDetails à la section Relations directement.
+			onClick: () => onFocus(tableName)
+		},
 		{ kind: "divider" },
 		{
 			kind: "action",
 			id: "copy",
 			label: "Copier le nom",
 			icon: <IconCopy {...ICON} />,
+			hint: <Kbd size="xs">⌘C</Kbd>,
 			onClick: () => void copyName()
 		},
 		{
 			kind: "action",
 			id: "hide",
-			label: "Masquer",
+			label: "Masquer sur le canvas",
 			icon: <IconEyeOff {...ICON} />,
+			hint: <Kbd size="xs">⌘H</Kbd>,
 			onClick: () => onHide(tableName)
 		}
 	];
@@ -187,7 +269,8 @@ export function CanvasContextMenu({
 			position={position}
 			onClose={onClose}
 			items={items}
-			title={tableName}
+			header={header}
+			width={340}
 		/>
 	);
 }

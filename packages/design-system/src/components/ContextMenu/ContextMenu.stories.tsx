@@ -1,6 +1,8 @@
-import { Button } from "@mantine/core";
+import { Box, Button, Kbd, Text } from "@mantine/core";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useState } from "react";
+import { ColorDot } from "../ColorDot/ColorDot";
+import { KindBadge } from "../KindBadge/KindBadge";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 
 const meta = {
@@ -13,29 +15,107 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 const items: ContextMenuItem[] = [
-	{ kind: "action", id: "details", label: "Détails" },
-	{ kind: "action", id: "open", label: "Ouvrir dans l'éditeur" },
-	{ kind: "action", id: "data", label: "Voir les 100 premières lignes" },
+	{
+		kind: "action",
+		id: "open",
+		label: "Ouvrir dans l'éditeur",
+		hint: <Kbd size="xs">get users</Kbd>,
+		active: true,
+	},
+	{
+		kind: "action",
+		id: "data",
+		label: "Voir les 100 premières lignes",
+		hint: <Kbd size="xs">↵</Kbd>,
+	},
+	{
+		kind: "action",
+		id: "details",
+		label: "Détails",
+		hint: <Kbd size="xs">I</Kbd>,
+	},
+	{ kind: "divider" },
+	{ kind: "section-label", label: "STRUCTURE" },
 	{
 		kind: "submenu",
 		id: "frame",
-		label: "Ajouter à un frame",
+		label: "Changer de frame",
 		items: [
 			{ kind: "action", id: "u", label: "Utilisateurs" },
 			{ kind: "action", id: "c", label: "Commerce" },
 		],
 	},
+	{
+		kind: "action",
+		id: "relations",
+		label: "Voir les relations",
+		hint: "3",
+	},
 	{ kind: "divider" },
-	{ kind: "action", id: "copy", label: "Copier le nom" },
-	{ kind: "action", id: "hide", label: "Masquer" },
+	{
+		kind: "action",
+		id: "copy",
+		label: "Copier le nom",
+		hint: <Kbd size="xs">⌘C</Kbd>,
+	},
+	{
+		kind: "action",
+		id: "hide",
+		label: "Masquer sur le canvas",
+		hint: <Kbd size="xs">⌘H</Kbd>,
+	},
 ];
+
+// Header pour la démo — reproduit le header riche du canvas (dot + nom +
+// metadata + KindBadge). Le composant DS accepte n'importe quel ReactNode.
+const richHeader = (
+	<Box
+		style={{
+			display: "flex",
+			alignItems: "flex-start",
+			gap: 10,
+			padding: "10px 12px",
+		}}
+	>
+		<Box pt={4}>
+			<ColorDot color="hsl(210, 55%, 55%)" size="lg" />
+		</Box>
+		<Box style={{ flex: 1, minWidth: 0 }}>
+			<Text fw={600} size="sm">
+				users
+			</Text>
+			<Text
+				size="xs"
+				ff="monospace"
+				style={{ color: "var(--sqlnest-text-tertiary)" }}
+			>
+				public · 5 champs · 3 FK
+			</Text>
+		</Box>
+		<KindBadge kind="declared" />
+	</Box>
+);
 
 export const Default: Story = {
 	args: {
 		open: true,
 		position: { x: 24, y: 24 },
 		items,
+		header: richHeader,
+		width: 340,
+		onClose: () => {},
+	},
+};
+
+export const TitleFallback: Story = {
+	args: {
+		open: true,
+		position: { x: 24, y: 24 },
 		title: "orders",
+		items: [
+			{ kind: "action", id: "a", label: "Action simple" },
+			{ kind: "action", id: "b", label: "Autre action" },
+		],
 		onClose: () => {},
 	},
 };
@@ -59,7 +139,7 @@ export const LongLabelAndHint: Story = {
 				kind: "action",
 				id: "short",
 				label: "Court",
-				hint: "⌘K",
+				hint: <Kbd size="xs">⌘K</Kbd>,
 			},
 		],
 		onClose: () => {},
@@ -95,7 +175,8 @@ export const TriggeredOnRightClick: Story = {
 					position={pos ?? { x: 0, y: 0 }}
 					onClose={() => setPos(null)}
 					items={items}
-					title="orders"
+					header={richHeader}
+					width={340}
 				/>
 			</div>
 		);

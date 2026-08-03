@@ -13,7 +13,10 @@ export type ContextMenuActionItem = {
 	id: string;
 	label: string;
 	icon?: ReactNode;
-	hint?: string;
+	/** Hint affiché à droite. Un `string` est stylé en monospace tertiary ;
+	 * un `ReactNode` (typiquement `<Kbd>`) est rendu tel quel — utilise
+	 * ReactNode pour raccourcis clavier, badges de count, ou pill custom. */
+	hint?: string | ReactNode;
 	active?: boolean;
 	danger?: boolean;
 	onClick?: () => void;
@@ -29,17 +32,31 @@ export type ContextMenuSubmenuItem = {
 
 export type ContextMenuDividerItem = { kind: "divider" };
 
+/** Label de section — texte tertiary uppercase, non-interactif. Utilisé
+ * pour regrouper visuellement des blocs d'items (ex : « STRUCTURE » avant
+ * les items de reorganisation). Précéder d'un `divider` pour la lisibilité. */
+export type ContextMenuSectionLabelItem = {
+	kind: "section-label";
+	label: string;
+};
+
 export type ContextMenuItem =
 	| ContextMenuActionItem
 	| ContextMenuSubmenuItem
-	| ContextMenuDividerItem;
+	| ContextMenuDividerItem
+	| ContextMenuSectionLabelItem;
 
 export type ContextMenuProps = {
 	open: boolean;
 	position: { x: number; y: number };
 	onClose: () => void;
 	items: readonly ContextMenuItem[];
+	/** Titre uppercase simple (compat historique). Ignoré si `header` fourni. */
 	title?: string;
+	/** Slot custom pour un header riche (dot + nom + metadata + badge, …).
+	 * Rendu à la place du `title`. Le composant fournit le border-bottom de
+	 * séparation ; le contenu du slot gère son propre padding interne. */
+	header?: ReactNode;
 	width?: number;
 };
 
@@ -134,20 +151,28 @@ function ItemRow({
 					›
 				</span>
 			) : "hint" in item && item.hint ? (
-				<Text
-					ff="monospace"
-					size="xs"
-					style={{
-						whiteSpace: "nowrap",
-						color: "var(--sqlnest-text-tertiary)",
-						flexShrink: 0,
-						maxWidth: "40%",
-						overflow: "hidden",
-						textOverflow: "ellipsis",
-					}}
-				>
-					{item.hint}
-				</Text>
+				typeof item.hint === "string" ? (
+					<Text
+						ff="monospace"
+						size="xs"
+						style={{
+							whiteSpace: "nowrap",
+							color: "var(--sqlnest-text-tertiary)",
+							flexShrink: 0,
+							maxWidth: "40%",
+							overflow: "hidden",
+							textOverflow: "ellipsis",
+						}}
+					>
+						{item.hint}
+					</Text>
+				) : (
+					/* ReactNode hint (typiquement `<Kbd>`) — rendu tel quel dans un
+					 * wrapper flex-safe (flexShrink 0 pour ne pas être écrasé). */
+					<span style={{ flexShrink: 0, display: "inline-flex", gap: 4 }}>
+						{item.hint}
+					</span>
+				)
 			) : null}
 		</UnstyledButton>
 	);
@@ -164,6 +189,7 @@ export function ContextMenu({
 	onClose,
 	items,
 	title,
+	header,
 	width = 260,
 }: ContextMenuProps) {
 	const containerRef = useRef<HTMLDivElement | null>(null);
@@ -222,7 +248,16 @@ export function ContextMenu({
 						zIndex: 9999,
 					}}
 				>
-					{title ? (
+					{header ? (
+						<Box
+							style={{
+								borderBottom: "1px solid var(--sqlnest-border-subtle)",
+								marginBottom: 4,
+							}}
+						>
+							{header}
+						</Box>
+					) : title ? (
 						<Text
 							size="xs"
 							fw={700}
@@ -251,6 +286,25 @@ export function ContextMenu({
 											margin: "4px 6px",
 										}}
 									/>
+								);
+							}
+							if (item.kind === "section-label") {
+								return (
+									<Text
+										key={`s-${i}`}
+										size="xs"
+										fw={700}
+										tt="uppercase"
+										px="xs"
+										pt={6}
+										pb={4}
+										style={{
+											letterSpacing: 0.5,
+											color: "var(--sqlnest-text-tertiary)",
+										}}
+									>
+										{item.label}
+									</Text>
 								);
 							}
 							return (
@@ -292,18 +346,40 @@ export function ContextMenu({
 						}}
 					>
 						<Stack gap={0}>
-							{submenu.item.items.map((child, i) =>
-								child.kind === "divider" ? (
-									<Box
-										role="separator"
-										key={`ds-${i}`}
-										style={{
-											height: 1,
-											background: "var(--sqlnest-border-subtle)",
-											margin: "4px 6px",
-										}}
-									/>
-								) : (
+							{submenu.item.items.map((child, i) => {
+								if (child.kind === "divider") {
+									return (
+										<Box
+											role="separator"
+											key={`ds-${i}`}
+											style={{
+												height: 1,
+												background: "var(--sqlnest-border-subtle)",
+												margin: "4px 6px",
+											}}
+										/>
+									);
+								}
+								if (child.kind === "section-label") {
+									return (
+										<Text
+											key={`ss-${i}`}
+											size="xs"
+											fw={700}
+											tt="uppercase"
+											px="xs"
+											pt={6}
+											pb={4}
+											style={{
+												letterSpacing: 0.5,
+												color: "var(--sqlnest-text-tertiary)",
+											}}
+										>
+											{child.label}
+										</Text>
+									);
+								}
+								return (
 									<ItemRow
 										key={child.id}
 										item={child}
@@ -312,8 +388,8 @@ export function ContextMenu({
 											onClose();
 										}}
 									/>
-								),
-							)}
+								);
+							})}
 						</Stack>
 					</Box>
 				) : null}

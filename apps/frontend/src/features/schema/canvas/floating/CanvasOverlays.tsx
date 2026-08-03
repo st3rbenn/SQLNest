@@ -86,6 +86,8 @@ export function CanvasOverlays() {
 					open
 					position={{ x: menu.x, y: menu.y }}
 					tableName={menu.tableName}
+					schema={schema}
+					schemaLabel={schemaLabel}
 					frames={framesApi.frames}
 					frameOfTable={framesApi.frameOfTable(menu.tableName)}
 					onClose={() => setMenu(null)}
