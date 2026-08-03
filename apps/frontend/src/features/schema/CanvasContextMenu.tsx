@@ -21,7 +21,7 @@ import { colorFor } from "./colors";
 import type { Frame } from "./frames";
 import type { SchemaModel } from "./schema-model";
 
-const ICON = { size: 16, stroke: 1.8 } as const;
+const ICON = { size: 14, stroke: 1.8 } as const;
 
 interface Props {
 	readonly open: boolean;
@@ -124,20 +124,19 @@ export function CanvasContextMenu({
 		<Box
 			style={{
 				display: "flex",
-				alignItems: "flex-start",
-				gap: 10,
-				padding: "10px 12px"
+				alignItems: "center",
+				gap: 8,
+				padding: "6px 10px"
 			}}
 		>
-			<Box pt={4}>
-				<ColorDot color={color.border} size="lg" />
-			</Box>
+			<ColorDot color={color.border} size="md" />
 			<Box style={{ flex: 1, minWidth: 0 }}>
 				<Text
 					fw={600}
-					size="sm"
+					size="xs"
 					style={{
 						color: "var(--sqlnest-text-primary)",
+						lineHeight: 1.3,
 						overflow: "hidden",
 						textOverflow: "ellipsis",
 						whiteSpace: "nowrap"
@@ -146,9 +145,12 @@ export function CanvasContextMenu({
 					{tableName}
 				</Text>
 				<Text
-					size="xs"
+					size="10px"
 					ff="monospace"
-					style={{ color: "var(--sqlnest-text-tertiary)" }}
+					style={{
+						color: "var(--sqlnest-text-tertiary)",
+						lineHeight: 1.3
+					}}
 				>
 					{metaParts.join(" · ")}
 				</Text>
@@ -270,7 +272,7 @@ export function CanvasContextMenu({
 			onClose={onClose}
 			items={items}
 			header={header}
-			width={340}
+			width={280}
 		/>
 	);
 }

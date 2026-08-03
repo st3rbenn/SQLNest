@@ -66,35 +66,49 @@ const rowBase: CSSProperties = {
 	justifyContent: "space-between",
 	gap: 8,
 	width: "100%",
-	padding: "7px 10px",
+	padding: "5px 9px",
 	borderRadius: 6,
-	fontSize: 12.5,
+	fontSize: 12,
 	textAlign: "left",
+	transition: "background-color 80ms ease-out",
 };
 
 function ItemRow({
 	item,
 	onPick,
 	onOpenSubmenu,
+	onCloseSubmenu,
 }: {
 	item: ContextMenuActionItem | ContextMenuSubmenuItem;
 	onPick: () => void;
 	onOpenSubmenu?: (rect: DOMRect) => void;
+	/** Appelé quand un item non-submenu reçoit le hover — ferme le
+	 * submenu actif éventuel (comme un menu natif OS : hover d'un item
+	 * frère referme le sous-menu du parent). */
+	onCloseSubmenu?: () => void;
 }) {
 	const ref = useRef<HTMLButtonElement | null>(null);
+	const [hovered, setHovered] = useState(false);
 	const isSubmenu = item.kind === "submenu";
+	const isActive = item.kind === "action" && item.active;
+	const isDanger = item.kind === "action" && item.danger;
+	// Layered bg : hover > active > transparent. Hover d'un item danger
+	// prend une teinte rouge soft ; sinon la surface de hover neutre.
+	const bgHover = isDanger
+		? "var(--sqlnest-danger-soft, rgba(255,80,80,0.12))"
+		: "var(--sqlnest-surface-hover, rgba(255,255,255,0.06))";
 	const style: CSSProperties = {
 		...rowBase,
-		background:
-			item.kind === "action" && item.active
+		background: hovered
+			? bgHover
+			: isActive
 				? "var(--sqlnest-accent-soft)"
 				: "transparent",
-		color:
-			item.kind === "action" && item.danger
-				? "var(--sqlnest-danger)"
-				: item.kind === "action" && item.active
-					? "var(--sqlnest-accent)"
-					: "var(--sqlnest-text-secondary)",
+		color: isDanger
+			? "var(--sqlnest-danger)"
+			: isActive
+				? "var(--sqlnest-accent)"
+				: "var(--sqlnest-text-secondary)",
 	};
 	return (
 		<UnstyledButton
@@ -109,10 +123,15 @@ function ItemRow({
 				}
 			}}
 			onMouseEnter={() => {
+				setHovered(true);
 				if (isSubmenu && ref.current) {
 					onOpenSubmenu?.(ref.current.getBoundingClientRect());
+				} else {
+					// Item frère — referme un submenu potentiellement ouvert.
+					onCloseSubmenu?.();
 				}
 			}}
+			onMouseLeave={() => setHovered(false)}
 		>
 			{/* Label span : `minWidth: 0` + `flex: 1` obligatoire pour que la
 			 * troncature s'applique dans un flex parent — sinon `flex-shrink`
@@ -232,6 +251,33 @@ export function ContextMenu({
 
 	return (
 		<Portal>
+			{/* Backdrop transparent full-screen — capture tous les événements
+			 * qui ne visent PAS le menu (le menu container est en zIndex 9999,
+			 * le backdrop en 9998, donc le menu reste cliquable au-dessus).
+			 * Sans lui, un scroll molette pendant que le menu est ouvert pan
+			 * le canvas ReactFlow en dessous — visible = user perd sa vue en
+			 * essayant de scroll vers un item bas. */}
+			<div
+				aria-hidden
+				onMouseDown={(e) => {
+					e.stopPropagation();
+					onClose();
+				}}
+				onContextMenu={(e) => {
+					// Empêche le vrai menu contextuel navigateur quand user
+					// right-click sur le vide pendant que le menu custom est ouvert.
+					e.preventDefault();
+					e.stopPropagation();
+					onClose();
+				}}
+				onWheel={(e) => e.stopPropagation()}
+				style={{
+					position: "fixed",
+					inset: 0,
+					zIndex: 9998,
+					background: "transparent",
+				}}
+			/>
 			<div ref={containerRef}>
 				<Box
 					role="menu"
@@ -324,6 +370,7 @@ export function ContextMenu({
 											});
 										}
 									}}
+									onCloseSubmenu={() => setSubmenu(null)}
 								/>
 							);
 						})}

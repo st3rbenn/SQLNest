@@ -72,22 +72,20 @@ const richHeader = (
 	<Box
 		style={{
 			display: "flex",
-			alignItems: "flex-start",
-			gap: 10,
-			padding: "10px 12px",
+			alignItems: "center",
+			gap: 8,
+			padding: "6px 10px",
 		}}
 	>
-		<Box pt={4}>
-			<ColorDot color="hsl(210, 55%, 55%)" size="lg" />
-		</Box>
+		<ColorDot color="hsl(210, 55%, 55%)" size="md" />
 		<Box style={{ flex: 1, minWidth: 0 }}>
-			<Text fw={600} size="sm">
+			<Text fw={600} size="xs" style={{ lineHeight: 1.3 }}>
 				users
 			</Text>
 			<Text
-				size="xs"
+				size="10px"
 				ff="monospace"
-				style={{ color: "var(--sqlnest-text-tertiary)" }}
+				style={{ color: "var(--sqlnest-text-tertiary)", lineHeight: 1.3 }}
 			>
 				public · 5 champs · 3 FK
 			</Text>
@@ -102,7 +100,7 @@ export const Default: Story = {
 		position: { x: 24, y: 24 },
 		items,
 		header: richHeader,
-		width: 340,
+		width: 280,
 		onClose: () => {},
 	},
 };
@@ -176,7 +174,7 @@ export const TriggeredOnRightClick: Story = {
 					onClose={() => setPos(null)}
 					items={items}
 					header={richHeader}
-					width={340}
+					width={280}
 				/>
 			</div>
 		);
