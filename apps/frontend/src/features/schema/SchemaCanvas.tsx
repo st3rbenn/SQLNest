@@ -17,12 +17,10 @@ import {
 	type Edge,
 	MarkerType,
 	MiniMap,
-	type NodeChange,
 	Panel,
 	ReactFlow,
 	ReactFlowProvider,
 	SelectionMode,
-	useNodesState,
 	useReactFlow
 } from "@xyflow/react";
 import { buildCanvasCommands } from "./commands";
@@ -40,11 +38,7 @@ import { CanvasContextMenu } from "./CanvasContextMenu";
 import { type CanvasTool, CanvasToolbar } from "./CanvasToolbar";
 import { AutoLayoutModal } from "./canvas/AutoLayoutModal";
 import { CanvasBreadcrumb } from "./canvas/CanvasBreadcrumb";
-import {
-	boundsOfTables,
-	computeFrameNodes,
-	FRAME_PAD
-} from "./canvas/computeFrameNodes";
+import { boundsOfTables, FRAME_PAD } from "./canvas/computeFrameNodes";
 import { DrawerPane, useResizableDrawer } from "./canvas/DrawerPane";
 import { HiddenChip } from "./canvas/HiddenChip";
 import { useCanvasFocus } from "./canvas/useCanvasFocus";
@@ -52,11 +46,12 @@ import { useCanvasHistory } from "./canvas/useCanvasHistory";
 import { useCanvasSelection } from "./canvas/useCanvasSelection";
 import { useCanvasSync } from "./canvas/useCanvasSync";
 import { useCanvasEdges } from "./canvas/useCanvasEdges";
+import { useCanvasFrames } from "./canvas/useCanvasFrames";
+import { useCanvasNodes } from "./canvas/useCanvasNodes";
 import { useCanvasViewport } from "./canvas/useCanvasViewport";
 import { useUndoRedoShortcuts } from "./canvas/useUndoRedoShortcuts";
 import { initialZoom, OVERVIEW_FIT } from "./canvas/viewport";
 import { FrameNode, type FrameNodeType } from "./FrameNode";
-import { type Frame, type FrameRect, rectContainsPoint } from "./frames";
 import { InteractiveEdge } from "./InteractiveEdge";
 import { buildLayout, type LayoutResult } from "./layout";
 import type { SchemaModel } from "./schema-model";
@@ -155,15 +150,6 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 	const baseRef = useRef<LayoutResult | null>(null);
 	baseRef.current = base;
 
-	// nodes reflètent les positions vivantes (drag) ; réinitialisés dès qu'ELK rend.
-	const [nodes, setNodes, onNodesChange] = useNodesState<TableNodeType>([]);
-
-	// Positions user persistées en localStorage — overlay au-dessus du layout ELK
-	// pour que la disposition survive au refresh (sans ça, ELK re-place tout,
-	// les tables sortent des frames, la membership devient fantôme et se fait
-	// nettoyer par le filtre post-layout). Lu via ref dans l'effet ci-dessous
-	// pour NE PAS re-déclencher `setNodes(base.nodes)` à chaque persistance —
-	// sinon chaque drag-stop réappliquerait l'overlay et pourrait clignoter.
 	// ─── Persistance : server-only quand loggé, localStorage quand anonyme ─
 	// Le user loggé a un canvas serveur (hydraté par useCanvasSync) — le
 	// localStorage n'apporte alors qu'un risque de stale state cross-device
@@ -197,32 +183,9 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 	}, [persistLocal]);
 
 	const tablePositions = useTablePositions(schema, hookOpts);
-	const tablePositionsRef = useRef(tablePositions.positions);
-	tablePositionsRef.current = tablePositions.positions;
-	// Sizes user persistées (NodeResizer 4 côtés de chaque table) — même
-	// pattern d'overlay que positions : ref pour éviter le re-seed en boucle.
-	// Stocke width ET height : le user peut resize dans les 2 axes.
+	// Sizes user persistées (NodeResizer 4 côtés de chaque table) — stocke
+	// width ET height : le user peut resize dans les 2 axes.
 	const tableSizes = useTableSizes(schema, hookOpts);
-	const tableSizesRef = useRef(tableSizes.sizes);
-	tableSizesRef.current = tableSizes.sizes;
-	useEffect(() => {
-		if (base !== null) {
-			const savedPos = tablePositionsRef.current;
-			const savedSize = tableSizesRef.current;
-			setNodes(
-				base.nodes.map((n) => {
-					const pos = savedPos[n.id];
-					const size = savedSize[n.id];
-					return {
-						...n,
-						...(pos !== undefined ? { position: pos } : {}),
-						...(size?.width !== undefined ? { width: size.width } : {}),
-						...(size?.height !== undefined ? { height: size.height } : {})
-					};
-				})
-			);
-		}
-	}, [base, setNodes]);
 
 	// Focus canvas — table OU frame, mutuellement exclusifs (un seul drawer
 	// détails à la fois). Extrait dans `useCanvasFocus`. `onClear` réapplique
@@ -270,6 +233,25 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 	// Déclaré ICI pour que `useCanvasSync` (juste après) puisse les
 	// observer + les remplacer via `canvasSyncReplaceAll.edgeAnchors`.
 	const edgeAnchors = useEdgeAnchors(schema, hookOpts);
+
+	// State React Flow `nodes` + handleTableResize + handleNodesChange
+	// (intercept frame changes) — voir `useCanvasNodes` pour la doc.
+	// `history.push` passé via ref (`historyPushRef`) : `useCanvasHistory`
+	// est déclaré JUSTE APRÈS mais a besoin de `setNodes` qu'on obtient
+	// ici → dépendance circulaire résolue par le ref (rebound plus bas).
+	const historyPushRef = useRef<() => void>(() => {});
+	const historyProxy = useMemo(
+		() => ({ push: () => historyPushRef.current() }),
+		[]
+	);
+	const { nodes, setNodes, nodesRef, handleNodesChange, handleTableResize } =
+		useCanvasNodes({
+			base,
+			tablePositions,
+			tableSizes,
+			framesApi,
+			history: historyProxy
+		});
 
 	// Historique undo/redo — capture positions + sizes + frames + hiddenIds.
 	// `history.push()` doit être appelé APRÈS chaque geste user notable
@@ -319,6 +301,12 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 			[setNodes]
 		)
 	});
+	// Bind du proxy `historyPushRef` (déclaré plus haut, consommé par
+	// `useCanvasNodes.handleTableResize`) au vrai `history.push` maintenant
+	// que `useCanvasHistory` est monté. Le pattern ref évite la dépendance
+	// circulaire entre useCanvasNodes (produit setNodes) et useCanvasHistory
+	// (consomme setNodes pour onRestore).
+	historyPushRef.current = history.push;
 
 	// Shortcuts globaux Cmd/Ctrl+Z (undo) et Cmd/Ctrl+Shift+Z ou Cmd/Ctrl+Y
 	// (redo). preventDefault critique pour bloquer le « restore tab fermée »
@@ -429,93 +417,6 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 		replaceAll: canvasSyncReplaceAll
 	});
 
-	// Frames : deux chemins d'update qui doivent cohabiter sans se marcher
-	// dessus :
-	//   (A) DRAG du frame — le user attrape le corps → `onNodeDrag` custom
-	//       (plus bas) shift TOUS les membres + call setFrameRect à chaque
-	//       tick. `frameDragStateRef` est set pendant ce geste.
-	//   (B) RESIZE via handle NodeResizer — RF dispatche `dimensions` et,
-	//       pour les corners top/left, ALSO des `position` NodeChange.
-	//       `onNodeDrag` NE fire PAS. Ces changes finissent par défaut dans
-	//       `applyNodeChanges(nodes)` où `nodes` ne contient que les tables →
-	//       drop silencieux → resize visuellement figé.
-	// Notre `handleNodesChange` intercepte (B) : dimensions + position pour
-	// les IDs `frame:*` → route vers `framesApi.setFrameRect`. On saute les
-	// `position` quand un drag est en cours pour le frame concerné (chemin A
-	// gère déjà, éviter la double-update).
-	const framesApiRef = useRef(framesApi);
-	framesApiRef.current = framesApi;
-	const frameDragStateRef = useRef<{
-		frameKey: string;
-		frameOrigin: { x: number; y: number };
-		rectSize: { width: number; height: number };
-		memberOrigins: Map<string, { x: number; y: number }>;
-	} | null>(null);
-	const handleNodesChange = useCallback(
-		(changes: NodeChange<TableNodeType>[]) => {
-			const restChanges: NodeChange<TableNodeType>[] = [];
-			const api = framesApiRef.current;
-			// RF émet dimensions ET position dans le MÊME batch pour un resize
-			// depuis un corner top/left. On doit fusionner par frame avant l'écriture
-			// — sinon deux `setFrameRect` séquentiels lisent `frame.rect` frozen
-			// avant le premier setState (async), et le 2e écrase le 1er.
-			// Bug symptomatique : tire vers la gauche → seule `position.x` s'applique,
-			// la nouvelle `width` est perdue → visuellement le frame « pousse à droite ».
-			const perFrame = new Map<
-				string,
-				{ x?: number; y?: number; width?: number; height?: number }
-			>();
-			for (const c of changes) {
-				// NodeChange est une union discriminée : `NodeAddChange` porte
-				// l'id sur `c.item.id`, pas `c.id`. On ignore les `add` pour le
-				// framing (RF ne crée jamais un frame côté runtime — les frames
-				// viennent tous de `framesApi.frames` via `computeFrameNodes`).
-				if (c.type === "add") {
-					restChanges.push(c);
-					continue;
-				}
-				if (!c.id.startsWith("frame:")) {
-					restChanges.push(c);
-					continue;
-				}
-				const key = c.id.slice("frame:".length);
-				if (c.type === "dimensions" && c.dimensions) {
-					// RF émet AUSSI des `dimensions` en dehors de tout geste (mesure
-					// DOM auto). `resizing !== true` = mesure → on ignore, sinon on
-					// écrit à chaque render la même dimension et on peut casser le rect.
-					if (c.resizing !== true) continue;
-					const entry = perFrame.get(key) ?? {};
-					entry.width = c.dimensions.width;
-					entry.height = c.dimensions.height;
-					perFrame.set(key, entry);
-				} else if (c.type === "position" && c.position) {
-					// `position` sur un frame — deux origines :
-					//   1) resize corner top/left → RF émet position (`dragging: false`)
-					//   2) drag manuel → `dragging: true`, géré par `onNodeDrag` custom
-					//      qui shift les membres. SKIP ici pour éviter la double-update.
-					if (c.dragging === true) continue;
-					const entry = perFrame.get(key) ?? {};
-					entry.x = c.position.x;
-					entry.y = c.position.y;
-					perFrame.set(key, entry);
-				}
-				// select/remove/… pour les frames → ignorés (non-selectable).
-			}
-			for (const [key, entry] of perFrame) {
-				const frame = api.frames.find((f) => f.key === key);
-				if (!frame?.rect) continue;
-				api.setFrameRect(key, {
-					x: entry.x ?? frame.rect.x,
-					y: entry.y ?? frame.rect.y,
-					width: entry.width ?? frame.rect.width,
-					height: entry.height ?? frame.rect.height
-				});
-			}
-			if (restChanges.length > 0) onNodesChange(restChanges);
-		},
-		[onNodesChange]
-	);
-
 	// (`edgeAnchors` déclaré plus haut — cohabitation avec useCanvasSync.)
 
 	// Sélection multi-tables — alimente le chip bas-centre et le raccourci `F`.
@@ -532,34 +433,27 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 		}, [setFocusId, setFocusFrameKey])
 	});
 
-	// Post-ELK : fige le rect des frames-seed depuis les positions ELK. Un
-	// frames-seed n'a pas de rect persisté (c'est le rôle de ce `useEffect`
-	// de le calculer une fois puis de le sauver). Les frames user-created ont
-	// déjà leur rect posé au moment du `createFrame`.
-	//
-	// Note : plus de filtre "membre hors du rect → remove". Avec les positions
-	// persistées, le rect + la membership sont indépendants — un membre peut
-	// être temporairement hors rect (ex. ajouté via context menu sans être
-	// déplacé, ou frame resizé plus petit sans déplacer les tables). Le retirer
-	// automatiquement provoquait un bug drag : la table "abandonnée" restait
-	// en place alors que le frame se déplaçait. Les gestes utilisateur (resize
-	// via handle, drag-out d'une table) continuent de nettoyer la membership.
-	const membershipRefreshedFor = useRef<LayoutResult | null>(null);
-	useEffect(() => {
-		if (base === null || nodes.length === 0) return;
-		if (membershipRefreshedFor.current === base) return;
-		membershipRefreshedFor.current = base;
-		const byId = new Map(nodes.map((n) => [n.id, n]));
-		for (const frame of framesApi.frames) {
-			if (frame.rect) continue;
-			const members = frame.collections
-				.map((c) => byId.get(c))
-				.filter((n): n is TableNodeType => n !== undefined);
-			const rect = boundsOfTables(members, FRAME_PAD);
-			if (rect) framesApi.setFrameRect(frame.key, rect);
-		}
-		// biome-ignore lint/correctness/useExhaustiveDependencies: framesApi lu via closure — ok car le ref garantit exec unique
-	}, [base, nodes]);
+	// Frames — orchestration complète (handlers resize/rename/delete/focus,
+	// membership reconciliation post-ELK, drag lifecycle avec snapshot des
+	// positions au drag-start). Voir `useCanvasFrames` pour la doc.
+	const {
+		frameNodes,
+		handleFrameRename,
+		handleFrameDelete,
+		onNodeDragStart,
+		onNodeDrag,
+		onNodeDragStop
+	} = useCanvasFrames({
+		base,
+		nodes,
+		nodesRef,
+		setNodes,
+		hiddenIds,
+		framesApi,
+		tablePositions,
+		history: historyProxy,
+		focusFrame
+	});
 
 	// Edges + neighbors dérivés — pipeline routing/offset dans un hook
 	// dédié (voir `useCanvasEdges` : override user > auto bestHandles,
@@ -571,23 +465,6 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 		focusId,
 		edgeAnchors
 	});
-
-	// Callback stable pour le NodeResizer d'une table : persist les nouvelles
-	// dimensions ET la nouvelle position au release. La position CHANGE quand
-	// le user tire depuis un handle top ou left (RF déplace l'origine pour
-	// garder l'opposé fixe). Sans persister x/y, un refresh remettait la table
-	// à l'ancienne origine → elle semblait grossir uniquement vers la droite.
-	const handleTableResize = useCallback(
-		(
-			name: string,
-			size: { width: number; height: number; x: number; y: number }
-		) => {
-			tableSizes.setSize(name, { width: size.width, height: size.height });
-			tablePositions.setPosition(name, { x: size.x, y: size.y });
-			history.push();
-		},
-		[tableSizes, tablePositions, history]
-	);
 
 	// Nœuds table affichés : positions vivantes (drag) + drapeaux focus + masqués.
 	// Injecte aussi le callback `onResizeEnd` — TableNode s'en sert pour le
@@ -618,108 +495,12 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 		[nodes, neighbors, focusId, hiddenIds, handleTableResize]
 	);
 
-	// Ref sur les nodes courants — le handler de resize a besoin de la
-	// dernière version des positions sans refermer sur une snapshot obsolète.
-	const nodesRef = useRef(nodes);
-	nodesRef.current = nodes;
+	// (`nodesRef` exposé par `useCanvasNodes` — voir plus haut, consommé par
+	// les handlers frame drag/resize qui ont besoin de la dernière version
+	// des positions sans refermer sur une snapshot obsolète.)
 
-	// `frameDragStateRef` déclaré plus haut (partagé avec handleNodesChange
-	// pour éviter la double-update des `position` NodeChange pendant un drag).
-	// Le snapshot capturé au `onNodeDragStart` calcule un delta ABSOLU depuis
-	// l'origine → immune au batching React 18 (plusieurs mousemove peuvent
-	// tirer avant qu'un setFrameRect ait committé, dx naïf `node.position -
-	// frame.rect` exploserait, les membres dériveraient plus vite que le
-	// frame).
-
-	// Callback `onResizeEnd` du NodeResizer — le rect a déjà été persisté en
-	// direct par `handleNodesChange` (intercept live des dimensions/position).
-	// Ici on ne fait QUE la reconciliation membership : table dont le centre
-	// tombe HORS du rect final → retirée du frame (sinon un drag du frame la
-	// ferait suivre alors qu'elle est visuellement dehors). Pas de nouveau
-	// `setFrameRect` — c'était un doublon qui écrasait le rect live avec le
-	// rect final tel que reçu du NodeResizer (précision floats + timing) et
-	// qui semblait provoquer des jumps + un état bancal empêchant le drag
-	// suivant.
-	const handleFrameResize = useCallback(
-		(key: string, newRect: FrameRect) => {
-			const api = framesApiRef.current;
-			const frame = api.frames.find((f) => f.key === key);
-			if (!frame) return;
-			const byId = new Map(nodesRef.current.map((n) => [n.id, n]));
-			for (const memberName of frame.collections) {
-				const node = byId.get(memberName);
-				if (!node) continue;
-				const w = node.width ?? NODE_WIDTH;
-				const h = node.height ?? nodeHeight(node.data.collection);
-				const center = {
-					x: node.position.x + w / 2,
-					y: node.position.y + h / 2
-				};
-				if (!rectContainsPoint(newRect, center)) {
-					api.removeTableFromFrame(memberName);
-				}
-			}
-			// Le rect final a déjà été persisté en direct par `handleNodesChange`
-			// (intercept live des dimensions). On checkpoint ici, une seule fois
-			// au release — pas pendant le drag continu du handle.
-			history.push();
-		},
-		[history]
-	);
-
-	// Rename inline depuis le badge d'un frame (double-clic → input → Enter).
-	const handleFrameRename = useCallback(
-		(key: string, label: string) => {
-			framesApi.renameFrame(key, label);
-			history.push();
-		},
-		[framesApi, history]
-	);
-
-	// Right-click sur le badge d'un frame → supprime (l'auto-delete a été
-	// retiré, il faut un geste explicite maintenant).
-	const handleFrameDelete = useCallback(
-		(key: string) => {
-			const frame = framesApi.frames.find((f) => f.key === key);
-			framesApi.removeFrame(key);
-			if (frame) {
-				showNotification({
-					title: `Frame « ${frame.label} » supprimé`,
-					message: `${frame.collections.length} table${frame.collections.length > 1 ? "s" : ""} conservée${frame.collections.length > 1 ? "s" : ""}.`,
-					color: "blue",
-					autoClose: 2500
-				});
-			}
-			history.push();
-		},
-		[framesApi, history]
-	);
-
-	const handleFrameFocus = useCallback(
-		(key: string) => focusFrame(key),
-		// biome-ignore lint/correctness/useExhaustiveDependencies: focusFrame stable (setState setter closure)
-		[]
-	);
-	const frameNodes = useMemo(
-		() =>
-			computeFrameNodes(
-				framesApi.frames,
-				nodes.filter((n) => !hiddenIds.has(n.id)),
-				handleFrameResize,
-				handleFrameRename,
-				handleFrameDelete,
-				handleFrameFocus
-			),
-		[
-			framesApi.frames,
-			nodes,
-			hiddenIds,
-			handleFrameResize,
-			handleFrameRename,
-			handleFrameDelete,
-			handleFrameFocus
-		]
-	);
+	// (`frameNodes` + handlers + drag lifecycle exposés par `useCanvasFrames`
+	// plus haut.)
 
 	const displayNodes = useMemo<SchemaNode[]>(
 		() => [...frameNodes, ...displayTableNodes],
@@ -1114,110 +895,9 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 						tableName: node.id
 					});
 				}}
-				onNodeDragStart={(_, node) => {
-					// Drag d'un frame : snapshot des positions initiales du frame
-					// et de tous ses membres. Le drag calculera un delta ABSOLU
-					// depuis ces origines — immune au batching React 18 (voir
-					// commentaire de `frameDragStateRef`).
-					if ((node as { type?: string }).type !== "frame") return;
-					const frameKey = node.id.replace(/^frame:/, "");
-					const frame = framesApi.frames.find((f) => f.key === frameKey);
-					if (!frame || !frame.rect) return;
-					const members = new Set(frame.collections);
-					const memberOrigins = new Map<string, { x: number; y: number }>();
-					for (const n of nodesRef.current) {
-						if (members.has(n.id))
-							memberOrigins.set(n.id, { x: n.position.x, y: n.position.y });
-					}
-					frameDragStateRef.current = {
-						frameKey,
-						frameOrigin: { x: node.position.x, y: node.position.y },
-						rectSize: { width: frame.rect.width, height: frame.rect.height },
-						memberOrigins
-					};
-				}}
-				onNodeDrag={(_, node) => {
-					// Drag d'un frame → applique le delta ABSOLU aux positions
-					// initiales des membres. Frame et tables bougent ensemble
-					// sous le curseur sans dérive.
-					if ((node as { type?: string }).type !== "frame") return;
-					const state = frameDragStateRef.current;
-					if (!state) return;
-					const dx = node.position.x - state.frameOrigin.x;
-					const dy = node.position.y - state.frameOrigin.y;
-					setNodes((ns) =>
-						ns.map((n) => {
-							const origin = state.memberOrigins.get(n.id);
-							if (!origin) return n;
-							return {
-								...n,
-								position: { x: origin.x + dx, y: origin.y + dy }
-							};
-						})
-					);
-					framesApi.setFrameRect(state.frameKey, {
-						x: node.position.x,
-						y: node.position.y,
-						width: state.rectSize.width,
-						height: state.rectSize.height
-					});
-				}}
-				onNodeDragStop={(_, node) => {
-					// Drag d'un frame → persiste les positions finales de ses
-					// membres (ceux-ci ont été shiftés en direct par `onNodeDrag`).
-					// Le rect du frame est déjà persisté via `setFrameRect` dans
-					// `onNodeDrag`. Sans ça, un refresh restaurerait le rect mais
-					// pas les tables → membership fantôme, filtre nettoie, frame
-					// vide.
-					if ((node as { type?: string }).type === "frame") {
-						const state = frameDragStateRef.current;
-						frameDragStateRef.current = null;
-						if (!state) return;
-						const entries: Record<string, XY> = {};
-						for (const n of nodesRef.current) {
-							if (state.memberOrigins.has(n.id)) entries[n.id] = n.position;
-						}
-						if (Object.keys(entries).length > 0) {
-							tablePositions.setManyPositions(entries);
-						}
-						// Checkpoint après drag frame (rect + positions membres).
-						history.push();
-						return;
-					}
-					// Une table posée : recalcule son appartenance à un frame en
-					// testant si son centre est dans un rect. Une seule frame par
-					// table (celui du dessous emporte s'il y a chevauchement, ce
-					// qui est rare avec des frames non-imbriqués).
-					const w = (node as { width?: number }).width ?? NODE_WIDTH;
-					const h = (node as { height?: number }).height ?? 200;
-					const center = {
-						x: node.position.x + w / 2,
-						y: node.position.y + h / 2
-					};
-					// Membership au drag (comme Figma) :
-					// - drop dans un frame ≠ actuel → add (drag-in ou switch)
-					// - drop en dehors de tout frame → remove (drag-out)
-					// - drop dans le frame actuel → no-op (repositionnement interne)
-					const current = framesApi.frameOfTable(node.id);
-					let dropped: Frame | null = null;
-					for (const f of framesApi.frames) {
-						if (!f.rect) continue;
-						if (rectContainsPoint(f.rect, center)) {
-							dropped = f;
-							break;
-						}
-					}
-					if (dropped && (!current || current.key !== dropped.key)) {
-						framesApi.addTableToFrame(dropped.key, node.id);
-					} else if (!dropped && current) {
-						framesApi.removeTableFromFrame(node.id);
-					}
-					// Persiste la position finale (survit au refresh).
-					tablePositions.setPosition(node.id, node.position);
-					// Checkpoint après drag stop d'une table (position + éventuel
-					// changement de membership frame).
-					history.push();
-				}}
+				onNodeDragStart={onNodeDragStart}
+				onNodeDrag={onNodeDrag}
+				onNodeDragStop={onNodeDragStop}
 				onPaneClick={() => {
 					setFocusId(null);
 					setMenu(null);
