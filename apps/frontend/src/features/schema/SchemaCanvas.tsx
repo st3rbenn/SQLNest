@@ -20,6 +20,7 @@ import {
 	useState
 } from "react";
 import { type CanvasTool } from "./CanvasToolbar";
+import { CanvasProviders } from "./canvas/CanvasContext";
 import { useResizableDrawer } from "./canvas/DrawerPane";
 import { CanvasBottomBar } from "./canvas/floating/CanvasBottomBar";
 import { CanvasLeftPanel } from "./canvas/floating/CanvasLeftPanel";
@@ -473,7 +474,9 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 		hideTable,
 		unhideAll,
 		hideSelected,
-		createFrameFromSelection
+		createFrameFromSelection,
+		addTableToFrame,
+		removeTableFromFrame
 	} = useCanvasActions({
 		base,
 		nodes,
@@ -541,6 +544,106 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 		onFocusTable: focusAndZoom,
 		onFitView: applyOverview
 	});
+
+	// ─── Contexts pour la couche floating (R4) ────────────────────────────
+	// Les 3 composants <CanvasBottomBar>, <CanvasLeftPanel>, <CanvasOverlays>
+	// consomment ces slots via `useCanvasData()`, `useCanvasFocusCtx()`,
+	// `useCanvasUI()`, `useCanvasActionsCtx()` — 0 prop parent. Chaque
+	// value est memoïsée par slot pour ne pas re-render tous les consumers
+	// dès qu'un state UI mineur change. Voir `CanvasContext.tsx` pour la
+	// raison du split en 4 contextes.
+	const dataCtxValue = useMemo(
+		() => ({ schema, schemaLabel, framesApi, hiddenIds }),
+		[schema, schemaLabel, framesApi, hiddenIds]
+	);
+	const focusCtxValue = useMemo(
+		() => ({
+			focusId,
+			focusFrameKey,
+			focusedFrame,
+			setFocusId,
+			setFocusFrameKey,
+			focusNode,
+			focusFrame,
+			clearFocus,
+			focusAndZoom,
+			applyOverview
+		}),
+		[
+			focusId,
+			focusFrameKey,
+			focusedFrame,
+			setFocusId,
+			setFocusFrameKey,
+			focusNode,
+			focusFrame,
+			clearFocus,
+			focusAndZoom,
+			applyOverview
+		]
+	);
+	const uiCtxValue = useMemo(
+		() => ({
+			search,
+			setSearch,
+			menu,
+			setMenu,
+			activeTool,
+			setActiveTool,
+			leftDrawerVisible,
+			setLeftDrawerVisible,
+			leftDrawerWidth,
+			drawerHandleProps,
+			leftPadding,
+			consoleHeight,
+			setConsoleHeight,
+			consoleGap: CONSOLE_GAP,
+			layoutConfirmOpen,
+			setLayoutConfirmOpen,
+			selectedTables,
+			clearSelection
+		}),
+		[
+			search,
+			menu,
+			activeTool,
+			leftDrawerVisible,
+			leftDrawerWidth,
+			drawerHandleProps,
+			leftPadding,
+			consoleHeight,
+			layoutConfirmOpen,
+			setLayoutConfirmOpen,
+			selectedTables,
+			clearSelection
+		]
+	);
+	const actionsCtxValue = useMemo(
+		() => ({
+			hideTable,
+			unhideAll,
+			hideSelected,
+			createFrameFromSelection,
+			handleFrameRename,
+			handleFrameDelete,
+			relayoutAll,
+			addTableToFrame,
+			removeTableFromFrame,
+			commandGroups
+		}),
+		[
+			hideTable,
+			unhideAll,
+			hideSelected,
+			createFrameFromSelection,
+			handleFrameRename,
+			handleFrameDelete,
+			relayoutAll,
+			addTableToFrame,
+			removeTableFromFrame,
+			commandGroups
+		]
+	);
 
 	return (
 		<div
@@ -735,64 +838,16 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 				) : null}
 			</ReactFlow>
 
-			<CanvasBottomBar
-				schema={schema}
-				activeTool={activeTool}
-				onSelectTool={setActiveTool}
-				bottomOffset={consoleHeight + CONSOLE_GAP}
-				consoleLeftOffset={leftPadding}
-				onConsoleHeightChange={setConsoleHeight}
-				autoLayoutOpen={layoutConfirmOpen}
-				onOpenAutoLayout={() => setLayoutConfirmOpen(true)}
-				onCloseAutoLayout={() => setLayoutConfirmOpen(false)}
-				onConfirmAutoLayout={relayoutAll}
-			/>
-
-			<CanvasLeftPanel
-				schema={schema}
-				visible={leftDrawerVisible}
-				onToggleVisible={() => setLeftDrawerVisible((x) => !x)}
-				width={leftDrawerWidth}
-				handleProps={drawerHandleProps}
-				search={search}
-				onSearchChange={setSearch}
-				framesApi={framesApi}
-				focusId={focusId}
-				focusFrameKey={focusFrameKey}
-				focusedFrame={focusedFrame}
-				onClearFocus={clearFocus}
-				onClearFocusFrame={() => setFocusFrameKey(null)}
-				onFocusTable={focusAndZoom}
-				onFrameRename={handleFrameRename}
-				onFrameDelete={handleFrameDelete}
-			/>
-
-			<CanvasOverlays
-				schema={schema}
-				schemaLabel={schemaLabel}
-				framesApi={framesApi}
-				selectedTables={selectedTables}
-				onCreateFrame={createFrameFromSelection}
-				onHideSelected={hideSelected}
-				onClearSelection={clearSelection}
-				hiddenIds={hiddenIds}
-				onUnhideAll={unhideAll}
-				menu={menu}
-				onCloseMenu={() => setMenu(null)}
-				onHide={hideTable}
-				onFocus={focusAndZoom}
-				onAddToFrame={(frameKey) => {
-					if (menu === null) return;
-					framesApi.addTableToFrame(frameKey, menu.tableName);
-					history.push();
-				}}
-				onRemoveFromFrame={() => {
-					if (menu === null) return;
-					framesApi.removeTableFromFrame(menu.tableName);
-					history.push();
-				}}
-				commandGroups={commandGroups}
-			/>
+			<CanvasProviders
+				data={dataCtxValue}
+				focus={focusCtxValue}
+				ui={uiCtxValue}
+				actions={actionsCtxValue}
+			>
+				<CanvasBottomBar />
+				<CanvasLeftPanel />
+				<CanvasOverlays />
+			</CanvasProviders>
 		</div>
 	);
 }

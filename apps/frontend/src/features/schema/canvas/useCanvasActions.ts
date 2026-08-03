@@ -46,6 +46,12 @@ export interface UseCanvasActionsReturn {
 	 * cartes + FRAME_PAD. No-op si sélection vide. Consommé par le
 	 * SelectionChip ET le raccourci F (via SchemaCanvas.useHotkeys). */
 	readonly createFrameFromSelection: () => void;
+	/** Ajoute une table à un frame (par sa clé) + history.push. Consommé
+	 * par le menu contextuel. */
+	readonly addTableToFrame: (frameKey: string, tableName: string) => void;
+	/** Retire une table de son frame courant + history.push. Consommé par
+	 * le menu contextuel. */
+	readonly removeTableFromFrame: (tableName: string) => void;
 }
 
 /**
@@ -151,6 +157,22 @@ export function useCanvasActions(
 		history.push();
 	}, [selectedTables, setHiddenIds, history]);
 
+	const addTableToFrame = useCallback(
+		(frameKey: string, tableName: string) => {
+			framesApi.addTableToFrame(frameKey, tableName);
+			history.push();
+		},
+		[framesApi, history]
+	);
+
+	const removeTableFromFrame = useCallback(
+		(tableName: string) => {
+			framesApi.removeTableFromFrame(tableName);
+			history.push();
+		},
+		[framesApi, history]
+	);
+
 	return {
 		layoutConfirmOpen,
 		setLayoutConfirmOpen,
@@ -158,6 +180,8 @@ export function useCanvasActions(
 		hideTable,
 		unhideAll,
 		hideSelected,
-		createFrameFromSelection
+		createFrameFromSelection,
+		addTableToFrame,
+		removeTableFromFrame
 	};
 }
