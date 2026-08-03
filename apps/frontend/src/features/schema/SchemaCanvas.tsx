@@ -1,4 +1,5 @@
 import { ActionIcon, Box } from "@mantine/core";
+import { useHotkeys } from "@mantine/hooks";
 import {
 	SelectionChip,
 	Spotlight,
@@ -28,7 +29,6 @@ import { buildCanvasCommands } from "./commands";
 import "@xyflow/react/dist/style.css";
 import "./canvas-overrides.css";
 import {
-	startTransition,
 	useCallback,
 	useEffect,
 	useMemo,
@@ -51,22 +51,13 @@ import { useCanvasFocus } from "./canvas/useCanvasFocus";
 import { useCanvasHistory } from "./canvas/useCanvasHistory";
 import { useCanvasSelection } from "./canvas/useCanvasSelection";
 import { useCanvasSync } from "./canvas/useCanvasSync";
+import { useCanvasEdges } from "./canvas/useCanvasEdges";
+import { useCanvasViewport } from "./canvas/useCanvasViewport";
 import { useUndoRedoShortcuts } from "./canvas/useUndoRedoShortcuts";
-import {
-	animateViewport,
-	FOCUS_TWEEN_MS,
-	FOCUS_ZOOM_MIN,
-	focusZoom,
-	initialZoom,
-	OVERVIEW_FIT,
-	overviewViewport,
-	tablesBounds,
-	type Viewport
-} from "./canvas/viewport";
-import { bestHandles, type Side, spreadOffsets } from "./edgeRouting";
+import { initialZoom, OVERVIEW_FIT } from "./canvas/viewport";
 import { FrameNode, type FrameNodeType } from "./FrameNode";
 import { type Frame, type FrameRect, rectContainsPoint } from "./frames";
-import { InteractiveEdge, type InteractiveEdgeData } from "./InteractiveEdge";
+import { InteractiveEdge } from "./InteractiveEdge";
 import { buildLayout, type LayoutResult } from "./layout";
 import type { SchemaModel } from "./schema-model";
 import {
@@ -264,11 +255,8 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 	// pour créer un frame depuis une sélection existante — c'est le geste
 	// « expert », le mode toolbar est le geste « découvrable ».
 	const [activeTool, setActiveTool] = useState<CanvasTool>("select");
-	const { getViewport, setViewport, getNodes, screenToFlowPosition } =
-		useReactFlow();
+	const { getNodes, screenToFlowPosition } = useReactFlow();
 	const containerRef = useRef<HTMLDivElement | null>(null);
-	// Handle du tween en cours — annulé si un nouveau focus arrive.
-	const tweenRef = useRef<{ cancel: () => void } | null>(null);
 
 	// Frames user-defined (persistés en localStorage quand anonyme,
 	// server-only quand loggé — cf. `hookOpts` plus haut). Remplace le
@@ -573,16 +561,16 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 		// biome-ignore lint/correctness/useExhaustiveDependencies: framesApi lu via closure — ok car le ref garantit exec unique
 	}, [base, nodes]);
 
-	// Voisinage FK direct du nœud focalisé (le nœud + ses 1-sauts).
-	const neighbors = useMemo(() => {
-		if (focusId === null || base === null) return null;
-		const set = new Set<string>([focusId]);
-		for (const e of base.edges) {
-			if (e.source === focusId) set.add(e.target);
-			if (e.target === focusId) set.add(e.source);
-		}
-		return set;
-	}, [focusId, base]);
+	// Edges + neighbors dérivés — pipeline routing/offset dans un hook
+	// dédié (voir `useCanvasEdges` : override user > auto bestHandles,
+	// spread offsets pour edges partageant un handle, style focus/dim).
+	const { displayEdges, neighbors } = useCanvasEdges({
+		base,
+		nodes,
+		hiddenIds,
+		focusId,
+		edgeAnchors
+	});
 
 	// Callback stable pour le NodeResizer d'une table : persist les nouvelles
 	// dimensions ET la nouvelle position au release. La position CHANGE quand
@@ -738,128 +726,6 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 		[frameNodes, displayTableNodes]
 	);
 
-	// Index rapide pour l'auto-routing des edges — évite un O(n) par edge.
-	const nodeById = useMemo(() => {
-		const map = new Map<string, TableNodeType>();
-		for (const n of nodes) map.set(n.id, n);
-		return map;
-	}, [nodes]);
-
-	// Enveloppe stable pour passer les setters d'ancres aux edges via
-	// `data` — recréée seulement si l'API change (refs stables via
-	// useCallback dans useEdgeAnchors).
-	const anchorApi = useMemo<InteractiveEdgeData>(
-		() => ({
-			setOverride: edgeAnchors.setOverride,
-			clearOverride: edgeAnchors.clearOverride
-		}),
-		[edgeAnchors.setOverride, edgeAnchors.clearOverride]
-	);
-
-	const displayEdges = useMemo(() => {
-		const visible = (base?.edges ?? []).filter(
-			(e) => !hiddenIds.has(e.source) && !hiddenIds.has(e.target)
-		);
-		// Pass 1 : résout side source + side target de chaque edge
-		// (override > auto-routing). Sert de base au groupement offset.
-		const resolved = visible.map((e) => {
-			const src = nodeById.get(e.source);
-			const tgt = nodeById.get(e.target);
-			const auto =
-				src && tgt
-					? bestHandles(
-							{
-								x: src.position.x,
-								y: src.position.y,
-								width: src.width ?? NODE_WIDTH,
-								height: src.height ?? nodeHeight(src.data.collection)
-							},
-							{
-								x: tgt.position.x,
-								y: tgt.position.y,
-								width: tgt.width ?? NODE_WIDTH,
-								height: tgt.height ?? nodeHeight(tgt.data.collection)
-							}
-						)
-					: null;
-			const override = edgeAnchors.overrides[e.id];
-			const sourceHandle: Side | undefined = override?.source ?? auto?.source;
-			const targetHandle: Side | undefined = override?.target ?? auto?.target;
-			return { edge: e, sourceHandle, targetHandle };
-		});
-
-		// Pass 2 : groupe TOUS les endpoints qui touchent le même (nodeId, side),
-		// SOURCE ET TARGET CONFONDUS. Un edge sortant et un edge rentrant du
-		// même côté d'un même node doivent s'écarter comme deux edges du même
-		// sens — sinon chacun se retrouve seul dans son groupe (SRC ou TGT) et
-		// atterrit au mid-side, ce qui les fait se superposer visuellement.
-		type HandleEntry = { edgeId: string; end: "source" | "target" };
-		const handleGroups = new Map<string, HandleEntry[]>();
-		for (const { edge, sourceHandle, targetHandle } of resolved) {
-			if (sourceHandle) {
-				const key = `${edge.source}:${sourceHandle}`;
-				const list = handleGroups.get(key) ?? [];
-				list.push({ edgeId: edge.id, end: "source" });
-				handleGroups.set(key, list);
-			}
-			if (targetHandle) {
-				const key = `${edge.target}:${targetHandle}`;
-				const list = handleGroups.get(key) ?? [];
-				list.push({ edgeId: edge.id, end: "target" });
-				handleGroups.set(key, list);
-			}
-		}
-		// Pass 3 : distribue les ratios sur le groupe unifié (l'ordre reflète
-		// l'ordre d'itération des edges — déterministe depuis ELK).
-		const offsets = new Map<string, { source?: number; target?: number }>();
-		for (const [, entries] of handleGroups) {
-			const ratios = spreadOffsets(entries.length);
-			entries.forEach((entry, i) => {
-				const r = ratios[i];
-				// `spreadOffsets(n)` renvoie exactement n éléments — guard TS car
-				// l'index-access sur array est typé `T | undefined`.
-				if (r === undefined) return;
-				const prev = offsets.get(entry.edgeId) ?? {};
-				offsets.set(
-					entry.edgeId,
-					entry.end === "source"
-						? { ...prev, source: r }
-						: { ...prev, target: r }
-				);
-			});
-		}
-
-		// Pass 4 : compose l'edge final (styles + handles + data avec offsets).
-		return resolved.map(({ edge: e, sourceHandle, targetHandle }) => {
-			const touchesFocus =
-				focusId !== null && (e.source === focusId || e.target === focusId);
-			const dim = focusId !== null && !touchesFocus;
-			const inferred = (e.data as { inferred?: boolean })?.inferred;
-			const o = offsets.get(e.id);
-			return {
-				...e,
-				...(sourceHandle !== undefined ? { sourceHandle } : {}),
-				...(targetHandle !== undefined ? { targetHandle } : {}),
-				style: {
-					...e.style,
-					// Sur bg #1E1E1E, un gris clair « pop » plus qu'il ne s'estompe.
-					// On utilise text-tertiary (#7A7A7A) qui reste lisible sans voler
-					// l'attention au chemin focus.
-					stroke: dim ? "#7a7a7a" : inferred ? INFERRED : DECLARED,
-					strokeWidth: touchesFocus ? 2.5 : 1.5,
-					opacity: dim ? 0.5 : 1
-				},
-				zIndex: touchesFocus ? 10 : 0,
-				data: {
-					...(e.data ?? {}),
-					...anchorApi,
-					sourceOffsetRatio: o?.source ?? 0,
-					targetOffsetRatio: o?.target ?? 0
-				}
-			};
-		});
-	}, [base, focusId, hiddenIds, nodeById, edgeAnchors.overrides, anchorApi]);
-
 	// Hauteur courante de la console SNQL (bas droite). Publiée par
 	// `CanvasConsole.onHeightChange` — sert (a) au safeArea pour que le
 	// fit initial garde le contenu au-dessus de la console, (b) au
@@ -890,145 +756,18 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 	//            en mode arborescence ET en mode détails) OU juste padding
 	// - droite : plus de drawer flottant droit (détails migrés dans le gauche)
 	// - bas   : toolbar (68 px) + console (dynamique, poussée au-dessus)
-	const safeArea = useMemo(
-		() => ({
-			left: leftPadding,
-			right: 8,
-			top: 12,
-			bottom: 68 + consoleHeight + CONSOLE_GAP
-		}),
-		[consoleHeight, leftPadding]
-	);
-
-	// Vue aérienne — auto-fit au mount du layout ELK, puis refit uniquement
-	// quand le CONTAINER change de taille (resize fenêtre). Sans ça :
-	//   - le container peut être mesuré à une taille intermédiaire pendant
-	//     l'hydratation, le fit s'y bloque (rect capturé trop petit sur les
-	//     écrans larges → schéma décollé du centre).
-	//   - le refresh sur une fenêtre différente laisse le schéma dans un
-	//     coin.
-	// `safeArea` **N'EST PAS** dans les deps : ses changements (toggle drawer,
-	// focus qui ouvre TableDetails, console qui grandit) ne doivent PAS reset
-	// la vue de l'utilisateur — sinon toggler le drawer ou focuser une table
-	// « recadre » sous les pieds. Le safeArea est lu via ref pour être frais
-	// quand le fit legitime tourne (mount + resize).
-	const safeAreaRef = useRef(safeArea);
-	safeAreaRef.current = safeArea;
-	const userTouchedViewportRef = useRef(false);
-	useEffect(() => {
-		if (base === null) return;
-		const el = containerRef.current;
-		if (el === null) return;
-
-		const fit = () => {
-			if (userTouchedViewportRef.current) return;
-			const rect = el.getBoundingClientRect();
-			if (rect.width === 0 || rect.height === 0) return;
-			const bounds = tablesBounds(base.nodes);
-			if (bounds === null) return;
-			setViewport(
-				overviewViewport(bounds, rect, {
-					padding: OVERVIEW_FIT.padding,
-					maxZoom: OVERVIEW_FIT.maxZoom,
-					minZoom: OVERVIEW_FIT.minZoom,
-					safeArea: safeAreaRef.current
-				})
-			);
-		};
-
-		fit();
-		const ro = new ResizeObserver(fit);
-		ro.observe(el);
-		return () => ro.disconnect();
-	}, [base, setViewport]);
-	// Reset du flag "user touched" quand base change (nouveau schéma =
-	// nouvelle vue par défaut, on ré-auto-fit jusqu'à interaction).
-	useEffect(() => {
-		userTouchedViewportRef.current = false;
-	}, [base]);
-	// Détecte les gestes viewport user (wheel = zoom, mousedown sur la
-	// pane = début de pan). Une fois marqué, l'auto-fit s'arrête → la
-	// vue de l'utilisateur est préservée sur les resize suivants.
-	useEffect(() => {
-		const el = containerRef.current;
-		if (el === null) return;
-		const markWheel = () => {
-			userTouchedViewportRef.current = true;
-		};
-		const markPan = (e: PointerEvent) => {
-			const t = e.target as HTMLElement | null;
-			// Pan démarre depuis la pane vide (pas sur un nœud/edge/UI).
-			if (t?.classList.contains("react-flow__pane")) {
-				userTouchedViewportRef.current = true;
-			}
-		};
-		el.addEventListener("wheel", markWheel, { passive: true });
-		el.addEventListener("pointerdown", markPan);
-		return () => {
-			el.removeEventListener("wheel", markWheel);
-			el.removeEventListener("pointerdown", markPan);
-		};
-	}, []);
-
-	/** Focus + recadrage sur la table. Utilisé par les points d'entrée
-	 * « distants » — arbre, palette Cmd+K, menu Détails, FK cliquables du
-	 * drawer — où l'utilisateur cherche activement une table et veut être
-	 * amené dessus. Aussi le double-clic sur la carte.
-	 *
-	 * Stratégie « zoom-in-only » : si la vue est déjà zoomée (≥ FOCUS_ZOOM_MIN),
-	 * on GARDE le zoom courant et on se contente d'un pan animé. Si le zoom est
-	 * en-dessous (vue aérienne), on zoome IN au seuil lisible. On ne dézoome
-	 * JAMAIS — cliquer sur une table doit toujours « rapprocher », comme un
-	 * zoom Figma sur un objet. */
-	const focusAndZoom = (id: string) => {
-		const node = nodes.find((n) => n.id === id);
-		if (!node || containerRef.current === null) {
-			setFocusId(id);
-			return;
-		}
-		const cx = node.position.x + (node.width ?? NODE_WIDTH) / 2;
-		const cy =
-			node.position.y + (node.height ?? nodeHeight(node.data.collection)) / 2;
-		const from = getViewport();
-		const zoom = focusZoom(from.zoom, { min: FOCUS_ZOOM_MIN });
-		const rect = containerRef.current.getBoundingClientRect();
-		const sa = safeAreaRef.current;
-		const freeCenterX = sa.left + (rect.width - sa.left - sa.right) / 2;
-		const freeCenterY = sa.top + (rect.height - sa.top - sa.bottom) / 2;
-		const to: Viewport = {
-			x: freeCenterX - cx * zoom,
-			y: freeCenterY - cy * zoom,
-			zoom
-		};
-		// Annule le tween précédent s'il est encore en cours, puis anime.
-		// `setFocusId` (ring/drawer/estompage) déféré via `startTransition`
-		// pour qu'il n'interrompe pas le tween mid-animation.
-		// Marque userTouched AVANT le tween : `setFocusId` change `safeArea`
-		// (drawer droit ouvre → right passe de 8 à 352), ce qui déclenche le
-		// `useEffect(fit, [safeArea])` — sans ce flag, ce fit écrase notre
-		// tween par un retour à l'overview (bug « ça dezoom au click »).
-		userTouchedViewportRef.current = true;
-		tweenRef.current?.cancel();
-		tweenRef.current = animateViewport(from, to, FOCUS_TWEEN_MS, setViewport);
-		startTransition(() => setFocusId(id));
-	};
-
-	const applyOverview = () => {
-		if (base === null || containerRef.current === null) return;
-		const bounds = tablesBounds(base.nodes);
-		if (bounds === null) return;
-		const rect = containerRef.current.getBoundingClientRect();
-		if (rect.width === 0 || rect.height === 0) return;
-		setViewport(
-			overviewViewport(bounds, rect, {
-				padding: OVERVIEW_FIT.padding,
-				maxZoom: OVERVIEW_FIT.maxZoom,
-				minZoom: OVERVIEW_FIT.minZoom,
-				safeArea
-			}),
-			{ duration: OVERVIEW_FIT.duration }
-		);
-	};
+	// Viewport : auto-fit + focusAndZoom + applyOverview + userTouched
+	// tracking. Encapsulé dans `useCanvasViewport` — voir sa doc pour la
+	// raison du safeArea via ref (évite le recadrage au toggle drawer).
+	const { focusAndZoom, applyOverview } = useCanvasViewport({
+		base,
+		nodes,
+		containerRef,
+		leftPadding,
+		consoleHeight,
+		consoleGap: CONSOLE_GAP,
+		setFocusId
+	});
 	// Injecte la version courante de `applyOverview` dans la ref lue par le
 	// callback `onClear` de `useCanvasFocus` (déclaré plus haut).
 	applyOverviewRef.current = applyOverview;
@@ -1129,35 +868,39 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 		history.push();
 	}, [selectedTables, history]);
 
-	useEffect(() => {
-		function onKey(e: KeyboardEvent) {
-			// Escape sort du mode « frame » de la toolbar sans rien créer —
-			// même sémantique que Figma. Priorité sur les autres handlers.
-			if (e.key === "Escape" && activeTool === "frame") {
-				e.preventDefault();
-				setActiveTool("select");
-				return;
-			}
-			if (e.key !== "f" && e.key !== "F") return;
-			if (e.metaKey || e.ctrlKey || e.altKey) return;
-			const target = e.target as HTMLElement | null;
-			// Ignore quand l'utilisateur tape dans un input.
-			if (
-				target &&
-				(target.tagName === "INPUT" ||
-					target.tagName === "TEXTAREA" ||
-					target.isContentEditable)
-			) {
-				return;
-			}
-			if (selectedTables.length === 0) return;
-			e.preventDefault();
-			createFrameFromSelection();
-			clearSelection();
-		}
-		document.addEventListener("keydown", onKey);
-		return () => document.removeEventListener("keydown", onKey);
-	}, [activeTool, selectedTables, createFrameFromSelection, clearSelection]);
+	// Shortcuts toolbar canvas — mêmes sémantiques que Figma/Sketch.
+	// `useHotkeys` skip auto sur INPUT/TEXTAREA/SELECT + contentEditable
+	// (préserve l'undo/rename inline), et gère les modifier keys sans
+	// qu'on ait besoin de check `metaKey/ctrlKey/altKey` à la main.
+	useHotkeys([
+		[
+			"Escape",
+			() => {
+				if (activeTool === "frame") setActiveTool("select");
+			},
+			{ preventDefault: true }
+		],
+		[
+			"V",
+			() => setActiveTool("select"),
+			{ preventDefault: true }
+		],
+		[
+			"F",
+			() => {
+				// `F` a deux comportements complémentaires :
+				//  - avec sélection → crée un frame depuis la sélection.
+				//  - sans sélection → active le mode Frame (lasso).
+				if (selectedTables.length > 0) {
+					createFrameFromSelection();
+					clearSelection();
+				} else {
+					setActiveTool("frame");
+				}
+			},
+			{ preventDefault: true }
+		]
+	]);
 
 	// Mode « frame » (toolbar) : on capture les coordonnées du lasso (start
 	// sur `onSelectionStart`, end sur `onSelectionEnd`) puis on crée un frame
