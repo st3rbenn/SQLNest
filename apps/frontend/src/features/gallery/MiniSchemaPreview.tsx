@@ -117,16 +117,25 @@ export function MiniSchemaPreview({ connectionId, isOnline, snapshot }: Props) {
 		prevOnlineRef.current = isOnline;
 	}, [isOnline, connectionId, queryClient]);
 
-	// CLI offline : fallback sur le snapshot persisté si dispo. Sinon,
-	// message vide comme avant (jamais save = pas de fallback possible).
+	// PRIORITÉ ABSOLUE au snapshot précalculé (C.15 → C.18). Le snapshot
+	// est capturé à partir du VRAI état du canvas (positions RF + frames +
+	// hidden), donc la preview affiche EXACTEMENT ce que l'user voit dans
+	// le canvas — pas de divergence par ELK settings différents.
+	//
+	// Sans ce shortcut, `PreviewSvg` recalcule via canvas_state (positions
+	// user si complètes) OU ELK dense (buildPreviewLayout) qui diffère du
+	// buildLayout du canvas. Un canvas partiellement bougé + reste en ELK
+	// standard produisait deux vues incohérentes. Bug rapporté 2026-08-07.
+	if (snapshot && snapshot.nodes.length > 0) {
+		return (
+			<div style={wrapperStyle}>
+				<PreviewSvgFromSnapshot snapshot={snapshot} />
+			</div>
+		);
+	}
+
+	// Pas de snapshot (jamais save) : fallback selon l'état CLI.
 	if (!isOnline) {
-		if (snapshot && snapshot.nodes.length > 0) {
-			return (
-				<div style={wrapperStyle}>
-					<PreviewSvgFromSnapshot snapshot={snapshot} />
-				</div>
-			);
-		}
 		return (
 			<div style={wrapperStyle}>
 				<div style={centerMessageStyle}>CLI hors ligne</div>
@@ -135,16 +144,6 @@ export function MiniSchemaPreview({ connectionId, isOnline, snapshot }: Props) {
 	}
 
 	if (isLoading) {
-		// Pendant l'introspection initiale, on peut afficher le snapshot si
-		// dispo — évite le flash skeleton quand l'user revient sur une gallery
-		// avec un canvas déjà save.
-		if (snapshot && snapshot.nodes.length > 0) {
-			return (
-				<div style={wrapperStyle}>
-					<PreviewSvgFromSnapshot snapshot={snapshot} />
-				</div>
-			);
-		}
 		return (
 			<div style={wrapperStyle}>
 				<PreviewSkeleton />
