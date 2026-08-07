@@ -97,6 +97,13 @@ const CARD_HOVER_CSS = `
 	border-color: var(--sqlnest-accent) !important;
 	box-shadow: 0 6px 20px rgba(13, 153, 255, 0.2);
 }
+.sqlnest-sidebar-item {
+	transition: background-color 120ms ease, color 120ms ease;
+}
+.sqlnest-sidebar-item:hover {
+	background: hsla(0, 0%, 100%, 0.05);
+	color: var(--sqlnest-text-primary) !important;
+}
 @keyframes sqlnest-skeleton-shimmer {
 	0% { background-position: 200% 0; }
 	100% { background-position: -200% 0; }
@@ -307,6 +314,7 @@ function Sidebar({
 				}}
 			>
 				<div
+					className="sqlnest-sidebar-item"
 					style={{
 						display: "flex",
 						alignItems: "center",
@@ -315,7 +323,8 @@ function Sidebar({
 						color: "var(--sqlnest-text-primary)",
 						borderRadius: 6,
 						fontSize: 12.5,
-						fontWeight: 500
+						fontWeight: 500,
+						cursor: "default"
 					}}
 				>
 					<svg
@@ -352,6 +361,7 @@ function Sidebar({
 			<div style={{ padding: "10px 10px 12px" }}>
 				<Link
 					to="/connect"
+					className="sqlnest-sidebar-item"
 					style={{
 						display: "flex",
 						width: "100%",

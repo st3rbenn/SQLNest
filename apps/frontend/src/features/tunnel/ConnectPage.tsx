@@ -23,6 +23,7 @@
 
 import { TextInput } from "@mantine/core";
 import { Button } from "@sqlnest/design-system";
+import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { type CSSProperties, type FormEvent, useEffect, useState } from "react";
 import { DismissibleAlert } from "../auth/DismissibleAlert";
@@ -96,6 +97,7 @@ interface StatusResponse {
 
 export function ConnectPage() {
 	const navigate = useNavigate();
+	const queryClient = useQueryClient();
 	const [code, setCode] = useState("");
 	const [deviceName, setDeviceName] = useState("");
 	const [isSubmitting, setIsSubmitting] = useState(false);
@@ -182,13 +184,16 @@ export function ConnectPage() {
 		}
 	}
 
-	// Redirect immédiat vers la gallery au succès. Le CLI continue son
-	// authenticate en parallèle ; le poll useDbConnections (5s) de la
-	// gallery fera apparaître la nouvelle card / bumper l'isOnline de
-	// l'existante.
+	// Redirect immédiat vers la gallery au succès. Invalide aussi
+	// `db-connections` — sans ça, la gallery affiche le cache TanStack
+	// existant (staleTime 5s) et la nouvelle card n'apparaît pas avant
+	// le prochain poll. Le CLI continue son authenticate en parallèle ;
+	// le refetch triggered par l'invalidation renverra la row fraîche.
 	useEffect(() => {
-		if (success) void navigate({ to: "/" });
-	}, [success, navigate]);
+		if (!success) return;
+		void queryClient.invalidateQueries({ queryKey: ["db-connections"] });
+		void navigate({ to: "/" });
+	}, [success, navigate, queryClient]);
 
 	return (
 		<div style={containerStyle}>
