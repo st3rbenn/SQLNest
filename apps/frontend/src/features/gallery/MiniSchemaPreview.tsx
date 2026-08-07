@@ -73,62 +73,29 @@ const centerMessageStyle: CSSProperties = {
 /** Padding autour de la bbox — évite que les tables touchent les bords. */
 const BBOX_PAD = 20;
 
-/** Rects du skeleton — positions évocatrices de tables + edges implicites,
- *  sans texte. Coord SVG en unités normalisées 100×62.5 (ratio 16:10 du
- *  wrapper). Palette gris fin sur bg dark, avec une opacité qui pulse
- *  légèrement pour signaler « ça charge ». */
-const SKELETON_RECTS: ReadonlyArray<{
-	readonly x: number;
-	readonly y: number;
-	readonly w: number;
-	readonly h: number;
-}> = [
-	{ x: 12, y: 12, w: 24, h: 14 },
-	{ x: 44, y: 8, w: 28, h: 12 },
-	{ x: 78, y: 16, w: 12, h: 10 },
-	{ x: 14, y: 36, w: 20, h: 16 },
-	{ x: 42, y: 34, w: 30, h: 18 },
-	{ x: 78, y: 40, w: 14, h: 10 }
-];
-
-/** Loading skeleton — pattern sobre inspiré des « content placeholders »
- *  Figma/Linear. Aucune couleur d'accent, juste un gris fin sur fond dark,
- *  avec un pulse doux (opacité 0.4 → 0.9 en 1.6s) qui reste visible sans
- *  agresser. Pas de texte : la présence de rects est un signal implicite
- *  de « ça arrive ».
+/** Loading skeleton — bloc uni qui remplit la zone preview avec un shimmer
+ *  gradient qui glisse de gauche à droite. Pattern classique : un
+ *  placeholder discret sans essayer de deviner le contenu final. Le
+ *  gradient utilise trois stops gris fin (base → highlight → base) sur un
+ *  background-size 200 % → l'animation `background-position` de 200 % à
+ *  -200 % fait glisser le highlight en travers en 1.6 s.
  *
- *  Rendu en SVG viewBox 100×62.5 avec `preserveAspectRatio="xMidYMid meet"`
- *  — même stretch que le vrai PreviewSvg, donc le placeholder scale à la
- *  taille du wrapper 16:10 sans distortion. */
+ *  Palette : `hsla(0, 0%, 100%, 0.04)` en base, `0.09` au pic — rest
+ *  parfaitement lisible sur le fond `--sqlnest-canvas-bg` sans jamais
+ *  attirer l'œil. */
 function PreviewSkeleton(): React.ReactNode {
 	return (
-		<svg
-			viewBox="0 0 100 62.5"
-			preserveAspectRatio="xMidYMid meet"
+		<div
 			style={{
 				position: "absolute",
 				inset: 0,
-				width: "100%",
-				height: "100%",
-				animation: "sqlnest-skeleton-pulse 1.6s ease-in-out infinite"
+				background:
+					"linear-gradient(90deg, hsla(0,0%,100%,0.04) 0%, hsla(0,0%,100%,0.04) 40%, hsla(0,0%,100%,0.09) 50%, hsla(0,0%,100%,0.04) 60%, hsla(0,0%,100%,0.04) 100%)",
+				backgroundSize: "200% 100%",
+				animation: "sqlnest-skeleton-shimmer 1.6s linear infinite"
 			}}
 			aria-hidden="true"
-		>
-			<title>Chargement de l'aperçu</title>
-			{SKELETON_RECTS.map((r) => (
-				<rect
-					key={`sk-${r.x}-${r.y}`}
-					x={r.x}
-					y={r.y}
-					width={r.w}
-					height={r.h}
-					rx={2}
-					fill="hsla(0, 0%, 100%, 0.05)"
-					stroke="hsla(0, 0%, 100%, 0.08)"
-					strokeWidth={0.4}
-				/>
-			))}
-		</svg>
+		/>
 	);
 }
 
