@@ -269,7 +269,11 @@ function PreviewSvg({
 		};
 	}, [layout, frames]);
 
-	if (!layout || !view) return null;
+	// Layout ELK / canvas_state en cours de résolution → fallback skeleton
+	// pour éviter un flick de wrapper vide entre l'état isLoading (skeleton
+	// affiché par MiniSchemaPreview) et le rendu final. `useSchema` a settle
+	// mais `useSchemaElkLayout` / `useUserCanvasState` sont encore pending.
+	if (!layout || !view) return <PreviewSkeleton />;
 	return <PreviewSvgBody layout={layout} frames={frames} view={view} />;
 }
 
@@ -474,7 +478,9 @@ function PreviewSvgFromSnapshot({
 		};
 	}, [layout, frames]);
 
-	if (!view) return null;
+	// Snapshot avec 0 nodes → skeleton plutôt que wrapper vide (le caller filtre
+	// déjà `nodes.length > 0` mais on garde le fallback pour robustesse).
+	if (!view) return <PreviewSkeleton />;
 	return <PreviewSvgBody layout={layout} frames={frames} view={view} />;
 }
 
