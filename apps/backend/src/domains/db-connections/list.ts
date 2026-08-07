@@ -33,6 +33,10 @@ export interface DbConnectionSummary {
 	readonly activeSince: Date;
 	readonly lastSeenAt: Date | null;
 	readonly createdAt: Date;
+	/** Snapshot précalculé du dernier rendu de preview (C.15). `null` si
+	 *  jamais save. Le frontend s'en sert comme fallback rendu quand le
+	 *  CLI est offline. Format `PreviewSnapshot` (voir schema Zod). */
+	readonly lastPreviewSnapshot: unknown;
 }
 
 export async function listDbConnections(
@@ -48,7 +52,8 @@ export async function listDbConnections(
 			engineMetadata: dbSchema.dbConnection.engineMetadata,
 			activeSince: dbSchema.dbConnection.activeSince,
 			lastSeenAt: dbSchema.dbConnection.lastSeenAt,
-			createdAt: dbSchema.dbConnection.createdAt
+			createdAt: dbSchema.dbConnection.createdAt,
+			lastPreviewSnapshot: dbSchema.dbConnection.lastPreviewSnapshot
 		})
 		.from(dbSchema.dbConnection)
 		.where(eq(dbSchema.dbConnection.userId, userId))

@@ -81,6 +81,7 @@ export function DbCard({ connection, isPending, onClick }: Props) {
 				<MiniSchemaPreview
 					connectionId={connection.id}
 					isOnline={connection.isOnline ?? true}
+					snapshot={connection.lastPreviewSnapshot ?? null}
 				/>
 			</div>
 			<div style={infoBlockStyle}>

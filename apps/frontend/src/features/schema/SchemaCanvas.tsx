@@ -31,6 +31,7 @@ import { useCanvasSelection } from "./canvas/useCanvasSelection";
 import { useCanvasSelectionLasso } from "./canvas/useCanvasSelectionLasso";
 import { useCanvasSyncBridge } from "./canvas/useCanvasSyncBridge";
 import { useCanvasViewport } from "./canvas/useCanvasViewport";
+import { usePreviewSnapshotSync } from "./canvas/usePreviewSnapshotSync";
 import { useUndoRedoShortcuts } from "./canvas/useUndoRedoShortcuts";
 import { initialZoom, OVERVIEW_FIT } from "./canvas/viewport";
 import { FrameNode, type FrameNodeType } from "./FrameNode";
@@ -311,6 +312,18 @@ function CanvasInner({
 		edgeAnchors,
 		hiddenIds,
 		setHiddenIds
+	});
+
+	// Sync serveur du snapshot de preview (C.15) — compute + PUT le rendu
+	// précalculé qui alimentera le fallback gallery quand le CLI est offline.
+	// Débounce 5 s, best-effort (une erreur ne bloque JAMAIS le canvas).
+	usePreviewSnapshotSync({
+		connectionId,
+		canvasReady,
+		tableNodes: nodes,
+		frames: framesApi.frames,
+		relations: schema.relations,
+		hiddenIds
 	});
 
 	// Sélection multi-tables — alimente le chip bas-centre et le raccourci `F`.

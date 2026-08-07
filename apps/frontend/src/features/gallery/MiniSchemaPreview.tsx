@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type CSSProperties, useEffect, useMemo, useRef } from "react";
+import type { PreviewSnapshot } from "../db-connections/useDbConnections";
 import { deserialize } from "../schema/canvas/canvasPayload";
 import {
 	type CanvasStateGetResponse,
@@ -44,6 +45,11 @@ import { useSchema } from "../schema/useSchema";
 interface Props {
 	readonly connectionId: string;
 	readonly isOnline: boolean;
+	/** Snapshot persisté du dernier rendu (C.15). Utilisé comme fallback
+	 *  quand `isOnline === false` — au lieu d'afficher « CLI hors ligne »
+	 *  vide, on re-render depuis le snapshot (theme-aware).
+	 *  `null` si l'user n'a jamais save le canvas de cette connection. */
+	readonly snapshot?: PreviewSnapshot | null;
 }
 
 const wrapperStyle: CSSProperties = {
@@ -67,7 +73,7 @@ const centerMessageStyle: CSSProperties = {
 /** Padding autour de la bbox — évite que les tables touchent les bords. */
 const BBOX_PAD = 20;
 
-export function MiniSchemaPreview({ connectionId, isOnline }: Props) {
+export function MiniSchemaPreview({ connectionId, isOnline, snapshot }: Props) {
 	const queryClient = useQueryClient();
 	const {
 		data: schema,
@@ -85,7 +91,16 @@ export function MiniSchemaPreview({ connectionId, isOnline }: Props) {
 		prevOnlineRef.current = isOnline;
 	}, [isOnline, connectionId, queryClient]);
 
+	// CLI offline : fallback sur le snapshot persisté si dispo. Sinon,
+	// message vide comme avant (jamais save = pas de fallback possible).
 	if (!isOnline) {
+		if (snapshot && snapshot.nodes.length > 0) {
+			return (
+				<div style={wrapperStyle}>
+					<PreviewSvgFromSnapshot snapshot={snapshot} />
+				</div>
+			);
+		}
 		return (
 			<div style={wrapperStyle}>
 				<div style={centerMessageStyle}>CLI hors ligne</div>
@@ -94,6 +109,16 @@ export function MiniSchemaPreview({ connectionId, isOnline }: Props) {
 	}
 
 	if (isLoading) {
+		// Pendant l'introspection initiale, on peut afficher le snapshot si
+		// dispo — évite le flash « Introspection… » quand l'user revient sur
+		// une gallery avec un canvas déjà save.
+		if (snapshot && snapshot.nodes.length > 0) {
+			return (
+				<div style={wrapperStyle}>
+					<PreviewSvgFromSnapshot snapshot={snapshot} />
+				</div>
+			);
+		}
 		return (
 			<div style={wrapperStyle}>
 				<div style={centerMessageStyle}>Introspection…</div>
@@ -219,9 +244,25 @@ function PreviewSvg({
 	}, [layout, frames]);
 
 	if (!layout || !view) return null;
+	return <PreviewSvgBody layout={layout} frames={frames} view={view} />;
+}
 
+/** Composant SVG PUR — pas de hooks, reçoit un layout + frames + view
+ *  déjà calculés et rend. Utilisé pour les 2 sources (canvas_state user
+ *  et snapshot persisté).
+ *
+ *  Extrait de `PreviewSvg` pour permettre à `PreviewSvgFromSnapshot`
+ *  (mode CLI offline) de réutiliser le même rendu sans dupliquer le SVG. */
+function PreviewSvgBody({
+	layout,
+	frames,
+	view
+}: {
+	readonly layout: PreviewLayoutResult;
+	readonly frames: readonly PreviewFrame[];
+	readonly view: { x: number; y: number; w: number; h: number };
+}): React.ReactNode {
 	const nodesByName = new Map(layout.nodes.map((n) => [n.id, n]));
-
 	// FontSize dynamique pour les labels de frame : la preview scale
 	// automatiquement pour fit le wrapper 16:10 → un fontSize constant en
 	// unités SVG deviendrait illisible sur les gros schémas (viewBox large).
@@ -342,6 +383,73 @@ function PreviewSvg({
 			})}
 		</svg>
 	);
+}
+
+/** Rend un snapshot persisté (C.15). Utilisé comme fallback quand le CLI
+ *  est offline — le snapshot contient déjà nodes/edges/frames précalculés,
+ *  on n'a qu'à mapper vers les types internes + calculer la bbox de la
+ *  vue. Theme-aware (couleurs calculées via `colorFor`, pas stockées). */
+function PreviewSvgFromSnapshot({
+	snapshot
+}: {
+	readonly snapshot: PreviewSnapshot;
+}): React.ReactNode {
+	const layout: PreviewLayoutResult = useMemo(
+		() => ({
+			nodes: snapshot.nodes.map((n) => ({
+				id: n.id,
+				x: n.x,
+				y: n.y,
+				w: n.w,
+				h: n.h
+			})),
+			edges: snapshot.edges.map((e) => ({ source: e.source, target: e.target }))
+		}),
+		[snapshot]
+	);
+	const frames: readonly PreviewFrame[] = useMemo(
+		() =>
+			snapshot.frames.map((f) => ({
+				key: f.key,
+				label: f.label,
+				hue: f.hue,
+				x: f.x,
+				y: f.y,
+				w: f.w,
+				h: f.h
+			})),
+		[snapshot]
+	);
+	const view = useMemo(() => {
+		if (layout.nodes.length === 0) return null;
+		let minX = Number.POSITIVE_INFINITY;
+		let minY = Number.POSITIVE_INFINITY;
+		let maxX = Number.NEGATIVE_INFINITY;
+		let maxY = Number.NEGATIVE_INFINITY;
+		for (const n of layout.nodes) {
+			if (n.x < minX) minX = n.x;
+			if (n.y < minY) minY = n.y;
+			if (n.x + n.w > maxX) maxX = n.x + n.w;
+			if (n.y + n.h > maxY) maxY = n.y + n.h;
+		}
+		for (const f of frames) {
+			if (f.x < minX) minX = f.x;
+			if (f.y < minY) minY = f.y;
+			if (f.x + f.w > maxX) maxX = f.x + f.w;
+			if (f.y + f.h > maxY) maxY = f.y + f.h;
+		}
+		const w = maxX - minX + BBOX_PAD * 2;
+		const badgeReserve = frames.length > 0 ? w * 0.05 : 0;
+		return {
+			x: minX - BBOX_PAD,
+			y: minY - BBOX_PAD - badgeReserve,
+			w,
+			h: maxY - minY + BBOX_PAD * 2 + badgeReserve
+		};
+	}, [layout, frames]);
+
+	if (!view) return null;
+	return <PreviewSvgBody layout={layout} frames={frames} view={view} />;
 }
 
 /** Convertit un canvas_state payload (positions/sizes user) en

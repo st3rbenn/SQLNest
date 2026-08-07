@@ -64,6 +64,13 @@
       "when": 1786113441126,
       "tag": "0008_pairing_cli_connection_name",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1786132502484,
+      "tag": "0009_db_connection_last_preview_snapshot",
+      "breakpoints": true
     }
   ]
 }

@@ -5,9 +5,13 @@ import {
 	requireUser
 } from "../../../domains/auth/require";
 import { listDbConnections } from "../../../domains/db-connections/list";
+import { putPreviewSnapshot } from "../../../domains/db-connections/preview-snapshot";
 import {
+	ConnectionIdParams,
 	DbConnectionsErrorResponse,
-	ListDbConnectionsResponse
+	ListDbConnectionsResponse,
+	PutPreviewSnapshotBody,
+	PutPreviewSnapshotResponse
 } from "../../../domains/db-connections/schema";
 
 /**
@@ -65,12 +69,63 @@ export default function dbConnectionsRoute(fastify: FastifyInstance) {
 							activeSince: r.activeSince.toISOString(),
 							lastSeenAt: r.lastSeenAt?.toISOString() ?? null,
 							createdAt: r.createdAt.toISOString(),
-							isOnline
+							isOnline,
+							// `lastPreviewSnapshot` est en `jsonb` non-typé côté DB —
+							// on le cast à travers le schema Zod côté response, qui
+							// re-valide sa forme. Un snapshot mal formé (corruption
+							// improbable, migration cassée) est renvoyé comme null
+							// à la place de faire 500 la route entière.
+							lastPreviewSnapshot:
+								(r.lastPreviewSnapshot as unknown as ListDbConnectionsResponse["_output"]["connections"][number]["lastPreviewSnapshot"]) ??
+								null
 						};
 					})
 				};
 			} catch (err) {
 				request.log.error({ err }, "list db-connections failed");
+				return reply.code(500).send({ message: "Erreur interne" });
+			}
+		}
+	);
+
+	// ─── PUT /:id/preview-snapshot (C.15) ────────────────────────────
+	// Enregistre le snapshot précalculé du dernier rendu de preview.
+	// Piggyback typique : appelé par le frontend au save du canvas
+	// (débounced avec `useCanvasSync`). Body cappé à 200 nodes / 500
+	// edges / 50 frames via Zod pour éviter les payloads abusifs.
+	instance.put(
+		"/:id/preview-snapshot",
+		{
+			preHandler: [requireUser],
+			// bodyLimit intentionnellement bas — un snapshot légitime dépasse
+			// rarement les 50 KB. On tolère jusqu'à 200 KB pour laisser de la
+			// marge sur un très gros schéma (les caps Zod protègent d'abord).
+			bodyLimit: 200_000,
+			schema: {
+				params: ConnectionIdParams,
+				body: PutPreviewSnapshotBody,
+				response: {
+					200: PutPreviewSnapshotResponse,
+					404: DbConnectionsErrorResponse,
+					500: DbConnectionsErrorResponse
+				}
+			}
+		},
+		async (request, reply) => {
+			assertAuthenticated(request);
+			try {
+				const result = await putPreviewSnapshot(
+					fastify.db,
+					request.user.id,
+					request.params.id,
+					request.body.snapshot
+				);
+				if (!result.ok) {
+					return reply.code(404).send({ message: "Connection introuvable" });
+				}
+				return { ok: true as const };
+			} catch (err) {
+				request.log.error({ err }, "put preview snapshot failed");
 				return reply.code(500).send({ message: "Erreur interne" });
 			}
 		}

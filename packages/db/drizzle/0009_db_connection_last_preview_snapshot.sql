@@ -1,0 +1,1 @@
+ALTER TABLE "db_connection" ADD COLUMN "last_preview_snapshot" jsonb;

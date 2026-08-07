@@ -392,6 +392,15 @@ export const dbConnection = pgTable(
 			.defaultNow(),
 		// Bump à chaque frame reçue du CLI. Indicateur "CLI online" côté UI.
 		lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+		// Snapshot précalculé du dernier rendu de preview (C.15). Structure :
+		// `{ nodes: [{id,x,y,w,h}], edges: [{source,target}], frames:
+		// [{key,label,hue,x,y,w,h}] }`. Alimenté par le frontend au save
+		// du canvas. Sert de fallback rendu pour `MiniSchemaPreview` quand
+		// le CLI est hors ligne — on re-render côté client (theme-aware)
+		// au lieu d'afficher "CLI hors ligne" vide. Aucune donnée métier
+		// nouvelle vs `canvas_state.payload` (les noms de tables y sont
+		// déjà via `positions`).
+		lastPreviewSnapshot: jsonb("last_preview_snapshot"),
 		createdAt: timestamp("created_at", { withTimezone: true })
 			.notNull()
 			.defaultNow()

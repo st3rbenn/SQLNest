@@ -2,6 +2,34 @@ import { useQuery } from "@tanstack/react-query";
 
 const API_BASE = window.CONTEXT.apiBaseUrl;
 
+/** Snapshot précalculé d'un rendu de preview (C.15) — miroir du zod
+ *  backend `PreviewSnapshotSchema`. Persisté par le frontend au save du
+ *  canvas, réutilisé comme fallback quand le CLI est offline. Structure
+ *  minimale (positions + edges + frames), le rendering se fait via le
+ *  même `<PreviewSvg>` que quand le CLI est online → theme-aware. */
+export interface PreviewSnapshot {
+	readonly nodes: ReadonlyArray<{
+		readonly id: string;
+		readonly x: number;
+		readonly y: number;
+		readonly w: number;
+		readonly h: number;
+	}>;
+	readonly edges: ReadonlyArray<{
+		readonly source: string;
+		readonly target: string;
+	}>;
+	readonly frames: ReadonlyArray<{
+		readonly key: string;
+		readonly label: string;
+		readonly hue: number;
+		readonly x: number;
+		readonly y: number;
+		readonly w: number;
+		readonly h: number;
+	}>;
+}
+
 /**
  * Métadonnées SÛRES d'une db_connection — miroir du zod backend
  * `ListDbConnectionsResponse` (packages/backend/src/domains/db-connections/schema.ts).
@@ -22,6 +50,11 @@ export interface DbConnection {
 	 *  connection (calc côté backend depuis le registry in-memory). Change
 	 *  en temps quasi-réel via le poll `refetchInterval: 5s` du hook. */
 	readonly isOnline: boolean;
+	/** Snapshot du dernier rendu de preview (C.15). `null` tant que l'user
+	 *  n'a pas ouvert le canvas au moins une fois. Sert de fallback rendu
+	 *  quand le CLI est offline — la gallery affiche le dernier état connu
+	 *  au lieu d'un « CLI hors ligne » vide. */
+	readonly lastPreviewSnapshot: PreviewSnapshot | null;
 }
 
 interface ListResponse {

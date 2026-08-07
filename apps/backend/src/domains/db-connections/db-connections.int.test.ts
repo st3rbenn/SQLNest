@@ -232,4 +232,168 @@ describe.skipIf(!DATABASE_URL)("GET /api/db-connections", () => {
 		};
 		expect(aliceBody.connections.map((c) => c.name)).toEqual(["alice-prod"]);
 	});
+
+	test("lastPreviewSnapshot est `null` par défaut", async () => {
+		const { cookie, userId } = await createTestUser(
+			app,
+			"snap-default@example.com",
+			"snap-default-password-abcd"
+		);
+		await seedConnection(app, userId, "snap-default");
+
+		const res = await app.inject({
+			method: "GET",
+			url: "/api/db-connections",
+			headers: { cookie }
+		});
+		const body = res.json() as {
+			connections: Array<{ lastPreviewSnapshot: unknown }>;
+		};
+		expect(body.connections[0]?.lastPreviewSnapshot).toBeNull();
+	});
 });
+
+describe.skipIf(!DATABASE_URL)(
+	"PUT /api/db-connections/:id/preview-snapshot",
+	() => {
+		let app: FastifyInstance;
+
+		beforeAll(async () => {
+			app = createTestApp({ withAuth: true, withTunnelRegistry: true });
+			await app.register(dbConnectionsRoute, { prefix: "/api/db-connections" });
+			await app.ready();
+		});
+
+		afterAll(async () => {
+			await app.close();
+		});
+
+		beforeEach(async () => {
+			await truncateTunnelsAndAuth(app);
+		});
+
+		const SAMPLE_SNAPSHOT = {
+			nodes: [
+				{ id: "users", x: 100, y: 50, w: 220, h: 180 },
+				{ id: "orders", x: 400, y: 200, w: 240, h: 220 }
+			],
+			edges: [{ source: "orders", target: "users" }],
+			frames: [
+				{
+					key: "auth",
+					label: "Auth",
+					hue: 210,
+					x: 80,
+					y: 30,
+					w: 260,
+					h: 220
+				}
+			]
+		};
+
+		test("sans cookie → 401", async () => {
+			const res = await app.inject({
+				method: "PUT",
+				url: "/api/db-connections/00000000-0000-0000-0000-000000000000/preview-snapshot",
+				headers: { "content-type": "application/json" },
+				payload: { snapshot: SAMPLE_SNAPSHOT }
+			});
+			expect(res.statusCode).toBe(401);
+		});
+
+		test("connection inconnue → 404", async () => {
+			const { cookie } = await createTestUser(
+				app,
+				"snap-nf@example.com",
+				"snap-nf-password-hello-1"
+			);
+			const res = await app.inject({
+				method: "PUT",
+				url: "/api/db-connections/00000000-0000-0000-0000-000000000000/preview-snapshot",
+				headers: { "content-type": "application/json", cookie },
+				payload: { snapshot: SAMPLE_SNAPSHOT }
+			});
+			expect(res.statusCode).toBe(404);
+		});
+
+		test("happy path : PUT écrit, GET renvoie le snapshot", async () => {
+			const { cookie, userId } = await createTestUser(
+				app,
+				"snap-happy@example.com",
+				"snap-happy-password-happy"
+			);
+			const id = await seedConnection(app, userId, "snap-happy");
+
+			const putRes = await app.inject({
+				method: "PUT",
+				url: `/api/db-connections/${id}/preview-snapshot`,
+				headers: { "content-type": "application/json", cookie },
+				payload: { snapshot: SAMPLE_SNAPSHOT }
+			});
+			expect(putRes.statusCode).toBe(200);
+			expect(putRes.json()).toEqual({ ok: true });
+
+			const listRes = await app.inject({
+				method: "GET",
+				url: "/api/db-connections",
+				headers: { cookie }
+			});
+			const body = listRes.json() as {
+				connections: Array<{ lastPreviewSnapshot: typeof SAMPLE_SNAPSHOT }>;
+			};
+			expect(body.connections[0]?.lastPreviewSnapshot).toEqual(SAMPLE_SNAPSHOT);
+		});
+
+		test("isolation user — Bob ne peut pas écraser le snapshot d'Alice", async () => {
+			const alice = await createTestUser(
+				app,
+				"snap-iso-a@example.com",
+				"snap-iso-a-password-abc12"
+			);
+			const bob = await createTestUser(
+				app,
+				"snap-iso-b@example.com",
+				"snap-iso-b-password-abc12"
+			);
+			const aliceId = await seedConnection(app, alice.userId, "alice-shop");
+
+			// Bob tape sur l'id d'Alice → 404 (isolation, pas de fuite).
+			const res = await app.inject({
+				method: "PUT",
+				url: `/api/db-connections/${aliceId}/preview-snapshot`,
+				headers: { "content-type": "application/json", cookie: bob.cookie },
+				payload: { snapshot: SAMPLE_SNAPSHOT }
+			});
+			expect(res.statusCode).toBe(404);
+		});
+
+		test("body invalide → 400 (Zod)", async () => {
+			const { cookie, userId } = await createTestUser(
+				app,
+				"snap-bad@example.com",
+				"snap-bad-password-abcdefg"
+			);
+			const id = await seedConnection(app, userId, "snap-bad");
+
+			// nodes.length > 200 → refusé
+			const bigSnapshot = {
+				nodes: Array.from({ length: 201 }, (_, i) => ({
+					id: `t${i}`,
+					x: 0,
+					y: 0,
+					w: 100,
+					h: 100
+				})),
+				edges: [],
+				frames: []
+			};
+			const res = await app.inject({
+				method: "PUT",
+				url: `/api/db-connections/${id}/preview-snapshot`,
+				headers: { "content-type": "application/json", cookie },
+				payload: { snapshot: bigSnapshot }
+			});
+			expect(res.statusCode).toBe(400);
+		});
+	}
+);
