@@ -17,13 +17,25 @@
  *  - preview_snapshot = rendu précalculé, jamais lu par le canvas lui-même,
  *    seulement par la gallery.
  *
- * Le débounce est plus large (5 s vs 2 s pour canvas_state) : la preview
- * n'a pas besoin d'être à la seconde près — l'user ne la voit pas pendant
- * qu'il travaille dans le canvas.
+ * ─── Débounce court (1.5 s) ────────────────────────────────────────────
+ * Précédemment 5 s — trop long : un user qui ouvre le canvas et repart
+ * en < 5 s perdait tout le snapshot (le cleanup effect clear le timeout
+ * au unmount avant qu'il ne fire). Bug rapporté par Anthonin 2026-08-07.
+ *
+ * ─── Flush au unmount + fermeture d'onglet ─────────────────────────────
+ * Pattern miroir de `useCanvasSync` — 3 events pour couvrir tous les
+ * scénarios de départ :
+ *  - cleanup useEffect (navigation SPA canvas → gallery / switch canvas)
+ *  - `beforeunload` + `pagehide` (fermeture d'onglet, refresh)
+ *  - `visibilitychange` (mobile / background tab)
+ *
+ * Chaque flush utilise `fetch({ keepalive: true })` — la request continue
+ * même si le document disparaît. Cap 60 KB (spec HTML keepalive) : les
+ * snapshots typiques font 2-10 KB, largement sous le seuil.
  *
  * ─── Gate ──────────────────────────────────────────────────────────────
  * User anonyme → no-op (pas de compte, pas de gallery, pas de snapshot).
- * `hydrated` = false → skip (on ne veut pas PUT un snapshot vide avant
+ * `canvasReady = false` → skip (on ne veut pas PUT un snapshot vide avant
  * que useCanvasSync ait finit son hydratation initiale).
  */
 
@@ -36,9 +48,10 @@ import {
 } from "../../db-connections/previewSnapshotClient";
 import type { Frame } from "../frames";
 
-/** Débounce plus long que useCanvasSync — la preview n'a pas besoin d'être
- *  à la seconde près. */
-export const PREVIEW_SNAPSHOT_DEBOUNCE_MS = 5000;
+/** Débounce court — 1.5 s. Assez pour dedup les changements en rafale
+ *  (drag qui émet N mousemove) mais assez court pour que le user qui
+ *  ouvre-modifie-repart en 3-4 s n'ait pas perdu son snapshot. */
+export const PREVIEW_SNAPSHOT_DEBOUNCE_MS = 1500;
 
 export interface UsePreviewSnapshotSyncOptions {
 	readonly connectionId: string;
@@ -146,6 +159,19 @@ export function computePreviewSnapshot(
 	return { nodes, edges, frames };
 }
 
+/** Un push planifié : capture (connectionId, snapshot) au moment de l'armement
+ *  pour permettre un flush à un moment où l'user pourrait avoir déjà changé
+ *  de connectionId ou dérivé le snapshot. */
+interface PendingPush {
+	readonly connectionId: string;
+	readonly snapshot: PreviewSnapshot;
+	readonly serialized: string;
+}
+
+/** Seuil sécurité `fetch({ keepalive: true })` — spec HTML limite à 64 KiB
+ *  total en vol par origin. On garde une marge pour headers/wrapping. */
+const KEEPALIVE_MAX_BODY_BYTES = 60_000;
+
 export function usePreviewSnapshotSync(
 	opts: UsePreviewSnapshotSyncOptions
 ): void {
@@ -170,41 +196,90 @@ export function usePreviewSnapshotSync(
 	const serialized = useMemo(() => JSON.stringify(snapshot), [snapshot]);
 	const lastSyncedRef = useRef<string | null>(null);
 	const timeoutRef = useRef<number | null>(null);
+	// Le dernier PendingPush armé — utilisé par le flush au unmount et par
+	// les listeners de fermeture d'onglet pour envoyer la version la plus
+	// fraîche même si le débounce n'a pas encore fire.
+	const pendingRef = useRef<PendingPush | null>(null);
 
+	// ─── Effet debounce push ──────────────────────────────────────────
 	useEffect(() => {
 		if (!enabled) return;
-		// Skip si snapshot vide (canvas pas encore prêt) OU si identique au
-		// dernier envoyé.
 		if (snapshot.nodes.length === 0) return;
 		if (serialized === lastSyncedRef.current) return;
 
 		if (timeoutRef.current !== null) {
 			window.clearTimeout(timeoutRef.current);
 		}
+		const pending: PendingPush = {
+			connectionId: opts.connectionId,
+			snapshot,
+			serialized
+		};
+		pendingRef.current = pending;
 		timeoutRef.current = window.setTimeout(() => {
 			timeoutRef.current = null;
-			putPreviewSnapshot(opts.connectionId, snapshot)
+			const p = pendingRef.current;
+			pendingRef.current = null;
+			if (p === null) return;
+			putPreviewSnapshot(p.connectionId, p.snapshot)
 				.then(() => {
-					lastSyncedRef.current = serialized;
-					// Invalide `db-connections` pour que la gallery re-fetch
-					// et pick le nouveau snapshot au prochain retour. Pas
-					// urgent : la nav gallery ré-fetch de toute façon (poll 5s).
+					lastSyncedRef.current = p.serialized;
+					// Invalide `db-connections` pour que la gallery pick le
+					// nouveau snapshot. Pas urgent : le poll 5s le ferait aussi.
 					void queryClient.invalidateQueries({
 						queryKey: ["db-connections"]
 					});
 				})
 				.catch(() => {
-					// Best-effort. Un échec (401 session expirée, 500 backend,
-					// 413 payload trop gros) ne bloque JAMAIS le canvas.
-					// On retentera au prochain change.
+					// Best-effort. Un échec (401 session, 500, 413) ne bloque
+					// JAMAIS le canvas. Retry au prochain change.
 				});
 		}, PREVIEW_SNAPSHOT_DEBOUNCE_MS);
+	}, [enabled, snapshot, serialized, opts.connectionId, queryClient]);
 
-		return () => {
+	// ─── Flush au unmount + fermeture d'onglet ────────────────────────
+	// Pattern miroir useCanvasSync. Un `pendingRef` non-null au moment du
+	// unmount signifie qu'un PUT est planifié mais n'a pas fire — on
+	// l'envoie immédiatement via `fetch({ keepalive: true })` qui survit
+	// à la disparition du document.
+	//
+	// Deps vide → l'effet install les listeners une seule fois au mount ;
+	// `pendingRef` capture la connectionId à l'armement (via l'effet ci-dessus),
+	// pas besoin de recréer les listeners au switch de canvas.
+	useEffect(() => {
+		function flushPending(): void {
+			const pending = pendingRef.current;
+			if (pending === null) return;
 			if (timeoutRef.current !== null) {
 				window.clearTimeout(timeoutRef.current);
 				timeoutRef.current = null;
 			}
+			pendingRef.current = null;
+			try {
+				const body = JSON.stringify({ snapshot: pending.snapshot });
+				if (body.length >= KEEPALIVE_MAX_BODY_BYTES) return;
+				void putPreviewSnapshot(pending.connectionId, pending.snapshot, {
+					keepalive: true
+				}).catch(() => {
+					// Silencieux — le document part.
+				});
+			} catch {
+				// Sérialisation impossible (rare) — no-op.
+			}
+		}
+
+		function onVisibilityChange(): void {
+			if (document.visibilityState === "hidden") flushPending();
+		}
+
+		window.addEventListener("beforeunload", flushPending);
+		window.addEventListener("pagehide", flushPending);
+		document.addEventListener("visibilitychange", onVisibilityChange);
+		return () => {
+			flushPending();
+			window.removeEventListener("beforeunload", flushPending);
+			window.removeEventListener("pagehide", flushPending);
+			document.removeEventListener("visibilitychange", onVisibilityChange);
 		};
-	}, [enabled, snapshot, serialized, opts.connectionId, queryClient]);
+	}, []);
 }
