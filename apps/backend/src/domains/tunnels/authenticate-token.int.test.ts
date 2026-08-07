@@ -27,7 +27,11 @@ import {
 } from "vitest";
 import apiTokensRoute from "../../routes/api/api-tokens/root";
 import tunnelsRoute from "../../routes/api/tunnels/root";
-import { createTestApp, truncateTunnelsAndAuth } from "../../utils/testapp";
+import {
+	createTestApp,
+	ensureTeamForUser,
+	truncateTunnelsAndAuth
+} from "../../utils/testapp";
 import { hashSha256Hex } from "./pairing/crypto";
 
 const rootEnv = resolve(
@@ -211,8 +215,10 @@ describe.skipIf(!DATABASE_URL)(
 			);
 			const { token } = await createApiTokenViaHttp(app, cookie, "ci");
 			// Seed une db_connection avec le nom.
+			const teamId = await ensureTeamForUser(app, userId);
 			await app.db.insert(schema.dbConnection).values({
 				userId,
+				teamId,
 				name: "prod",
 				cliFingerprint: "0".repeat(64),
 				engine: "postgres"

@@ -41,7 +41,10 @@ import dbPlugin from "../../../plugins/02-db.plugin";
 import authPlugin from "../../../plugins/03-auth.plugin";
 import sessionPlugin from "../../../plugins/04-session.plugin";
 import tunnelsPlugin from "../../../plugins/05-tunnels.plugin";
-import { truncateTunnelsAndAuth } from "../../../utils/testapp";
+import {
+	ensureTeamForUser,
+	truncateTunnelsAndAuth
+} from "../../../utils/testapp";
 import tunnelsRoute from "./root";
 import tunnelsWsRoute from "./ws";
 
@@ -106,10 +109,12 @@ async function seedConnection(
 	userId: string,
 	pubkeyHex: string
 ): Promise<string> {
+	const teamId = await ensureTeamForUser(app, userId);
 	const rows = await app.db
 		.insert(schema.dbConnection)
 		.values({
 			userId,
+			teamId,
 			name: `conn-${crypto.randomUUID().slice(0, 8)}`,
 			cliFingerprint: hashSha256Hex(pubkeyHex),
 			engine: "postgres"

@@ -409,8 +409,23 @@ export const dbConnection = pgTable(
 		userId: text("user_id")
 			.notNull()
 			.references(() => user.id, { onDelete: "cascade" }),
+		// C.21.2 : team scope. Chaque db_connection appartient à une team ;
+		// l'owner de la team en a la propriété exclusive (V1). Une même DSN
+		// CLI peut être pair-ée dans 2 teams distinctes du même user → 2
+		// db_connection différentes, chacune avec son canvas_state.
+		//
+		// FK team cascade : DELETE team → toutes ses db_connection (+ leurs
+		// tunnel_session + canvas_state en chaîne).
+		//
+		// `user_id` reste porté pour la compat historique et l'audit ("qui
+		// a pair-é ce CLI"), mais l'AUTORISATION passe par team_id → owner
+		// (voir middleware `requireTeamAccess` en C.21.3).
+		teamId: uuid("team_id")
+			.notNull()
+			.references(() => team.id, { onDelete: "cascade" }),
 		// Nom court choisi par le user au moment du pairing (`prod`, `staging`,
-		// `local`). Unique par user.
+		// `local`). Unique par team (C.21.2 : plus par user — un même user
+		// peut avoir la même DSN dans 2 teams distinctes).
 		name: text("name").notNull(),
 		// SHA-256 hex (64 chars) de la clé pub Ed25519 du CLI. Pas la pub elle-
 		// même — on garde uniquement l'empreinte pour l'audit dashboard, la
@@ -442,21 +457,26 @@ export const dbConnection = pgTable(
 			.defaultNow()
 	},
 	(t) => [
-		// Un user ne peut pas avoir 2 connexions nommées "prod".
-		uniqueIndex("db_connection_user_name_unique").on(t.userId, t.name),
-		// Pairing idempotent (C.6) : un CLI = une db_connection. Deux
-		// pairings depuis la même keypair Ed25519 (donc même fingerprint)
-		// pour le même user → UPDATE au lieu d'INSERT. Sans cet index, un
-		// relance `sqlnest connect` créait un doublon avec un nom
-		// différent, et le canvas_state rattaché à l'ancienne devenait
-		// invisible.
-		uniqueIndex("db_connection_user_fingerprint_unique").on(
-			t.userId,
+		// C.21.2 — Indexes team-scoped (les user-scoped historiques ont
+		// été droppés en 0013, redondants en V1 et bloquants en V2 où
+		// un user peut avoir plusieurs teams).
+		//
+		// Une team ne peut pas avoir 2 connexions nommées "prod".
+		uniqueIndex("db_connection_team_name_unique").on(t.teamId, t.name),
+		// Pairing idempotent scopé team (C.21.2) : un même install CLI
+		// (fingerprint) peut être pair-é dans 2 teams distinctes → 2
+		// db_connection. Dans la même team, second pairing = UPDATE.
+		uniqueIndex("db_connection_team_fingerprint_unique").on(
+			t.teamId,
 			t.cliFingerprint
 		),
+		// List des db_connection d'une team (gallery, dashboard).
+		index("db_connection_team_id_idx").on(t.teamId),
 		// Retrouver toutes les connexions liées à un CLI (reconnect, audit).
 		index("db_connection_fingerprint_idx").on(t.cliFingerprint),
-		// List du user (dashboard).
+		// List du user (audit historique : "quels CLIs ce user a-t-il
+		// pair-é dans toutes ses teams ?"). Non-unique — un même user
+		// peut avoir N db_connection réparties sur ses teams.
 		index("db_connection_user_id_idx").on(t.userId)
 	]
 );

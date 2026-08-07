@@ -85,6 +85,20 @@
 			"when": 1786145641891,
 			"tag": "0011_team_seed_existing_users",
 			"breakpoints": true
+		},
+		{
+			"idx": 12,
+			"version": "7",
+			"when": 1786146106478,
+			"tag": "0012_db_connection_team_id",
+			"breakpoints": true
+		},
+		{
+			"idx": 13,
+			"version": "7",
+			"when": 1786146807722,
+			"tag": "0013_db_connection_drop_user_scoped_indexes",
+			"breakpoints": true
 		}
 	]
 }

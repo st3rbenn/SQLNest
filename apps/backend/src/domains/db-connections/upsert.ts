@@ -1,6 +1,6 @@
 /**
  * `upsertDbConnectionByFingerprint` — pairing idempotent au niveau
- * `(user_id, cli_fingerprint)`.
+ * `(team_id, cli_fingerprint)` (C.21.2, avant : `(user_id, ...)`).
  *
  * ─── Problème résolu (C.6) ────────────────────────────────────────────
  * Avant : chaque `sqlnest connect` INSERT une nouvelle `db_connection`,
@@ -8,27 +8,28 @@
  * qui stop/relance son CLI se retrouvait avec un DOUBLON, et le
  * `canvas_state` rattaché à l'ancienne connection devenait invisible.
  *
- * Nouveau contrat :
- *   - Si `(user_id, cli_fingerprint)` existe → UPDATE `active_since` /
+ * ─── Contrat (C.21.2 : scope team) ────────────────────────────────────
+ *   - Si `(team_id, cli_fingerprint)` existe → UPDATE `active_since` /
  *     `last_seen_at`, garde le `name` existant, retourne le même `id`.
- *   - Sinon → INSERT normal. Pré-check du conflit `(user_id, name)` pour
+ *   - Sinon → INSERT normal. Pré-check du conflit `(team_id, name)` pour
  *     renvoyer une erreur explicite avant que la contrainte unique ne
  *     lève un `unique_violation` cryptique.
+ *   - Le `userId` est stocké comme héritage historique (audit : "qui a
+ *     pair-é ce CLI") ; l'AUTORISATION passe par team → owner (voir
+ *     `requireTeamAccess`, C.21.3).
  *
  * Le `name` saisi par l'user au pairing est utilisé UNIQUEMENT à
- * l'INSERT. Pour un CLI déjà connu, le nouveau name est SILENCIEUSEMENT
- * IGNORÉ (compromis UX : le user peut renommer sa connection via un
- * futur dashboard). Aucun risque de fuite : les 2 unique index
- * (user, name) ET (user, fingerprint) restent cohérents.
+ * l'INSERT. Pour un CLI déjà connu (fingerprint match dans cette team),
+ * le nouveau name est SILENCIEUSEMENT IGNORÉ (compromis UX : le user
+ * peut renommer sa connection via un futur dashboard).
  *
  * ─── Race window ──────────────────────────────────────────────────────
  * Le lookup + INSERT/UPDATE est appelé dans une transaction externe (le
  * caller wrap dans `db.transaction`). Deux pairings concurrents avec la
- * MÊME pubkey seraient serialisés par le SELECT ... FOR UPDATE si on
- * l'ajoutait — mais avec l'index unique `(user_id, cli_fingerprint)` en
- * place, la course perdante lève `unique_violation` sur l'INSERT et le
- * caller peut retry. Pratique : cas rarissime (l'user ne lance pas 2
- * `sqlnest connect` en parallèle depuis le même device).
+ * même pubkey pour la même team seraient serialisés par l'index unique
+ * `(team_id, cli_fingerprint)` — la course perdante lève
+ * `unique_violation` sur l'INSERT et le caller peut retry. Pratique :
+ * cas rarissime.
  */
 
 import { schema as dbSchema } from "@sqlnest/db";
@@ -38,6 +39,10 @@ import { computeCliFingerprint } from "../tunnels/pairing/crypto";
 
 export interface UpsertConnectionOptions {
 	readonly userId: string;
+	/** Team qui possédera la db_connection (V1 = team perso de l'user,
+	 *  V2 = choix explicite au pairing). Scope l'INSERT ET le lookup
+	 *  idempotent (`(team_id, fingerprint)`). */
+	readonly teamId: string;
 	/** Pubkey Ed25519 du CLI — reçue en STRING (hex ou base64 selon le
 	 *  flow). Utilisée avec `cliConnectionName` pour produire le fingerprint
 	 *  effectif via `computeCliFingerprint`. */
@@ -76,13 +81,13 @@ export async function upsertDbConnectionByFingerprint(
 		opts.cliConnectionName
 	);
 
-	// 1. Lookup fingerprint existant pour cet user.
+	// 1. Lookup fingerprint existant pour cette team.
 	const existing = await tx
 		.select({ id: dbSchema.dbConnection.id })
 		.from(dbSchema.dbConnection)
 		.where(
 			and(
-				eq(dbSchema.dbConnection.userId, opts.userId),
+				eq(dbSchema.dbConnection.teamId, opts.teamId),
 				eq(dbSchema.dbConnection.cliFingerprint, fingerprint)
 			)
 		)
@@ -107,7 +112,7 @@ export async function upsertDbConnectionByFingerprint(
 		return { ok: true, connectionId: row.id, wasCreated: false };
 	}
 
-	// 2. Pas d'existant : check collision `(user_id, name)` explicitement
+	// 2. Pas d'existant : check collision `(team_id, name)` explicitement
 	//    avant l'INSERT — renvoie un `name_conflict` propre plutôt qu'un
 	//    unique_violation Postgres cryptique.
 	const nameCollision = await tx
@@ -115,7 +120,7 @@ export async function upsertDbConnectionByFingerprint(
 		.from(dbSchema.dbConnection)
 		.where(
 			and(
-				eq(dbSchema.dbConnection.userId, opts.userId),
+				eq(dbSchema.dbConnection.teamId, opts.teamId),
 				eq(dbSchema.dbConnection.name, opts.name)
 			)
 		)
@@ -129,6 +134,7 @@ export async function upsertDbConnectionByFingerprint(
 		.insert(dbSchema.dbConnection)
 		.values({
 			userId: opts.userId,
+			teamId: opts.teamId,
 			name: opts.name,
 			cliFingerprint: fingerprint,
 			engine: opts.engine

@@ -51,7 +51,10 @@ import sessionPlugin from "../../../plugins/04-session.plugin";
 import tunnelsPlugin from "../../../plugins/05-tunnels.plugin";
 import backendIdentityPlugin from "../../../plugins/06-backend-identity.plugin";
 import backendProxyPlugin from "../../../plugins/07-backend-proxy.plugin";
-import { truncateTunnelsAndAuth } from "../../../utils/testapp";
+import {
+	ensureTeamForUser,
+	truncateTunnelsAndAuth
+} from "../../../utils/testapp";
 import tunnelsRoute from "../tunnels/root";
 import tunnelsWsRoute from "../tunnels/ws";
 import dbConnectionsProxyRoute from "./proxy";
@@ -136,10 +139,12 @@ async function seedConnectionAndSession(
 	userId: string,
 	cliPubHex: string
 ): Promise<{ connectionId: string; sessionId: string; token: string }> {
+	const teamId = await ensureTeamForUser(app, userId);
 	const conn = await app.db
 		.insert(schema.dbConnection)
 		.values({
 			userId,
+			teamId,
 			name: "shop",
 			cliFingerprint: hashSha256Hex(cliPubHex),
 			engine: "postgres"

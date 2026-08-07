@@ -21,7 +21,11 @@ import {
 	test
 } from "vitest";
 import dbConnectionsRoute from "../../routes/api/db-connections/root";
-import { createTestApp, truncateTunnelsAndAuth } from "../../utils/testapp";
+import {
+	createTestApp,
+	ensureTeamForUser,
+	truncateTunnelsAndAuth
+} from "../../utils/testapp";
 import { hashSha256Hex } from "../tunnels/pairing/crypto";
 
 const rootEnv = resolve(
@@ -84,10 +88,12 @@ async function seedConnection(
 	name: string,
 	overrides: { activeSince?: Date; engine?: string } = {}
 ): Promise<string> {
+	const teamId = await ensureTeamForUser(app, userId);
 	const rows = await app.db
 		.insert(schema.dbConnection)
 		.values({
 			userId,
+			teamId,
 			name,
 			cliFingerprint: hashSha256Hex(`${name}-${userId}`),
 			engine: overrides.engine ?? "postgres",

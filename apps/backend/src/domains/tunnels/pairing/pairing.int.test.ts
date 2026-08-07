@@ -36,7 +36,11 @@ import {
 	hashSha256Hex
 } from "../../../domains/tunnels/pairing/crypto";
 import tunnelsRoute from "../../../routes/api/tunnels/root";
-import { createTestApp, truncateTunnelsAndAuth } from "../../../utils/testapp";
+import {
+	createTestApp,
+	ensureTeamForUser,
+	truncateTunnelsAndAuth
+} from "../../../utils/testapp";
 
 // ─── .env RACINE (identique aux autres int tests) ────────────────────
 const rootEnv = resolve(
@@ -339,8 +343,10 @@ describe.skipIf(!DATABASE_URL)("/api/tunnels — device flow", () => {
 			const { pubkeyHex } = makeCliKeypair();
 			// Seed une db_connection avec cette pubkey (fingerprint match
 			// possible SI on avait un userId dans le status).
+			const anonTeamId = await ensureTeamForUser(app, userId);
 			await app.db.insert(schema.dbConnection).values({
 				userId,
+				teamId: anonTeamId,
 				name: "existing-cli",
 				cliFingerprint: hashSha256Hex(pubkeyHex),
 				engine: "postgres"
@@ -368,8 +374,10 @@ describe.skipIf(!DATABASE_URL)("/api/tunnels — device flow", () => {
 				"reco-status-reco-status-1"
 			);
 			const { pubkeyHex } = makeCliKeypair();
+			const recoTeamId = await ensureTeamForUser(app, userId);
 			await app.db.insert(schema.dbConnection).values({
 				userId,
+				teamId: recoTeamId,
 				name: "apollon_db",
 				cliFingerprint: hashSha256Hex(pubkeyHex),
 				engine: "postgres"
@@ -562,8 +570,10 @@ describe.skipIf(!DATABASE_URL)("/api/tunnels — device flow", () => {
 				"heidi-heidi-heidi-heidi"
 			);
 			// Seed une db_connection existante avec le nom.
+			const heidiTeamId = await ensureTeamForUser(app, userId);
 			await app.db.insert(schema.dbConnection).values({
 				userId,
+				teamId: heidiTeamId,
 				name: "prod",
 				cliFingerprint: "0".repeat(64),
 				engine: "postgres"

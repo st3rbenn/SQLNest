@@ -33,6 +33,8 @@
 import { schema as dbSchema } from "@sqlnest/db";
 import { authenticateBearer } from "../api-tokens/authenticate-bearer";
 import { upsertDbConnectionByFingerprint } from "../db-connections/upsert";
+import { createPersonalTeam, defaultTeamNameForUser } from "../teams/create";
+import { getDefaultTeamOfUser } from "../teams/get";
 import type { DbOrTx } from "./db";
 import { TUNNEL_SESSION_TTL_MS } from "./pairing/authenticate";
 import { generateSessionToken, hashSha256Hex } from "./pairing/crypto";
@@ -67,12 +69,30 @@ export async function authenticateTunnelWithToken(
 	const auth = await authenticateBearer(db, clearBearerToken, nowMs);
 	if (auth == null) return { ok: false, reason: "invalid_token" as const };
 
-	// Étape 2 — upsert db_connection (pairing idempotent C.6/C.13 sur
-	// fingerprint scopé) + INSERT tunnel_session, dans une transaction
-	// atomique.
+	// Étape 2 — upsert db_connection (pairing idempotent C.6/C.13/C.21.2
+	// sur fingerprint scopé par team) + INSERT tunnel_session, dans une
+	// transaction atomique.
+	//
+	// C.21.2 : la team qui possédera la db_connection = la team perso de
+	// l'user (V1). Lazy-créée si absente (filet cohérent avec le device
+	// flow). En C.21.4/V2, un token pourra être scopé à une team précise.
 	return db.transaction(async (tx) => {
+		let teamId: string;
+		const defaultTeam = await getDefaultTeamOfUser(tx, auth.userId);
+		if (defaultTeam) {
+			teamId = defaultTeam.id;
+		} else {
+			const created = await createPersonalTeam(
+				tx,
+				auth.userId,
+				defaultTeamNameForUser(deviceName)
+			);
+			teamId = created.teamId;
+		}
+
 		const upsert = await upsertDbConnectionByFingerprint(tx, {
 			userId: auth.userId,
+			teamId,
 			cliPubkey: cliPubkeyEd25519,
 			cliConnectionName,
 			name: deviceName,

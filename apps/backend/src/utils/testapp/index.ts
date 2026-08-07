@@ -5,6 +5,7 @@ import {
 	serializerCompiler,
 	validatorCompiler
 } from "fastify-type-provider-zod";
+import { createPersonalTeam } from "../../domains/teams/create";
 import { createTunnelRegistry } from "../../domains/tunnels/session/registry";
 import dbPlugin from "../../plugins/02-db.plugin";
 import authPlugin from "../../plugins/03-auth.plugin";
@@ -145,6 +146,34 @@ export async function truncateCanvasAndAuth(
 	await app.db.execute(
 		sql`TRUNCATE TABLE "canvas_state", "session_kv", "session", "account", "verification", "user" RESTART IDENTITY CASCADE`
 	);
+}
+
+/**
+ * Ensure une team perso pour `userId` — idempotent, retourne son id.
+ *
+ * ─── Contexte (C.21.2) ────────────────────────────────────────────────
+ * Depuis C.21.2, `db_connection.team_id` est NOT NULL. Les tests qui
+ * INSERT directement dans `db_connection` doivent d'abord garantir une
+ * team pour l'user. Deux chemins :
+ *   - user créé via signup → le hook Better Auth a déjà créé la team
+ *     perso ; ce helper la RETROUVE et retourne son id (idempotent).
+ *   - user créé via INSERT direct (bypass Better Auth) → pas de team ;
+ *     ce helper la CRÉE.
+ *
+ * Utilise `createPersonalTeam` (idempotent par design), donc safe à
+ * appeler N fois pour le même userId. */
+export async function ensureTeamForUser(
+	app: FastifyInstance,
+	userId: string,
+	name: string = "Personal"
+): Promise<string> {
+	if (app.db == null) {
+		throw new Error(
+			"ensureTeamForUser: fastify.db introuvable — appelle createTestApp({ withAuth: true }) et await app.ready() d'abord."
+		);
+	}
+	const result = await createPersonalTeam(app.db, userId, name);
+	return result.teamId;
 }
 
 /** TRUNCATE des tables tunnel/API-token + auth + team. Utilisé par les

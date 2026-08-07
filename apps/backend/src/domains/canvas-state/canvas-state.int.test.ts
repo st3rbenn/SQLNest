@@ -36,7 +36,11 @@ import {
 	vi
 } from "vitest";
 import canvasStateRoute from "../../routes/api/canvas-state/root";
-import { createTestApp, truncateCanvasAndAuth } from "../../utils/testapp";
+import {
+	createTestApp,
+	ensureTeamForUser,
+	truncateCanvasAndAuth
+} from "../../utils/testapp";
 
 const rootEnv = resolve(
 	dirname(fileURLToPath(import.meta.url)),
@@ -116,10 +120,12 @@ async function createTestConnection(
 	userId: string,
 	name = `test-${Math.random().toString(36).slice(2, 8)}`
 ): Promise<string> {
+	const teamId = await ensureTeamForUser(app, userId);
 	const rows = await app.db
 		.insert(dbSchema.dbConnection)
 		.values({
 			userId,
+			teamId,
 			name,
 			cliFingerprint: randomBytes(32).toString("hex"),
 			engine: "postgres"

@@ -166,6 +166,107 @@ describe.skipIf(!DATABASE_URL)("C.21.1 — team auto-signup", () => {
 		expect(after.length).toBe(0);
 	});
 
+	test("C.21.2 — db_connection est scopée team (isolation cross-team pour un même user)", async () => {
+		const { userId } = await signup(
+			app,
+			"multi-team@example.com",
+			"multi-team-multi-team-1"
+		);
+		// Le hook a créé « Personal ». On crée une 2ᵉ team pour simuler
+		// un user avec 2 teams (V2 preview) — l'isolation doit tenir même
+		// pour le même owner.
+		const teamAlpha = (
+			await app.db
+				.select()
+				.from(schema.team)
+				.where(eq(schema.team.ownerId, userId))
+		)[0];
+		expect(teamAlpha).toBeDefined();
+		const teamBeta = await app.db
+			.insert(schema.team)
+			.values({
+				slug: "beta01",
+				name: "Team Beta",
+				ownerId: userId
+			})
+			.returning();
+		const teamBetaId = teamBeta[0]?.id;
+		expect(teamBetaId).toBeDefined();
+
+		// Une db_connection avec le MÊME name « prod » dans chaque team →
+		// autorisé par le nouvel index (team_id, name).
+		await app.db.insert(schema.dbConnection).values([
+			{
+				userId,
+				// biome-ignore lint/style/noNonNullAssertion: checked above
+				teamId: teamAlpha!.id,
+				name: "prod",
+				cliFingerprint: "a".repeat(64),
+				engine: "postgres"
+			},
+			{
+				userId,
+				// biome-ignore lint/style/noNonNullAssertion: checked above
+				teamId: teamBetaId!,
+				name: "prod",
+				cliFingerprint: "b".repeat(64),
+				engine: "postgres"
+			}
+		]);
+
+		// Le lookup par team_id est strictement scopé.
+		const alphaConns = await app.db
+			.select({ id: schema.dbConnection.id })
+			.from(schema.dbConnection)
+			// biome-ignore lint/style/noNonNullAssertion: checked above
+			.where(eq(schema.dbConnection.teamId, teamAlpha!.id));
+		expect(alphaConns.length).toBe(1);
+		const betaConns = await app.db
+			.select({ id: schema.dbConnection.id })
+			.from(schema.dbConnection)
+			// biome-ignore lint/style/noNonNullAssertion: checked above
+			.where(eq(schema.dbConnection.teamId, teamBetaId!));
+		expect(betaConns.length).toBe(1);
+		expect(alphaConns[0]?.id).not.toBe(betaConns[0]?.id);
+	});
+
+	test("C.21.2 — DELETE team cascade → db_connection supprimées", async () => {
+		const { userId } = await signup(
+			app,
+			"cascade-team@example.com",
+			"cascade-team-cascade-team"
+		);
+		const teamId = (
+			await app.db
+				.select()
+				.from(schema.team)
+				.where(eq(schema.team.ownerId, userId))
+		)[0]?.id;
+		expect(teamId).toBeDefined();
+		await app.db.insert(schema.dbConnection).values({
+			userId,
+			// biome-ignore lint/style/noNonNullAssertion: checked above
+			teamId: teamId!,
+			name: "will-die",
+			cliFingerprint: "c".repeat(64),
+			engine: "postgres"
+		});
+		const before = await app.db
+			.select()
+			.from(schema.dbConnection)
+			// biome-ignore lint/style/noNonNullAssertion: checked above
+			.where(eq(schema.dbConnection.teamId, teamId!));
+		expect(before.length).toBe(1);
+		// biome-ignore lint/style/noNonNullAssertion: checked above
+		await app.db.delete(schema.team).where(eq(schema.team.id, teamId!));
+		const after = await app.db
+			.select()
+			.from(schema.dbConnection)
+			// biome-ignore lint/style/noNonNullAssertion: checked above
+			.where(eq(schema.dbConnection.teamId, teamId!));
+		expect(after.length).toBe(0);
+	});
+
 	test("2 users signent → 2 teams isolées, slugs distincts", async () => {
 		const a = await signup(
 			app,

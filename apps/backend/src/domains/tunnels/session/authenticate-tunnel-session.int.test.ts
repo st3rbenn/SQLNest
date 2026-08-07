@@ -17,7 +17,11 @@ import {
 	expect,
 	test
 } from "vitest";
-import { createTestApp, truncateTunnelsAndAuth } from "../../../utils/testapp";
+import {
+	createTestApp,
+	ensureTeamForUser,
+	truncateTunnelsAndAuth
+} from "../../../utils/testapp";
 import { hashSha256Hex } from "../pairing/crypto";
 import { authenticateTunnelSession } from "./authenticate-tunnel-session";
 
@@ -60,10 +64,12 @@ async function seedConnection(
 	name: string,
 	pubkeyHex: string
 ): Promise<string> {
+	const teamId = await ensureTeamForUser(app, userId);
 	const rows = await app.db
 		.insert(schema.dbConnection)
 		.values({
 			userId,
+			teamId,
 			name,
 			cliFingerprint: hashSha256Hex(pubkeyHex),
 			engine: "postgres"

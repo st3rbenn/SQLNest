@@ -34,7 +34,11 @@ import {
 	expect,
 	test
 } from "vitest";
-import { createTestApp, truncateTunnelsAndAuth } from "../../utils/testapp";
+import {
+	createTestApp,
+	ensureTeamForUser,
+	truncateTunnelsAndAuth
+} from "../../utils/testapp";
 
 // Charge le .env RACINE avant tout register (même pattern que
 // canvas-state.int.test.ts).
@@ -373,8 +377,10 @@ describe.skipIf(!DATABASE_URL)("tunnels schema — contraintes DB", () => {
 	describe("db_connection", () => {
 		test("INSERT valide → row présente, engine_metadata default {}", async () => {
 			const userId = await seedUser(app, "grace@example.com");
+			const teamId = await ensureTeamForUser(app, userId);
 			await app.db.insert(schema.dbConnection).values({
 				userId,
+				teamId,
 				name: "prod",
 				cliFingerprint: "a".repeat(64),
 				engine: "postgres"
@@ -398,10 +404,12 @@ describe.skipIf(!DATABASE_URL)("tunnels schema — contraintes DB", () => {
 			expect(row!.activeSince).toBeInstanceOf(Date);
 		});
 
-		test("unicité (user_id, name) — 2 `prod` pour même user → refus", async () => {
+		test("unicité (team_id, name) — 2 `prod` pour même team → refus", async () => {
 			const userId = await seedUser(app, "heidi@example.com");
+			const teamId = await ensureTeamForUser(app, userId);
 			await app.db.insert(schema.dbConnection).values({
 				userId,
+				teamId,
 				name: "prod",
 				cliFingerprint: "a".repeat(64),
 				engine: "postgres"
@@ -410,25 +418,32 @@ describe.skipIf(!DATABASE_URL)("tunnels schema — contraintes DB", () => {
 			await expect(
 				app.db.insert(schema.dbConnection).values({
 					userId,
+					teamId,
 					name: "prod",
 					cliFingerprint: "b".repeat(64),
 					engine: "postgres"
 				})
-			).rejects.toThrow(/db_connection_user_name_unique|duplicate key/i);
+			).rejects.toThrow(
+				/db_connection_team_name_unique|db_connection_user_name_unique|duplicate key/i
+			);
 		});
 
 		test("2 users peuvent avoir chacun leur `prod`", async () => {
 			const alice = await seedUser(app, "alice-conn@example.com");
 			const bob = await seedUser(app, "bob-conn@example.com");
+			const aliceTeam = await ensureTeamForUser(app, alice);
+			const bobTeam = await ensureTeamForUser(app, bob);
 			await app.db.insert(schema.dbConnection).values([
 				{
 					userId: alice,
+					teamId: aliceTeam,
 					name: "prod",
 					cliFingerprint: "a".repeat(64),
 					engine: "postgres"
 				},
 				{
 					userId: bob,
+					teamId: bobTeam,
 					name: "prod",
 					cliFingerprint: "b".repeat(64),
 					engine: "postgres"
@@ -444,6 +459,7 @@ describe.skipIf(!DATABASE_URL)("tunnels schema — contraintes DB", () => {
 
 		test("engine_metadata jsonb libre — accepte payload arbitraire", async () => {
 			const userId = await seedUser(app, "ivan@example.com");
+			const teamId = await ensureTeamForUser(app, userId);
 			const meta = {
 				version: "16.2",
 				schemas: ["public", "billing"],
@@ -451,6 +467,7 @@ describe.skipIf(!DATABASE_URL)("tunnels schema — contraintes DB", () => {
 			};
 			await app.db.insert(schema.dbConnection).values({
 				userId,
+				teamId,
 				name: "staging",
 				cliFingerprint: "c".repeat(64),
 				engine: "postgres",
@@ -467,8 +484,10 @@ describe.skipIf(!DATABASE_URL)("tunnels schema — contraintes DB", () => {
 
 		test("DELETE user → CASCADE vide les db_connection", async () => {
 			const userId = await seedUser(app, "judy@example.com");
+			const teamId = await ensureTeamForUser(app, userId);
 			await app.db.insert(schema.dbConnection).values({
 				userId,
+				teamId,
 				name: "prod",
 				cliFingerprint: "d".repeat(64),
 				engine: "postgres"

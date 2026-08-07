@@ -27,6 +27,8 @@
 import { schema as dbSchema } from "@sqlnest/db";
 import { eq } from "drizzle-orm";
 import { upsertDbConnectionByFingerprint } from "../../db-connections/upsert";
+import { createPersonalTeam, defaultTeamNameForUser } from "../../teams/create";
+import { getDefaultTeamOfUser } from "../../teams/get";
 import type { DbOrTx } from "../db";
 import { generateSessionToken, hashSha256Hex, verifyEd25519 } from "./crypto";
 
@@ -101,13 +103,31 @@ export async function authenticatePairing(
 			return { ok: false, reason: "signature_invalid" as const };
 		}
 
-		// Pairing idempotent (C.6/C.13) : le fingerprint est SCOPÉ par la
-		// DSN locale du CLI (C.13) → un même install CLI peut avoir N
-		// db_connection distinctes, chacune identifiée par sa DSN locale.
-		// Si `(user_id, cli_fingerprint)` existe déjà → RÉUTILISE. Sinon
-		// INSERT normal.
+		// Pairing idempotent (C.6/C.13/C.21.2) : le fingerprint est SCOPÉ
+		// par la DSN locale du CLI (C.13) + par la team (C.21.2) → un
+		// même install CLI peut avoir N db_connection distinctes, chacune
+		// identifiée par (team, DSN locale).
+		//
+		// En C.21.2 : le pairing n'a pas encore de champ `team_id` (arrive
+		// en C.21.4). On fallback sur la team perso de l'user. Si l'user
+		// n'en a pas (race Better Auth hook), on la crée lazy — filet de
+		// sécurité pour ne jamais bloquer un `sqlnest connect`.
+		let teamId: string;
+		const defaultTeam = await getDefaultTeamOfUser(tx, row.userId);
+		if (defaultTeam) {
+			teamId = defaultTeam.id;
+		} else {
+			const created = await createPersonalTeam(
+				tx,
+				row.userId,
+				defaultTeamNameForUser(row.deviceName)
+			);
+			teamId = created.teamId;
+		}
+
 		const upsert = await upsertDbConnectionByFingerprint(tx, {
 			userId: row.userId,
+			teamId,
 			cliPubkey: row.cliPubkey,
 			cliConnectionName: row.cliConnectionName,
 			name: row.deviceName,
