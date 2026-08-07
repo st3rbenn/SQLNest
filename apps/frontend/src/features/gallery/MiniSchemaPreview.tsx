@@ -73,6 +73,65 @@ const centerMessageStyle: CSSProperties = {
 /** Padding autour de la bbox — évite que les tables touchent les bords. */
 const BBOX_PAD = 20;
 
+/** Rects du skeleton — positions évocatrices de tables + edges implicites,
+ *  sans texte. Coord SVG en unités normalisées 100×62.5 (ratio 16:10 du
+ *  wrapper). Palette gris fin sur bg dark, avec une opacité qui pulse
+ *  légèrement pour signaler « ça charge ». */
+const SKELETON_RECTS: ReadonlyArray<{
+	readonly x: number;
+	readonly y: number;
+	readonly w: number;
+	readonly h: number;
+}> = [
+	{ x: 12, y: 12, w: 24, h: 14 },
+	{ x: 44, y: 8, w: 28, h: 12 },
+	{ x: 78, y: 16, w: 12, h: 10 },
+	{ x: 14, y: 36, w: 20, h: 16 },
+	{ x: 42, y: 34, w: 30, h: 18 },
+	{ x: 78, y: 40, w: 14, h: 10 }
+];
+
+/** Loading skeleton — pattern sobre inspiré des « content placeholders »
+ *  Figma/Linear. Aucune couleur d'accent, juste un gris fin sur fond dark,
+ *  avec un pulse doux (opacité 0.4 → 0.9 en 1.6s) qui reste visible sans
+ *  agresser. Pas de texte : la présence de rects est un signal implicite
+ *  de « ça arrive ».
+ *
+ *  Rendu en SVG viewBox 100×62.5 avec `preserveAspectRatio="xMidYMid meet"`
+ *  — même stretch que le vrai PreviewSvg, donc le placeholder scale à la
+ *  taille du wrapper 16:10 sans distortion. */
+function PreviewSkeleton(): React.ReactNode {
+	return (
+		<svg
+			viewBox="0 0 100 62.5"
+			preserveAspectRatio="xMidYMid meet"
+			style={{
+				position: "absolute",
+				inset: 0,
+				width: "100%",
+				height: "100%",
+				animation: "sqlnest-skeleton-pulse 1.6s ease-in-out infinite"
+			}}
+			aria-hidden="true"
+		>
+			<title>Chargement de l'aperçu</title>
+			{SKELETON_RECTS.map((r) => (
+				<rect
+					key={`sk-${r.x}-${r.y}`}
+					x={r.x}
+					y={r.y}
+					width={r.w}
+					height={r.h}
+					rx={2}
+					fill="hsla(0, 0%, 100%, 0.05)"
+					stroke="hsla(0, 0%, 100%, 0.08)"
+					strokeWidth={0.4}
+				/>
+			))}
+		</svg>
+	);
+}
+
 export function MiniSchemaPreview({ connectionId, isOnline, snapshot }: Props) {
 	const queryClient = useQueryClient();
 	const {
@@ -110,8 +169,8 @@ export function MiniSchemaPreview({ connectionId, isOnline, snapshot }: Props) {
 
 	if (isLoading) {
 		// Pendant l'introspection initiale, on peut afficher le snapshot si
-		// dispo — évite le flash « Introspection… » quand l'user revient sur
-		// une gallery avec un canvas déjà save.
+		// dispo — évite le flash skeleton quand l'user revient sur une gallery
+		// avec un canvas déjà save.
 		if (snapshot && snapshot.nodes.length > 0) {
 			return (
 				<div style={wrapperStyle}>
@@ -121,7 +180,7 @@ export function MiniSchemaPreview({ connectionId, isOnline, snapshot }: Props) {
 		}
 		return (
 			<div style={wrapperStyle}>
-				<div style={centerMessageStyle}>Introspection…</div>
+				<PreviewSkeleton />
 			</div>
 		);
 	}

@@ -97,6 +97,10 @@ const CARD_HOVER_CSS = `
 	border-color: var(--sqlnest-accent) !important;
 	box-shadow: 0 6px 20px rgba(13, 153, 255, 0.2);
 }
+@keyframes sqlnest-skeleton-pulse {
+	0%, 100% { opacity: 0.4; }
+	50% { opacity: 0.9; }
+}
 `;
 
 export function GalleryPage() {
