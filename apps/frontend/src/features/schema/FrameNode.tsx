@@ -10,22 +10,27 @@ import type { Frame, FrameRect } from "./frames";
 
 export interface FrameNodeData {
 	readonly frame: Frame;
-	/** Appelé au release du resize. Rect final + reconciliation membership
-	 * (tables tombées hors du nouveau rect → retirées). Fourni par
-	 * SchemaCanvas — closure sur `handleFrameResize`. Le suivi live des
-	 * dimensions/position pendant le drag est géré côté SchemaCanvas via
-	 * l'interception des `dimensions`/`position` changes RF (voir
-	 * `handleNodesChange`). */
-	readonly onResizeEnd?: (rect: FrameRect) => void;
-	/** Callback appelé au commit d'un rename inline (Enter ou blur). Fourni
-	 * par SchemaCanvas — closure sur `useFrames.renameFrame`. */
-	readonly onRename?: (label: string) => void;
-	/** Callback appelé au right-click sur le badge du frame — supprime
-	 * l'entrée. Fourni par SchemaCanvas — closure sur `useFrames.removeFrame`. */
-	readonly onDelete?: () => void;
-	/** Callback appelé au clic gauche sur le badge du frame — ouvre la vue
+	/** Appelé au release du resize avec `(frame.key, rect)`. Rect final +
+	 * reconciliation membership (tables tombées hors du nouveau rect →
+	 * retirées). Fourni par SchemaCanvas — `handleFrameResize` stable via
+	 * useCallback. Le suivi live des dimensions/position pendant le drag
+	 * est géré côté SchemaCanvas via l'interception des changes RF (voir
+	 * `handleNodesChange`).
+	 *
+	 * NOTE (C.14) : la clé est passée en 1er arg APPLIQUÉ CÔTÉ FrameNode
+	 * (avec `data.frame.key`) plutôt que via une closure inline
+	 * `(r) => handler(key, r)` dans computeFrameNodes. Cela garde `data`
+	 * stable entre renders → RF n'invalide plus le NodeResizer en cours
+	 * de drag (les axes sautaient sinon). */
+	readonly onResizeEnd?: (key: string, rect: FrameRect) => void;
+	/** Callback appelé au commit d'un rename inline (Enter ou blur). Signature
+	 * `(key, label)` — stable via useCallback côté SchemaCanvas. */
+	readonly onRename?: (key: string, label: string) => void;
+	/** Callback appelé au right-click sur le badge — `(key)`. */
+	readonly onDelete?: (key: string) => void;
+	/** Callback appelé au clic gauche sur le badge — `(key)`, ouvre la vue
 	 * FrameDetails dans le drawer gauche (liste des tables du frame). */
-	readonly onFocus?: () => void;
+	readonly onFocus?: (key: string) => void;
 	readonly [key: string]: unknown;
 }
 
@@ -62,11 +67,8 @@ export function FrameNode({
 
 	// Zoom-invariance du badge — Figma-like : le badge doit garder une
 	// taille lisible EN PIXELS ÉCRAN quelle que soit la profondeur de zoom.
-	// Sans compensation, RF scale le node → à zoom 0.3 le texte 11px devient
-	// 3.3px illisible ; à zoom 3 il gonfle à 33px et prend toute la vue.
-	// On applique `transform: scale(1/zoom)` cappé à [0.5, 2.5] pour éviter
-	// des extrêmes visuellement violents (zoom out infini ferait un badge
-	// démesuré vs son cadre, zoom in un badge invisible).
+	// `useStore` avec un sélecteur scalaire ne re-render que si la valeur
+	// change → ok. Cappé à [0.5, 2.5] pour éviter les extrêmes.
 	const zoom = useStore((s) => s.transform[2]);
 	const badgeScale = Math.max(0.5, Math.min(2.5, 1 / zoom));
 
@@ -76,7 +78,9 @@ export function FrameNode({
 	};
 	const commit = () => {
 		const trimmed = draft.trim();
-		if (trimmed !== "" && trimmed !== frame.label) onRename?.(trimmed);
+		if (trimmed !== "" && trimmed !== frame.label) {
+			onRename?.(frame.key, trimmed);
+		}
 		setEditing(false);
 	};
 	const cancel = () => {
@@ -111,7 +115,7 @@ export function FrameNode({
 					borderWidth: 2
 				}}
 				onResizeEnd={(_, params) => {
-					onResizeEnd?.({
+					onResizeEnd?.(frame.key, {
 						x: params.x ?? positionAbsoluteX,
 						y: params.y ?? positionAbsoluteY,
 						width: params.width,
@@ -160,7 +164,7 @@ export function FrameNode({
 						// avec le drag du frame déclenché par un mousedown sur le
 						// wrapper RF quand on ne bouge pas la souris (tiny threshold).
 						e.stopPropagation();
-						onFocus?.();
+						onFocus?.(frame.key);
 					}}
 					onDoubleClick={(e) => {
 						// Empêche RF `onNodeDoubleClick` de faire son travail
@@ -173,7 +177,7 @@ export function FrameNode({
 						// le menu par défaut du navigateur ET RF's onNodeContextMenu.
 						e.preventDefault();
 						e.stopPropagation();
-						onDelete?.();
+						onDelete?.(frame.key);
 					}}
 				>
 					{editing ? (

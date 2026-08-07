@@ -56,12 +56,18 @@ export function computeFrameNodes(
 				position: { x: rect.x, y: rect.y },
 				width: rect.width,
 				height: rect.height,
+				// Callbacks passés BRUTS (stables via useCallback côté hook).
+				// FrameNode les rappellera avec `frame.key` en premier arg — ça
+				// évite de recréer des closures inline `(r) => handler(key, r)`
+				// à chaque render, qui faisaient RF re-mesurer tous les frames
+				// en boucle (bug C.14 : re-mesures pendant un drag NodeResizer
+				// réinitialisaient son état interne → axes qui sautaient).
 				data: {
 					frame,
-					onResizeEnd: (r: FrameRect) => onFrameResizeEnd(frame.key, r),
-					onRename: (label: string) => onFrameRename(frame.key, label),
-					onDelete: () => onFrameDelete(frame.key),
-					onFocus: () => onFrameFocus(frame.key)
+					onResizeEnd: onFrameResizeEnd,
+					onRename: onFrameRename,
+					onDelete: onFrameDelete,
+					onFocus: onFrameFocus
 				},
 				// Draggable pour déplacer le frame + ses tables ensemble
 				// (handler `onNodeDrag` applique le delta aux membres).
