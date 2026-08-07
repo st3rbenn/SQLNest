@@ -21,7 +21,7 @@
 		"README.md"
 	],
 	"scripts": {
-		"build": "esbuild src/bin.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/sqlnest.mjs --banner:js='#!/usr/bin/env node' --external:@noble/curves --external:@noble/hashes --external:@noble/ciphers --external:msgpackr --external:smol-toml --external:ws --external:postgres --external:mongodb --external:pg",
+		"build": "esbuild src/bin.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/sqlnest.mjs --banner:js='#!/usr/bin/env node' --external:@noble/curves --external:@noble/hashes --external:@noble/ciphers --external:msgpackr --external:smol-toml --external:ws --external:postgres --external:mongodb --external:pg --external:@inquirer/* --external:mute-stream --external:cli-width --external:@sindresorhus/is --external:signal-exit --external:yoctocolors-cjs",
 		"postbuild": "chmod +x dist/sqlnest.mjs",
 		"test": "vitest run",
 		"test:watch": "vitest",
@@ -29,6 +29,7 @@
 		"check": "biome check --write"
 	},
 	"dependencies": {
+		"@inquirer/prompts": "^8.5.2",
 		"@noble/ciphers": "^2.0.5",
 		"@noble/curves": "^2.3.0",
 		"@noble/hashes": "^2.3.0",

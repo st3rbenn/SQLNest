@@ -29,6 +29,9 @@ function mockPrompter(confirms: boolean[] = []): Prompter {
 				throw new Error("mockPrompter: confirm queue vide");
 			}
 			return next;
+		}),
+		select: vi.fn(async () => {
+			throw new Error("select() ne devrait pas être appelé dans revoke");
 		})
 	};
 }

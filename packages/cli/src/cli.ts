@@ -305,11 +305,18 @@ async function resolveCliConnectionName(
 		return entries[0]?.name ?? null;
 	}
 
-	// ≥2 DSN : prompt select. On liste + on demande un numéro. Le
-	// prompter défaut nécessite un TTY — non testable en unit, mais
-	// injectable côté io.prompter.
+	// ≥2 DSN : prompt select interactif (flèches ↑↓, Enter valide, Ctrl-C
+	// annule via `ExitPromptError`). Sur non-TTY (CI, stdin pipé), inquirer
+	// throw → fallback silencieux sur le prompt numéroté classique.
 	const prompter = ctx.io.prompter ?? defaultPrompter();
 	try {
+		if (process.stdin.isTTY === true) {
+			return await prompter.select({
+				message: "DSN à servir",
+				choices: entries.map((c) => ({ value: c.name, label: c.name }))
+			});
+		}
+		// Fallback non-TTY : prompt numéroté ligne par ligne.
 		ctx.stdout("▲ Plusieurs DSN locales configurées :");
 		for (let i = 0; i < entries.length; i++) {
 			ctx.stdout(`  ${i + 1}) ${entries[i]?.name}`);
@@ -573,8 +580,8 @@ function handleConnectError(
 const HELP_TEXT = `sqlnest — CLI SQLNest (tunnel local vers ta DB Postgres).
 
 Usage :
-  sqlnest connect                          Device flow interactif (prompt DSN si ≥2)
-  sqlnest connect --connection <name>      Force la DSN locale à servir (skip prompt)
+  sqlnest connect                          Device flow interactif (menu ↑↓ si ≥2 DSN)
+  sqlnest connect --connection <name>      Force la DSN locale à servir (skip menu)
   sqlnest connect --no-browser             Idem, sans ouverture browser
   sqlnest connect --token <sn> --name <n>  CI mode (Bearer sn_...)
   sqlnest logout --all                     Retire tous les tunnels locaux

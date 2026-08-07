@@ -43,6 +43,9 @@ function mockPrompter(responses: MockResponses): Prompter {
 				throw new Error("mockPrompter: confirm queue vide");
 			}
 			return next;
+		}),
+		select: vi.fn(async () => {
+			throw new Error("mockPrompter: select non stubé pour ce test");
 		})
 	};
 }

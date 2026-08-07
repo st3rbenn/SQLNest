@@ -24,12 +24,30 @@
  * intestable finement en unit test (validation manuelle CLI).
  */
 
-import { createInterface, type Interface as ReadlineInterface } from "node:readline";
+import {
+	createInterface,
+	type Interface as ReadlineInterface
+} from "node:readline";
+import { select } from "@inquirer/prompts";
+
+export interface SelectChoice<T> {
+	readonly value: T;
+	readonly label: string;
+	readonly description?: string;
+}
 
 export interface Prompter {
 	readonly line: (prompt: string) => Promise<string>;
 	readonly password: (prompt: string) => Promise<string>;
 	readonly confirm: (prompt: string) => Promise<boolean>;
+	/** Menu à navigation clavier (flèches ↑↓, Enter valide, Ctrl-C annule).
+	 *  Implémenté via `@inquirer/prompts` en TTY — sur non-TTY (CI, pipe),
+	 *  la lib throw explicitement, le caller peut retomber sur `line()`
+	 *  avec un prompt numéroté. */
+	readonly select: <T>(opts: {
+		readonly message: string;
+		readonly choices: readonly SelectChoice<T>[];
+	}) => Promise<T>;
 	/** Optionnel — le prompter par défaut détient un `readline.Interface`
 	 *  qu'il faut close en fin de commande. Les mocks n'en ont pas. */
 	readonly close?: () => void;
@@ -59,9 +77,27 @@ export function defaultPrompter(): Prompter {
 				rl.question(promptText, (answer) => resolve(answer));
 			});
 			const norm = ans.trim().toLowerCase();
-			return (
-				norm === "y" || norm === "yes" || norm === "o" || norm === "oui"
-			);
+			return norm === "y" || norm === "yes" || norm === "o" || norm === "oui";
+		},
+		select: async <T>(opts: {
+			readonly message: string;
+			readonly choices: readonly SelectChoice<T>[];
+		}): Promise<T> => {
+			// `@inquirer/prompts.select` — navigation clavier ↑↓ + Enter, Ctrl-C
+			// throw un `ExitPromptError` qu'on relaie brut au caller (le
+			// dispatcher CLI l'affiche + return 130 comme n'importe quel SIGINT).
+			// `terminal: false` du readline ci-dessus ne gêne pas inquirer :
+			// inquirer utilise process.stdin/stdout directement et gère son
+			// propre raw-mode le temps du prompt.
+			const value = await select({
+				message: opts.message,
+				choices: opts.choices.map((c) => ({
+					name: c.label,
+					value: c.value,
+					...(c.description !== undefined ? { description: c.description } : {})
+				}))
+			});
+			return value as T;
 		},
 		close: () => rl.close()
 	};

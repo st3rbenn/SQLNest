@@ -345,7 +345,12 @@ describe("runCli — connect: sélection DSN locale (C.13)", () => {
 			prompter: {
 				line,
 				password: async () => "",
-				confirm: async () => false
+				confirm: async () => false,
+				select: async () => {
+					throw new Error(
+						"select() ne devrait pas être appelé — TTY=false en tests"
+					);
+				}
 			},
 			// biome-ignore lint/suspicious/noExplicitAny: mock
 			connectFn: connectFn as any,
