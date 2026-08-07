@@ -2,6 +2,10 @@ import { schema as dbSchema } from "@sqlnest/db";
 import { type Auth, type BetterAuthOptions, betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import fp from "fastify-plugin";
+import {
+	createPersonalTeam,
+	defaultTeamNameForUser
+} from "../domains/teams/create";
 import { createHashedSessionStorage } from "./03-auth/hashedSessionStorage";
 
 // Regex top-level — Vite/Vitest injecte `process.env.BASE_URL = "/"` par
@@ -138,6 +142,15 @@ export default fp(
 				encryptOAuthTokens: true
 			},
 			// Policy C (suite) — annule les tokens OAuth avant insert/update en DB.
+			//
+			// ─── C.21.1 hook user.create.after ────────────────────────────
+			// À la signup (email/password OU OAuth premier login), on
+			// auto-crée la team « Personal » de l'user. `createPersonalTeam`
+			// est idempotent — si le fallback lazy de `/api/teams/me/default`
+			// a déjà couru en amont (race browser rapide), l'INSERT est
+			// skipé et on log juste. Une erreur ici est loggée mais
+			// N'ANNULE PAS le signup — la route `/api/teams/me/default`
+			// fera le rattrapage au premier fetch.
 			databaseHooks: {
 				account: {
 					create: {
@@ -165,6 +178,24 @@ export default fp(
 								scope: null
 							}
 						})
+					}
+				},
+				user: {
+					create: {
+						after: async (createdUser) => {
+							try {
+								await createPersonalTeam(
+									fastify.db,
+									createdUser.id,
+									defaultTeamNameForUser(createdUser.name)
+								);
+							} catch (err) {
+								fastify.log.error(
+									{ err, userId: createdUser.id },
+									"C.21.1 hook: failed to create personal team on signup — fallback lazy créera au premier fetch"
+								);
+							}
+						}
 					}
 				}
 			},

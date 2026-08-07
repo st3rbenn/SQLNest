@@ -147,11 +147,12 @@ export async function truncateCanvasAndAuth(
 	);
 }
 
-/** TRUNCATE des tables tunnel/API-token + auth. Utilisé par les tests
- * intégration du Bloc CLI + tunnel WSS (`domains/tunnels/*.int.test.ts`).
- * L'ordre explicite documente les tables métier ; le CASCADE via
- * `user.id` vide en réalité déjà `api_token`, `tunnel_pairing` et
- * `db_connection` (toutes FK-cascade → user). */
+/** TRUNCATE des tables tunnel/API-token + auth + team. Utilisé par les
+ * tests intégration du Bloc CLI + tunnel WSS (`domains/tunnels/*.int.test.ts`)
+ * et par les tests teams (C.21). L'ordre explicite documente les tables
+ * métier ; le CASCADE via `user.id` vide en réalité déjà `api_token`,
+ * `tunnel_pairing`, `team` et `db_connection` (toutes FK-cascade → user
+ * ou → team). */
 export async function truncateTunnelsAndAuth(
 	app: FastifyInstance
 ): Promise<void> {
@@ -162,6 +163,6 @@ export async function truncateTunnelsAndAuth(
 	}
 	assertTestDatabase();
 	await app.db.execute(
-		sql`TRUNCATE TABLE "db_connection", "tunnel_pairing", "api_token", "canvas_state", "session_kv", "session", "account", "verification", "user" RESTART IDENTITY CASCADE`
+		sql`TRUNCATE TABLE "db_connection", "tunnel_pairing", "api_token", "canvas_state", "team", "session_kv", "session", "account", "verification", "user" RESTART IDENTITY CASCADE`
 	);
 }

@@ -42,10 +42,7 @@ export async function putCanvasState(
 			payload
 		})
 		.onConflictDoUpdate({
-			target: [
-				dbSchema.canvasState.userId,
-				dbSchema.canvasState.connectionId
-			],
+			target: [dbSchema.canvasState.userId, dbSchema.canvasState.connectionId],
 			set: {
 				payload,
 				updatedAt: sql`now()`

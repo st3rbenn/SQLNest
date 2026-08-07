@@ -202,6 +202,42 @@ export const sessionKv = pgTable(
 	(t) => [index("session_kv_expires_at_idx").on(t.expiresAt)]
 );
 
+// ─── team ────────────────────────────────────────────────────────────────
+// Workspace de type Figma/Linear. Chaque user a AU MOINS une team «
+// Personal » auto-créée à la signup (owner unique = user), servant de
+// bucket par défaut pour ses `db_connection` + `canvas_state`. Les URLs
+// frontend deviennent team-scoped : `/team/:slug/*`.
+//
+// V1 : 1 team = 1 owner. Pas d'invitations, pas de rôles. La table
+// `team_membership` viendra plus tard (V2) — l'ownership porté par
+// `owner_id` reste la seule dimension d'accès pour le middleware.
+//
+// `slug` : UUID court opaque (6 hex, ~1.7e7 combos). Non-devinable, pas
+// de rename V1. La regex `[0-9a-f]{6}` est enforcée côté app (Zod des
+// routes) — un CHECK Postgres est overkill pour V1.
+//
+// Un `DELETE user` cascade → toutes ses teams → toutes ses
+// `db_connection` (via `team_id`) → toutes ses `tunnel_session` +
+// `canvas_state` rattachés. Isolation stricte quand un compte disparaît.
+export const team = pgTable(
+	"team",
+	{
+		id: uuid("id").defaultRandom().primaryKey(),
+		slug: text("slug").notNull().unique(),
+		name: text("name").notNull(),
+		ownerId: text("owner_id")
+			.notNull()
+			.references(() => user.id, { onDelete: "cascade" }),
+		createdAt: timestamp("created_at", { withTimezone: true })
+			.notNull()
+			.defaultNow()
+	},
+	(t) => [
+		// List des teams d'un user (sélecteur sidebar, redirect depuis `/`).
+		index("team_owner_id_idx").on(t.ownerId)
+	]
+);
+
 // ─── canvas_state ────────────────────────────────────────────────────────
 // Snapshot serveur du canvas d'un utilisateur pour UNE db_connection donnée.
 // Unique par (user_id, db_connection_id) — un canvas par connection.
@@ -482,6 +518,9 @@ export type NewAccount = typeof account.$inferInsert;
 
 export type Verification = typeof verification.$inferSelect;
 export type NewVerification = typeof verification.$inferInsert;
+
+export type Team = typeof team.$inferSelect;
+export type NewTeam = typeof team.$inferInsert;
 
 export type CanvasState = typeof canvasState.$inferSelect;
 export type NewCanvasState = typeof canvasState.$inferInsert;

@@ -19,10 +19,10 @@
  * les endpoints avec le connectionId retourné.
  */
 
-import { schema as dbSchema } from "@sqlnest/db";
 import { randomBytes } from "node:crypto";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { schema as dbSchema } from "@sqlnest/db";
 import { config as loadEnv } from "dotenv";
 import { sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
@@ -264,9 +264,7 @@ describe.skipIf(!DATABASE_URL)("/api/canvas-state integration", () => {
 			new Date(firstUpdatedAt).getTime()
 		);
 
-		const rows = await app.db.execute(
-			sql`SELECT payload FROM "canvas_state"`
-		);
+		const rows = await app.db.execute(sql`SELECT payload FROM "canvas_state"`);
 		expect(rows.length).toBe(1);
 		expect((rows[0] as { payload: unknown }).payload).toEqual({
 			version: 2,
@@ -342,8 +340,16 @@ describe.skipIf(!DATABASE_URL)("/api/canvas-state integration", () => {
 
 	// ─── 7. Isolation cross-user : Alice ne voit pas le canvas de Bob ─
 	test("un user ne peut pas lire le canvas d'un autre user", async () => {
-		const alice = await createTestUser(app, "alice-iso@ex.com", "pw-alice-1234567");
-		const bob = await createTestUser(app, "bob-iso@ex.com", "pw-bob-9876543210");
+		const alice = await createTestUser(
+			app,
+			"alice-iso@ex.com",
+			"pw-alice-1234567"
+		);
+		const bob = await createTestUser(
+			app,
+			"bob-iso@ex.com",
+			"pw-bob-9876543210"
+		);
 
 		const aliceConn = await createTestConnection(app, alice.userId, "alice-db");
 		const bobConn = await createTestConnection(app, bob.userId, "bob-db");

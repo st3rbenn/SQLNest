@@ -1,0 +1,187 @@
+/**
+ * Tests intégration C.21.1 — auto-création de la team « Personal » à la
+ * signup + idempotence de `createPersonalTeam`.
+ */
+
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { schema } from "@sqlnest/db";
+import { config as loadEnv } from "dotenv";
+import { eq } from "drizzle-orm";
+import type { FastifyInstance } from "fastify";
+import {
+	afterAll,
+	beforeAll,
+	beforeEach,
+	describe,
+	expect,
+	test
+} from "vitest";
+import { createTestApp, truncateTunnelsAndAuth } from "../../utils/testapp";
+import { createPersonalTeam, defaultTeamNameForUser } from "./create";
+import { TEAM_SLUG_REGEX } from "./slug";
+
+const rootEnv = resolve(
+	dirname(fileURLToPath(import.meta.url)),
+	"..",
+	"..",
+	"..",
+	"..",
+	"..",
+	".env"
+);
+loadEnv({ path: rootEnv, quiet: true });
+process.env.AUTH_SECRET =
+	process.env.AUTH_SECRET &&
+	!/changeme|replace|placeholder/i.test(process.env.AUTH_SECRET)
+		? process.env.AUTH_SECRET
+		: "test-secret-super-long-value-32-chars-min-XX";
+process.env.GOOGLE_CLIENT_ID ??= "";
+process.env.GITHUB_CLIENT_ID ??= "";
+process.env.BASE_URL = "http://localhost:4000";
+process.env.TRUSTED_ORIGINS ??= "http://localhost:3000";
+
+const DATABASE_URL = process.env.DATABASE_URL;
+
+async function signup(
+	app: FastifyInstance,
+	email: string,
+	password: string,
+	name?: string
+): Promise<{ userId: string }> {
+	const res = await app.inject({
+		method: "POST",
+		url: "/api/auth/sign-up/email",
+		headers: { "content-type": "application/json" },
+		payload: { email, password, name: name ?? email.split("@")[0] }
+	});
+	if (res.statusCode !== 200) {
+		throw new Error(`sign-up failed: ${res.statusCode} ${res.body}`);
+	}
+	const body = res.json() as { user?: { id?: string } };
+	// biome-ignore lint/style/noNonNullAssertion: sign-up returns user
+	return { userId: body.user!.id! };
+}
+
+describe.skipIf(!DATABASE_URL)("C.21.1 — team auto-signup", () => {
+	let app: FastifyInstance;
+
+	beforeAll(async () => {
+		app = createTestApp({ withAuth: true, withTunnelRegistry: true });
+		await app.ready();
+	});
+
+	afterAll(async () => {
+		await app.close();
+	});
+
+	beforeEach(async () => {
+		await truncateTunnelsAndAuth(app);
+	});
+
+	test("signup email/password → 1 team « name » auto-créée", async () => {
+		const { userId } = await signup(
+			app,
+			"alice-teams@example.com",
+			"alice-teams-alice-teams-1",
+			"Alice"
+		);
+		const teams = await app.db
+			.select()
+			.from(schema.team)
+			.where(eq(schema.team.ownerId, userId));
+		expect(teams.length).toBe(1);
+		const first = teams[0];
+		// biome-ignore lint/style/noNonNullAssertion: length checked
+		expect(first!.ownerId).toBe(userId);
+		// biome-ignore lint/style/noNonNullAssertion: length checked
+		expect(first!.name).toBe("Alice");
+		// biome-ignore lint/style/noNonNullAssertion: length checked
+		expect(first!.slug).toMatch(TEAM_SLUG_REGEX);
+	});
+
+	test("signup sans name → team « Personal »", async () => {
+		// L'API sign-up/email requiert un name — on force '' via un signup
+		// puis UPDATE direct pour simuler un user sans name (rare, mais le
+		// hook doit ne pas planter).
+		const { userId } = await signup(
+			app,
+			"noname@example.com",
+			"noname-noname-noname-noname"
+		);
+		// Remet name à vide + re-run le seed logic manuellement pour vérifier
+		// le fallback « Personal ».
+		await app.db
+			.update(schema.team)
+			.set({ name: defaultTeamNameForUser("") })
+			.where(eq(schema.team.ownerId, userId));
+		const t = await app.db
+			.select({ name: schema.team.name })
+			.from(schema.team)
+			.where(eq(schema.team.ownerId, userId))
+			.limit(1);
+		expect(t[0]?.name).toBe("Personal");
+	});
+
+	test("createPersonalTeam est idempotent (2 appels = 1 team)", async () => {
+		const { userId } = await signup(
+			app,
+			"idem@example.com",
+			"idem-idem-idem-idem-idem-1"
+		);
+		// Le hook a déjà créé la team. Ré-appel direct → même team retournée,
+		// pas de nouvelle row.
+		const before = await app.db
+			.select({ id: schema.team.id })
+			.from(schema.team)
+			.where(eq(schema.team.ownerId, userId));
+		const firstId = before[0]?.id;
+		expect(firstId).toBeDefined();
+		const result = await createPersonalTeam(app.db, userId, "Personal");
+		expect(result.wasCreated).toBe(false);
+		expect(result.teamId).toBe(firstId);
+		const after = await app.db
+			.select({ id: schema.team.id })
+			.from(schema.team)
+			.where(eq(schema.team.ownerId, userId));
+		expect(after.length).toBe(1);
+	});
+
+	test("DELETE user cascade → team supprimée", async () => {
+		const { userId } = await signup(
+			app,
+			"cascade@example.com",
+			"cascade-cascade-cascade-1"
+		);
+		const before = await app.db
+			.select()
+			.from(schema.team)
+			.where(eq(schema.team.ownerId, userId));
+		expect(before.length).toBe(1);
+		await app.db.delete(schema.user).where(eq(schema.user.id, userId));
+		const after = await app.db
+			.select()
+			.from(schema.team)
+			.where(eq(schema.team.ownerId, userId));
+		expect(after.length).toBe(0);
+	});
+
+	test("2 users signent → 2 teams isolées, slugs distincts", async () => {
+		const a = await signup(
+			app,
+			"iso-a@example.com",
+			"iso-a-iso-a-iso-a-iso-a-1"
+		);
+		const b = await signup(
+			app,
+			"iso-b@example.com",
+			"iso-b-iso-b-iso-b-iso-b-1"
+		);
+		const teams = await app.db.select().from(schema.team);
+		expect(teams.length).toBe(2);
+		const slugs = teams.map((t) => t.slug);
+		expect(new Set(slugs).size).toBe(2);
+		const owners = teams.map((t) => t.ownerId).sort();
+		expect(owners).toEqual([a.userId, b.userId].sort());
+	});
+});
