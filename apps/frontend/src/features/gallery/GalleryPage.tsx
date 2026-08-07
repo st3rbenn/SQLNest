@@ -104,6 +104,13 @@ const CARD_HOVER_CSS = `
 	background: hsla(0, 0%, 100%, 0.05);
 	color: var(--sqlnest-text-primary) !important;
 }
+.sqlnest-sidebar-item--active {
+	background: rgba(13, 153, 255, 0.12);
+	color: var(--sqlnest-text-primary) !important;
+}
+.sqlnest-sidebar-item--active:hover {
+	background: rgba(13, 153, 255, 0.16);
+}
 @keyframes sqlnest-skeleton-shimmer {
 	0% { background-position: 200% 0; }
 	100% { background-position: -200% 0; }
@@ -314,7 +321,7 @@ function Sidebar({
 				}}
 			>
 				<div
-					className="sqlnest-sidebar-item"
+					className="sqlnest-sidebar-item sqlnest-sidebar-item--active"
 					style={{
 						display: "flex",
 						alignItems: "center",
@@ -332,7 +339,7 @@ function Sidebar({
 						height={13}
 						viewBox="0 0 24 24"
 						fill="none"
-						stroke="var(--sqlnest-text-secondary)"
+						stroke="var(--sqlnest-accent)"
 						strokeWidth={2}
 						aria-hidden="true"
 					>
