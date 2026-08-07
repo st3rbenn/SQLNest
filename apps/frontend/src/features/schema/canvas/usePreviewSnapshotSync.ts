@@ -201,20 +201,47 @@ export function usePreviewSnapshotSync(
 	// fraîche même si le débounce n'a pas encore fire.
 	const pendingRef = useRef<PendingPush | null>(null);
 
-	// ─── Effet debounce push ──────────────────────────────────────────
+	// ─── Effet push : premier immédiat, suivants debounce ─────────────
+	// Le premier snapshot d'une session DOIT partir immédiatement : sinon
+	// l'user qui ouvre le canvas et quitte en < 1.5 s perd la preview
+	// (bug apollon_db 2026-08-07). Les changements suivants (drag, resize,
+	// frames) sont debounced normalement pour dedup les rafales.
 	useEffect(() => {
 		if (!enabled) return;
 		if (snapshot.nodes.length === 0) return;
 		if (serialized === lastSyncedRef.current) return;
 
-		if (timeoutRef.current !== null) {
-			window.clearTimeout(timeoutRef.current);
-		}
 		const pending: PendingPush = {
 			connectionId: opts.connectionId,
 			snapshot,
 			serialized
 		};
+
+		const isFirstSnapshotThisSession = lastSyncedRef.current === null;
+		if (isFirstSnapshotThisSession) {
+			// PUT immédiat — la preview de cette connection dans la gallery
+			// affichera un rendu fidèle même si l'user quitte tout de suite.
+			// On pose `lastSyncedRef` OPTIMISTE avant le PUT pour éviter que
+			// les renders suivants (avant que la promise settle) re-fire cet
+			// effet et ne PUT une deuxième fois.
+			lastSyncedRef.current = pending.serialized;
+			putPreviewSnapshot(pending.connectionId, pending.snapshot)
+				.then(() => {
+					void queryClient.invalidateQueries({
+						queryKey: ["db-connections"]
+					});
+				})
+				.catch(() => {
+					// Revert le baseline pour retry au prochain change.
+					lastSyncedRef.current = null;
+				});
+			return;
+		}
+
+		// Changements suivants : debounce classique.
+		if (timeoutRef.current !== null) {
+			window.clearTimeout(timeoutRef.current);
+		}
 		pendingRef.current = pending;
 		timeoutRef.current = window.setTimeout(() => {
 			timeoutRef.current = null;
@@ -224,8 +251,6 @@ export function usePreviewSnapshotSync(
 			putPreviewSnapshot(p.connectionId, p.snapshot)
 				.then(() => {
 					lastSyncedRef.current = p.serialized;
-					// Invalide `db-connections` pour que la gallery pick le
-					// nouveau snapshot. Pas urgent : le poll 5s le ferait aussi.
 					void queryClient.invalidateQueries({
 						queryKey: ["db-connections"]
 					});

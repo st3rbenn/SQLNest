@@ -126,10 +126,16 @@ export function MiniSchemaPreview({ connectionId, isOnline, snapshot }: Props) {
 	// user si complètes) OU ELK dense (buildPreviewLayout) qui diffère du
 	// buildLayout du canvas. Un canvas partiellement bougé + reste en ELK
 	// standard produisait deux vues incohérentes. Bug rapporté 2026-08-07.
+	//
+	// C.19 : quand CLI offline mais snapshot dispo, on garde la preview
+	// et on ajoute un badge « hors ligne » discret en top-right. L'user
+	// voit ce qu'il connaît + le status, au lieu d'un « CLI hors ligne »
+	// qui masque tout.
 	if (snapshot && snapshot.nodes.length > 0) {
 		return (
 			<div style={wrapperStyle}>
 				<PreviewSvgFromSnapshot snapshot={snapshot} />
+				{!isOnline ? <OfflineBadge /> : null}
 			</div>
 		);
 	}
@@ -162,6 +168,47 @@ export function MiniSchemaPreview({ connectionId, isOnline, snapshot }: Props) {
 	return (
 		<div style={wrapperStyle}>
 			<PreviewSvg schema={schema} connectionId={connectionId} />
+		</div>
+	);
+}
+
+/** Badge discret en top-right qui signale que le CLI n'est plus connecté,
+ *  affiché EN OVERLAY sur la preview snapshot pour ne pas la masquer.
+ *  Palette : dot orange (statut warning, pas erreur), pill semi-opaque
+ *  sur fond dark, texte minuscule. L'user comprend en un coup d'œil
+ *  « tu vois un snapshot, pas du live ». */
+function OfflineBadge(): React.ReactNode {
+	return (
+		<div
+			style={{
+				position: "absolute",
+				top: 8,
+				right: 8,
+				display: "inline-flex",
+				alignItems: "center",
+				gap: 5,
+				padding: "3px 8px",
+				borderRadius: 999,
+				background: "hsla(0, 0%, 0%, 0.55)",
+				border: "1px solid var(--sqlnest-border-subtle)",
+				fontSize: 10,
+				fontWeight: 600,
+				color: "var(--sqlnest-text-secondary)",
+				letterSpacing: "0.2px",
+				pointerEvents: "none",
+				backdropFilter: "blur(4px)"
+			}}
+			aria-label="CLI hors ligne — aperçu du dernier état connu"
+		>
+			<span
+				style={{
+					width: 5,
+					height: 5,
+					borderRadius: "50%",
+					background: "hsl(30, 90%, 55%)"
+				}}
+			/>
+			Hors ligne
 		</div>
 	);
 }
