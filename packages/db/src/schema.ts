@@ -326,6 +326,14 @@ export const tunnelPairing = pgTable(
 		// Persisté ici parce qu'il est copié dans `db_connection.name` au
 		// consume — évite un re-prompt.
 		deviceName: text("device_name"),
+		// Nom de la DSN locale que le CLI veut servir CETTE session (C.13).
+		// Distinct de `deviceName` (qui est le nom user-facing côté serveur)
+		// — ce champ sert UNIQUEMENT à scoper le fingerprint effectif :
+		// `SHA256(pubkey || "|" || cliConnectionName)`. Permet à un même
+		// install CLI (une seule keypair) de servir plusieurs DBs distinctes
+		// côté serveur, chacune ayant sa propre db_connection.
+		// NULL = CLI legacy (pré-C.13) → fingerprint = SHA256(pubkey) seul.
+		cliConnectionName: text("cli_connection_name"),
 		approvedAt: timestamp("approved_at", { withTimezone: true }),
 		consumedAt: timestamp("consumed_at", { withTimezone: true }),
 		expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),

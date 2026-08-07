@@ -70,6 +70,7 @@ export async function authenticatePairing(
 			.select({
 				userId: dbSchema.tunnelPairing.userId,
 				cliPubkey: dbSchema.tunnelPairing.cliPubkeyEd25519,
+				cliConnectionName: dbSchema.tunnelPairing.cliConnectionName,
 				deviceName: dbSchema.tunnelPairing.deviceName,
 				approvedAt: dbSchema.tunnelPairing.approvedAt,
 				consumedAt: dbSchema.tunnelPairing.consumedAt,
@@ -100,14 +101,15 @@ export async function authenticatePairing(
 			return { ok: false, reason: "signature_invalid" as const };
 		}
 
-		// Pairing idempotent (C.6) : si `(user_id, cli_fingerprint)` existe
-		// déjà, on RÉUTILISE la connection (canvas_state et positions
-		// préservés). Sinon INSERT normal. Le pré-check `(user_id, name)`
-		// à l'approve reste en place pour un new pairing avec un name libre ;
-		// pour un re-pairing (fingerprint match), le name saisi est ignoré.
+		// Pairing idempotent (C.6/C.13) : le fingerprint est SCOPÉ par la
+		// DSN locale du CLI (C.13) → un même install CLI peut avoir N
+		// db_connection distinctes, chacune identifiée par sa DSN locale.
+		// Si `(user_id, cli_fingerprint)` existe déjà → RÉUTILISE. Sinon
+		// INSERT normal.
 		const upsert = await upsertDbConnectionByFingerprint(tx, {
 			userId: row.userId,
 			cliPubkey: row.cliPubkey,
+			cliConnectionName: row.cliConnectionName,
 			name: row.deviceName,
 			engine: DEFAULT_ENGINE
 		});

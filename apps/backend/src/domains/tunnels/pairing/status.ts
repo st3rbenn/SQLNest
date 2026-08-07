@@ -27,7 +27,7 @@
 import { schema as dbSchema } from "@sqlnest/db";
 import { and, eq } from "drizzle-orm";
 import type { DbOrTx } from "../db";
-import { hashSha256Hex } from "./crypto";
+import { computeCliFingerprint } from "./crypto";
 import type { StatusPairingResponseT } from "./schema";
 
 export async function getPairingStatus(
@@ -42,7 +42,8 @@ export async function getPairingStatus(
 			consumedAt: dbSchema.tunnelPairing.consumedAt,
 			expiresAt: dbSchema.tunnelPairing.expiresAt,
 			deviceName: dbSchema.tunnelPairing.deviceName,
-			cliPubkey: dbSchema.tunnelPairing.cliPubkeyEd25519
+			cliPubkey: dbSchema.tunnelPairing.cliPubkeyEd25519,
+			cliConnectionName: dbSchema.tunnelPairing.cliConnectionName
 		})
 		.from(dbSchema.tunnelPairing)
 		.where(eq(dbSchema.tunnelPairing.code, codeCanonical))
@@ -53,11 +54,15 @@ export async function getPairingStatus(
 		return { status: "expired", deviceName: null, existingConnection: null };
 	}
 
-	// Lookup existingConnection quand un user est identifié — un seul
-	// SELECT sur l'index unique `(user_id, cli_fingerprint)`.
+	// Lookup existingConnection quand un user est identifié — fingerprint
+	// SCOPÉ par la DSN CLI (C.13) : SHA256(pubkey || "|" || connectionName)
+	// si le CLI a envoyé son nom local, sinon fingerprint legacy pubkey-only.
 	let existingConnection: { id: string; name: string } | null = null;
 	if (options.userId !== undefined) {
-		const fingerprint = hashSha256Hex(row.cliPubkey);
+		const fingerprint = computeCliFingerprint(
+			row.cliPubkey,
+			row.cliConnectionName
+		);
 		const existing = await db
 			.select({
 				id: dbSchema.dbConnection.id,

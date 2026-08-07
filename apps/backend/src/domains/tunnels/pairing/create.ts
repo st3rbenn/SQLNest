@@ -42,6 +42,7 @@ export interface CreatePairingResult {
 export async function createPairing(
 	db: DbOrTx,
 	cliPubkeyEd25519: string,
+	cliConnectionName: string | null = null,
 	nowMs: number = Date.now()
 ): Promise<CreatePairingResult> {
 	const canonical = generatePairingCode();
@@ -56,6 +57,7 @@ export async function createPairing(
 	await db.insert(dbSchema.tunnelPairing).values({
 		code: canonical,
 		cliPubkeyEd25519,
+		cliConnectionName,
 		expiresAt
 	});
 

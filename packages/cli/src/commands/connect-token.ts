@@ -23,6 +23,10 @@ export interface ConnectTokenOptions {
 	readonly bearerToken: string;
 	/** Nom explicite requis en CI (pas d'UI de sélection). */
 	readonly deviceName: string;
+	/** Nom de la DSN LOCALE à servir cette session (C.13). Envoyé au backend
+	 *  pour scoper le fingerprint et pilote `resolveLocalConnectionUrl` dans
+	 *  le serve loop. Peut être null en compat legacy single-DSN. */
+	readonly cliConnectionName?: string | null;
 
 	// Injection pour test.
 	readonly api?: ApiClient;
@@ -45,13 +49,18 @@ export async function connectWithToken(
 	const auth = await api.authenticateWithToken(
 		opts.bearerToken,
 		config.keypair.public,
-		opts.deviceName
+		opts.deviceName,
+		opts.cliConnectionName ?? null
 	);
 
 	// Le deviceName choisi par le user en CI est source de vérité pour le
 	// label local (contrairement au device flow où on prend le nom saisi
 	// dans /connect côté browser).
 	const label = opts.deviceName || opts.deviceLabelFallback || hostname();
+	// `connectionName` retourné pilote `resolveLocalConnectionUrl` dans le
+	// serve loop — DOIT être la DSN locale (pas le label serveur). Fallback
+	// sur label pour cas legacy single-DSN.
+	const localConnectionName = opts.cliConnectionName ?? label;
 	const entry: TunnelEntry = {
 		id: auth.tunnelId,
 		name: label,
@@ -66,6 +75,6 @@ export async function connectWithToken(
 		connectionId: auth.connectionId,
 		sessionToken: auth.token,
 		expiresAt: new Date(auth.expiresAt),
-		connectionName: label
+		connectionName: localConnectionName
 	};
 }

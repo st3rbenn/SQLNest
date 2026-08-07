@@ -42,7 +42,10 @@ import {
 	RevokeConnectionError
 } from "./commands/revoke-connection";
 import { serveTunnel as defaultServeTunnel } from "./commands/serve";
-import { LocalConnectionNotFoundError } from "./local-connections";
+import {
+	LocalConnectionNotFoundError,
+	loadLocalConnections
+} from "./local-connections";
 import { defaultPrompter, type Prompter } from "./prompts";
 
 const DEFAULT_API_URL = "http://localhost:4000";
@@ -115,6 +118,7 @@ async function runConnect(args: string[], ctx: RunContext): Promise<number> {
 		values: {
 			token?: string;
 			name?: string;
+			connection?: string;
 			"no-browser"?: boolean;
 		};
 	};
@@ -124,6 +128,7 @@ async function runConnect(args: string[], ctx: RunContext): Promise<number> {
 			options: {
 				token: { type: "string" },
 				name: { type: "string" },
+				connection: { type: "string" },
 				"no-browser": { type: "boolean" }
 			},
 			strict: true,
@@ -138,6 +143,23 @@ async function runConnect(args: string[], ctx: RunContext): Promise<number> {
 	const env = ctx.env ?? {};
 	const baseUrl = env.SQLNEST_API_URL ?? DEFAULT_API_URL;
 	const frontendUrl = env.SQLNEST_FRONTEND_URL ?? DEFAULT_FRONTEND_URL;
+
+	// ─── Résolution de la DSN locale à servir (C.13) ─────────────────
+	// Un même install CLI (une seule keypair) peut manager plusieurs DSN
+	// locales via `add-connection`. On envoie le nom choisi au backend :
+	// le fingerprint effectif est `SHA256(pubkey || "|" || cliConnectionName)`,
+	// donc chaque (CLI, DSN) devient une db_connection distincte côté
+	// serveur — sinon les 2 DSN collapse toutes sur la même db_connection.
+	let cliConnectionName: string | null;
+	try {
+		cliConnectionName = await resolveCliConnectionName(
+			parsed.values.connection,
+			ctx
+		);
+	} catch (err) {
+		ctx.stderr(`sqlnest connect: ${(err as Error).message}`);
+		return 2;
+	}
 
 	let sessionId: string;
 	let token: string;
@@ -156,7 +178,8 @@ async function runConnect(args: string[], ctx: RunContext): Promise<number> {
 			const result = await connectWithTokenFn({
 				baseUrl,
 				bearerToken: parsed.values.token,
-				deviceName: parsed.values.name
+				deviceName: parsed.values.name,
+				cliConnectionName
 			});
 			ctx.stdout(
 				`✓ Pairing CI OK : « ${result.connectionName} » — ${result.tunnelId}`
@@ -171,8 +194,12 @@ async function runConnect(args: string[], ctx: RunContext): Promise<number> {
 				baseUrl,
 				frontendUrl,
 				openBrowserOnDisplay: parsed.values["no-browser"] !== true,
+				cliConnectionName,
 				onCodeDisplayed: (info) => {
 					ctx.stdout("▲ SQLNest — device pairing");
+					if (cliConnectionName) {
+						ctx.stdout(`  DSN    : ${cliConnectionName}`);
+					}
 					ctx.stdout(`  Visite : ${info.connectUrl}`);
 					ctx.stdout(`  Code   : ${info.code}`);
 					ctx.stdout(
@@ -217,6 +244,80 @@ async function runConnect(args: string[], ctx: RunContext): Promise<number> {
 	} catch (err) {
 		ctx.stderr(`✗ Tunnel : ${(err as Error).message ?? String(err)}`);
 		return 1;
+	}
+}
+
+/**
+ * Résout la DSN LOCALE que `sqlnest connect` doit servir cette session (C.13).
+ *
+ * Ordre de priorité :
+ *   1. Flag `--connection <name>` explicite (validé contre le fichier).
+ *   2. Si une seule DSN est configurée localement → celle-ci automatiquement.
+ *   3. Si ≥2 DSN → prompt interactif "1) apollon  2) delphi > ".
+ *   4. Si 0 DSN → `null` (compat CLI legacy pré-C.13 — le tunnel utilisera
+ *      les env vars `SQLNEST_PG_URL` ou throw à la résolution).
+ *
+ * La valeur retournée est envoyée au backend au POST /pairings pour scoper
+ * le fingerprint effectif ET utilisée dans le serve loop pour matérialiser
+ * la DSN via `resolveLocalConnectionUrl`.
+ */
+async function resolveCliConnectionName(
+	explicit: string | undefined,
+	ctx: RunContext
+): Promise<string | null> {
+	const local = loadLocalConnections();
+	const entries = local?.connections ?? [];
+
+	if (explicit) {
+		if (entries.length === 0) {
+			throw new Error(
+				`--connection ${explicit} : aucune DSN configurée localement.\n` +
+					"Ajoute-en une : sqlnest add-connection --name " +
+					explicit
+			);
+		}
+		const match = entries.find((c) => c.name === explicit);
+		if (!match) {
+			const names = entries.map((c) => c.name).join(", ");
+			throw new Error(
+				`--connection ${explicit} : aucune entrée nommée « ${explicit} » ` +
+					`dans local-connections.toml. Connues : ${names}`
+			);
+		}
+		return match.name;
+	}
+
+	if (entries.length === 0) {
+		// Compat legacy — pas de DSN locale = mode env var. Le backend
+		// fallback à `hashSha256Hex(pubkey)` seul.
+		return null;
+	}
+	if (entries.length === 1) {
+		return entries[0]?.name ?? null;
+	}
+
+	// ≥2 DSN : prompt select. On liste + on demande un numéro. Le
+	// prompter défaut nécessite un TTY — non testable en unit, mais
+	// injectable côté io.prompter.
+	const prompter = ctx.io.prompter ?? defaultPrompter();
+	try {
+		ctx.stdout("▲ Plusieurs DSN locales configurées :");
+		for (let i = 0; i < entries.length; i++) {
+			ctx.stdout(`  ${i + 1}) ${entries[i]?.name}`);
+		}
+		while (true) {
+			const raw = await prompter.line("Choisis la DSN à servir [1] : ");
+			const trimmed = raw.trim();
+			const idx = trimmed === "" ? 1 : Number.parseInt(trimmed, 10);
+			if (Number.isInteger(idx) && idx >= 1 && idx <= entries.length) {
+				return entries[idx - 1]?.name ?? null;
+			}
+			ctx.stderr(
+				`Réponse invalide — tape un numéro entre 1 et ${entries.length}.`
+			);
+		}
+	} finally {
+		prompter.close?.();
 	}
 }
 
@@ -463,7 +564,8 @@ function handleConnectError(
 const HELP_TEXT = `sqlnest — CLI SQLNest (tunnel local vers ta DB Postgres).
 
 Usage :
-  sqlnest connect                          Device flow interactif
+  sqlnest connect                          Device flow interactif (prompt DSN si ≥2)
+  sqlnest connect --connection <name>      Force la DSN locale à servir (skip prompt)
   sqlnest connect --no-browser             Idem, sans ouverture browser
   sqlnest connect --token <sn> --name <n>  CI mode (Bearer sn_...)
   sqlnest logout --all                     Retire tous les tunnels locaux

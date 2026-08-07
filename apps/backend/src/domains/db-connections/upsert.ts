@@ -34,16 +34,22 @@
 import { schema as dbSchema } from "@sqlnest/db";
 import { and, eq, sql } from "drizzle-orm";
 import type { DbOrTx } from "../canvas-state/db";
-import { hashSha256Hex } from "../tunnels/pairing/crypto";
+import { computeCliFingerprint } from "../tunnels/pairing/crypto";
 
 export interface UpsertConnectionOptions {
 	readonly userId: string;
 	/** Pubkey Ed25519 du CLI — reçue en STRING (hex ou base64 selon le
-	 *  flow) et hashée telle quelle. Cohérent avec `hashSha256Hex(input)`
-	 *  qui est string-only. */
+	 *  flow). Utilisée avec `cliConnectionName` pour produire le fingerprint
+	 *  effectif via `computeCliFingerprint`. */
 	readonly cliPubkey: string;
-	/** Name saisi par l'user au pairing. Utilisé UNIQUEMENT si nouvelle
-	 *  connection ; ignoré si un fingerprint match. */
+	/** Nom de la DSN LOCALE au CLI (C.13). Utilisé UNIQUEMENT pour scoper
+	 *  le fingerprint effectif — permet à un même install CLI de gérer N
+	 *  db_connection distinctes côté serveur. `null` = CLI legacy pré-C.13,
+	 *  fingerprint = SHA256(pubkey) seul. */
+	readonly cliConnectionName: string | null;
+	/** Name saisi par l'user au pairing (côté serveur — apparaît dans la
+	 *  gallery). Utilisé UNIQUEMENT si nouvelle connection ; ignoré si un
+	 *  fingerprint match. */
 	readonly name: string;
 	readonly engine: string;
 }
@@ -65,7 +71,10 @@ export async function upsertDbConnectionByFingerprint(
 	tx: DbOrTx,
 	opts: UpsertConnectionOptions
 ): Promise<UpsertConnectionResult> {
-	const fingerprint = hashSha256Hex(opts.cliPubkey);
+	const fingerprint = computeCliFingerprint(
+		opts.cliPubkey,
+		opts.cliConnectionName
+	);
 
 	// 1. Lookup fingerprint existant pour cet user.
 	const existing = await tx

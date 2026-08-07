@@ -22,7 +22,18 @@ const ED25519_SIG_HEX = /^[0-9a-fA-F]{128}$/;
 export const CreatePairingBody = z.object({
 	cliPubkeyEd25519: z
 		.string()
-		.regex(ED25519_PUBKEY_HEX, "Ed25519 pubkey doit être 64 chars hex")
+		.regex(ED25519_PUBKEY_HEX, "Ed25519 pubkey doit être 64 chars hex"),
+	/** Nom de la DSN locale que ce CLI veut servir cette session (C.13).
+	 *  Optionnel pour compat avec les CLI legacy (pré-C.13) qui n'envoient
+	 *  rien → le backend fallback à un fingerprint pubkey-only.
+	 *  Un CLI récent DOIT l'envoyer quand plusieurs DSN sont configurées
+	 *  localement pour éviter les collisions côté serveur. */
+	cliConnectionName: z
+		.string()
+		.trim()
+		.min(1, "Le nom de connection CLI ne peut pas être vide")
+		.max(100, "Nom trop long (max 100)")
+		.optional()
 });
 z.globalRegistry.add(CreatePairingBody, { id: "CreatePairingBody" });
 export type CreatePairingBodyT = z.infer<typeof CreatePairingBody>;
@@ -142,7 +153,16 @@ export const AuthenticateTokenBody = z.object({
 		.string()
 		.trim()
 		.min(1, "Le nom est requis")
+		.max(100, "Nom trop long (max 100)"),
+	/** Nom de la DSN locale au CLI (C.13). Utilisé pour scoper le
+	 *  fingerprint : SHA256(pubkey || "|" || cliConnectionName). Optionnel
+	 *  pour compat CLI legacy. */
+	cliConnectionName: z
+		.string()
+		.trim()
+		.min(1, "Le nom de connection CLI ne peut pas être vide")
 		.max(100, "Nom trop long (max 100)")
+		.optional()
 });
 z.globalRegistry.add(AuthenticateTokenBody, { id: "AuthenticateTokenBody" });
 export type AuthenticateTokenBodyT = z.infer<typeof AuthenticateTokenBody>;

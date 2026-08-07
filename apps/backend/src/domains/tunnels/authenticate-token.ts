@@ -60,18 +60,21 @@ export async function authenticateTunnelWithToken(
 	clearBearerToken: string,
 	cliPubkeyEd25519: string,
 	deviceName: string,
+	cliConnectionName: string | null = null,
 	nowMs: number = Date.now()
 ): Promise<AuthenticateTokenResult> {
 	// Étape 1 — valider le Bearer et bumper last_used_at.
 	const auth = await authenticateBearer(db, clearBearerToken, nowMs);
 	if (auth == null) return { ok: false, reason: "invalid_token" as const };
 
-	// Étape 2 — upsert db_connection (pairing idempotent C.6 sur fingerprint)
-	// + INSERT tunnel_session, dans une transaction atomique.
+	// Étape 2 — upsert db_connection (pairing idempotent C.6/C.13 sur
+	// fingerprint scopé) + INSERT tunnel_session, dans une transaction
+	// atomique.
 	return db.transaction(async (tx) => {
 		const upsert = await upsertDbConnectionByFingerprint(tx, {
 			userId: auth.userId,
 			cliPubkey: cliPubkeyEd25519,
+			cliConnectionName,
 			name: deviceName,
 			engine: DEFAULT_ENGINE
 		});

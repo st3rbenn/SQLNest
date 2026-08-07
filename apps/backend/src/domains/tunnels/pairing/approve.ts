@@ -20,7 +20,7 @@
 import { schema as dbSchema } from "@sqlnest/db";
 import { and, eq } from "drizzle-orm";
 import type { DbOrTx } from "../db";
-import { hashSha256Hex } from "./crypto";
+import { computeCliFingerprint } from "./crypto";
 
 export type ApproveFailureReason =
 	| "not_found"
@@ -51,7 +51,8 @@ export async function approvePairing(
 				approvedAt: dbSchema.tunnelPairing.approvedAt,
 				consumedAt: dbSchema.tunnelPairing.consumedAt,
 				expiresAt: dbSchema.tunnelPairing.expiresAt,
-				cliPubkey: dbSchema.tunnelPairing.cliPubkeyEd25519
+				cliPubkey: dbSchema.tunnelPairing.cliPubkeyEd25519,
+				cliConnectionName: dbSchema.tunnelPairing.cliConnectionName
 			})
 			.from(dbSchema.tunnelPairing)
 			.where(eq(dbSchema.tunnelPairing.code, codeCanonical))
@@ -67,12 +68,14 @@ export async function approvePairing(
 			return { ok: false, reason: "expired" as const };
 		}
 
-		// C.7 — Lookup db_connection existante par fingerprint. Si match, on
-		// autofill le deviceName avec le nom existant : le tunnel_pairing
-		// portera le vrai nom qui sera réutilisé au /authenticate → aucun
-		// silent-ignore de la saisie user, l'UI /connect a déjà caché le
-		// champ dans ce cas.
-		const fingerprint = hashSha256Hex(row.cliPubkey);
+		// C.7 — Lookup db_connection existante par fingerprint SCOPÉ (C.13 :
+		// SHA256(pubkey || "|" || cliConnectionName) si le CLI a envoyé son
+		// nom local, sinon legacy pubkey-only). Si match, on autofill le
+		// deviceName avec le nom existant côté serveur.
+		const fingerprint = computeCliFingerprint(
+			row.cliPubkey,
+			row.cliConnectionName
+		);
 		const existing = await tx
 			.select({
 				id: dbSchema.dbConnection.id,

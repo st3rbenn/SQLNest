@@ -1,0 +1,1 @@
+ALTER TABLE "tunnel_pairing" ADD COLUMN "cli_connection_name" text;

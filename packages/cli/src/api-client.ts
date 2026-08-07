@@ -65,7 +65,10 @@ export interface AuthenticateResult {
 // ─── API client ───────────────────────────────────────────────────────
 
 export interface ApiClient {
-	createPairing(cliPubkeyEd25519: string): Promise<CreatePairingResult>;
+	createPairing(
+		cliPubkeyEd25519: string,
+		cliConnectionName?: string | null
+	): Promise<CreatePairingResult>;
 	getPairingStatus(code: string): Promise<StatusPairingResult>;
 	authenticatePairing(
 		code: string,
@@ -74,7 +77,8 @@ export interface ApiClient {
 	authenticateWithToken(
 		bearerToken: string,
 		cliPubkeyEd25519: string,
-		deviceName: string
+		deviceName: string,
+		cliConnectionName?: string | null
 	): Promise<AuthenticateResult>;
 }
 
@@ -119,10 +123,18 @@ export function createApiClient(
 	}
 
 	return {
-		async createPairing(cliPubkeyEd25519: string) {
-			const data = (await jsonPost("/api/tunnels/pairings", {
-				cliPubkeyEd25519
-			})) as CreatePairingResult;
+		async createPairing(
+			cliPubkeyEd25519: string,
+			cliConnectionName: string | null = null
+		) {
+			const body: Record<string, string> = { cliPubkeyEd25519 };
+			if (cliConnectionName != null && cliConnectionName !== "") {
+				body.cliConnectionName = cliConnectionName;
+			}
+			const data = (await jsonPost(
+				"/api/tunnels/pairings",
+				body
+			)) as CreatePairingResult;
 			return data;
 		},
 
@@ -146,13 +158,16 @@ export function createApiClient(
 		async authenticateWithToken(
 			bearerToken: string,
 			cliPubkeyEd25519: string,
-			deviceName: string
+			deviceName: string,
+			cliConnectionName: string | null = null
 		) {
-			const data = (await jsonPost(
-				"/api/tunnels/authenticate-token",
-				{ cliPubkeyEd25519, deviceName },
-				{ authorization: `Bearer ${bearerToken}` }
-			)) as AuthenticateResult;
+			const body: Record<string, string> = { cliPubkeyEd25519, deviceName };
+			if (cliConnectionName != null && cliConnectionName !== "") {
+				body.cliConnectionName = cliConnectionName;
+			}
+			const data = (await jsonPost("/api/tunnels/authenticate-token", body, {
+				authorization: `Bearer ${bearerToken}`
+			})) as AuthenticateResult;
 			return data;
 		}
 	};

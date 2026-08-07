@@ -57,6 +57,13 @@
       "when": 1786060100000,
       "tag": "0007_db_connection_fingerprint_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1786113441126,
+      "tag": "0008_pairing_cli_connection_name",
+      "breakpoints": true
     }
   ]
 }

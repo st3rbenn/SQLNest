@@ -141,6 +141,40 @@ export function hashSha256Hex(input: string): string {
 }
 
 /**
+ * Fingerprint effectif d'un pairing CLI (C.13).
+ *
+ * Un install CLI a une seule keypair Ed25519 globale, mais peut manager
+ * plusieurs DSN locales via `add-connection`. Sans scoping, le lookup
+ * `(user, fingerprint = SHA256(pubkey))` collapse toutes ces DSN sur une
+ * seule db_connection côté serveur (bug remonté par Anthonin le 2026-08-07).
+ *
+ * Solution : le fingerprint inclut le NOM de la DSN CLI que ce pairing
+ * sert. Deux `add-connection` (apollon / delphi) sur le même CLI produiront
+ * 2 fingerprints distincts → 2 db_connection distinctes côté serveur.
+ *
+ * Compat : un CLI legacy (pré-C.13) qui n'envoie pas de `cliConnectionName`
+ * → fingerprint = SHA256(pubkey) seul. Ses db_connection existantes
+ * restent identifiables tel quel (aucune migration destructive).
+ *
+ * ─── Anti-collision par length-prefix implicite ──────────────────────
+ * On pré-hash la pubkey (SHA-256 → 64 chars hex, longueur FIXE) avant de
+ * concaténer le nom. Cette longueur fixe agit comme un séparateur strict :
+ * `(pubA, "b|c")` et `(pubA + "b", "c")` produiraient le même string si on
+ * concaténait naïvement `pubkey + "|" + name`, mais donneront des hashs
+ * distincts ici car les 2 pubkeys pré-hashées diffèrent en tête.
+ */
+export function computeCliFingerprint(
+	cliPubkey: string,
+	cliConnectionName: string | null | undefined
+): string {
+	if (cliConnectionName == null || cliConnectionName === "") {
+		return hashSha256Hex(cliPubkey);
+	}
+	const pubkeyHash = hashSha256Hex(cliPubkey);
+	return hashSha256Hex(`${pubkeyHash}|${cliConnectionName}`);
+}
+
+/**
  * Génère un token opaque de session tunnel : `tn_<64 hex>`. Le clair
  * n'est renvoyé qu'une fois (au CLI, en réponse de /authenticate) et
  * ne repasse jamais par le backend — le storage garde uniquement

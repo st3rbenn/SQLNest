@@ -95,6 +95,15 @@ export interface ConnectOptions {
 	readonly frontendUrl: string;
 	/** Ouvrir le browser automatiquement (défaut: true). */
 	readonly openBrowserOnDisplay?: boolean;
+	/** Nom de la DSN LOCALE à servir cette session (C.13). Envoyé au backend
+	 *  au POST /pairings et utilisé pour :
+	 *   - scoper le fingerprint effectif SHA256(pubkey || "|" || cliConnectionName)
+	 *     → un même install CLI peut servir N DBs distinctes côté serveur
+	 *   - identifier la DSN à ouvrir localement via `resolveLocalConnectionUrl`
+	 *     dans le serve loop.
+	 *  Requis dès que ≥2 `add-connection` sont configurées (sélection UI
+	 *  côté CLI). Pour une seule connection locale, tolérable en optionnel. */
+	readonly cliConnectionName?: string | null;
 
 	// Callbacks — le CLI wrapper affiche via ces hooks.
 	readonly onCodeDisplayed?: (info: CodeDisplayInfo) => void;
@@ -122,7 +131,13 @@ export async function connect(opts: ConnectOptions): Promise<ConnectResult> {
 	const { config, privateKeyHex } = loadOrInitConfig();
 
 	// ─── 2. POST /pairings ────────────────────────────────────────────
-	const pairing = await api.createPairing(config.keypair.public);
+	// On envoie `cliConnectionName` : le backend l'utilise pour scoper le
+	// fingerprint effectif → un même install CLI peut servir N DBs
+	// distinctes côté serveur (C.13).
+	const pairing = await api.createPairing(
+		config.keypair.public,
+		opts.cliConnectionName ?? null
+	);
 	const connectUrl = `${opts.frontendUrl.replace(TRAILING_SLASH_RE, "")}/connect`;
 	const expiresAt = new Date(pairing.expiresAt);
 
@@ -169,8 +184,15 @@ export async function connect(opts: ConnectOptions): Promise<ConnectResult> {
 	const auth = await api.authenticatePairing(pairing.code, signature);
 
 	// ─── 6. Persist tunnel entry dans config ──────────────────────────
+	// Le `deviceLabel` sert d'affichage dans la config locale + la config
+	// des tunnels historiques.
 	const deviceLabel =
 		lastStatus.deviceName ?? opts.deviceLabelFallback ?? hostname();
+	// Le `connectionName` retourné pilote `resolveLocalConnectionUrl` dans
+	// le serve loop — il DOIT être le nom de la DSN LOCALE, pas le nom
+	// serveur (les 2 peuvent diverger si l'user renomme sa db_connection).
+	// Fallback sur deviceLabel pour les cas legacy (single-DSN sans C.13).
+	const localConnectionName = opts.cliConnectionName ?? deviceLabel;
 	const tunnelEntry: TunnelEntry = {
 		id: auth.tunnelId,
 		name: deviceLabel,
@@ -188,7 +210,7 @@ export async function connect(opts: ConnectOptions): Promise<ConnectResult> {
 		connectionId: auth.connectionId,
 		sessionToken: auth.token,
 		expiresAt: new Date(auth.expiresAt),
-		connectionName: deviceLabel
+		connectionName: localConnectionName
 	};
 }
 

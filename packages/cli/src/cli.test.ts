@@ -5,9 +5,33 @@
  * tout side-effect. Aucun test filesystem/network réel.
  */
 
-import { describe, expect, test, vi } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { runCli } from "./cli";
 import { ConnectError } from "./commands/connect";
+import { addLocalConnection } from "./local-connections";
+
+// Isolation obligatoire : `runCli connect` (via `resolveCliConnectionName`
+// C.13) lit `~/.sqlnest/local-connections.toml`. Sans isolation, un dev qui
+// a des DSN locales verrait le CLI prompt (≥2 entrées) → tests bloqués
+// en TTY-wait. On pointe `SQLNEST_CONFIG_DIR` vers un tmpdir vide.
+let originalConfigDir: string | undefined;
+let tmpConfigDir: string;
+beforeEach(() => {
+	originalConfigDir = process.env.SQLNEST_CONFIG_DIR;
+	tmpConfigDir = mkdtempSync(join(tmpdir(), "sqlnest-cli-test-"));
+	process.env.SQLNEST_CONFIG_DIR = tmpConfigDir;
+});
+afterEach(() => {
+	if (originalConfigDir === undefined) {
+		delete process.env.SQLNEST_CONFIG_DIR;
+	} else {
+		process.env.SQLNEST_CONFIG_DIR = originalConfigDir;
+	}
+	rmSync(tmpConfigDir, { recursive: true, force: true });
+});
 
 function captureIO(): {
 	stdout: (line: string) => void;
@@ -162,6 +186,124 @@ describe("runCli — connect (device flow)", () => {
 		});
 		expect(code).toBe(1);
 		expect(io.err.some((l) => /expiré|expire/i.test(l))).toBe(true);
+	});
+});
+
+describe("runCli — connect: sélection DSN locale (C.13)", () => {
+	test("0 DSN locale → cliConnectionName null (compat legacy)", async () => {
+		const io = captureIO();
+		const connectFn = vi.fn().mockResolvedValue({
+			tunnelId: "id",
+			connectionId: "c",
+			sessionToken: "tn_x",
+			expiresAt: new Date(),
+			connectionName: "x"
+		});
+		await runCli(["connect"], {
+			stdout: io.stdout,
+			stderr: io.stderr,
+			// biome-ignore lint/suspicious/noExplicitAny: mock
+			connectFn: connectFn as any,
+			// biome-ignore lint/suspicious/noExplicitAny: mock stub
+			serveTunnelFn: (async () => 0) as any
+		});
+		expect(connectFn.mock.calls[0]?.[0].cliConnectionName).toBeNull();
+	});
+
+	test("1 seule DSN locale → sélection auto (pas de prompt)", async () => {
+		addLocalConnection({
+			name: "apollon",
+			url: "postgres://user:pass@localhost:5432/apollon"
+		});
+		const io = captureIO();
+		const connectFn = vi.fn().mockResolvedValue({
+			tunnelId: "id",
+			connectionId: "c",
+			sessionToken: "tn_x",
+			expiresAt: new Date(),
+			connectionName: "apollon"
+		});
+		await runCli(["connect"], {
+			stdout: io.stdout,
+			stderr: io.stderr,
+			// biome-ignore lint/suspicious/noExplicitAny: mock
+			connectFn: connectFn as any,
+			// biome-ignore lint/suspicious/noExplicitAny: mock stub
+			serveTunnelFn: (async () => 0) as any
+		});
+		expect(connectFn.mock.calls[0]?.[0].cliConnectionName).toBe("apollon");
+	});
+
+	test("--connection <name> explicite → pris tel quel", async () => {
+		addLocalConnection({
+			name: "apollon",
+			url: "postgres://x/apollon"
+		});
+		addLocalConnection({
+			name: "delphi",
+			url: "postgres://x/delphi"
+		});
+		const io = captureIO();
+		const connectFn = vi.fn().mockResolvedValue({
+			tunnelId: "id",
+			connectionId: "c",
+			sessionToken: "tn_x",
+			expiresAt: new Date(),
+			connectionName: "delphi"
+		});
+		await runCli(["connect", "--connection", "delphi"], {
+			stdout: io.stdout,
+			stderr: io.stderr,
+			// biome-ignore lint/suspicious/noExplicitAny: mock
+			connectFn: connectFn as any,
+			// biome-ignore lint/suspicious/noExplicitAny: mock stub
+			serveTunnelFn: (async () => 0) as any
+		});
+		expect(connectFn.mock.calls[0]?.[0].cliConnectionName).toBe("delphi");
+	});
+
+	test("--connection <inconnu> → 2 + message d'erreur listant les DSN connues", async () => {
+		addLocalConnection({ name: "apollon", url: "postgres://x/apollon" });
+		addLocalConnection({ name: "delphi", url: "postgres://x/delphi" });
+		const io = captureIO();
+		const code = await runCli(["connect", "--connection", "olympia"], {
+			stdout: io.stdout,
+			stderr: io.stderr
+		});
+		expect(code).toBe(2);
+		expect(io.err.some((l) => /olympia/.test(l))).toBe(true);
+		expect(io.err.some((l) => /apollon.*delphi|delphi.*apollon/.test(l))).toBe(
+			true
+		);
+	});
+
+	test("≥2 DSN + prompter injecté → prompt appelé, réponse '2' → 2e DSN", async () => {
+		addLocalConnection({ name: "apollon", url: "postgres://x/apollon" });
+		addLocalConnection({ name: "delphi", url: "postgres://x/delphi" });
+		const io = captureIO();
+		const connectFn = vi.fn().mockResolvedValue({
+			tunnelId: "id",
+			connectionId: "c",
+			sessionToken: "tn_x",
+			expiresAt: new Date(),
+			connectionName: "delphi"
+		});
+		const line = vi.fn().mockResolvedValue("2");
+		await runCli(["connect"], {
+			stdout: io.stdout,
+			stderr: io.stderr,
+			prompter: {
+				line,
+				password: async () => "",
+				confirm: async () => false
+			},
+			// biome-ignore lint/suspicious/noExplicitAny: mock
+			connectFn: connectFn as any,
+			// biome-ignore lint/suspicious/noExplicitAny: mock stub
+			serveTunnelFn: (async () => 0) as any
+		});
+		expect(line).toHaveBeenCalledOnce();
+		expect(connectFn.mock.calls[0]?.[0].cliConnectionName).toBe("delphi");
 	});
 });
 

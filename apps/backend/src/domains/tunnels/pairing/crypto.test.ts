@@ -19,6 +19,7 @@
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { describe, expect, test } from "vitest";
 import {
+	computeCliFingerprint,
 	formatPairingCode,
 	generatePairingCode,
 	generateSessionToken,
@@ -147,6 +148,45 @@ describe("hashSha256Hex", () => {
 
 	test("inputs différents → outputs différents", () => {
 		expect(hashSha256Hex("foo")).not.toBe(hashSha256Hex("bar"));
+	});
+});
+
+describe("computeCliFingerprint", () => {
+	const pubkey = "a".repeat(64); // hex Ed25519 valide
+
+	test("compat legacy — sans connectionName → SHA256(pubkey) seul", () => {
+		expect(computeCliFingerprint(pubkey, null)).toBe(hashSha256Hex(pubkey));
+		expect(computeCliFingerprint(pubkey, undefined)).toBe(
+			hashSha256Hex(pubkey)
+		);
+		expect(computeCliFingerprint(pubkey, "")).toBe(hashSha256Hex(pubkey));
+	});
+
+	test("scopé — pré-hash pubkey puis SHA256(hash || '|' || name)", () => {
+		const scoped = computeCliFingerprint(pubkey, "apollon");
+		expect(scoped).toHaveLength(64);
+		expect(scoped).toMatch(/^[0-9a-f]{64}$/);
+		expect(scoped).not.toBe(hashSha256Hex(pubkey));
+		const expected = hashSha256Hex(`${hashSha256Hex(pubkey)}|apollon`);
+		expect(scoped).toBe(expected);
+	});
+
+	test("noms distincts → fingerprints distincts", () => {
+		expect(computeCliFingerprint(pubkey, "apollon")).not.toBe(
+			computeCliFingerprint(pubkey, "delphi")
+		);
+	});
+
+	test("pubkeys distinctes → fingerprints distincts (même name)", () => {
+		expect(computeCliFingerprint("a".repeat(64), "apollon")).not.toBe(
+			computeCliFingerprint("b".repeat(64), "apollon")
+		);
+	});
+
+	test("(pubA, 'b|c') ≠ (pubA + 'b', 'c') — length-prefix implicite via pré-hash", () => {
+		expect(computeCliFingerprint("aa", "b|c")).not.toBe(
+			computeCliFingerprint("aa|b", "c")
+		);
 	});
 });
 
