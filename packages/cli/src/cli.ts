@@ -235,7 +235,16 @@ async function runConnect(args: string[], ctx: RunContext): Promise<number> {
 				if (event.kind === "op-received") {
 					ctx.stdout(`  ← ${event.op}`);
 				} else if (event.kind === "op-completed") {
-					ctx.stdout(`  → ${event.op} ${event.ok ? "✓" : "✗"}`);
+					if (event.ok) {
+						ctx.stdout(`  → ${event.op} ✓`);
+					} else {
+						// Sortie sur stderr pour rester grep-able / redirigeable.
+						// Le message d'erreur (ex `connect ECONNREFUSED 127.0.0.1:5432`
+						// quand Postgres est down) évite le classique "✗ opaque" qui
+						// force le user à ouvrir les logs backend pour diagnostiquer.
+						const suffix = event.error ? ` — ${event.error}` : "";
+						ctx.stderr(`  → ${event.op} ✗${suffix}`);
+					}
 				} else if (event.kind === "error") {
 					ctx.stderr(`  ! ${event.message}`);
 				}

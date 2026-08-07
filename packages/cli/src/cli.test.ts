@@ -173,6 +173,56 @@ describe("runCli — connect (device flow)", () => {
 		expect(io.err.some((l) => /Timeout/i.test(l))).toBe(true);
 	});
 
+	test("op-completed avec error → message surfacé sur stderr après le ✗", async () => {
+		const io = captureIO();
+		const connectFn = vi.fn().mockResolvedValue({
+			tunnelId: "id",
+			connectionId: "c",
+			sessionToken: "tn_x",
+			expiresAt: new Date(),
+			connectionName: "x"
+		});
+		// serveTunnel stub qui simule 2 ops : une réussie, une échouée avec
+		// message d'erreur (DB down). Vérifie que le suffix `— <error>` apparaît
+		// uniquement sur la ✗ (et sur stderr, pas stdout).
+		const serveTunnelFn = vi.fn().mockImplementation(async (opts: unknown) => {
+			const { onEvent } = opts as {
+				onEvent: (e: {
+					kind: string;
+					op?: string;
+					ok?: boolean;
+					error?: string;
+				}) => void;
+			};
+			onEvent({ kind: "op-received", op: "introspect" });
+			onEvent({ kind: "op-completed", op: "introspect", ok: true });
+			onEvent({ kind: "op-received", op: "introspect" });
+			onEvent({
+				kind: "op-completed",
+				op: "introspect",
+				ok: false,
+				error: "connect ECONNREFUSED 127.0.0.1:5432"
+			});
+			return 0;
+		});
+		await runCli(["connect"], {
+			stdout: io.stdout,
+			stderr: io.stderr,
+			// biome-ignore lint/suspicious/noExplicitAny: mock
+			connectFn: connectFn as any,
+			// biome-ignore lint/suspicious/noExplicitAny: mock stub
+			serveTunnelFn: serveTunnelFn as any
+		});
+		// La ligne succès reste sur stdout, sans suffix.
+		expect(io.out.some((l) => l === "  → introspect ✓")).toBe(true);
+		// La ligne échec passe sur stderr AVEC le message d'erreur.
+		expect(
+			io.err.some(
+				(l) => l === "  → introspect ✗ — connect ECONNREFUSED 127.0.0.1:5432"
+			)
+		).toBe(true);
+	});
+
 	test("ConnectError expired → message spécifique", async () => {
 		const io = captureIO();
 		const connectFn = vi.fn().mockRejectedValue(new ConnectError("expired"));

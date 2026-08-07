@@ -39,7 +39,16 @@ export interface ServeTunnelOptions {
 export type ServeEvent =
 	| { kind: "connecting" }
 	| { kind: "op-received"; op: RemoteOp["op"] }
-	| { kind: "op-completed"; op: RemoteOp["op"]; ok: boolean }
+	| {
+			kind: "op-completed";
+			op: RemoteOp["op"];
+			ok: boolean;
+			/** Message court, peuplé UNIQUEMENT quand `ok === false` — remonte
+			 *  la cause de l'échec (ex: "connect ECONNREFUSED 127.0.0.1:5432"
+			 *  quand Postgres est down) pour que le CLI puisse l'afficher au
+			 *  user au lieu d'un opaque « ✗ ». */
+			error?: string;
+	  }
 	| { kind: "error"; message: string };
 
 /**
@@ -70,7 +79,8 @@ export async function serveTunnel(opts: ServeTunnelOptions): Promise<number> {
 				opts.onEvent?.({
 					kind: "op-completed",
 					op: op.op,
-					ok: result.ok
+					ok: result.ok,
+					...(result.ok ? {} : { error: result.error })
 				});
 				return result;
 			} catch (err) {
@@ -78,7 +88,8 @@ export async function serveTunnel(opts: ServeTunnelOptions): Promise<number> {
 				opts.onEvent?.({
 					kind: "op-completed",
 					op: op.op,
-					ok: false
+					ok: false,
+					error: message
 				});
 				return { ok: false, error: message };
 			}
