@@ -17,6 +17,7 @@ import {
 	IconTerminal2
 } from "@tabler/icons-react";
 import { useNavigate } from "@tanstack/react-router";
+import { useCanvasData } from "./canvas/CanvasContext";
 import { colorFor } from "./colors";
 import type { Frame } from "./frames";
 import type { SchemaModel } from "./schema-model";
@@ -74,11 +75,13 @@ export function CanvasContextMenu({
 	onRemoveFromFrame
 }: Props) {
 	const navigate = useNavigate();
+	const { connectionId } = useCanvasData();
 	const collection = schema.collections.find((c) => c.name === tableName);
 
 	const goToEditor = (source: string, autorun: boolean) => {
 		void navigate({
-			to: "/query",
+			to: "/canvas/$connId/query",
+			params: { connId: connectionId },
 			search: autorun ? { source, autorun: 1 } : { source }
 		});
 	};

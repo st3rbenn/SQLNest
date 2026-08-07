@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
 	boolean,
 	index,
@@ -16,6 +17,13 @@ import {
  *   - `canvasState` (Phase 1) : snapshot serveur du canvas d'un utilisateur.
  *   - `user`, `session`, `account`, `verification` (Phase 2) : tables auth
  *     alignées sur le schéma canonique de Better Auth (adapter Drizzle).
+ *   - `apiToken`, `tunnelPairing`, `dbConnection` (Bloc CLI + tunnel WSS) :
+ *     device-flow pairing du CLI, API tokens CI, et catalogue des connexions
+ *     nommées par user. **Aucune** de ces tables ne stocke un DSN, un mot de
+ *     passe, une URL ou tout autre secret de connexion DB — les credentials
+ *     vivent uniquement dans la config du CLI local. Cette règle est ancrée
+ *     par le test `db-schema-guard.test.ts` (échec CI si une colonne
+ *     `password/url/dsn/secret/…` est introduite).
  *
  * NOTE : le schéma auth ci-dessous est écrit MANUELLEMENT et doit rester
  * synchronisé avec la version canonique de Better Auth. Si Better Auth
@@ -195,24 +203,30 @@ export const sessionKv = pgTable(
 );
 
 // ─── canvas_state ────────────────────────────────────────────────────────
-// Snapshot serveur du canvas d'un utilisateur pour un schéma donné.
-// Unique par (user_id, schema_signature) — un canvas par (user × schéma).
-// La FK vers `user.id` cascade la suppression : si un compte est supprimé,
-// ses canvases persistés le sont aussi.
+// Snapshot serveur du canvas d'un utilisateur pour UNE db_connection donnée.
+// Unique par (user_id, db_connection_id) — un canvas par connection.
+//
+// Historique : la clé était (user_id, schema_signature) avec signature =
+// `${engine}:${sortedCollectionNames}`. Ce modèle a échoué dès qu'un user
+// avait 2 connections partageant le même set de tables (ex: deux DBs Prisma
+// avec `_prisma_migrations, agency, cabinet…`) → collision, écrasement
+// mutuel silencieux. Le refacto vers `/canvas/$connId` a rendu le bug visible :
+// chaque navigation entre canvases écrasait le précédent. Rattaché à
+// `db_connection.id` = 1 canvas par connection, isolation stricte.
+//
+// FK cascade : DELETE user OU DELETE db_connection → canvas orphelin
+// supprimé. Le user peut ainsi révoquer/re-pair une db_connection sans
+// laisser de residu.
 export const canvasState = pgTable(
 	"canvas_state",
 	{
 		id: uuid("id").defaultRandom().primaryKey(),
-		// CASCADE = choix RGPD conscient. Un DELETE user supprime définitivement
-		// ses canvases persistés. Aucun soft-delete ni archivage : c'est le
-		// modèle "droit à l'oubli" par défaut. En prod, toute suppression
-		// massive de users doit passer par un job avec backup préalable
-		// (dump table `canvas_state` filtré sur les user_id concernés).
 		userId: text("user_id")
 			.notNull()
 			.references(() => user.id, { onDelete: "cascade" }),
-		// Signature du schéma introspecté — format `${engine}:${sortedCollectionNames}`.
-		schemaSignature: text("schema_signature").notNull(),
+		connectionId: uuid("db_connection_id")
+			.notNull()
+			.references(() => dbConnection.id, { onDelete: "cascade" }),
 		// Payload complet : positions tables, sizes, frames, hidden, drawer
 		// width, etc. Sérialisé côté frontend, opaque côté backend.
 		payload: jsonb("payload").notNull(),
@@ -224,7 +238,218 @@ export const canvasState = pgTable(
 			.defaultNow()
 	},
 	(t) => [
-		uniqueIndex("canvas_user_schema_unique").on(t.userId, t.schemaSignature)
+		uniqueIndex("canvas_user_connection_unique").on(t.userId, t.connectionId)
+	]
+);
+
+// ─── api_token ───────────────────────────────────────────────────────────
+// API tokens persistants pour CI/scripts. Le CLI s'authentifie en mode
+// non-interactif via `sqlnest connect --token sn_XXXX` — au lieu du device
+// flow, il envoie le Bearer directement à `POST /tunnels/authenticate`.
+//
+// Storage :
+//   - `hash` = SHA-256(clearToken) — 64 chars hex. On ne stocke JAMAIS le
+//     clear ; le dashboard n'affiche le token qu'une fois à la génération.
+//   - `prefix` = les 8 premiers chars du clear (ex `sn_1a2b`) — sert
+//     uniquement à identifier visuellement le token dans la liste
+//     (l'utilisateur reconnaît "c'est mon token GitHub Actions").
+//   - `last_used_at` : bumpé à chaque `authenticate` réussi — surface les
+//     tokens dormants dans le dashboard.
+//   - `revoked_at` : soft-revoke (pour garder l'historique). Un token
+//     révoqué ne peut plus s'authentifier (WHERE `revoked_at IS NULL`).
+export const apiToken = pgTable(
+	"api_token",
+	{
+		id: uuid("id").defaultRandom().primaryKey(),
+		userId: text("user_id")
+			.notNull()
+			.references(() => user.id, { onDelete: "cascade" }),
+		// Nom humain fourni à la création (ex "GitHub Actions", "Local dev CI").
+		// Longueur libre côté DB — bornée côté Zod dans la route.
+		name: text("name").notNull(),
+		// SHA-256 hex du clair. Unique — la validation d'un Bearer devient un
+		// seul lookup indexé.
+		hash: text("hash").notNull(),
+		// Les 8 premiers chars du clair (`sn_XXXX`). Sert à l'affichage
+		// dashboard uniquement — pas un secret.
+		prefix: text("prefix").notNull(),
+		lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+		createdAt: timestamp("created_at", { withTimezone: true })
+			.notNull()
+			.defaultNow(),
+		revokedAt: timestamp("revoked_at", { withTimezone: true })
+	},
+	(t) => [
+		// Lookup principal : valider un Bearer entrant → hit indexé unique.
+		uniqueIndex("api_token_hash_unique").on(t.hash),
+		// Un user ne peut pas avoir 2 tokens ACTIFS du même nom (mais peut
+		// réutiliser un nom après révocation). Index partiel.
+		uniqueIndex("api_token_user_name_active_unique")
+			.on(t.userId, t.name)
+			.where(sql`${t.revokedAt} IS NULL`),
+		// List des tokens d'un user (dashboard settings) — sans cet index,
+		// seq scan.
+		index("api_token_user_id_idx").on(t.userId)
+	]
+);
+
+// ─── tunnel_pairing ──────────────────────────────────────────────────────
+// Code éphémère du device flow CLI ↔ compte user (pattern GitHub/Vercel).
+// Cycle de vie :
+//   1. CLI POST /tunnels/pairings → INSERT row avec `code`, `cli_pubkey`
+//      et `expires_at = now + 5min`. `user_id` NULL (pas encore lié).
+//   2. User visite /connect, tape le code → POST /pairings/:code/approve.
+//      Le backend renseigne `user_id` + `device_name` + `approved_at`.
+//   3. CLI poll `/status` détecte `approved_at`, envoie POST /authenticate
+//      avec `signature_of_code`. Backend valide contre `cli_pubkey` (Ed25519),
+//      génère une `tunnel_session` (voir Bloc 2), marque `consumed_at`.
+//
+// Une fois `consumed_at` renseigné, le code est mort — pas de réutilisation.
+// `expires_at` court (5 min) protège contre le brute-force du code.
+//
+// **`code` en PK** : c'est déjà un identifiant unique généré par le backend
+// (ex `ABCD-1234` en base32 sans confusables), pas besoin d'uuid parallèle.
+export const tunnelPairing = pgTable(
+	"tunnel_pairing",
+	{
+		code: text("code").primaryKey(),
+		// NULL avant approve, renseigné à l'étape 2 du device flow.
+		userId: text("user_id").references(() => user.id, {
+			onDelete: "cascade"
+		}),
+		// Clé publique Ed25519 du CLI en hex (64 chars). C'est ce qui lie le
+		// code au CLI qui l'a émis : au /authenticate, la signature du code
+		// doit vérifier contre cette clé. Impossible pour un attaquant qui
+		// voit passer le code de s'authentifier sans la privkey correspondante.
+		cliPubkeyEd25519: text("cli_pubkey_ed25519").notNull(),
+		// Nom humain du device (fourni à l'approve, sinon fallback UA côté UI).
+		// Persisté ici parce qu'il est copié dans `db_connection.name` au
+		// consume — évite un re-prompt.
+		deviceName: text("device_name"),
+		approvedAt: timestamp("approved_at", { withTimezone: true }),
+		consumedAt: timestamp("consumed_at", { withTimezone: true }),
+		expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+		createdAt: timestamp("created_at", { withTimezone: true })
+			.notNull()
+			.defaultNow()
+	},
+	(t) => [
+		// Purge cron des pairings expirés (`DELETE WHERE expires_at < now`).
+		index("tunnel_pairing_expires_at_idx").on(t.expiresAt),
+		// Retrouver les pairings d'un user (dashboard "devices en attente").
+		index("tunnel_pairing_user_id_idx").on(t.userId)
+	]
+);
+
+// ─── db_connection ───────────────────────────────────────────────────────
+// Catalogue des connexions DB nommées par un user. **Aucune** creds ici :
+// la connexion vit sur la machine du CLI (env vars, `.sqlnest.local.toml`).
+// Le backend garde uniquement le mapping `name → CLI` pour router les
+// queries entrantes du browser vers le bon tunnel.
+//
+// `cli_fingerprint` = SHA-256 hex de la `cli_pubkey_ed25519` du CLI qui a
+// créé la connexion. Sert à :
+//   - dashboard : "cette connection est liée au CLI de la machine X"
+//   - reconnect : quand un CLI revient online, on retrouve ses connections.
+//
+// `engine_metadata` : jsonb libre pour version PG, list of schemas, capabilities
+// remontées par l'introspection. Enrichi au premier ping/introspect.
+//
+// **Contrainte de sécurité forte** : cette table N'AURA JAMAIS de colonne
+// `password`, `url`, `dsn`, `host`, `port`, `dbname`. Test-guard :
+// `db-schema-guard.test.ts`.
+export const dbConnection = pgTable(
+	"db_connection",
+	{
+		id: uuid("id").defaultRandom().primaryKey(),
+		userId: text("user_id")
+			.notNull()
+			.references(() => user.id, { onDelete: "cascade" }),
+		// Nom court choisi par le user au moment du pairing (`prod`, `staging`,
+		// `local`). Unique par user.
+		name: text("name").notNull(),
+		// SHA-256 hex (64 chars) de la clé pub Ed25519 du CLI. Pas la pub elle-
+		// même — on garde uniquement l'empreinte pour l'audit dashboard, la
+		// pub complète vit dans `tunnel_pairing` (jusqu'au consume) puis dans
+		// la session tunnel active (Bloc 2).
+		cliFingerprint: text("cli_fingerprint").notNull(),
+		// Ex "postgres". Enum côté app, texte libre côté DB pour permettre
+		// l'ajout de Mongo (v1.1) sans migration.
+		engine: text("engine").notNull(),
+		// Version PG, list of schemas, capabilities. Enrichi au ping/introspect.
+		engineMetadata: jsonb("engine_metadata").notNull().default({}),
+		// Bump à chaque nouvelle session tunnel (le CLI se reconnecte).
+		activeSince: timestamp("active_since", { withTimezone: true })
+			.notNull()
+			.defaultNow(),
+		// Bump à chaque frame reçue du CLI. Indicateur "CLI online" côté UI.
+		lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+		createdAt: timestamp("created_at", { withTimezone: true })
+			.notNull()
+			.defaultNow()
+	},
+	(t) => [
+		// Un user ne peut pas avoir 2 connexions nommées "prod".
+		uniqueIndex("db_connection_user_name_unique").on(t.userId, t.name),
+		// Pairing idempotent (C.6) : un CLI = une db_connection. Deux
+		// pairings depuis la même keypair Ed25519 (donc même fingerprint)
+		// pour le même user → UPDATE au lieu d'INSERT. Sans cet index, un
+		// relance `sqlnest connect` créait un doublon avec un nom
+		// différent, et le canvas_state rattaché à l'ancienne devenait
+		// invisible.
+		uniqueIndex("db_connection_user_fingerprint_unique").on(
+			t.userId,
+			t.cliFingerprint
+		),
+		// Retrouver toutes les connexions liées à un CLI (reconnect, audit).
+		index("db_connection_fingerprint_idx").on(t.cliFingerprint),
+		// List du user (dashboard).
+		index("db_connection_user_id_idx").on(t.userId)
+	]
+);
+
+// ─── tunnel_session ──────────────────────────────────────────────────────
+// Session éphémère du tunnel WS. Un `db_connection` est le device durable
+// (persiste tant que l'user ne le révoque pas) ; une `tunnel_session` est
+// le token opaque que le CLI présente à `WSS /tunnels/:tunnel_id` (et aux
+// futures introspections /queries). Analogue de `api_token` mais scopé
+// à une connection (pas à un user directement).
+//
+// Storage :
+//   - `hash` = SHA-256(clearToken) — 64 chars hex. Le clair (`tn_<32 hex>`)
+//     n'est jamais persisté. Un dump DB expose au max des hashes SHA-256.
+//   - `expires_at` : TTL long par défaut (30j côté domain) — le CLI est
+//     un usage semi-permanent, contrairement à une session browser.
+//   - `revoked_at` : soft-revoke pour audit, filtered via WHERE
+//     `revoked_at IS NULL AND expires_at > now()`.
+//   - `last_used_at` : bumpé à chaque frame WS validée — surface les
+//     sessions dormantes dans le dashboard.
+//
+// La FK vers `db_connection` cascade : si un user supprime une connexion
+// (dashboard), toutes ses sessions ouvertes deviennent inutilisables.
+export const tunnelSession = pgTable(
+	"tunnel_session",
+	{
+		id: uuid("id").defaultRandom().primaryKey(),
+		connectionId: uuid("connection_id")
+			.notNull()
+			.references(() => dbConnection.id, { onDelete: "cascade" }),
+		// SHA-256 hex du clair. Unique — la validation d'un token WS = 1 lookup.
+		hash: text("hash").notNull(),
+		createdAt: timestamp("created_at", { withTimezone: true })
+			.notNull()
+			.defaultNow(),
+		expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+		revokedAt: timestamp("revoked_at", { withTimezone: true }),
+		lastUsedAt: timestamp("last_used_at", { withTimezone: true })
+	},
+	(t) => [
+		// Lookup principal : valider le token présenté par le CLI.
+		uniqueIndex("tunnel_session_hash_unique").on(t.hash),
+		// List des sessions d'une connexion (dashboard, révocation en masse).
+		index("tunnel_session_connection_id_idx").on(t.connectionId),
+		// Purge cron des sessions expirées.
+		index("tunnel_session_expires_at_idx").on(t.expiresAt)
 	]
 );
 
@@ -243,3 +468,15 @@ export type NewVerification = typeof verification.$inferInsert;
 
 export type CanvasState = typeof canvasState.$inferSelect;
 export type NewCanvasState = typeof canvasState.$inferInsert;
+
+export type ApiToken = typeof apiToken.$inferSelect;
+export type NewApiToken = typeof apiToken.$inferInsert;
+
+export type TunnelPairing = typeof tunnelPairing.$inferSelect;
+export type NewTunnelPairing = typeof tunnelPairing.$inferInsert;
+
+export type DbConnection = typeof dbConnection.$inferSelect;
+export type NewDbConnection = typeof dbConnection.$inferInsert;
+
+export type TunnelSession = typeof tunnelSession.$inferSelect;
+export type NewTunnelSession = typeof tunnelSession.$inferInsert;

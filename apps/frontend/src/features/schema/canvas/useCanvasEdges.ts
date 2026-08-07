@@ -1,10 +1,10 @@
 import type { Edge } from "@xyflow/react";
 import { useMemo } from "react";
-import type { LayoutResult } from "../layout";
-import { NODE_WIDTH, nodeHeight } from "../TableNode";
-import type { TableNodeType } from "../TableNode";
 import { bestHandles, type Side, spreadOffsets } from "../edgeRouting";
 import type { InteractiveEdgeData } from "../InteractiveEdge";
+import type { LayoutResult } from "../layout";
+import type { TableNodeType } from "../TableNode";
+import { NODE_WIDTH, nodeHeight } from "../TableNode";
 import type { AnchorMap } from "../useEdgeAnchors";
 
 // Couleurs edges (dupliquées volontairement avec SchemaCanvas pour éviter
@@ -188,14 +188,7 @@ export function useCanvasEdges(
 				}
 			};
 		});
-	}, [
-		base,
-		focusId,
-		hiddenIds,
-		nodeById,
-		edgeAnchors.overrides,
-		anchorApi
-	]);
+	}, [base, focusId, hiddenIds, nodeById, edgeAnchors.overrides, anchorApi]);
 
 	return { displayEdges, neighbors };
 }

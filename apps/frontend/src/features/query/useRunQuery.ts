@@ -11,30 +11,34 @@ export interface QueryResult {
 }
 
 export interface RunQueryInput {
-	readonly engine: "postgres" | "mongodb";
+	readonly connectionId: string;
 	readonly source: string;
-	/** Schéma cible Postgres (défaut `public`) ; omis si vide. */
-	readonly schema?: string;
 }
 
 async function runQueryRequest(input: RunQueryInput): Promise<QueryResult> {
-	// N'envoie `schema` que s'il est renseigné (le backend applique `public`).
-	const body = input.schema
-		? input
-		: { engine: input.engine, source: input.source };
-	const res = await fetch(`${API_BASE}/query`, {
-		method: "POST",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify(body)
-	});
-	const data = (await res.json()) as QueryResult & { message?: string };
+	const res = await fetch(
+		`${API_BASE}/api/db-connections/${encodeURIComponent(input.connectionId)}/query`,
+		{
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			credentials: "include",
+			body: JSON.stringify({ source: input.source })
+		}
+	);
+	const data = (await res.json().catch(() => ({}))) as QueryResult & {
+		message?: string;
+	};
 	if (!res.ok) {
 		throw new Error(data.message ?? `Erreur HTTP ${res.status}`);
 	}
 	return data;
 }
 
-/** Exécute une requête SNQL via la route backend `/query`. */
+/**
+ * Exécute une requête SNQL via le proxy tunnel
+ * `POST /api/db-connections/:id/query`. Le moteur (postgres / mongodb) est
+ * porté par la connection elle-même — plus besoin de le passer ici.
+ */
 export function useRunQuery() {
 	return useMutation({ mutationFn: runQueryRequest });
 }

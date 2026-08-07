@@ -1,5 +1,10 @@
 import { FrameBadge } from "@sqlnest/design-system";
-import { type Node, type NodeProps, NodeResizer } from "@xyflow/react";
+import {
+	type Node,
+	type NodeProps,
+	NodeResizer,
+	useStore
+} from "@xyflow/react";
 import { useState } from "react";
 import type { Frame, FrameRect } from "./frames";
 
@@ -54,6 +59,16 @@ export function FrameNode({
 	// vraiment changé (et n'est pas vide après trim).
 	const [editing, setEditing] = useState(false);
 	const [draft, setDraft] = useState(frame.label);
+
+	// Zoom-invariance du badge — Figma-like : le badge doit garder une
+	// taille lisible EN PIXELS ÉCRAN quelle que soit la profondeur de zoom.
+	// Sans compensation, RF scale le node → à zoom 0.3 le texte 11px devient
+	// 3.3px illisible ; à zoom 3 il gonfle à 33px et prend toute la vue.
+	// On applique `transform: scale(1/zoom)` cappé à [0.5, 2.5] pour éviter
+	// des extrêmes visuellement violents (zoom out infini ferait un badge
+	// démesuré vs son cadre, zoom in un badge invisible).
+	const zoom = useStore((s) => s.transform[2]);
+	const badgeScale = Math.max(0.5, Math.min(2.5, 1 / zoom));
 
 	const startEdit = () => {
 		setDraft(frame.label);
@@ -123,13 +138,20 @@ export function FrameNode({
 					pointerEvents: "none"
 				}}
 			>
+				{/* biome-ignore lint/a11y/noNoninteractiveElementInteractions: badge cliquable dans un node RF — pas d'équivalent clavier pour un click sur un node canvas. */}
+				{/* biome-ignore lint/a11y/useKeyWithClickEvents: idem */}
+				{/* biome-ignore lint/a11y/noStaticElementInteractions: idem */}
 				<div
 					style={{
 						position: "absolute",
 						top: -13,
 						left: 12,
 						pointerEvents: "auto",
-						cursor: editing ? "text" : "grab"
+						cursor: editing ? "text" : "grab",
+						// Ancre au coin haut-gauche du frame, puis compense le
+						// zoom RF — le badge garde sa taille écran (Figma-like).
+						transform: `scale(${badgeScale})`,
+						transformOrigin: "0 100%"
 					}}
 					onClick={(e) => {
 						// Clic gauche sur le badge → ouvre FrameDetails (liste des

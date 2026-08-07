@@ -51,9 +51,10 @@ const MAX_JSON_DEPTH = 10;
  * Note : le TRUSTED_ORIGINS lu ici est le MÊME que celui utilisé par
  * Better Auth (env var) et CORS (index.ts). Une seule source de vérité.
  */
-function assertTrustedOrigin(request: FastifyRequest, reply: FastifyReply):
-	| { ok: true }
-	| { ok: false; response: FastifyReply } {
+function assertTrustedOrigin(
+	request: FastifyRequest,
+	reply: FastifyReply
+): { ok: true } | { ok: false; response: FastifyReply } {
 	const origin = request.headers.origin;
 	if (typeof origin !== "string" || origin.length === 0) {
 		request.log.warn(
@@ -95,16 +96,18 @@ z.globalRegistry.add(ErrorResponse, { id: "CanvasErrorResponse" });
  * le routing reverse-proxy production (une seule règle `/api → backend`).
  *
  * ─── Endpoints (tous protégés par requireUser → 401 si non authentifié) ─
- *   GET    /api/canvas-state?signature=<sig>   → 200 { payload, updatedAt } | 404
- *   PUT    /api/canvas-state                    → 200 { updatedAt }
- *                                                 body: { signature, payload }
- *   DELETE /api/canvas-state?signature=<sig>   → 204
+ *   GET    /api/canvas-state?connectionId=<uuid>  → 200 { payload, updatedAt } | 404
+ *   PUT    /api/canvas-state                       → 200 { updatedAt }
+ *                                                    body: { connectionId, payload }
+ *   DELETE /api/canvas-state?connectionId=<uuid>  → 204
  *
  * ─── Autorisation ──────────────────────────────────────────────────────
  * Toujours filtrer par `request.user.id` — un user ne peut jamais lire ni
- * modifier le canvas d'un autre user, même en connaissant sa signature.
+ * modifier le canvas d'un autre user, même en connaissant un connectionId.
  * L'isolation est enforced au niveau de la clause WHERE des queries
- * (getCanvasState, putCanvasState, delCanvasState).
+ * (getCanvasState, putCanvasState, delCanvasState). La FK cascade sur
+ * `db_connection` garantit que si un user révoque sa connection, son
+ * canvas orphelin disparait aussi.
  *
  * ─── Body opaque ───────────────────────────────────────────────────────
  * Le contenu de `payload` n'est PAS validé structurellement (z.record(
@@ -134,7 +137,7 @@ export default function canvasStateRoute(fastify: FastifyInstance) {
 				const row = await getCanvasState(
 					fastify.db,
 					request.user.id,
-					request.query.signature
+					request.query.connectionId
 				);
 				if (row == null) {
 					return reply.code(404).send({ message: "Canvas introuvable" });
@@ -191,7 +194,7 @@ export default function canvasStateRoute(fastify: FastifyInstance) {
 					const existing = await getCanvasState(
 						tx,
 						userId,
-						request.body.signature
+						request.body.connectionId
 					);
 					if (existing == null) {
 						const total = await countCanvasStates(tx, userId);
@@ -203,7 +206,7 @@ export default function canvasStateRoute(fastify: FastifyInstance) {
 					return await putCanvasState(
 						tx,
 						userId,
-						request.body.signature,
+						request.body.connectionId,
 						request.body.payload
 					);
 				});
@@ -242,7 +245,7 @@ export default function canvasStateRoute(fastify: FastifyInstance) {
 				await delCanvasState(
 					fastify.db,
 					request.user.id,
-					request.query.signature
+					request.query.connectionId
 				);
 				// 204 No Content — idempotent : renvoie 204 que la row ait
 				// existé ou pas (le state final est identique).

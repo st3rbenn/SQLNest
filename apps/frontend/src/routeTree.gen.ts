@@ -12,12 +12,14 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
 import { Route as AuthRouteImport } from './routes/_auth'
 import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated.index'
-import { Route as AuthenticatedQueryRouteImport } from './routes/_authenticated.query'
+import { Route as AuthenticatedConnectRouteImport } from './routes/_authenticated.connect'
 import { Route as AuthVerifyEmailRouteImport } from './routes/_auth.verify-email'
 import { Route as AuthSignupRouteImport } from './routes/_auth.signup'
 import { Route as AuthResetPasswordRouteImport } from './routes/_auth.reset-password'
 import { Route as AuthLoginRouteImport } from './routes/_auth.login'
 import { Route as AuthForgotPasswordRouteImport } from './routes/_auth.forgot-password'
+import { Route as AuthenticatedCanvasConnIdIndexRouteImport } from './routes/_authenticated.canvas.$connId.index'
+import { Route as AuthenticatedCanvasConnIdQueryRouteImport } from './routes/_authenticated.canvas.$connId.query'
 
 const AuthenticatedRoute = AuthenticatedRouteImport.update({
   id: '/_authenticated',
@@ -32,9 +34,9 @@ const AuthenticatedIndexRoute = AuthenticatedIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
-const AuthenticatedQueryRoute = AuthenticatedQueryRouteImport.update({
-  id: '/query',
-  path: '/query',
+const AuthenticatedConnectRoute = AuthenticatedConnectRouteImport.update({
+  id: '/connect',
+  path: '/connect',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
 const AuthVerifyEmailRoute = AuthVerifyEmailRouteImport.update({
@@ -62,6 +64,18 @@ const AuthForgotPasswordRoute = AuthForgotPasswordRouteImport.update({
   path: '/forgot-password',
   getParentRoute: () => AuthRoute,
 } as any)
+const AuthenticatedCanvasConnIdIndexRoute =
+  AuthenticatedCanvasConnIdIndexRouteImport.update({
+    id: '/canvas/$connId/',
+    path: '/canvas/$connId/',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
+const AuthenticatedCanvasConnIdQueryRoute =
+  AuthenticatedCanvasConnIdQueryRouteImport.update({
+    id: '/canvas/$connId/query',
+    path: '/canvas/$connId/query',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/forgot-password': typeof AuthForgotPasswordRoute
@@ -69,8 +83,10 @@ export interface FileRoutesByFullPath {
   '/reset-password': typeof AuthResetPasswordRoute
   '/signup': typeof AuthSignupRoute
   '/verify-email': typeof AuthVerifyEmailRoute
-  '/query': typeof AuthenticatedQueryRoute
+  '/connect': typeof AuthenticatedConnectRoute
   '/': typeof AuthenticatedIndexRoute
+  '/canvas/$connId/query': typeof AuthenticatedCanvasConnIdQueryRoute
+  '/canvas/$connId': typeof AuthenticatedCanvasConnIdIndexRoute
 }
 export interface FileRoutesByTo {
   '/forgot-password': typeof AuthForgotPasswordRoute
@@ -78,8 +94,10 @@ export interface FileRoutesByTo {
   '/reset-password': typeof AuthResetPasswordRoute
   '/signup': typeof AuthSignupRoute
   '/verify-email': typeof AuthVerifyEmailRoute
-  '/query': typeof AuthenticatedQueryRoute
+  '/connect': typeof AuthenticatedConnectRoute
   '/': typeof AuthenticatedIndexRoute
+  '/canvas/$connId/query': typeof AuthenticatedCanvasConnIdQueryRoute
+  '/canvas/$connId': typeof AuthenticatedCanvasConnIdIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -90,8 +108,10 @@ export interface FileRoutesById {
   '/_auth/reset-password': typeof AuthResetPasswordRoute
   '/_auth/signup': typeof AuthSignupRoute
   '/_auth/verify-email': typeof AuthVerifyEmailRoute
-  '/_authenticated/query': typeof AuthenticatedQueryRoute
+  '/_authenticated/connect': typeof AuthenticatedConnectRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
+  '/_authenticated/canvas/$connId/query': typeof AuthenticatedCanvasConnIdQueryRoute
+  '/_authenticated/canvas/$connId/': typeof AuthenticatedCanvasConnIdIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -101,8 +121,10 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/signup'
     | '/verify-email'
-    | '/query'
+    | '/connect'
     | '/'
+    | '/canvas/$connId/query'
+    | '/canvas/$connId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/forgot-password'
@@ -110,8 +132,10 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/signup'
     | '/verify-email'
-    | '/query'
+    | '/connect'
     | '/'
+    | '/canvas/$connId/query'
+    | '/canvas/$connId'
   id:
     | '__root__'
     | '/_auth'
@@ -121,8 +145,10 @@ export interface FileRouteTypes {
     | '/_auth/reset-password'
     | '/_auth/signup'
     | '/_auth/verify-email'
-    | '/_authenticated/query'
+    | '/_authenticated/connect'
     | '/_authenticated/'
+    | '/_authenticated/canvas/$connId/query'
+    | '/_authenticated/canvas/$connId/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -153,11 +179,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedIndexRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
-    '/_authenticated/query': {
-      id: '/_authenticated/query'
-      path: '/query'
-      fullPath: '/query'
-      preLoaderRoute: typeof AuthenticatedQueryRouteImport
+    '/_authenticated/connect': {
+      id: '/_authenticated/connect'
+      path: '/connect'
+      fullPath: '/connect'
+      preLoaderRoute: typeof AuthenticatedConnectRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
     '/_auth/verify-email': {
@@ -195,6 +221,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthForgotPasswordRouteImport
       parentRoute: typeof AuthRoute
     }
+    '/_authenticated/canvas/$connId/': {
+      id: '/_authenticated/canvas/$connId/'
+      path: '/canvas/$connId'
+      fullPath: '/canvas/$connId'
+      preLoaderRoute: typeof AuthenticatedCanvasConnIdIndexRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/canvas/$connId/query': {
+      id: '/_authenticated/canvas/$connId/query'
+      path: '/canvas/$connId/query'
+      fullPath: '/canvas/$connId/query'
+      preLoaderRoute: typeof AuthenticatedCanvasConnIdQueryRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
   }
 }
 
@@ -217,13 +257,17 @@ const AuthRouteChildren: AuthRouteChildren = {
 const AuthRouteWithChildren = AuthRoute._addFileChildren(AuthRouteChildren)
 
 interface AuthenticatedRouteChildren {
-  AuthenticatedQueryRoute: typeof AuthenticatedQueryRoute
+  AuthenticatedConnectRoute: typeof AuthenticatedConnectRoute
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
+  AuthenticatedCanvasConnIdQueryRoute: typeof AuthenticatedCanvasConnIdQueryRoute
+  AuthenticatedCanvasConnIdIndexRoute: typeof AuthenticatedCanvasConnIdIndexRoute
 }
 
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
-  AuthenticatedQueryRoute: AuthenticatedQueryRoute,
+  AuthenticatedConnectRoute: AuthenticatedConnectRoute,
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
+  AuthenticatedCanvasConnIdQueryRoute: AuthenticatedCanvasConnIdQueryRoute,
+  AuthenticatedCanvasConnIdIndexRoute: AuthenticatedCanvasConnIdIndexRoute,
 }
 
 const AuthenticatedRouteWithChildren = AuthenticatedRoute._addFileChildren(

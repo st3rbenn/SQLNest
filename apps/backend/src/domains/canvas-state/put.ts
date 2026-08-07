@@ -1,24 +1,25 @@
 import { schema as dbSchema } from "@sqlnest/db";
 import { sql } from "drizzle-orm";
 import type { DbOrTx } from "./db";
-import type { CanvasPayloadT, CanvasSignatureT } from "./schema";
+import type { CanvasConnectionIdT, CanvasPayloadT } from "./schema";
 
 export interface PutCanvasResult {
 	readonly updatedAt: string;
 }
 
 /**
- * Upsert du canvas d'un utilisateur pour une signature donnée.
+ * Upsert du canvas d'un utilisateur pour une db_connection donnée.
  *
  * ─── Contrat ───────────────────────────────────────────────────────────
- * - Si (userId, signature) n'existe pas → INSERT et renvoie l'updatedAt
+ * - Si (userId, connectionId) n'existe pas → INSERT et renvoie l'updatedAt
  *   posé par le default `now()`.
  * - Si la row existe → UPDATE `payload` + refresh `updated_at = now()` et
  *   renvoie le nouvel updatedAt.
  *
- * On utilise `onConflictDoUpdate` sur l'index unique `canvas_user_schema_unique`
- * (target: userId + schemaSignature). Ça garantit l'atomicité (pas de
- * race condition SELECT-then-INSERT/UPDATE) et un seul aller-retour DB.
+ * On utilise `onConflictDoUpdate` sur l'index unique
+ * `canvas_user_connection_unique` (target: userId + connectionId). Ça
+ * garantit l'atomicité (pas de race condition SELECT-then-INSERT/UPDATE)
+ * et un seul aller-retour DB.
  *
  * ─── updated_at ─────────────────────────────────────────────────────────
  * Sur UPDATE, Postgres ne re-calcule PAS le default `now()` — il faut
@@ -30,20 +31,20 @@ export interface PutCanvasResult {
 export async function putCanvasState(
 	db: DbOrTx,
 	userId: string,
-	signature: CanvasSignatureT,
+	connectionId: CanvasConnectionIdT,
 	payload: CanvasPayloadT
 ): Promise<PutCanvasResult> {
 	const rows = await db
 		.insert(dbSchema.canvasState)
 		.values({
 			userId,
-			schemaSignature: signature,
+			connectionId,
 			payload
 		})
 		.onConflictDoUpdate({
 			target: [
 				dbSchema.canvasState.userId,
-				dbSchema.canvasState.schemaSignature
+				dbSchema.canvasState.connectionId
 			],
 			set: {
 				payload,

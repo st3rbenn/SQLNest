@@ -24,9 +24,13 @@
 		"@fastify/rate-limit": "^11.2.0",
 		"@fastify/request-context": "^6.2.1",
 		"@fastify/swagger": "^9.5.2",
+		"@fastify/websocket": "^11.3.0",
+		"@noble/curves": "^2.3.0",
+		"@noble/hashes": "^2.3.0",
 		"@scalar/fastify-api-reference": "^1.37.0",
 		"@sqlnest/db": "workspace:*",
 		"@sqlnest/engine": "workspace:*",
+		"@sqlnest/tunnel-protocol": "workspace:*",
 		"better-auth": "^1.2.0",
 		"dotenv": "^16.4.5",
 		"drizzle-orm": "^0.36.4",
@@ -40,10 +44,15 @@
 	"devDependencies": {
 		"@biomejs/biome": "catalog:",
 		"@tsconfig/node22": "^22.0.1",
+		"@sqlnest/cli": "workspace:*",
+		"@sqlnest/tunnel-protocol": "workspace:*",
+		"@types/ws": "^8.5.13",
+		"msgpackr": "^1.11.2",
 		"@vitest/coverage-v8": "^3.2.4",
 		"fastify-tsconfig": "^3.0.0",
 		"pino-pretty": "^13.1.1",
 		"tsx": "^4.20.6",
-		"typescript": "catalog:"
+		"typescript": "catalog:",
+		"ws": "^8.21.2"
 	}
 }

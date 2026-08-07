@@ -1,10 +1,10 @@
 import { type NodeChange, useNodesState } from "@xyflow/react";
 import { useCallback, useEffect, useRef } from "react";
-import type { FramesApi } from "../useFrames";
 import type { LayoutResult } from "../layout";
+import type { TableNodeType } from "../TableNode";
+import type { FramesApi } from "../useFrames";
 import type { PositionsApi } from "../useTablePositions";
 import type { SizesApi } from "../useTableSizes";
-import type { TableNodeType } from "../TableNode";
 
 export interface UseCanvasNodesOptions {
 	readonly base: LayoutResult | null;

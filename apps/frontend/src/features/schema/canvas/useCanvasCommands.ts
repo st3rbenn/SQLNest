@@ -1,8 +1,8 @@
 import {
+	type SpotlightActionGroupData,
 	showNotification,
 	spotlight,
-	useCommandPaletteShortcut,
-	type SpotlightActionGroupData
+	useCommandPaletteShortcut
 } from "@sqlnest/design-system";
 import { useMemo } from "react";
 import { buildCanvasCommands } from "../commands";

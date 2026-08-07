@@ -7,7 +7,6 @@ import {
 	useCanvasFocusCtx,
 	useCanvasUI
 } from "../CanvasContext";
-import { CanvasBreadcrumb } from "../CanvasBreadcrumb";
 import { HiddenChip } from "../HiddenChip";
 
 /**
@@ -32,14 +31,6 @@ export function CanvasOverlays() {
 	} = useCanvasActionsCtx();
 	return (
 		<>
-			<CanvasBreadcrumb
-				engine={schema.engine as "postgres" | "mongodb"}
-				schemaLabel={
-					schema.engine === "postgres" ? (schemaLabel ?? "public") : undefined
-				}
-				tableCount={schema.collections.length}
-			/>
-
 			{selectedTables.length > 0 ? (
 				<Box
 					style={{

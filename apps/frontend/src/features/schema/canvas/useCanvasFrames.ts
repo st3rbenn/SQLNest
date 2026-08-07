@@ -1,11 +1,11 @@
+import { showNotification } from "@sqlnest/design-system";
 import type { Node } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import { showNotification } from "@sqlnest/design-system";
 import type { FrameNodeType } from "../FrameNode";
 import { type Frame, type FrameRect, rectContainsPoint } from "../frames";
 import type { LayoutResult } from "../layout";
-import { NODE_WIDTH, nodeHeight } from "../TableNode";
 import type { TableNodeType } from "../TableNode";
+import { NODE_WIDTH, nodeHeight } from "../TableNode";
 import type { FramesApi } from "../useFrames";
 import type { PositionsApi, XY } from "../useTablePositions";
 import {
@@ -18,9 +18,7 @@ export interface UseCanvasFramesOptions {
 	readonly base: LayoutResult | null;
 	readonly nodes: readonly TableNodeType[];
 	readonly nodesRef: React.MutableRefObject<TableNodeType[]>;
-	readonly setNodes: React.Dispatch<
-		React.SetStateAction<TableNodeType[]>
-	>;
+	readonly setNodes: React.Dispatch<React.SetStateAction<TableNodeType[]>>;
 	readonly hiddenIds: ReadonlySet<string>;
 	readonly framesApi: FramesApi;
 	readonly tablePositions: PositionsApi;
@@ -37,10 +35,7 @@ export interface UseCanvasFramesReturn {
 	readonly handleFrameDelete: (key: string) => void;
 	/** Handlers React Flow — à passer tel quel à `<ReactFlow>`.
 	 * Ils gèrent DEUX chemins (frame drag vs table drag) selon `node.type`. */
-	readonly onNodeDragStart: (
-		_: unknown,
-		node: Node
-	) => void;
+	readonly onNodeDragStart: (_: unknown, node: Node) => void;
 	readonly onNodeDrag: (_: unknown, node: Node) => void;
 	readonly onNodeDragStop: (_: unknown, node: Node) => void;
 }

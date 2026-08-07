@@ -5,6 +5,7 @@ import {
 	serializerCompiler,
 	validatorCompiler
 } from "fastify-type-provider-zod";
+import { createTunnelRegistry } from "../../domains/tunnels/session/registry";
 import dbPlugin from "../../plugins/02-db.plugin";
 import authPlugin from "../../plugins/03-auth.plugin";
 import sessionPlugin from "../../plugins/04-session.plugin";
@@ -19,6 +20,10 @@ import sessionPlugin from "../../plugins/04-session.plugin";
  */
 export interface CreateTestAppOptions {
 	readonly withAuth?: boolean;
+	/** Décore `fastify.tunnelRegistry` avec une instance in-memory —
+	 *  requis par les routes qui lisent le registry (ex: `GET /api/db-
+	 *  connections` pour calculer `isOnline`). */
+	readonly withTunnelRegistry?: boolean;
 }
 
 /**
@@ -65,6 +70,14 @@ export function createTestApp(
 		void server.register(sessionPlugin);
 	}
 
+	if (options.withTunnelRegistry) {
+		// Instance in-memory vide — les tests peuvent la manipuler via
+		// `app.tunnelRegistry.attachCli(...)` s'ils veulent simuler un CLI
+		// online. Sans manipulation, `findByConnection` retourne undefined
+		// → isOnline calculé à `false` (le cas nominal d'un test canvas).
+		server.decorate("tunnelRegistry", createTunnelRegistry());
+	}
+
 	return server;
 }
 
@@ -89,11 +102,15 @@ export function createTestApp(
  * `session.user_id` / `account.user_id` / `canvas_state.user_id` vide
  * déjà les rows dépendantes lorsque `user` est vidé.
  */
+// Regex hissée au top-level (règle Biome `useTopLevelRegex`) — évite de
+// recompiler la regex à chaque appel de la garde.
+const TEST_DB_URL_RE = /test/i;
+
 /** Garde runtime commune : refuse tout TRUNCATE hors d'une DB _test.
  * Historique : deux fois où les tests int ont wipé la DB dev — plus jamais. */
 function assertTestDatabase(): void {
 	const dbUrl = process.env.DATABASE_URL;
-	if (!dbUrl || !/test/i.test(dbUrl)) {
+	if (!dbUrl || !TEST_DB_URL_RE.test(dbUrl)) {
 		throw new Error(
 			`Refuse d'exécuter TRUNCATE contre une DB dont l'URL ne contient pas "test" (DATABASE_URL="${dbUrl ?? "<undefined>"}"). Configure DATABASE_URL_TEST dans .env et charge le setup file vitest (apps/backend/src/test-setup.ts).`
 		);
@@ -127,5 +144,24 @@ export async function truncateCanvasAndAuth(
 	assertTestDatabase();
 	await app.db.execute(
 		sql`TRUNCATE TABLE "canvas_state", "session_kv", "session", "account", "verification", "user" RESTART IDENTITY CASCADE`
+	);
+}
+
+/** TRUNCATE des tables tunnel/API-token + auth. Utilisé par les tests
+ * intégration du Bloc CLI + tunnel WSS (`domains/tunnels/*.int.test.ts`).
+ * L'ordre explicite documente les tables métier ; le CASCADE via
+ * `user.id` vide en réalité déjà `api_token`, `tunnel_pairing` et
+ * `db_connection` (toutes FK-cascade → user). */
+export async function truncateTunnelsAndAuth(
+	app: FastifyInstance
+): Promise<void> {
+	if (app.db == null) {
+		throw new Error(
+			"truncateTunnelsAndAuth: fastify.db introuvable — appelle createTestApp({ withAuth: true }) et await app.ready() d'abord."
+		);
+	}
+	assertTestDatabase();
+	await app.db.execute(
+		sql`TRUNCATE TABLE "db_connection", "tunnel_pairing", "api_token", "canvas_state", "session_kv", "session", "account", "verification", "user" RESTART IDENTITY CASCADE`
 	);
 }

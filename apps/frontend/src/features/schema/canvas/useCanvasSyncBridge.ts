@@ -1,18 +1,16 @@
 import { useMemo } from "react";
 import type { LayoutResult } from "../layout";
-import type { SchemaModel } from "../schema-model";
 import type { TableNodeType } from "../TableNode";
 import type { AnchorsApi } from "../useEdgeAnchors";
 import type { FramesApi } from "../useFrames";
-import {
-	type PositionsApi,
-	type PositionsMap
-} from "../useTablePositions";
-import { type SizesApi, type SizesMap } from "../useTableSizes";
+import type { PositionsApi, PositionsMap } from "../useTablePositions";
+import type { SizesApi, SizesMap } from "../useTableSizes";
 import { useCanvasSync } from "./useCanvasSync";
 
 export interface UseCanvasSyncBridgeOptions {
-	readonly schema: SchemaModel;
+	/** UUID de la db_connection dont ce canvas dépend — clé de sync serveur.
+	 *  Un canvas par (user × connection). */
+	readonly connectionId: string;
 	readonly baseRef: React.MutableRefObject<LayoutResult | null>;
 	readonly setNodes: React.Dispatch<React.SetStateAction<TableNodeType[]>>;
 	readonly tablePositions: PositionsApi;
@@ -35,7 +33,9 @@ export interface UseCanvasSyncBridgeReturn {
 
 /**
  * Encapsule TOUT ce qui touche à la synchro serveur du state canvas :
- *   - Calcule la `signature` (engine + tables triées) — clé du GET/PUT.
+ *   - Reçoit le `connectionId` (UUID db_connection) — clé du GET/PUT.
+ *     Depuis C.5 la clé n'est plus la signature `${engine}:${tables}` (source
+ *     de collisions entre 2 dbs partageant le même set de tables).
  *   - Compose `replaceAll` — 5 setters atomiques combinés en un objet stable.
  *   - Wire `useCanvasSync` — GET au mount, observe les 5 slices, PUT debounce
  *     2 s. Skip si user anonyme (le hook interne détecte via `session`).
@@ -55,14 +55,14 @@ export interface UseCanvasSyncBridgeReturn {
  * valeurs courantes du node RF, qui peuvent être stales d'un seed pré-login
  * (`persistLocal=true` a chargé le localStorage résiduel). Sans ce fallback,
  * RF continue d'afficher les vieilles dimensions locales tandis que
- * `tableSizes.sizes` (source of truth pour la signature `useCanvasSync`) est
- * vide — divergence permanente + jump au reload suivant.
+ * `tableSizes.sizes` (source of truth pour `useCanvasSync`) est vide —
+ * divergence permanente + jump au reload suivant.
  */
 export function useCanvasSyncBridge(
 	opts: UseCanvasSyncBridgeOptions
 ): UseCanvasSyncBridgeReturn {
 	const {
-		schema,
+		connectionId,
 		baseRef,
 		setNodes,
 		tablePositions,
@@ -72,15 +72,6 @@ export function useCanvasSyncBridge(
 		hiddenIds,
 		setHiddenIds
 	} = opts;
-
-	const canvasSignature = useMemo(() => {
-		const names = schema.collections
-			.map((c) => c.name)
-			.slice()
-			.sort()
-			.join(",");
-		return `${schema.engine}:${names}`;
-	}, [schema]);
 
 	const canvasSyncReplaceAll = useMemo(
 		() => ({
@@ -133,7 +124,7 @@ export function useCanvasSyncBridge(
 	);
 
 	const { ready: canvasReady } = useCanvasSync({
-		signature: canvasSignature,
+		connectionId,
 		positions: tablePositions.positions,
 		sizes: tableSizes.sizes,
 		frames: framesApi.frames,

@@ -60,10 +60,7 @@ function sha256Hex(input: string): string {
 function encryptGcm(plaintext: string, key: Buffer): string {
 	const iv = randomBytes(IV_LEN);
 	const cipher = createCipheriv("aes-256-gcm", key, iv);
-	const enc = Buffer.concat([
-		cipher.update(plaintext, "utf8"),
-		cipher.final()
-	]);
+	const enc = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
 	const tag = cipher.getAuthTag();
 	return `${iv.toString("base64")}.${tag.toString("base64")}.${enc.toString("base64")}`;
 }

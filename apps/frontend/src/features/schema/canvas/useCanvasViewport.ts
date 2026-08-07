@@ -7,8 +7,8 @@ import {
 	useRef
 } from "react";
 import type { LayoutResult } from "../layout";
-import { NODE_WIDTH, nodeHeight } from "../TableNode";
 import type { TableNodeType } from "../TableNode";
+import { NODE_WIDTH, nodeHeight } from "../TableNode";
 import {
 	animateViewport,
 	FOCUS_TWEEN_MS,

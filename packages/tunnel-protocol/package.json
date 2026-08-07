@@ -1,0 +1,46 @@
+{
+	"name": "@sqlnest/tunnel-protocol",
+	"version": "0.0.1",
+	"type": "module",
+	"description": "Framing + crypto (Ed25519 sig, ECDH X25519, ChaCha20-Poly1305 AEAD, MessagePack) du tunnel SQLNest — partagé backend / CLI / frontend.",
+	"main": "./src/index.ts",
+	"types": "./src/index.ts",
+	"exports": {
+		".": {
+			"types": "./src/index.ts",
+			"default": "./src/index.ts"
+		}
+	},
+	"files": [
+		"src",
+		"package.json"
+	],
+	"scripts": {
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"type-check": "tsc --project tsconfig.json",
+		"check": "biome check --write"
+	},
+	"dependencies": {
+		"@noble/ciphers": "^2.0.5",
+		"@noble/curves": "^2.3.0",
+		"@noble/hashes": "^2.3.0",
+		"msgpackr": "^1.11.2"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "catalog:",
+		"@types/node": "^24.6.0",
+		"typescript": "catalog:",
+		"vitest": "catalog:"
+	},
+	"keywords": [
+		"sqlnest",
+		"tunnel",
+		"messagepack",
+		"ed25519",
+		"chacha20"
+	],
+	"author": "Anthonin COLAS <anthonincolaspro@gmail.com>",
+	"license": "ISC",
+	"packageManager": "pnpm@10.17.1"
+}

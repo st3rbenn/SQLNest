@@ -1,50 +1,23 @@
 import z from "zod/v4";
 
 /**
- * Signature du schéma introspecté — format `${engine}:${sortedCollectionNames}`.
+ * Identifiant d'une `db_connection` — UUID v4 validé strict.
  *
- * ─── Exemples valides ────────────────────────────────────────────────────
- *   postgres:orders,products,users
- *   mongodb:accounts,transactions
- *   postgres:public.users,public.orders
- *   mongodb:MyDb.Users,MyDb.Orders
- *
- * ─── Contraintes ─────────────────────────────────────────────────────────
- * - `engine` : lettres minuscules uniquement (`[a-z]+`) — aligné sur les
- *   engines connus (`postgres`, `mongodb`).
- * - `sortedCollectionNames` : safe permissive — bloque juste les caractères
- *   qui casseraient un log line ou un query Mongo. Tout le reste (espaces,
- *   unicode, majuscules, séparateurs `.` / `,` / `/`) est autorisé pour
- *   supporter des schémas réels (tables `public.users` en Postgres,
- *   collections Mongo `MyDb.Coll`).
- *   - Interdit : `\x00` (null-byte — casse Postgres text), `$` (préfixe
- *     réservé Mongo opérateurs, casse un query), CR / LF / TAB (safe pour
- *     logs single-line).
- * - Longueur bornée `[3, 8000]` pour laisser passer un vrai schéma Postgres
- *   avec beaucoup de tables (identifier max = 63 chars, ~100 tables = ~6.5 KB)
- *   tout en gardant une borne haute anti-DoS. La borne initiale de 200
- *   rejetait 400 tout schéma de ~15 tables réelles (ex : Apollon = 30 tables,
- *   signature 510 chars).
- *
- * ─── Regex hoistée (biome useTopLevelRegex) ──────────────────────────────
- * Extraction top-level pour éviter la recompilation à chaque validation.
+ * Depuis C.5, le canvas_state est rattaché à UNE `db_connection` (au lieu
+ * de la signature `${engine}:${sortedTables}`). Un canvas par (user ×
+ * connection). Cf. `packages/db/src/schema.ts` (table `canvas_state`) pour
+ * la clé unique DB.
  */
-// biome-ignore lint/suspicious/noControlCharactersInRegex: null-byte bloqué volontairement.
-const CANVAS_SIGNATURE_RE = /^[a-z]+:[^\x00$\n\r\t]{1,8000}$/;
-
-export const CanvasSignature = z
-	.string()
-	.min(3)
-	.max(8000)
-	.regex(CANVAS_SIGNATURE_RE);
+export const CanvasConnectionId = z.uuid();
 
 /**
  * Payload canvas — opaque côté backend.
  *
- * Le frontend sérialise ses 4 slices (positions, sizes, frames, hidden) en
- * un objet arbitraire. On ne valide PAS le contenu ici (z.record(z.unknown()))
- * pour préserver la flexibilité : le format peut évoluer côté frontend sans
- * migration backend. La sécurité est assurée par :
+ * Le frontend sérialise ses 5 slices (positions, sizes, frames, hidden,
+ * edgeAnchors) en un objet arbitraire. On ne valide PAS le contenu ici
+ * (z.record(z.unknown())) pour préserver la flexibilité : le format peut
+ * évoluer côté frontend sans migration backend. La sécurité est assurée
+ * par :
  *   1. Le typage `unknown` — le backend ne fait aucun deref/exécution.
  *   2. Le `bodyLimit: 100_000` (100 KB) au niveau route — évite un payload
  *      pathologique.
@@ -53,11 +26,11 @@ export const CanvasSignature = z
 export const CanvasPayload = z.record(z.string(), z.unknown());
 
 export const GetCanvasQuery = z.object({
-	signature: CanvasSignature
+	connectionId: CanvasConnectionId
 });
 
 export const PutCanvasBody = z.object({
-	signature: CanvasSignature,
+	connectionId: CanvasConnectionId,
 	payload: CanvasPayload
 });
 
@@ -73,7 +46,7 @@ export const PutCanvasResponse = z.object({
 	updatedAt: z.string()
 });
 
-export type CanvasSignatureT = z.infer<typeof CanvasSignature>;
+export type CanvasConnectionIdT = z.infer<typeof CanvasConnectionId>;
 export type CanvasPayloadT = z.infer<typeof CanvasPayload>;
 export type GetCanvasQueryT = z.infer<typeof GetCanvasQuery>;
 export type PutCanvasBodyT = z.infer<typeof PutCanvasBody>;

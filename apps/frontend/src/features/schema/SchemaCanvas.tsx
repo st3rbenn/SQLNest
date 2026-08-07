@@ -12,14 +12,9 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import "./canvas-overrides.css";
-import {
-	useCallback,
-	useEffect,
-	useMemo,
-	useRef,
-	useState
-} from "react";
-import { type CanvasTool } from "./CanvasToolbar";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCurrentUser } from "../auth/sessionQuery";
+import type { CanvasTool } from "./CanvasToolbar";
 import { CanvasProviders } from "./canvas/CanvasContext";
 import { useResizableDrawer } from "./canvas/DrawerPane";
 import { CanvasBottomBar } from "./canvas/floating/CanvasBottomBar";
@@ -48,7 +43,6 @@ import {
 	TableNode,
 	type TableNodeType
 } from "./TableNode";
-import { useCurrentUser } from "../auth/sessionQuery";
 import { useEdgeAnchors } from "./useEdgeAnchors";
 import { useFrames } from "./useFrames";
 import { useTablePositions } from "./useTablePositions";
@@ -111,9 +105,16 @@ interface CanvasInnerProps {
 	 * `exactOptionalPropertyTypes`, `schemaLabel?: string` n'accepterait pas
 	 * une valeur `string | undefined`). */
 	schemaLabel?: string | undefined;
+	connectionId: string;
+	dbName: string;
 }
 
-function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
+function CanvasInner({
+	schema,
+	schemaLabel,
+	connectionId,
+	dbName
+}: CanvasInnerProps) {
 	// Layout ELK — async. Le composant est **remonté** au changement de schéma
 	// (clé sur ReactFlowProvider), donc pas de course entre deux layouts.
 	const [base, setBase] = useState<LayoutResult | null>(null);
@@ -297,11 +298,11 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 	// SNQL) reste actif.
 	useUndoRedoShortcuts({ onUndo: history.undo, onRedo: history.redo });
 
-	// Sync serveur du state canvas — signature + replaceAll + useCanvasSync.
+	// Sync serveur du state canvas — connectionId + replaceAll + useCanvasSync.
 	// Voir `useCanvasSyncBridge` pour la doc (repush RF nodes après hydration,
 	// fallback chaîné serveur → ELK base → keep, gate anonyme).
 	const { canvasReady } = useCanvasSyncBridge({
-		schema,
+		connectionId,
 		baseRef,
 		setNodes,
 		tablePositions,
@@ -504,11 +505,7 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 			},
 			{ preventDefault: true }
 		],
-		[
-			"V",
-			() => setActiveTool("select"),
-			{ preventDefault: true }
-		],
+		["V", () => setActiveTool("select"), { preventDefault: true }],
 		[
 			"F",
 			() => {
@@ -553,8 +550,15 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 	// dès qu'un state UI mineur change. Voir `CanvasContext.tsx` pour la
 	// raison du split en 4 contextes.
 	const dataCtxValue = useMemo(
-		() => ({ schema, schemaLabel, framesApi, hiddenIds }),
-		[schema, schemaLabel, framesApi, hiddenIds]
+		() => ({
+			schema,
+			schemaLabel,
+			connectionId,
+			dbName,
+			framesApi,
+			hiddenIds
+		}),
+		[schema, schemaLabel, connectionId, dbName, framesApi, hiddenIds]
 	);
 	const focusCtxValue = useMemo(
 		() => ({
@@ -855,10 +859,14 @@ function CanvasInner({ schema, schemaLabel }: CanvasInnerProps) {
 /** Canvas ER interactif — dompte les grands schémas via drawers + focus + recherche. */
 export function SchemaCanvas({
 	schema,
-	schemaLabel
+	schemaLabel,
+	connectionId,
+	dbName
 }: {
 	schema: SchemaModel;
 	schemaLabel?: string;
+	connectionId: string;
+	dbName: string;
 }) {
 	// Remonte tout le flow au changement de schéma : état React Flow réinitialisé
 	// proprement, le graphe se recadre au montage. Clé combinant moteur, taille et
@@ -867,7 +875,12 @@ export function SchemaCanvas({
 	const key = `${schema.engine}:${cols.length}:${cols[0]?.name ?? ""}:${cols[cols.length - 1]?.name ?? ""}`;
 	return (
 		<ReactFlowProvider key={key}>
-			<CanvasInner schema={schema} schemaLabel={schemaLabel} />
+			<CanvasInner
+				schema={schema}
+				schemaLabel={schemaLabel}
+				connectionId={connectionId}
+				dbName={dbName}
+			/>
 		</ReactFlowProvider>
 	);
 }

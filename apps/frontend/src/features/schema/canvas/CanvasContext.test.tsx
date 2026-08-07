@@ -1,15 +1,15 @@
 import { render, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import {
-	CanvasProviders,
-	useCanvasActionsCtx,
-	useCanvasData,
-	useCanvasFocusCtx,
-	useCanvasUI,
 	type CanvasActionsContextValue,
 	type CanvasDataContextValue,
 	type CanvasFocusContextValue,
-	type CanvasUIContextValue
+	CanvasProviders,
+	type CanvasUIContextValue,
+	useCanvasActionsCtx,
+	useCanvasData,
+	useCanvasFocusCtx,
+	useCanvasUI
 } from "./CanvasContext";
 
 // Minimal fixtures — on ne teste PAS les hooks canvas, juste le fait que

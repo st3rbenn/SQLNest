@@ -1,5 +1,5 @@
-import { createContext, useContext, useMemo, type ReactNode } from "react";
 import type { SpotlightActionGroupData } from "@sqlnest/design-system";
+import { createContext, type ReactNode, useContext, useMemo } from "react";
 import type { CanvasTool } from "../CanvasToolbar";
 import type { Frame } from "../frames";
 import type { SchemaModel } from "../schema-model";
@@ -30,6 +30,14 @@ import type { FramesApi } from "../useFrames";
 export interface CanvasDataContextValue {
 	readonly schema: SchemaModel;
 	readonly schemaLabel: string | undefined;
+	/** UUID de la db_connection dont ce schéma provient — propagé aux
+	 *  navigations sortantes (ex: menu contextuel → /query) pour que
+	 *  l'éditeur atterrisse sur la MÊME db que le canvas. */
+	readonly connectionId: string;
+	/** Nom lisible de la db_connection (ex: "apollon_db") — affiché dans
+	 *  le back button top-left. Différent de `schemaLabel` qui désigne le
+	 *  schéma Postgres cible (`public`). */
+	readonly dbName: string;
 	readonly framesApi: FramesApi;
 	readonly hiddenIds: ReadonlySet<string>;
 }
@@ -70,7 +78,9 @@ export interface CanvasUIContextValue {
 	readonly activeTool: CanvasTool;
 	readonly setActiveTool: (t: CanvasTool) => void;
 	readonly leftDrawerVisible: boolean;
-	readonly setLeftDrawerVisible: (v: boolean | ((prev: boolean) => boolean)) => void;
+	readonly setLeftDrawerVisible: (
+		v: boolean | ((prev: boolean) => boolean)
+	) => void;
 	readonly leftDrawerWidth: number;
 	readonly drawerHandleProps: ResizableDrawerHandleProps;
 	readonly leftPadding: number;

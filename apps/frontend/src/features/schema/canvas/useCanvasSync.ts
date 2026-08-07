@@ -1,7 +1,7 @@
 /**
  * Sync serveur du state canvas (positions / sizes / frames / hidden).
  *
- * Rôle : au mount, hydrate depuis `/api/canvas-state?signature=...` (200 → apply
+ * Rôle : au mount, hydrate depuis `/api/canvas-state?connectionId=...` (200 → apply
  * en écrasant l'état localStorage courant SI l'user n'a rien touché pendant le
  * fetch ; 404 / erreur / divergence détectée → garde le local). Puis observe
  * les 4 slices, debounce 2 s au moindre changement, et pousse un snapshot
@@ -32,7 +32,7 @@
  * de la queryKey (éviterait la loop refetch → replaceAll → useEffect → push).
  */
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useCurrentUser } from "../../auth/sessionQuery";
 import type { Frame } from "../frames";
@@ -49,7 +49,7 @@ export const CANVAS_SYNC_DEBOUNCE_MS = 2000;
  * Seuil sécurité `fetch({ keepalive: true })` — spec HTML limite le total des
  * bodies keepalive en vol à 64 KiB par origin. Au-delà, le browser drop la
  * request silencieusement. On garde ~4 KB de marge pour le wrapping
- * `{signature, payload}` + les headers.
+ * `{connectionId, payload}` + les headers.
  */
 const KEEPALIVE_MAX_BODY_BYTES = 60_000;
 
@@ -72,7 +72,7 @@ export interface CanvasSyncReplaceAll {
 }
 
 export interface UseCanvasSyncOptions extends CanvasSources {
-	readonly signature: string;
+	readonly connectionId: string;
 	readonly replaceAll: CanvasSyncReplaceAll;
 }
 
@@ -101,19 +101,20 @@ const EMPTY_SERIALIZED = JSON.stringify(
 	})
 );
 
-/** Un push planifié : capture la paire {signature, serialized} au moment de
- * l'armement du timer. Sans capture, un changement de signature pendant le
- * débounce enverrait le vieux payload avec la NOUVELLE signature — payload
+/** Un push planifié : capture la paire {connectionId, serialized} au moment de
+ * l'armement du timer. Sans capture, un changement de connectionId pendant le
+ * débounce enverrait le vieux payload avec la NOUVELLE connectionId — payload
  * appliqué au mauvais schéma côté serveur. */
 interface PendingPush {
-	readonly signature: string;
+	readonly connectionId: string;
 	readonly serialized: string;
 }
 
 export function useCanvasSync(opts: UseCanvasSyncOptions): UseCanvasSyncReturn {
 	const { data: session } = useCurrentUser();
 	const user = session?.user ?? null;
-	const enabled = user !== null && opts.signature.length > 0;
+	const enabled = user !== null && opts.connectionId.length > 0;
+	const queryClient = useQueryClient();
 
 	const [syncStatus, setSyncStatus] = useState<SyncStatus>("idle");
 	const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
@@ -141,11 +142,11 @@ export function useCanvasSync(opts: UseCanvasSyncOptions): UseCanvasSyncReturn {
 	// `debounceTimeoutRef` : id du setTimeout pending. `null` = pas de push
 	// en attente. Reset à chaque nouveau change (repousse l'échéance de 2 s).
 	const debounceTimeoutRef = useRef<number | null>(null);
-	// `pendingPushRef` : dernier push planifié (paire {signature, serialized}).
+	// `pendingPushRef` : dernier push planifié (paire {connectionId, serialized}).
 	// Utilisée par (a) le timeout au fire pour envoyer la version la plus
 	// fraîche, et (b) le flush pré-unmount / beforeunload pour envoyer
-	// immédiatement. La signature est captée au moment de l'armement — évite
-	// d'envoyer un vieux payload avec une nouvelle signature.
+	// immédiatement. La connectionId est captée au moment de l'armement — évite
+	// d'envoyer un vieux payload avec une nouvelle connectionId.
 	const pendingPushRef = useRef<PendingPush | null>(null);
 	// `fetchStartSerializedRef` : snapshot du `currentSerialized` au moment
 	// où le fetch d'hydratation démarre. Utilisé au settle pour détecter si
@@ -159,20 +160,20 @@ export function useCanvasSync(opts: UseCanvasSyncOptions): UseCanvasSyncReturn {
 	// sous-jacentes sont stables via useCallback).
 	const replaceAllRef = useRef(opts.replaceAll);
 	replaceAllRef.current = opts.replaceAll;
-	// `signatureRef` : NE PAS synchroniser en eager (avant effets) — sinon un
-	// push effect qui fire dans le MÊME render qu'un changement de signature
-	// captera la NOUVELLE signature avec l'ANCIEN payload. La sync se fait
-	// dans l'effet dédié `signature-change` ci-dessous, après flush du
+	// `connectionIdRef` : NE PAS synchroniser en eager (avant effets) — sinon un
+	// push effect qui fire dans le MÊME render qu'un changement de connectionId
+	// captera la NOUVELLE connectionId avec l'ANCIEN payload. La sync se fait
+	// dans l'effet dédié `connectionId-change` ci-dessous, après flush du
 	// pending push de l'ancien schéma.
-	const signatureRef = useRef(opts.signature);
+	const connectionIdRef = useRef(opts.connectionId);
 
 	// ─── Query hydratation ────────────────────────────────────────────────
 	// `staleTime: Infinity` + `retry: false` : on ne veut PAS que RQ refetch
 	// après le mount. Un refetch → hydratation refire → replaceAll écrase
 	// les gestes user depuis le mount → chaos. L'hydratation est one-shot.
 	const query = useQuery({
-		queryKey: ["canvas-state", opts.signature],
-		queryFn: () => fetchCanvasState(opts.signature),
+		queryKey: ["canvas-state", opts.connectionId],
+		queryFn: () => fetchCanvasState(opts.connectionId),
 		enabled,
 		staleTime: Number.POSITIVE_INFINITY,
 		gcTime: Number.POSITIVE_INFINITY,
@@ -182,18 +183,18 @@ export function useCanvasSync(opts: UseCanvasSyncOptions): UseCanvasSyncReturn {
 		refetchOnReconnect: false
 	});
 
-	// ─── Signature change : flush + reset (avant tout le reste) ──────────
+	// ─── ConnectionId change : flush + reset (avant tout le reste) ──────────
 	// Quand l'user navigue d'un schéma à un autre :
 	//  1. Si un push est débounce en attente pour l'ANCIEN schéma → on le
-	//     flush IMMÉDIATEMENT avec l'ancienne signature (les modifications
+	//     flush IMMÉDIATEMENT avec l'ancienne connectionId (les modifications
 	//     appartiennent à l'ancien schéma).
 	//  2. On reset tout l'état d'hydratation (baseline, snapshot fetch-start,
 	//     hydrated) — le nouveau queryKey déclenche un fetch neuf, et
 	//     l'hydratation redémarre à zéro pour le nouveau schéma.
-	//  3. On aligne `signatureRef` sur la nouvelle signature APRÈS le flush.
-	const previousSignatureRef = useRef(opts.signature);
+	//  3. On aligne `connectionIdRef` sur la nouvelle connectionId APRÈS le flush.
+	const previousConnectionIdRef = useRef(opts.connectionId);
 	useEffect(() => {
-		if (previousSignatureRef.current === opts.signature) return;
+		if (previousConnectionIdRef.current === opts.connectionId) return;
 		const oldPending = pendingPushRef.current;
 		if (debounceTimeoutRef.current !== null) {
 			window.clearTimeout(debounceTimeoutRef.current);
@@ -203,12 +204,12 @@ export function useCanvasSync(opts: UseCanvasSyncOptions): UseCanvasSyncReturn {
 		setHydrated(false);
 		lastSyncedSerializedRef.current = null;
 		fetchStartSerializedRef.current = null;
-		previousSignatureRef.current = opts.signature;
-		signatureRef.current = opts.signature;
+		previousConnectionIdRef.current = opts.connectionId;
+		connectionIdRef.current = opts.connectionId;
 		if (oldPending !== null) {
 			void doPushRef.current(oldPending);
 		}
-	}, [opts.signature]);
+	}, [opts.connectionId]);
 
 	// ─── Serialization du state courant ───────────────────────────────────
 	// Recalculée à chaque render où l'une des 4 sources change. On garde
@@ -325,27 +326,42 @@ export function useCanvasSync(opts: UseCanvasSyncOptions): UseCanvasSyncReturn {
 	// Pas de useMutation — plus simple à orchestrer avec le debounce timer
 	// + le flush pré-unmount (qui doit pouvoir déclencher sans le hook
 	// React de RQ).
-	const doPush = useCallback(async (pending: PendingPush): Promise<void> => {
-		setSyncStatus("saving");
-		try {
-			const payload = JSON.parse(pending.serialized) as Record<string, unknown>;
-			// Utilise la signature captée au moment de l'armement — évite
-			// qu'un changement de schéma pendant le débounce fasse partir
-			// le payload avec la mauvaise signature.
-			const result = await putCanvasState(pending.signature, payload);
-			// Baseline mise à jour APRÈS confirmation du serveur : si un autre
-			// change arrive entre-temps, le comparateur du push effect verra
-			// bien la divergence et reschedulera.
-			lastSyncedSerializedRef.current = pending.serialized;
-			setLastSavedAt(result.updatedAt);
-			setSyncStatus("idle");
-		} catch {
-			// On ne verrouille PAS le hook après une erreur : au prochain
-			// changement (nouveau geste user), le debounce reprogrammera un
-			// push. `error` reste affiché jusqu'au prochain succès.
-			setSyncStatus("error");
-		}
-	}, []);
+	const doPush = useCallback(
+		async (pending: PendingPush): Promise<void> => {
+			setSyncStatus("saving");
+			try {
+				const payload = JSON.parse(pending.serialized) as Record<
+					string,
+					unknown
+				>;
+				// Utilise la connectionId captée au moment de l'armement — évite
+				// qu'un changement de schéma pendant le débounce fasse partir
+				// le payload avec la mauvaise connectionId.
+				const result = await putCanvasState(pending.connectionId, payload);
+				// Baseline mise à jour APRÈS confirmation du serveur : si un autre
+				// change arrive entre-temps, le comparateur du push effect verra
+				// bien la divergence et reschedulera.
+				lastSyncedSerializedRef.current = pending.serialized;
+				// Rafraîchit le cache TanStack — sans ça, un re-mount (nav
+				// gallery → canvas) réhydrate depuis un cache stale et écrase
+				// les positions user via replaceAll. staleTime: Infinity +
+				// refetchOnMount: false → si on ne pousse pas à jour ici,
+				// personne d'autre ne le fera avant un F5 hard.
+				queryClient.setQueryData(
+					["canvas-state", pending.connectionId],
+					{ payload, updatedAt: result.updatedAt }
+				);
+				setLastSavedAt(result.updatedAt);
+				setSyncStatus("idle");
+			} catch {
+				// On ne verrouille PAS le hook après une erreur : au prochain
+				// changement (nouveau geste user), le debounce reprogrammera un
+				// push. `error` reste affiché jusqu'au prochain succès.
+				setSyncStatus("error");
+			}
+		},
+		[queryClient]
+	);
 	const doPushRef = useRef(doPush);
 	doPushRef.current = doPush;
 
@@ -363,10 +379,10 @@ export function useCanvasSync(opts: UseCanvasSyncOptions): UseCanvasSyncReturn {
 		if (debounceTimeoutRef.current !== null) {
 			window.clearTimeout(debounceTimeoutRef.current);
 		}
-		// Capture (signature, serialized) au moment de l'armement — cf. bloc
+		// Capture (connectionId, serialized) au moment de l'armement — cf. bloc
 		// PendingPush ci-dessus pour le rationale.
 		const pending: PendingPush = {
-			signature: signatureRef.current,
+			connectionId: connectionIdRef.current,
 			serialized: currentSerialized
 		};
 		pendingPushRef.current = pending;
@@ -415,7 +431,7 @@ export function useCanvasSync(opts: UseCanvasSyncOptions): UseCanvasSyncReturn {
 			pendingPushRef.current = null;
 			try {
 				const body = JSON.stringify({
-					signature: pending.signature,
+					connectionId: pending.connectionId,
 					payload: JSON.parse(pending.serialized) as Record<string, unknown>
 				});
 				const url = `${window.CONTEXT.apiBaseUrl}/api/canvas-state`;

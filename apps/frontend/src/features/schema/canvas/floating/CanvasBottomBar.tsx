@@ -1,5 +1,5 @@
-import { CanvasToolbar } from "../../CanvasToolbar";
 import { CanvasConsole } from "../../CanvasConsole";
+import { CanvasToolbar } from "../../CanvasToolbar";
 import { AutoLayoutModal } from "../AutoLayoutModal";
 import {
 	useCanvasActionsCtx,

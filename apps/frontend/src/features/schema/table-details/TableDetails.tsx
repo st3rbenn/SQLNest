@@ -1,5 +1,6 @@
 import { Box } from "@mantine/core";
 import { useNavigate } from "@tanstack/react-router";
+import { useCanvasData } from "../canvas/CanvasContext";
 import { colorFor } from "../colors";
 import type { SchemaModel } from "../schema-model";
 import { TableDetailsFields } from "./TableDetailsFields";
@@ -32,6 +33,7 @@ export function TableDetails({
 }: TableDetailsProps) {
 	const table = schema.collections.find((c) => c.name === tableName);
 	const navigate = useNavigate();
+	const { connectionId } = useCanvasData();
 
 	if (table === undefined) return null;
 
@@ -48,7 +50,8 @@ export function TableDetails({
 
 	const goToEditor = () => {
 		void navigate({
-			to: "/query",
+			to: "/canvas/$connId/query",
+			params: { connId: connectionId },
 			search: { source: table.name, autorun: 1 }
 		});
 	};

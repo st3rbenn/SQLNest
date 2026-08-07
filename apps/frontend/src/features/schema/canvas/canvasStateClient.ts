@@ -6,9 +6,9 @@
  * requêtes pour joindre le cookie de session Better Auth (préfixe `sqlnest.`).
  *
  * Contract miroir de `apps/backend/src/domains/canvas-state/schema.ts` :
- * - GET  ?signature=<sig>  → 200 { payload, updatedAt } | 404 (null) | 401 (throw)
- * - PUT  { signature, payload } → 200 { updatedAt } | 401/500 (throw)
- * - DELETE ?signature=<sig>  → 204 (void) | 401 (throw)
+ * - GET  ?connectionId=<uuid> → 200 { payload, updatedAt } | 404 (null) | 401 (throw)
+ * - PUT  { connectionId, payload } → 200 { updatedAt } | 401/500 (throw)
+ * - DELETE ?connectionId=<uuid> → 204 (void) | 401 (throw)
  *
  * ─── Préfixe `/api` ──────────────────────────────────────────────────────
  * Alignement sur la convention `/api/auth/*` (Better Auth) — facilite le
@@ -36,18 +36,18 @@ function endpoint(): string {
 }
 
 /**
- * Lit l'état canvas serveur pour la signature donnée.
+ * Lit l'état canvas serveur pour la connection donnée.
  *
  * Convention retour :
  * - 200 → l'objet parsé
- * - 404 → `null` (pas d'état côté serveur pour ce couple user × signature)
+ * - 404 → `null` (pas d'état côté serveur pour ce couple user × connection)
  * - autre erreur (401, 5xx, réseau) → throw pour que l'appelant (useQuery) la
  *   propage en `isError` et retombe en mode offline.
  */
 export async function fetchCanvasState(
-	signature: string
+	connectionId: string
 ): Promise<CanvasStateGetResponse | null> {
-	const url = `${endpoint()}?signature=${encodeURIComponent(signature)}`;
+	const url = `${endpoint()}?connectionId=${encodeURIComponent(connectionId)}`;
 	const res = await fetch(url, {
 		method: "GET",
 		credentials: "include"
@@ -67,14 +67,14 @@ export async function fetchCanvasState(
  * « sauvegardé il y a X secondes ».
  */
 export async function putCanvasState(
-	signature: string,
+	connectionId: string,
 	payload: Record<string, unknown>
 ): Promise<CanvasStatePutResponse> {
 	const res = await fetch(endpoint(), {
 		method: "PUT",
 		credentials: "include",
 		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({ signature, payload })
+		body: JSON.stringify({ connectionId, payload })
 	});
 	if (!res.ok) {
 		throw new Error(`canvas-state PUT failed: HTTP ${res.status}`);
@@ -83,13 +83,13 @@ export async function putCanvasState(
 }
 
 /**
- * Supprime l'état canvas serveur pour la signature donnée.
+ * Supprime l'état canvas serveur pour la connection donnée.
  *
  * Idempotent côté backend (204 renvoyé même si aucune row n'existait) — on
  * n'a donc pas à distinguer « inexistant » de « supprimé ».
  */
-export async function deleteCanvasState(signature: string): Promise<void> {
-	const url = `${endpoint()}?signature=${encodeURIComponent(signature)}`;
+export async function deleteCanvasState(connectionId: string): Promise<void> {
+	const url = `${endpoint()}?connectionId=${encodeURIComponent(connectionId)}`;
 	const res = await fetch(url, {
 		method: "DELETE",
 		credentials: "include"

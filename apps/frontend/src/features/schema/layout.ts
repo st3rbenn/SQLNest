@@ -44,6 +44,25 @@ const LAYERED_OPTIONS: Record<string, string> = {
 	"elk.spacing.componentComponent": "80"
 };
 
+/** Options ELK dédiées à la MiniSchemaPreview de la gallery. Dense —
+ *  optimise la lisibilité sur ~200×130px plutôt que sur un canvas full-
+ *  viewport. Toujours `layered` (même pour 30+ tables) : le layout
+ *  hiérarchique reste lisible quand les nodes eux-mêmes sont petits. */
+const PREVIEW_OPTIONS: Record<string, string> = {
+	"elk.algorithm": "layered",
+	"elk.direction": "RIGHT",
+	"elk.spacing.nodeNode": "16",
+	"elk.layered.spacing.nodeNodeBetweenLayers": "36",
+	"elk.layered.nodePlacement.strategy": "NETWORK_SIMPLEX",
+	"elk.separateConnectedComponents": "true",
+	"elk.spacing.componentComponent": "24"
+};
+
+/** Dimensions fixes pour les nodes de la preview — bien plus petites que
+ *  `NODE_WIDTH`/`nodeHeight` du canvas pour compacter le layout. */
+export const PREVIEW_NODE_W = 120;
+export const PREVIEW_NODE_H = 44;
+
 const STRESS_OPTIONS: Record<string, string> = {
 	"elk.algorithm": "stress",
 	// Longueur d'arête cible = force de répulsion → distance moyenne inter-table.
@@ -113,4 +132,73 @@ export async function buildLayout(
 		if (p !== undefined) n.position = p;
 	}
 	return { nodes, edges };
+}
+
+export interface PreviewLayoutNode {
+	readonly id: string;
+	readonly x: number;
+	readonly y: number;
+	readonly w: number;
+	readonly h: number;
+}
+
+export interface PreviewLayoutEdge {
+	readonly source: string;
+	readonly target: string;
+}
+
+export interface PreviewLayoutResult {
+	readonly nodes: readonly PreviewLayoutNode[];
+	readonly edges: readonly PreviewLayoutEdge[];
+}
+
+/**
+ * Layout dédié à la MiniSchemaPreview — dense, node dims fixes, algo
+ * `layered` even sur les gros schémas (le rendu 200×130px absorbe la
+ * densité que le canvas full-viewport ne tolérait pas). Découplé du
+ * canvas layout pour éviter de mélanger les paramètres.
+ */
+export async function buildPreviewLayout(
+	schema: SchemaModel
+): Promise<PreviewLayoutResult> {
+	if (schema.collections.length === 0) return { nodes: [], edges: [] };
+
+	const present = new Set(schema.collections.map((c) => c.name));
+	const elkNodes: ElkNode[] = schema.collections.map((c) => ({
+		id: c.name,
+		width: PREVIEW_NODE_W,
+		height: PREVIEW_NODE_H
+	}));
+
+	const inScope = schema.relations.filter(
+		(r) => present.has(r.from.collection) && present.has(r.to.collection)
+	);
+	const elkEdges: ElkExtendedEdge[] = inScope.map((r, i) => ({
+		id: `pe${i}-${r.from.collection}-${r.to.collection}`,
+		sources: [r.from.collection],
+		targets: [r.to.collection]
+	}));
+
+	const graph = await elk.layout({
+		id: "root",
+		layoutOptions: PREVIEW_OPTIONS,
+		children: elkNodes,
+		edges: elkEdges
+	});
+
+	const nodes: PreviewLayoutNode[] = (graph.children ?? []).map((c) => ({
+		id: c.id,
+		x: c.x ?? 0,
+		y: c.y ?? 0,
+		w: c.width ?? PREVIEW_NODE_W,
+		h: c.height ?? PREVIEW_NODE_H
+	}));
+
+	return {
+		nodes,
+		edges: inScope.map((r) => ({
+			source: r.from.collection,
+			target: r.to.collection
+		}))
+	};
 }

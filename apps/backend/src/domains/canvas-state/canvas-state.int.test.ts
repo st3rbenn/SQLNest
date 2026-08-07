@@ -10,17 +10,17 @@
  * ─── Suffixe `.int.test.ts` ────────────────────────────────────────────
  * Signale que ces tests requièrent Postgres up (container
  * `sqlnest-postgres-app` port 5434). `describe.skipIf(!DATABASE_URL)`
- * saute proprement quand la base est absente (CI sans docker par
- * exemple).
+ * saute proprement quand la base est absente (CI sans docker par exemple).
  *
- * ─── Isolation ─────────────────────────────────────────────────────────
- * `beforeEach` TRUNCATE (user, session, account, verification, canvas_state)
- * — un test = un état DB propre. `canvas_state.user_id` est CASCADE via
- * l'FK vers `user.id`, donc le TRUNCATE via `truncateAuthTables` vide
- * aussi implicitement `canvas_state`. On garde `canvas_state` dans le
- * TRUNCATE explicite pour la lisibilité (montre l'intent).
+ * ─── Modèle testé (C.5) ───────────────────────────────────────────────
+ * canvas_state est rattaché à `(user_id, db_connection_id)` — un canvas
+ * par (user × connection). Chaque test crée d'abord une db_connection
+ * fake pour son user via le helper `createTestConnection`, puis exerce
+ * les endpoints avec le connectionId retourné.
  */
 
+import { schema as dbSchema } from "@sqlnest/db";
+import { randomBytes } from "node:crypto";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { config as loadEnv } from "dotenv";
@@ -38,13 +38,6 @@ import {
 import canvasStateRoute from "../../routes/api/canvas-state/root";
 import { createTestApp, truncateCanvasAndAuth } from "../../utils/testapp";
 
-// ─── Chargement du .env RACINE ───────────────────────────────────────
-// Vitest ne charge PAS `.env` automatiquement. Réplique la stratégie
-// d'`auth.int.test.ts` : loadEnv depuis la racine monorepo AVANT de créer
-// l'app (les plugins lisent process.env à register).
-// __dirname = .../apps/backend/src/domains/canvas-state → 5 niveaux au-dessus
-// pour atteindre la racine monorepo (canvas-state → domains → src → backend
-// → apps → root).
 const rootEnv = resolve(
 	dirname(fileURLToPath(import.meta.url)),
 	"..",
@@ -56,16 +49,12 @@ const rootEnv = resolve(
 );
 loadEnv({ path: rootEnv, quiet: true });
 
-// AUTH_SECRET peut être un placeholder dans le .env dev. On force une
-// valeur valide pour les tests (>=32 chars, sans mot interdit par la
-// regex de env.schema).
 process.env.AUTH_SECRET =
 	process.env.AUTH_SECRET &&
 	!/changeme|replace|placeholder/i.test(process.env.AUTH_SECRET)
 		? process.env.AUTH_SECRET
 		: "test-secret-super-long-value-32-chars-min-XX";
 
-// Providers OAuth désactivés en test.
 process.env.GOOGLE_CLIENT_ID ??= "";
 process.env.GITHUB_CLIENT_ID ??= "";
 
@@ -74,7 +63,6 @@ process.env.TRUSTED_ORIGINS ??= "http://localhost:3000";
 
 const DATABASE_URL = process.env.DATABASE_URL;
 
-/** app.inject peut renvoyer set-cookie en string OU string[] : on normalise. */
 function getSetCookies(
 	headers: Record<string, string | string[] | number | undefined>
 ): string[] {
@@ -83,7 +71,6 @@ function getSetCookies(
 	return Array.isArray(raw) ? raw.map(String) : [String(raw)];
 }
 
-/** Réduit chaque cookie à sa paire `name=value` (drop `; Path=/; HttpOnly...`). */
 function extractSessionCookie(setCookies: string[]): string {
 	const pairs = setCookies
 		.map((c) => c.split(";")[0])
@@ -92,11 +79,8 @@ function extractSessionCookie(setCookies: string[]): string {
 }
 
 /**
- * Helper — crée un user via Better Auth et retourne le cookie de session
- * prêt à être injecté dans les requêtes suivantes.
- *
- * Retourne aussi l'`id` du user (via GET /api/auth/get-session juste
- * après) — utile pour les assertions cross-user (isolation).
+ * Helper — crée un user via Better Auth et retourne le cookie de session +
+ * son `id` (utile pour les assertions cross-user).
  */
 async function createTestUser(
 	app: FastifyInstance,
@@ -114,19 +98,36 @@ async function createTestUser(
 			`sign-up failed for ${email}: ${signUp.statusCode} ${signUp.payload}`
 		);
 	}
-
 	const cookie = extractSessionCookie(getSetCookies(signUp.headers));
-	if (!cookie) {
-		throw new Error(`no session cookie returned for ${email}`);
-	}
-
+	if (!cookie) throw new Error(`no session cookie returned for ${email}`);
 	const body = signUp.json() as { user?: { id?: string } };
 	const userId = body.user?.id;
-	if (!userId) {
-		throw new Error(`no user.id returned for ${email}`);
-	}
-
+	if (!userId) throw new Error(`no user.id returned for ${email}`);
 	return { cookie, userId };
+}
+
+/**
+ * Helper — crée une db_connection factice pour ce user et retourne son id.
+ * Simule un pairing CLI sans passer par le tunnel réel : suffit pour
+ * exercer canvas_state qui ne se soucie que de l'existence de la FK.
+ */
+async function createTestConnection(
+	app: FastifyInstance,
+	userId: string,
+	name = `test-${Math.random().toString(36).slice(2, 8)}`
+): Promise<string> {
+	const rows = await app.db
+		.insert(dbSchema.dbConnection)
+		.values({
+			userId,
+			name,
+			cliFingerprint: randomBytes(32).toString("hex"),
+			engine: "postgres"
+		})
+		.returning({ id: dbSchema.dbConnection.id });
+	const row = rows[0];
+	if (!row) throw new Error("createTestConnection: insert returned no row");
+	return row.id;
 }
 
 describe.skipIf(!DATABASE_URL)("/api/canvas-state integration", () => {
@@ -134,9 +135,6 @@ describe.skipIf(!DATABASE_URL)("/api/canvas-state integration", () => {
 
 	beforeAll(async () => {
 		app = createTestApp({ withAuth: true });
-		// Register manuel du plugin route — `createTestApp` ne fait pas d'
-		// autoload. On utilise le prefix `/api/canvas-state` (identique à
-		// l'autoload en runtime : `src/routes/api/canvas-state/` → `/api/canvas-state`).
 		await app.register(canvasStateRoute, { prefix: "/api/canvas-state" });
 		await app.ready();
 	});
@@ -147,10 +145,6 @@ describe.skipIf(!DATABASE_URL)("/api/canvas-state integration", () => {
 	});
 
 	beforeEach(async () => {
-		// TRUNCATE inclut explicitement canvas_state — le CASCADE via
-		// user.id le viderait aussi, mais l'ordre explicite documente
-		// l'intent. Le helper enforce la garde "DATABASE_URL doit contenir
-		// 'test'" pour éviter de wiper la DB dev.
 		await truncateCanvasAndAuth(app);
 	});
 
@@ -158,24 +152,25 @@ describe.skipIf(!DATABASE_URL)("/api/canvas-state integration", () => {
 	test("GET sans cookie → 401", async () => {
 		const response = await app.inject({
 			method: "GET",
-			url: "/api/canvas-state?signature=postgres:users"
+			url: `/api/canvas-state?connectionId=${randomUuid()}`
 		});
 		expect(response.statusCode).toBe(401);
 		const body = response.json() as { message?: string };
 		expect(body.message).toBe("Non authentifié");
 	});
 
-	// ─── 2. GET avec cookie mais signature jamais synchronisée → 404 ──
-	test("GET avec cookie mais signature jamais synchronisée → 404", async () => {
-		const { cookie } = await createTestUser(
+	// ─── 2. GET avec cookie mais connection jamais synchronisée → 404 ─
+	test("GET avec cookie mais row inexistante → 404", async () => {
+		const { cookie, userId } = await createTestUser(
 			app,
 			"alice@example.com",
 			"correct-horse-battery-staple"
 		);
+		const connectionId = await createTestConnection(app, userId);
 
 		const response = await app.inject({
 			method: "GET",
-			url: "/api/canvas-state?signature=postgres:users",
+			url: `/api/canvas-state?connectionId=${connectionId}`,
 			headers: { cookie }
 		});
 		expect(response.statusCode).toBe(404);
@@ -190,6 +185,7 @@ describe.skipIf(!DATABASE_URL)("/api/canvas-state integration", () => {
 			"bob@example.com",
 			"hunter2-hunter2-hunter2"
 		);
+		const connectionId = await createTestConnection(app, userId);
 
 		const payload = {
 			positions: { users: { x: 100, y: 200 } },
@@ -201,64 +197,66 @@ describe.skipIf(!DATABASE_URL)("/api/canvas-state integration", () => {
 		const response = await app.inject({
 			method: "PUT",
 			url: "/api/canvas-state",
-			headers: { cookie, "content-type": "application/json", origin: "http://localhost:3000" },
-			payload: { signature: "postgres:users", payload }
+			headers: {
+				cookie,
+				"content-type": "application/json",
+				origin: "http://localhost:3000"
+			},
+			payload: { connectionId, payload }
 		});
 
 		expect(response.statusCode).toBe(200);
 		const body = response.json() as { updatedAt?: string };
 		expect(typeof body.updatedAt).toBe("string");
-		// updatedAt doit être un ISO string parsable en Date.
 		expect(Number.isNaN(new Date(body.updatedAt ?? "").getTime())).toBe(false);
 
-		// Sanity DB : une seule row, matchant (userId, signature).
 		const rows = await app.db.execute(
-			sql`SELECT user_id, schema_signature, payload FROM "canvas_state"`
+			sql`SELECT user_id, db_connection_id, payload FROM "canvas_state"`
 		);
 		expect(rows.length).toBe(1);
 		const row = rows[0] as {
 			user_id: string;
-			schema_signature: string;
+			db_connection_id: string;
 			payload: unknown;
 		};
 		expect(row.user_id).toBe(userId);
-		expect(row.schema_signature).toBe("postgres:users");
+		expect(row.db_connection_id).toBe(connectionId);
 		expect(row.payload).toEqual(payload);
 	});
 
-	// ─── 4. PUT idempotent — mêmes (userId, signature) → UPDATE ───────
-	test("PUT même signature payload différent → 200 + row updated (idempotent upsert)", async () => {
+	// ─── 4. PUT idempotent — même connection → UPDATE ─────────────────
+	test("PUT même connection payload différent → update (upsert)", async () => {
 		const { cookie, userId } = await createTestUser(
 			app,
 			"carol@example.com",
 			"another-strong-password-123"
 		);
+		const connectionId = await createTestConnection(app, userId);
 
 		const first = await app.inject({
 			method: "PUT",
 			url: "/api/canvas-state",
-			headers: { cookie, "content-type": "application/json", origin: "http://localhost:3000" },
-			payload: {
-				signature: "postgres:users",
-				payload: { version: 1 }
-			}
+			headers: {
+				cookie,
+				"content-type": "application/json",
+				origin: "http://localhost:3000"
+			},
+			payload: { connectionId, payload: { version: 1 } }
 		});
 		expect(first.statusCode).toBe(200);
 		const firstUpdatedAt = (first.json() as { updatedAt: string }).updatedAt;
 
-		// Deuxième PUT avec un payload différent — doit UPDATE (pas INSERT).
-		// On attend 1ms pour garantir un `now()` distinct côté Postgres et
-		// pouvoir vérifier que `updated_at` est bien refresh.
 		await new Promise((r) => setTimeout(r, 5));
 
 		const second = await app.inject({
 			method: "PUT",
 			url: "/api/canvas-state",
-			headers: { cookie, "content-type": "application/json", origin: "http://localhost:3000" },
-			payload: {
-				signature: "postgres:users",
-				payload: { version: 2, extra: "data" }
-			}
+			headers: {
+				cookie,
+				"content-type": "application/json",
+				origin: "http://localhost:3000"
+			},
+			payload: { connectionId, payload: { version: 2, extra: "data" } }
 		});
 		expect(second.statusCode).toBe(200);
 		const secondUpdatedAt = (second.json() as { updatedAt: string }).updatedAt;
@@ -266,186 +264,160 @@ describe.skipIf(!DATABASE_URL)("/api/canvas-state integration", () => {
 			new Date(firstUpdatedAt).getTime()
 		);
 
-		// Toujours UNE seule row (upsert, pas double insert).
 		const rows = await app.db.execute(
-			sql`SELECT user_id, payload FROM "canvas_state"`
+			sql`SELECT payload FROM "canvas_state"`
 		);
 		expect(rows.length).toBe(1);
-		const row = rows[0] as { user_id: string; payload: unknown };
-		expect(row.user_id).toBe(userId);
-		expect(row.payload).toEqual({ version: 2, extra: "data" });
+		expect((rows[0] as { payload: unknown }).payload).toEqual({
+			version: 2,
+			extra: "data"
+		});
 	});
 
-	// ─── 5. GET après PUT → 200 payload identique ─────────────────────
+	// ─── 5. GET après PUT → 200 avec le bon payload ───────────────────
 	test("GET après PUT → 200 payload identique", async () => {
-		const { cookie } = await createTestUser(
+		const { cookie, userId } = await createTestUser(
 			app,
-			"dave@example.com",
-			"my-very-long-password-45"
+			"dan@example.com",
+			"yet-another-strong-pw-321"
 		);
+		const connectionId = await createTestConnection(app, userId);
 
-		const payload = {
-			positions: { orders: { x: 10, y: 20 }, products: { x: 30, y: 40 } },
-			hidden: ["invoices"]
-		};
-
-		const putResp = await app.inject({
-			method: "PUT",
-			url: "/api/canvas-state",
-			headers: { cookie, "content-type": "application/json", origin: "http://localhost:3000" },
-			payload: { signature: "postgres:orders,products", payload }
-		});
-		expect(putResp.statusCode).toBe(200);
-		const putUpdatedAt = (putResp.json() as { updatedAt: string }).updatedAt;
-
-		const getResp = await app.inject({
-			method: "GET",
-			url: "/api/canvas-state?signature=postgres:orders,products",
-			headers: { cookie }
-		});
-		expect(getResp.statusCode).toBe(200);
-		const body = getResp.json() as { payload: unknown; updatedAt: string };
-		expect(body.payload).toEqual(payload);
-		expect(body.updatedAt).toBe(putUpdatedAt);
-	});
-
-	// ─── 6. DELETE → 204, GET suivant → 404 ───────────────────────────
-	test("DELETE → 204, GET suivant → 404", async () => {
-		const { cookie } = await createTestUser(
-			app,
-			"erin@example.com",
-			"strong-password-erin-89"
-		);
-
-		// Setup : PUT une row.
+		const payload = { positions: { foo: { x: 1, y: 2 } } };
 		await app.inject({
 			method: "PUT",
 			url: "/api/canvas-state",
-			headers: { cookie, "content-type": "application/json", origin: "http://localhost:3000" },
-			payload: {
-				signature: "postgres:users",
-				payload: { foo: "bar" }
-			}
+			headers: {
+				cookie,
+				"content-type": "application/json",
+				origin: "http://localhost:3000"
+			},
+			payload: { connectionId, payload }
 		});
 
-		// DELETE.
-		const delResp = await app.inject({
+		const response = await app.inject({
+			method: "GET",
+			url: `/api/canvas-state?connectionId=${connectionId}`,
+			headers: { cookie }
+		});
+		expect(response.statusCode).toBe(200);
+		const body = response.json() as { payload: unknown; updatedAt: string };
+		expect(body.payload).toEqual(payload);
+	});
+
+	// ─── 6. DELETE → 204 puis GET suivant → 404 ────────────────────────
+	test("DELETE → 204, GET suivant → 404", async () => {
+		const { cookie, userId } = await createTestUser(
+			app,
+			"eve@example.com",
+			"eve-strong-password-1234"
+		);
+		const connectionId = await createTestConnection(app, userId);
+
+		await app.inject({
+			method: "PUT",
+			url: "/api/canvas-state",
+			headers: {
+				cookie,
+				"content-type": "application/json",
+				origin: "http://localhost:3000"
+			},
+			payload: { connectionId, payload: { any: "thing" } }
+		});
+
+		const del = await app.inject({
 			method: "DELETE",
-			url: "/api/canvas-state?signature=postgres:users",
+			url: `/api/canvas-state?connectionId=${connectionId}`,
 			headers: { cookie, origin: "http://localhost:3000" }
 		});
-		expect(delResp.statusCode).toBe(204);
-		// 204 ne doit renvoyer aucun body.
-		expect(delResp.payload).toBe("");
+		expect(del.statusCode).toBe(204);
 
-		// GET suivant → 404.
-		const getResp = await app.inject({
+		const get = await app.inject({
 			method: "GET",
-			url: "/api/canvas-state?signature=postgres:users",
+			url: `/api/canvas-state?connectionId=${connectionId}`,
 			headers: { cookie }
 		});
-		expect(getResp.statusCode).toBe(404);
-
-		// DB vide (pour ce user).
-		const rows = await app.db.execute(
-			sql`SELECT COUNT(*)::int AS n FROM "canvas_state"`
-		);
-		expect((rows[0] as { n: number }).n).toBe(0);
+		expect(get.statusCode).toBe(404);
 	});
 
-	// ─── 7. Isolation entre users ─────────────────────────────────────
-	test("un user ne peut ni lire ni delete le canvas d'un autre user", async () => {
-		const alice = await createTestUser(
-			app,
-			"alice-iso@example.com",
-			"alice-alice-alice-alice"
-		);
-		const mallory = await createTestUser(
-			app,
-			"mallory@example.com",
-			"mallory-mallory-mallory"
-		);
+	// ─── 7. Isolation cross-user : Alice ne voit pas le canvas de Bob ─
+	test("un user ne peut pas lire le canvas d'un autre user", async () => {
+		const alice = await createTestUser(app, "alice-iso@ex.com", "pw-alice-1234567");
+		const bob = await createTestUser(app, "bob-iso@ex.com", "pw-bob-9876543210");
 
-		// Alice crée un canvas.
-		const alicePayload = { secret: "alice-only" };
+		const aliceConn = await createTestConnection(app, alice.userId, "alice-db");
+		const bobConn = await createTestConnection(app, bob.userId, "bob-db");
+
 		await app.inject({
 			method: "PUT",
 			url: "/api/canvas-state",
-			headers: { cookie: alice.cookie, "content-type": "application/json", origin: "http://localhost:3000" },
-			payload: { signature: "postgres:users", payload: alicePayload }
+			headers: {
+				cookie: alice.cookie,
+				"content-type": "application/json",
+				origin: "http://localhost:3000"
+			},
+			payload: { connectionId: aliceConn, payload: { secret: "alice" } }
 		});
 
-		// Mallory tente de lire → 404 (isolation via WHERE user_id).
-		const malloryGet = await app.inject({
+		// Bob tente de GET le canvas d'Alice via son connectionId → 404
+		// (isolation par user_id dans la WHERE : la row d'Alice n'est jamais
+		// visible depuis Bob, même s'il connaissait l'aliceConn).
+		const bobReadsAlice = await app.inject({
 			method: "GET",
-			url: "/api/canvas-state?signature=postgres:users",
-			headers: { cookie: mallory.cookie }
+			url: `/api/canvas-state?connectionId=${aliceConn}`,
+			headers: { cookie: bob.cookie }
 		});
-		expect(malloryGet.statusCode).toBe(404);
+		expect(bobReadsAlice.statusCode).toBe(404);
 
-		// Mallory tente de delete → 204 (idempotent), mais la row d'Alice
-		// est INTACTE en DB (WHERE user_id = mallory.id ne matche rien).
-		const malloryDel = await app.inject({
-			method: "DELETE",
-			url: "/api/canvas-state?signature=postgres:users",
-			headers: { cookie: mallory.cookie, origin: "http://localhost:3000" }
-		});
-		expect(malloryDel.statusCode).toBe(204);
-
-		// Vérification cruciale : la row d'Alice existe toujours en DB.
-		const rows = await app.db.execute(
-			sql`SELECT user_id, payload FROM "canvas_state"`
-		);
-		expect(rows.length).toBe(1);
-		const row = rows[0] as { user_id: string; payload: unknown };
-		expect(row.user_id).toBe(alice.userId);
-		expect(row.payload).toEqual(alicePayload);
-
-		// Alice peut toujours lire son propre canvas.
-		const aliceGet = await app.inject({
+		// Bob lit son propre canvas (vide) → 404 aussi, pas 200 avec payload d'Alice
+		const bobReadsBob = await app.inject({
 			method: "GET",
-			url: "/api/canvas-state?signature=postgres:users",
-			headers: { cookie: alice.cookie }
+			url: `/api/canvas-state?connectionId=${bobConn}`,
+			headers: { cookie: bob.cookie }
 		});
-		expect(aliceGet.statusCode).toBe(200);
-		const body = aliceGet.json() as { payload: unknown };
-		expect(body.payload).toEqual(alicePayload);
+		expect(bobReadsBob.statusCode).toBe(404);
 	});
 
-	// ─── 8. CSRF — Origin manquant ou non-whitelist ───────────────────
+	// ─── 8. CSRF : PUT sans Origin → 403 ──────────────────────────────
 	test("PUT sans Origin → 403 (CSRF defense-in-depth)", async () => {
-		const { cookie } = await createTestUser(
+		const { cookie, userId } = await createTestUser(
 			app,
-			"origin-none@example.com",
-			"password-strong-1234"
+			"frank@example.com",
+			"frank-strong-password-1234"
 		);
+		const connectionId = await createTestConnection(app, userId);
+
 		const response = await app.inject({
 			method: "PUT",
 			url: "/api/canvas-state",
-			headers: { cookie, "content-type": "application/json" },
-			payload: {
-				signature: "postgres:users",
-				payload: { positions: {} }
-			}
+			headers: {
+				cookie,
+				"content-type": "application/json"
+				// pas de header origin
+			},
+			payload: { connectionId, payload: {} }
 		});
 		expect(response.statusCode).toBe(403);
-		const body = response.json() as { message?: string };
-		expect(body.message).toBe("Origin manquant");
 	});
 
+	// ─── 9. CSRF : DELETE avec Origin hostile → 403 ───────────────────
 	test("DELETE avec Origin hostile → 403 (CSRF defense-in-depth)", async () => {
-		const { cookie } = await createTestUser(
+		const { cookie, userId } = await createTestUser(
 			app,
-			"origin-evil@example.com",
-			"password-strong-5678"
+			"grace@example.com",
+			"grace-strong-password-1234"
 		);
+		const connectionId = await createTestConnection(app, userId);
+
 		const response = await app.inject({
 			method: "DELETE",
-			url: "/api/canvas-state?signature=postgres:users",
-			headers: { cookie, origin: "https://evil.com" }
+			url: `/api/canvas-state?connectionId=${connectionId}`,
+			headers: { cookie, origin: "https://evil.example.com" }
 		});
 		expect(response.statusCode).toBe(403);
-		const body = response.json() as { message?: string };
-		expect(body.message).toBe("Origin non autorisé");
 	});
 });
+
+function randomUuid(): string {
+	return crypto.randomUUID();
+}

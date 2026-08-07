@@ -10,8 +10,8 @@ export const CONSOLE_HEIGHT_MIN = 180;
 export const CONSOLE_HEIGHT_EXPANDED_DEFAULT = 340;
 
 const EXAMPLES: Record<Engine, string> = {
-	postgres: "get users | where is_active = true | pick email, display_name",
-	mongodb: 'get orders | where status = "paid" | pick user_id, total_cents'
+	postgres: "get <table> | pick <fields>",
+	mongodb: "get <collection> | pick <fields>"
 };
 
 /** Max = presque tout le viewport (laisse ~80 px pour la toolbar + marges).

@@ -1,7 +1,7 @@
 import { schema as dbSchema } from "@sqlnest/db";
 import { and, eq } from "drizzle-orm";
 import type { DbOrTx } from "./db";
-import type { CanvasPayloadT, CanvasSignatureT } from "./schema";
+import type { CanvasConnectionIdT, CanvasPayloadT } from "./schema";
 
 export interface GetCanvasResult {
 	readonly payload: CanvasPayloadT;
@@ -9,13 +9,13 @@ export interface GetCanvasResult {
 }
 
 /**
- * Lit le canvas d'un utilisateur pour une signature de schéma donnée.
+ * Lit le canvas d'un utilisateur pour une db_connection donnée.
  *
  * ─── Contrat ───────────────────────────────────────────────────────────
- * - `null` si aucune row (userId × signature) — le handler HTTP répondra 404.
+ * - `null` si aucune row (userId × connectionId) — le handler HTTP répondra 404.
  * - `{ payload, updatedAt }` sinon.
  *
- * L'unique-index (`user_id`, `schema_signature`) garantit qu'au plus une
+ * L'unique-index (`user_id`, `db_connection_id`) garantit qu'au plus une
  * row existe pour un couple donné — on utilise `LIMIT 1` pour rester
  * explicite (defensive : si l'index disparaissait, on ne renverrait pas
  * plusieurs rows silencieusement).
@@ -23,7 +23,7 @@ export interface GetCanvasResult {
 export async function getCanvasState(
 	db: DbOrTx,
 	userId: string,
-	signature: CanvasSignatureT
+	connectionId: CanvasConnectionIdT
 ): Promise<GetCanvasResult | null> {
 	const rows = await db
 		.select({
@@ -34,7 +34,7 @@ export async function getCanvasState(
 		.where(
 			and(
 				eq(dbSchema.canvasState.userId, userId),
-				eq(dbSchema.canvasState.schemaSignature, signature)
+				eq(dbSchema.canvasState.connectionId, connectionId)
 			)
 		)
 		.limit(1);

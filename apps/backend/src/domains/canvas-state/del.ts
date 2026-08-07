@@ -1,14 +1,14 @@
 import { schema as dbSchema } from "@sqlnest/db";
 import { and, eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
-import type { CanvasSignatureT } from "./schema";
+import type { CanvasConnectionIdT } from "./schema";
 
 export interface DelCanvasResult {
 	readonly deleted: boolean;
 }
 
 /**
- * Supprime le canvas d'un utilisateur pour une signature donnée.
+ * Supprime le canvas d'un utilisateur pour une db_connection donnée.
  *
  * ─── Contrat ───────────────────────────────────────────────────────────
  * Retourne `{ deleted: true }` si une row a été supprimée, `false` sinon.
@@ -24,14 +24,14 @@ export interface DelCanvasResult {
 export async function delCanvasState(
 	db: FastifyInstance["db"],
 	userId: string,
-	signature: CanvasSignatureT
+	connectionId: CanvasConnectionIdT
 ): Promise<DelCanvasResult> {
 	const rows = await db
 		.delete(dbSchema.canvasState)
 		.where(
 			and(
 				eq(dbSchema.canvasState.userId, userId),
-				eq(dbSchema.canvasState.schemaSignature, signature)
+				eq(dbSchema.canvasState.connectionId, connectionId)
 			)
 		)
 		.returning({ id: dbSchema.canvasState.id });

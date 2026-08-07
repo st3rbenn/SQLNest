@@ -1,6 +1,6 @@
+import { showNotification } from "@sqlnest/design-system";
 import { useReactFlow } from "@xyflow/react";
 import { useCallback, useRef } from "react";
-import { showNotification } from "@sqlnest/design-system";
 import type { CanvasTool } from "../CanvasToolbar";
 import type { FramesApi } from "../useFrames";
 
