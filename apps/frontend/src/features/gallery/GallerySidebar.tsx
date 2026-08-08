@@ -9,8 +9,7 @@ import { useCurrentTeam } from "../teams/useCurrentTeam";
  * et la page de pairing (`/team/:slug/pair`). 2 blocs :
  *   1. Perso — UserBadge + nav cross-team (Recents)
  *   2. Team  — TeamSelector + nav team-scoped (Drafts)
- * Footer : CTA « Nouveau canvas » qui pointe vers `/pair`. Marqué actif
- * quand `activeItem === "pair"` (utilisateur EST sur la page pairing).
+ * Le CTA « Nouveau canvas » vit dans le PageHead à droite (pas ici).
  */
 
 const sidebarStyle: CSSProperties = {
@@ -22,15 +21,13 @@ const sidebarStyle: CSSProperties = {
 	flexShrink: 0
 };
 
-export type SidebarActiveItem = "recents" | "drafts" | "pair";
+export type SidebarActiveItem = "recents" | "drafts";
 
 export function GallerySidebar({
 	teamSlug,
-	hasConnections,
 	activeItem
 }: {
 	readonly teamSlug: string | null;
-	readonly hasConnections: boolean;
 	readonly activeItem?: SidebarActiveItem;
 }): React.ReactNode {
 	const team = useCurrentTeam();
@@ -85,86 +82,7 @@ export function GallerySidebar({
 			</div>
 
 			<div style={{ flex: 1 }} />
-
-			<div style={{ padding: "10px 10px 12px" }}>
-				<PairCta
-					teamSlug={teamSlug}
-					hasConnections={hasConnections}
-					active={activeItem === "pair"}
-				/>
-			</div>
 		</aside>
-	);
-}
-
-function PairCta({
-	teamSlug,
-	hasConnections,
-	active
-}: {
-	readonly teamSlug: string | null;
-	readonly hasConnections: boolean;
-	readonly active: boolean;
-}): React.ReactNode {
-	const className = active
-		? "sqlnest-sidebar-item sqlnest-sidebar-item--active"
-		: "sqlnest-sidebar-item";
-	const style: CSSProperties = {
-		display: "flex",
-		width: "100%",
-		alignItems: "center",
-		gap: 7,
-		padding: "6px 10px",
-		color: "var(--sqlnest-text-secondary)",
-		borderRadius: 6,
-		fontSize: 12,
-		textDecoration: "none",
-		boxSizing: "border-box"
-	};
-	const inner = (
-		<>
-			<svg
-				width={12}
-				height={12}
-				viewBox="0 0 24 24"
-				fill="none"
-				stroke="currentColor"
-				strokeWidth={2}
-				aria-hidden="true"
-			>
-				<title>Nouveau canvas</title>
-				<path d="M12 5v14M5 12h14" />
-			</svg>
-			<span style={{ flex: 1 }}>Nouveau canvas</span>
-			{hasConnections ? (
-				<span
-					title="Au moins une connection"
-					style={{
-						width: 5,
-						height: 5,
-						borderRadius: "50%",
-						background: "var(--sqlnest-success)"
-					}}
-				/>
-			) : null}
-		</>
-	);
-	if (teamSlug) {
-		return (
-			<Link
-				to="/team/$teamSlug/pair"
-				params={{ teamSlug }}
-				className={className}
-				style={style}
-			>
-				{inner}
-			</Link>
-		);
-	}
-	return (
-		<Link to="/pair" className={className} style={style}>
-			{inner}
-		</Link>
 	);
 }
 

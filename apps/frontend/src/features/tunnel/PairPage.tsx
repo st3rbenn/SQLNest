@@ -26,8 +26,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { type CSSProperties, type FormEvent, useEffect, useState } from "react";
 import { DismissibleAlert } from "../auth/DismissibleAlert";
-import { useDbConnections } from "../db-connections/useDbConnections";
 import { GallerySidebar } from "../gallery/GallerySidebar";
+import { PageHead } from "../gallery/PageHead";
 import { useCurrentTeamSlug } from "../teams/useCurrentTeam";
 
 function apiBase(): string {
@@ -50,23 +50,6 @@ const mainStyle: CSSProperties = {
 	display: "flex",
 	flexDirection: "column",
 	minWidth: 0
-};
-
-const mainHeadStyle: CSSProperties = {
-	minHeight: 45,
-	boxSizing: "border-box",
-	display: "flex",
-	alignItems: "center",
-	padding: "0 32px",
-	borderBottom: "1px solid var(--sqlnest-border)",
-	flexShrink: 0
-};
-
-const mainHeadTitleStyle: CSSProperties = {
-	fontSize: 13,
-	fontWeight: 500,
-	color: "var(--sqlnest-text-title)",
-	margin: 0
 };
 
 const contentStyle: CSSProperties = {
@@ -140,7 +123,6 @@ export function PairPage() {
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
 	const teamSlug = useCurrentTeamSlug();
-	const { data: connections } = useDbConnections(teamSlug);
 	const [code, setCode] = useState("");
 	const [deviceName, setDeviceName] = useState("");
 	const [isSubmitting, setIsSubmitting] = useState(false);
@@ -234,19 +216,11 @@ export function PairPage() {
 		}
 	}, [success, navigate, queryClient, teamSlug]);
 
-	const hasConnections = (connections?.length ?? 0) > 0;
-
 	return (
 		<div style={pageStyle}>
-			<GallerySidebar
-				teamSlug={teamSlug}
-				hasConnections={hasConnections}
-				activeItem="pair"
-			/>
+			<GallerySidebar teamSlug={teamSlug} />
 			<main style={mainStyle}>
-				<div style={mainHeadStyle}>
-					<h1 style={mainHeadTitleStyle}>Nouveau canvas</h1>
-				</div>
+				<PageHead title="Nouveau canvas" />
 				<div style={contentStyle}>
 					<div style={formWrapperStyle}>
 						{error && (

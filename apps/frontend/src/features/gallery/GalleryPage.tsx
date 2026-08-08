@@ -8,6 +8,7 @@ import { useRecentConnectionIds } from "../db-connections/useRecentConnections";
 import { useCurrentTeam } from "../teams/useCurrentTeam";
 import { DbCard } from "./DbCard";
 import { GallerySidebar } from "./GallerySidebar";
+import { NewCanvasCta, PageHead } from "./PageHead";
 import { useNavigateToCanvas } from "./useNavigateToCanvas";
 
 /**
@@ -43,29 +44,6 @@ const mainStyle: CSSProperties = {
 	display: "flex",
 	flexDirection: "column",
 	minWidth: 0
-};
-
-/**
- * Head de la page main — même height que le bloc user de la sidebar
- * (UserBadge trigger ~32px + padding 8px top + 4px bottom = 44px).
- * Alignement horizontal top garanti : la baseline visuelle du titre
- * matche celle du nom user à sa gauche.
- */
-const mainHeadStyle: CSSProperties = {
-	minHeight: 45,
-	boxSizing: "border-box",
-	display: "flex",
-	alignItems: "center",
-	padding: "0 32px",
-	borderBottom: "1px solid var(--sqlnest-border)",
-	flexShrink: 0
-};
-
-const mainHeadTitleStyle: CSSProperties = {
-	fontSize: 13,
-	fontWeight: 500,
-	color: "var(--sqlnest-text-title)",
-	margin: 0
 };
 
 const mainContentStyle: CSSProperties = {
@@ -127,13 +105,12 @@ export function GalleryPage({ view = "drafts" }: { readonly view?: GalleryView }
 	if (error) {
 		return (
 			<div style={pageStyle}>
-				<GallerySidebar
-					hasConnections={false}
-					teamSlug={teamSlug}
-					activeItem={view}
-				/>
+				<GallerySidebar teamSlug={teamSlug} activeItem={view} />
 				<main style={mainStyle}>
-					<PageHead title={title} />
+					<PageHead
+						title={title}
+						actions={<NewCanvasCta teamSlug={teamSlug} />}
+					/>
 					<div style={mainContentStyle}>
 						<div style={{ color: "var(--sqlnest-danger)" }}>
 							Impossible de charger les connections : {error.message}
@@ -149,13 +126,12 @@ export function GalleryPage({ view = "drafts" }: { readonly view?: GalleryView }
 		// contenu attend sans afficher de "Loading…" (bruit visuel).
 		return (
 			<div style={pageStyle}>
-				<GallerySidebar
-					hasConnections={false}
-					teamSlug={teamSlug}
-					activeItem={view}
-				/>
+				<GallerySidebar teamSlug={teamSlug} activeItem={view} />
 				<main style={mainStyle}>
-					<PageHead title={title} />
+					<PageHead
+						title={title}
+						actions={<NewCanvasCta teamSlug={teamSlug} />}
+					/>
 					<div style={mainContentStyle} />
 				</main>
 			</div>
@@ -166,13 +142,12 @@ export function GalleryPage({ view = "drafts" }: { readonly view?: GalleryView }
 	if (connections.length === 0) {
 		return (
 			<div style={pageStyle}>
-				<GallerySidebar
-					hasConnections={false}
-					teamSlug={teamSlug}
-					activeItem={view}
-				/>
+				<GallerySidebar teamSlug={teamSlug} activeItem={view} />
 				<main style={mainStyle}>
-					<PageHead title={title} />
+					<PageHead
+						title={title}
+						actions={<NewCanvasCta teamSlug={teamSlug} />}
+					/>
 					<EmptyHero teamSlug={teamSlug} />
 				</main>
 			</div>
@@ -190,13 +165,12 @@ export function GalleryPage({ view = "drafts" }: { readonly view?: GalleryView }
 	return (
 		<div style={pageStyle}>
 			<style>{CARD_HOVER_CSS}</style>
-			<GallerySidebar
-				hasConnections={true}
-				teamSlug={teamSlug}
-				activeItem={view}
-			/>
+			<GallerySidebar teamSlug={teamSlug} activeItem={view} />
 			<main style={mainStyle}>
-				<PageHead title={title} />
+				<PageHead
+					title={title}
+					actions={<NewCanvasCta teamSlug={teamSlug} />}
+				/>
 				<div
 					style={{
 						...mainContentStyle,
@@ -416,10 +390,3 @@ function EmptyHero({
 	);
 }
 
-function PageHead({ title }: { readonly title: string }): React.ReactNode {
-	return (
-		<div style={mainHeadStyle}>
-			<h1 style={mainHeadTitleStyle}>{title}</h1>
-		</div>
-	);
-}

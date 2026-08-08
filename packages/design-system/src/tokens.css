@@ -111,3 +111,16 @@
 	cursor: not-allowed;
 	opacity: 0.55;
 }
+
+/* CTA compact dans un header de page (ex. « Nouveau canvas » dans le
+ * PageHead de la gallery). Aspect « outlined » : bg surface + border
+ * neutre au repos, border accent + bg surface-hover au hover. Moins
+ * fort qu'un vrai Button primary du DS mais plus visible qu'un simple
+ * link. */
+.sqlnest-header-cta {
+	transition: background-color 120ms ease, border-color 120ms ease;
+}
+.sqlnest-header-cta:hover {
+	background: var(--sqlnest-surface-hover) !important;
+	border-color: var(--sqlnest-accent-muted) !important;
+}
