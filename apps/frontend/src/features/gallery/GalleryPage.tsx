@@ -62,15 +62,15 @@ const mainStyle: CSSProperties = {
  * matche celle du nom user à sa gauche.
  */
 const mainHeadStyle: CSSProperties = {
-	// 45px = padding user block (8+4) + UserBadge trigger (32) + divider
-	// sidebar (1). Alignement pixel-perfect entre la borderBottom du
-	// header et le divider sidebar (mesures via getBoundingClientRect).
-	minHeight: 45,
+	// Height = bloc user (44). Pas de borderBottom : le divider sidebar
+	// descend maintenant sous le bloc [user + Recents] et ne matcherait
+	// pas ce header. Sans trait, le PageHead reste juste un titre
+	// discret — pattern Notion/Linear.
+	minHeight: 44,
 	boxSizing: "border-box",
 	display: "flex",
 	alignItems: "center",
 	padding: "0 32px",
-	borderBottom: "1px solid var(--sqlnest-border)",
 	flexShrink: 0
 };
 
@@ -240,18 +240,24 @@ function Sidebar({
 	const team = useCurrentTeam();
 	return (
 		<aside style={sidebarStyle}>
-			{/* User en top — style Figma "workspace switcher". */}
+			{/* ── Bloc PERSONAL : user + nav cross-team. ────────────────
+			    En V2 « Recents » agrégera les canvas récemment ouverts
+			    tous workspaces confondus (own team, external teams,
+			    communautaire). En V1 la route n'existe pas encore →
+			    marqué disabled avec « bientôt ». */}
 			<div style={{ padding: "8px 12px 4px" }}>
 				<UserBadge />
 			</div>
+			<div style={{ padding: "2px 12px 8px" }}>
+				<NavItem
+					label="Recents"
+					icon={<ClockIcon />}
+					disabled
+					disabledHint="bientôt"
+				/>
+			</div>
 
-			{/* Séparateur user / team — full width (pas de gap horizontal)
-			    pour aligner visuellement avec la borderBottom de la
-			    PageHead à sa droite. `margin: 0` colle le divider au bas
-			    du user wrapper — le padding-bottom 4px de ce wrapper
-			    fournit l'air au-dessus, et le team wrapper (padding-top
-			    0) le padding-top 8px du team wrapper donne l'air en
-			    dessous. */}
+			{/* Séparateur bloc perso / bloc team — full width. */}
 			<div
 				style={{
 					height: 1,
@@ -260,7 +266,7 @@ function Sidebar({
 				}}
 			/>
 
-			{/* Team courante en dessous — dropdown pour V2 multi-teams. */}
+			{/* ── Bloc TEAM : sélecteur team + nav team-scoped. ──────── */}
 			<div style={{ padding: "8px 12px 4px" }}>
 				{team ? (
 					<TeamSelector currentTeam={team} />
@@ -276,60 +282,8 @@ function Sidebar({
 					</div>
 				)}
 			</div>
-
-			<div
-				style={{
-					padding: "2px 12px",
-					display: "flex",
-					flexDirection: "column"
-				}}
-			>
-				<div
-					className="sqlnest-sidebar-item sqlnest-sidebar-item--active"
-					style={{
-						display: "flex",
-						alignItems: "center",
-						// gap 10 = même que UserBadge / TeamSelector triggers,
-						// alignement horizontal cohérent icon → label.
-						gap: 10,
-						padding: "6px 8px",
-						color: "var(--sqlnest-text-primary)",
-						borderRadius: 6,
-						fontSize: 12,
-						fontWeight: 500,
-						cursor: "default"
-					}}
-				>
-					{/* Wrapper 20x20 — matche l'avatar rond user / team pour
-					    aligner l'icône au même centre horizontal. */}
-					<span
-						style={{
-							width: 20,
-							height: 20,
-							display: "inline-flex",
-							alignItems: "center",
-							justifyContent: "center",
-							flexShrink: 0
-						}}
-					>
-						<svg
-							width={14}
-							height={14}
-							viewBox="0 0 24 24"
-							fill="none"
-							stroke="var(--sqlnest-text-cream)"
-							strokeWidth={2}
-							strokeLinecap="round"
-							strokeLinejoin="round"
-							aria-hidden="true"
-						>
-							<title>Recents</title>
-							<circle cx={12} cy={12} r={9} />
-							<path d="M12 7v5l3 2" />
-						</svg>
-					</span>
-					Recents
-				</div>
+			<div style={{ padding: "2px 12px" }}>
+				<NavItem label="Drafts" icon={<DraftIcon />} active />
 			</div>
 
 			<div style={{ flex: 1 }} />
@@ -608,5 +562,108 @@ function PageHead({ title }: { readonly title: string }): React.ReactNode {
 		<div style={mainHeadStyle}>
 			<h1 style={mainHeadTitleStyle}>{title}</h1>
 		</div>
+	);
+}
+
+/** Item de navigation sidebar (Recents, Drafts, …). Un seul composant
+ *  pour homogénéiser padding / gap / icon-slot avec les triggers
+ *  UserBadge / TeamSelector. Le hover est porté par la classe
+ *  `sqlnest-sidebar-item` du DS. */
+function NavItem({
+	label,
+	icon,
+	active = false,
+	disabled = false,
+	disabledHint
+}: {
+	readonly label: string;
+	readonly icon: React.ReactNode;
+	readonly active?: boolean;
+	readonly disabled?: boolean;
+	readonly disabledHint?: string;
+}): React.ReactNode {
+	const className = active
+		? "sqlnest-sidebar-item sqlnest-sidebar-item--active"
+		: "sqlnest-sidebar-item";
+	const style: CSSProperties = {
+		display: "flex",
+		alignItems: "center",
+		gap: 10,
+		padding: "6px 8px",
+		color: disabled
+			? "var(--sqlnest-text-tertiary)"
+			: "var(--sqlnest-text-title)",
+		borderRadius: 6,
+		fontSize: 12,
+		fontWeight: 500,
+		cursor: disabled ? "not-allowed" : "default",
+		opacity: disabled ? 0.75 : 1
+	};
+	return (
+		<div className={className} style={style} title={disabledHint}>
+			<span
+				style={{
+					width: 20,
+					height: 20,
+					display: "inline-flex",
+					alignItems: "center",
+					justifyContent: "center",
+					flexShrink: 0
+				}}
+			>
+				{icon}
+			</span>
+			<span style={{ flex: 1 }}>{label}</span>
+			{disabled && disabledHint ? (
+				<span
+					style={{
+						fontSize: 10,
+						color: "var(--sqlnest-text-tertiary)"
+					}}
+				>
+					{disabledHint}
+				</span>
+			) : null}
+		</div>
+	);
+}
+
+function ClockIcon(): React.ReactNode {
+	return (
+		<svg
+			width={14}
+			height={14}
+			viewBox="0 0 24 24"
+			fill="none"
+			stroke="var(--sqlnest-text-cream)"
+			strokeWidth={2}
+			strokeLinecap="round"
+			strokeLinejoin="round"
+			aria-hidden="true"
+		>
+			<title>Recents</title>
+			<circle cx={12} cy={12} r={9} />
+			<path d="M12 7v5l3 2" />
+		</svg>
+	);
+}
+
+function DraftIcon(): React.ReactNode {
+	return (
+		<svg
+			width={14}
+			height={14}
+			viewBox="0 0 24 24"
+			fill="none"
+			stroke="var(--sqlnest-text-cream)"
+			strokeWidth={2}
+			strokeLinecap="round"
+			strokeLinejoin="round"
+			aria-hidden="true"
+		>
+			<title>Drafts</title>
+			<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+			<path d="M14 3v5h5" />
+		</svg>
 	);
 }
