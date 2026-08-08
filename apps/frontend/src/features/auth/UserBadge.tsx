@@ -34,7 +34,7 @@ const triggerStyle: CSSProperties = {
 	borderRadius: 6,
 	cursor: "pointer",
 	textAlign: "left",
-	color: "var(--sqlnest-text-primary)",
+	color: "var(--sqlnest-text-title)",
 	fontFamily: "inherit",
 	fontSize: 12,
 	minWidth: 0
@@ -51,7 +51,7 @@ const avatarStyle: CSSProperties = {
 	justifyContent: "center",
 	fontWeight: 600,
 	fontSize: 10.5,
-	color: "var(--sqlnest-text-primary)",
+	color: "var(--sqlnest-text-title)",
 	flexShrink: 0
 };
 

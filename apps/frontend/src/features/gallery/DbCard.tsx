@@ -23,7 +23,7 @@ const linkStyle: CSSProperties = {
 	textDecoration: "none",
 	color: "inherit",
 	cursor: "pointer",
-	border: "1px solid var(--sqlnest-border-subtle)",
+	border: "1px solid var(--sqlnest-border)",
 	borderRadius: 12,
 	overflow: "hidden",
 	background: "var(--sqlnest-surface)"
@@ -31,7 +31,7 @@ const linkStyle: CSSProperties = {
 
 const infoBlockStyle: CSSProperties = {
 	padding: "10px 12px",
-	borderTop: "1px solid var(--sqlnest-border-subtle)"
+	borderTop: "1px solid var(--sqlnest-border)"
 };
 
 const nameStyle: CSSProperties = {

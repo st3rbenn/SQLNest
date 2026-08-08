@@ -77,7 +77,7 @@ const mainHeadStyle: CSSProperties = {
 const mainHeadTitleStyle: CSSProperties = {
 	fontSize: 13,
 	fontWeight: 500,
-	color: "var(--sqlnest-text-secondary)",
+	color: "var(--sqlnest-text-title)",
 	margin: 0
 };
 
@@ -243,7 +243,7 @@ function Sidebar({
 	return (
 		<aside style={sidebarStyle}>
 			{/* User en top — style Figma "workspace switcher". */}
-			<div style={{ padding: "8px 8px 4px" }}>
+			<div style={{ padding: "8px 12px 4px" }}>
 				<UserBadge />
 			</div>
 
@@ -263,7 +263,7 @@ function Sidebar({
 			/>
 
 			{/* Team courante en dessous — dropdown pour V2 multi-teams. */}
-			<div style={{ padding: "0 8px 8px" }}>
+			<div style={{ padding: "8px 12px 4px" }}>
 				{team ? (
 					<TeamSelector currentTeam={team} />
 				) : (
@@ -281,7 +281,7 @@ function Sidebar({
 
 			<div
 				style={{
-					padding: "2px 8px",
+					padding: "2px 12px",
 					display: "flex",
 					flexDirection: "column"
 				}}
