@@ -480,9 +480,6 @@ function NewConnectionCard({
 				<div style={{ fontSize: 12, color: "var(--sqlnest-text-secondary)" }}>
 					Nouveau canvas
 				</div>
-				<div style={{ fontSize: 10.5, color: "var(--sqlnest-text-tertiary)" }}>
-					Device flow via ton CLI local
-				</div>
 			</div>
 		</Link>
 	);
