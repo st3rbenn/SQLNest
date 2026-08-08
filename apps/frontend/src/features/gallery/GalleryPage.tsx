@@ -419,7 +419,7 @@ function NewConnectionCard({
 		>
 			<div
 				style={{
-					aspectRatio: "16 / 10",
+					aspectRatio: "16 / 9",
 					background: "transparent",
 					border: "1.5px dashed var(--sqlnest-border)",
 					borderRadius: 12,
