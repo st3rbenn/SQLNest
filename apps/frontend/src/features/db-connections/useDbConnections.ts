@@ -61,10 +61,15 @@ interface ListResponse {
 	readonly connections: readonly DbConnection[];
 }
 
-async function fetchDbConnections(): Promise<readonly DbConnection[]> {
-	const res = await fetch(`${API_BASE}/api/db-connections`, {
-		credentials: "include"
-	});
+async function fetchDbConnections(
+	teamSlug: string | null
+): Promise<readonly DbConnection[]> {
+	// C.21.5 : URL team-scoped si teamSlug est fourni (context router),
+	// sinon fallback route legacy user-scoped (supprimée en C.21.7).
+	const url = teamSlug
+		? `${API_BASE}/api/teams/${encodeURIComponent(teamSlug)}/db-connections`
+		: `${API_BASE}/api/db-connections`;
+	const res = await fetch(url, { credentials: "include" });
 	if (!res.ok) {
 		const data = (await res.json().catch(() => ({}))) as { message?: string };
 		throw new Error(data.message ?? `HTTP ${res.status}`);
@@ -84,11 +89,14 @@ async function fetchDbConnections(): Promise<readonly DbConnection[]> {
  * Le poll 5s est intentionnellement fréquent : les cards gallery ont besoin
  * de savoir vite quand un CLI reconnecte pour ré-fetch le mini-schema.
  * Coût backend négligeable (SELECT indexé + O(N) sur registry).
+ *
+ * `teamSlug` (C.21.5) : si fourni, appelle la route team-scoped ; sinon
+ * la route legacy (transitionnel, supprimée en C.21.7).
  */
-export function useDbConnections() {
+export function useDbConnections(teamSlug: string | null = null) {
 	return useQuery({
-		queryKey: ["db-connections"],
-		queryFn: fetchDbConnections,
+		queryKey: ["db-connections", teamSlug],
+		queryFn: () => fetchDbConnections(teamSlug),
 		retry: false,
 		refetchOnWindowFocus: false,
 		refetchInterval: 5000

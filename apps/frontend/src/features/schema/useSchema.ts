@@ -18,13 +18,16 @@ export class SchemaRequestError extends Error {
 	}
 }
 
-export async function fetchSchema(connectionId: string): Promise<SchemaModel> {
+export async function fetchSchema(
+	connectionId: string,
+	teamSlug: string | null = null
+): Promise<SchemaModel> {
+	const url = teamSlug
+		? `${API_BASE}/api/teams/${encodeURIComponent(teamSlug)}/db-connections/${encodeURIComponent(connectionId)}/schema`
+		: `${API_BASE}/api/db-connections/${encodeURIComponent(connectionId)}/schema`;
 	let res: Response;
 	try {
-		res = await fetch(
-			`${API_BASE}/api/db-connections/${encodeURIComponent(connectionId)}/schema`,
-			{ credentials: "include" }
-		);
+		res = await fetch(url, { credentials: "include" });
 	} catch (cause) {
 		throw new SchemaRequestError(0, "Backend injoignable", { cause });
 	}
@@ -42,20 +45,22 @@ export async function fetchSchema(connectionId: string): Promise<SchemaModel> {
 }
 
 /**
- * Introspecte le schéma via le proxy tunnel `/api/db-connections/:id/schema`.
- * `connectionId = null` désactive le hook (utile quand aucune connection
- * n'est encore sélectionnée par l'UI).
+ * Introspecte le schéma via le proxy tunnel `/api/db-connections/:id/schema`
+ * (ou `/api/teams/:slug/db-connections/:id/schema` si un teamSlug est
+ * fourni, C.21.5). `connectionId = null` désactive le hook (utile quand
+ * aucune connection n'est encore sélectionnée par l'UI).
  */
-export function useSchema(connectionId: string | null) {
+export function useSchema(
+	connectionId: string | null,
+	teamSlug: string | null = null
+) {
 	return useQuery({
-		queryKey: ["schema", connectionId],
+		queryKey: ["schema", teamSlug, connectionId],
 		queryFn: () => {
 			if (connectionId === null) {
-				// Ne devrait jamais être appelé — `enabled` gate déjà, mais on
-				// garde une erreur explicite pour éviter un cast non-null silencieux.
 				throw new SchemaRequestError(0, "Aucune connection sélectionnée");
 			}
-			return fetchSchema(connectionId);
+			return fetchSchema(connectionId, teamSlug);
 		},
 		enabled: connectionId !== null,
 		retry: false,

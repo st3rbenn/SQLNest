@@ -61,9 +61,7 @@ describe("ConnectPage", () => {
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 		// biome-ignore lint/suspicious/noExplicitAny: mock inspection
 		const [url, opts] = (fetchMock.mock.calls[0] ?? []) as [string, any];
-		expect(url).toBe(
-			"http://test-api/api/tunnels/pairings/ABCD1234/approve"
-		);
+		expect(url).toBe("http://test-api/api/tunnels/pairings/ABCD1234/approve");
 		expect(opts.method).toBe("POST");
 		expect(opts.credentials).toBe("include");
 		expect(JSON.parse(opts.body)).toEqual({ deviceName: "apollon" });
@@ -80,11 +78,9 @@ describe("ConnectPage", () => {
 				(globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.length
 			).toBe(1);
 		});
-		const [url] = ((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0] ??
-			[]) as string[];
-		expect(url).toBe(
-			"http://test-api/api/tunnels/pairings/110V1234/approve"
-		);
+		const [url] = ((globalThis.fetch as ReturnType<typeof vi.fn>).mock
+			.calls[0] ?? []) as string[];
+		expect(url).toBe("http://test-api/api/tunnels/pairings/110V1234/approve");
 	});
 
 	test("HTTP 410 (code expiré) → alerte avec message backend", async () => {
@@ -109,9 +105,7 @@ describe("ConnectPage", () => {
 		render(wrap(<ConnectPage />));
 		await submitForm("ABCD-1234", "prod");
 		await waitFor(() => {
-			expect(
-				screen.getByText(/connexion avec ce nom existe/i)
-			).toBeTruthy();
+			expect(screen.getByText(/connexion avec ce nom existe/i)).toBeTruthy();
 		});
 	});
 

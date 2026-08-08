@@ -46,6 +46,7 @@ import {
 	type PreviewSnapshot,
 	putPreviewSnapshot
 } from "../../db-connections/previewSnapshotClient";
+import { useCurrentTeamSlug } from "../../teams/useCurrentTeam";
 import type { Frame } from "../frames";
 
 /** Débounce court — 1.5 s. Assez pour dedup les changements en rafale
@@ -176,6 +177,7 @@ export function usePreviewSnapshotSync(
 	opts: UsePreviewSnapshotSyncOptions
 ): void {
 	const { data: session } = useCurrentUser();
+	const teamSlug = useCurrentTeamSlug();
 	const enabled =
 		session?.user != null && opts.connectionId.length > 0 && opts.canvasReady;
 	const queryClient = useQueryClient();
@@ -225,7 +227,9 @@ export function usePreviewSnapshotSync(
 			// les renders suivants (avant que la promise settle) re-fire cet
 			// effet et ne PUT une deuxième fois.
 			lastSyncedRef.current = pending.serialized;
-			putPreviewSnapshot(pending.connectionId, pending.snapshot)
+			putPreviewSnapshot(pending.connectionId, pending.snapshot, {
+				teamSlug
+			})
 				.then(() => {
 					void queryClient.invalidateQueries({
 						queryKey: ["db-connections"]
@@ -248,7 +252,7 @@ export function usePreviewSnapshotSync(
 			const p = pendingRef.current;
 			pendingRef.current = null;
 			if (p === null) return;
-			putPreviewSnapshot(p.connectionId, p.snapshot)
+			putPreviewSnapshot(p.connectionId, p.snapshot, { teamSlug })
 				.then(() => {
 					lastSyncedRef.current = p.serialized;
 					void queryClient.invalidateQueries({
@@ -260,7 +264,7 @@ export function usePreviewSnapshotSync(
 					// JAMAIS le canvas. Retry au prochain change.
 				});
 		}, PREVIEW_SNAPSHOT_DEBOUNCE_MS);
-	}, [enabled, snapshot, serialized, opts.connectionId, queryClient]);
+	}, [enabled, snapshot, serialized, opts.connectionId, queryClient, teamSlug]);
 
 	// ─── Flush au unmount + fermeture d'onglet ────────────────────────
 	// Pattern miroir useCanvasSync. Un `pendingRef` non-null au moment du
@@ -284,7 +288,8 @@ export function usePreviewSnapshotSync(
 				const body = JSON.stringify({ snapshot: pending.snapshot });
 				if (body.length >= KEEPALIVE_MAX_BODY_BYTES) return;
 				void putPreviewSnapshot(pending.connectionId, pending.snapshot, {
-					keepalive: true
+					keepalive: true,
+					teamSlug
 				}).catch(() => {
 					// Silencieux — le document part.
 				});
@@ -306,5 +311,5 @@ export function usePreviewSnapshotSync(
 			window.removeEventListener("pagehide", flushPending);
 			document.removeEventListener("visibilitychange", onVisibilityChange);
 		};
-	}, []);
+	}, [teamSlug]);
 }

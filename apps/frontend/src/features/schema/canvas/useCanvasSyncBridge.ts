@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { useCurrentTeamSlug } from "../../teams/useCurrentTeam";
 import type { LayoutResult } from "../layout";
 import type { TableNodeType } from "../TableNode";
 import type { AnchorsApi } from "../useEdgeAnchors";
@@ -123,8 +124,10 @@ export function useCanvasSyncBridge(
 		]
 	);
 
+	const teamSlug = useCurrentTeamSlug();
 	const { ready: canvasReady } = useCanvasSync({
 		connectionId,
+		teamSlug,
 		positions: tablePositions.positions,
 		sizes: tableSizes.sizes,
 		frames: framesApi.frames,

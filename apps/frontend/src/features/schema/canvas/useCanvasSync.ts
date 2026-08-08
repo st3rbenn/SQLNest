@@ -74,6 +74,10 @@ export interface CanvasSyncReplaceAll {
 export interface UseCanvasSyncOptions extends CanvasSources {
 	readonly connectionId: string;
 	readonly replaceAll: CanvasSyncReplaceAll;
+	/** C.21.5 : team courante — si présente, utilise les URLs
+	 *  team-scoped ; sinon fallback URLs legacy (transitionnel, supprimé
+	 *  en C.21.7). */
+	readonly teamSlug?: string | null;
 }
 
 export interface UseCanvasSyncReturn {
@@ -171,9 +175,10 @@ export function useCanvasSync(opts: UseCanvasSyncOptions): UseCanvasSyncReturn {
 	// `staleTime: Infinity` + `retry: false` : on ne veut PAS que RQ refetch
 	// après le mount. Un refetch → hydratation refire → replaceAll écrase
 	// les gestes user depuis le mount → chaos. L'hydratation est one-shot.
+	const teamSlug = opts.teamSlug ?? null;
 	const query = useQuery({
-		queryKey: ["canvas-state", opts.connectionId],
-		queryFn: () => fetchCanvasState(opts.connectionId),
+		queryKey: ["canvas-state", teamSlug, opts.connectionId],
+		queryFn: () => fetchCanvasState(opts.connectionId, teamSlug),
 		enabled,
 		staleTime: Number.POSITIVE_INFINITY,
 		gcTime: Number.POSITIVE_INFINITY,
@@ -337,7 +342,11 @@ export function useCanvasSync(opts: UseCanvasSyncOptions): UseCanvasSyncReturn {
 				// Utilise la connectionId captée au moment de l'armement — évite
 				// qu'un changement de schéma pendant le débounce fasse partir
 				// le payload avec la mauvaise connectionId.
-				const result = await putCanvasState(pending.connectionId, payload);
+				const result = await putCanvasState(
+					pending.connectionId,
+					payload,
+					teamSlug
+				);
 				// Baseline mise à jour APRÈS confirmation du serveur : si un autre
 				// change arrive entre-temps, le comparateur du push effect verra
 				// bien la divergence et reschedulera.
@@ -348,7 +357,7 @@ export function useCanvasSync(opts: UseCanvasSyncOptions): UseCanvasSyncReturn {
 				// refetchOnMount: false → si on ne pousse pas à jour ici,
 				// personne d'autre ne le fera avant un F5 hard.
 				queryClient.setQueryData(
-					["canvas-state", pending.connectionId],
+					["canvas-state", teamSlug, pending.connectionId],
 					{ payload, updatedAt: result.updatedAt }
 				);
 				setLastSavedAt(result.updatedAt);
@@ -434,7 +443,9 @@ export function useCanvasSync(opts: UseCanvasSyncOptions): UseCanvasSyncReturn {
 					connectionId: pending.connectionId,
 					payload: JSON.parse(pending.serialized) as Record<string, unknown>
 				});
-				const url = `${window.CONTEXT.apiBaseUrl}/api/canvas-state`;
+				const url = teamSlug
+					? `${window.CONTEXT.apiBaseUrl}/api/teams/${encodeURIComponent(teamSlug)}/canvas-state`
+					: `${window.CONTEXT.apiBaseUrl}/api/canvas-state`;
 
 				if (body.length < KEEPALIVE_MAX_BODY_BYTES) {
 					// `keepalive:true` = la request continue même si le document
@@ -492,7 +503,7 @@ export function useCanvasSync(opts: UseCanvasSyncOptions): UseCanvasSyncReturn {
 			window.removeEventListener("pagehide", flushPending);
 			document.removeEventListener("visibilitychange", onVisibilityChange);
 		};
-	}, []);
+	}, [teamSlug]);
 
 	// `ready` : true quand plus rien ne peut modifier le state canvas via
 	// hydration server. Un anonyme est ready immédiatement (pas de query,

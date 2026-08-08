@@ -18,8 +18,13 @@ import { Route as AuthSignupRouteImport } from './routes/_auth.signup'
 import { Route as AuthResetPasswordRouteImport } from './routes/_auth.reset-password'
 import { Route as AuthLoginRouteImport } from './routes/_auth.login'
 import { Route as AuthForgotPasswordRouteImport } from './routes/_auth.forgot-password'
+import { Route as AuthenticatedTeamTeamSlugRouteImport } from './routes/_authenticated.team.$teamSlug'
+import { Route as AuthenticatedTeamTeamSlugIndexRouteImport } from './routes/_authenticated.team.$teamSlug.index'
 import { Route as AuthenticatedCanvasConnIdIndexRouteImport } from './routes/_authenticated.canvas.$connId.index'
+import { Route as AuthenticatedTeamTeamSlugConnectRouteImport } from './routes/_authenticated.team.$teamSlug.connect'
 import { Route as AuthenticatedCanvasConnIdQueryRouteImport } from './routes/_authenticated.canvas.$connId.query'
+import { Route as AuthenticatedTeamTeamSlugCanvasConnIdIndexRouteImport } from './routes/_authenticated.team.$teamSlug.canvas.$connId.index'
+import { Route as AuthenticatedTeamTeamSlugCanvasConnIdQueryRouteImport } from './routes/_authenticated.team.$teamSlug.canvas.$connId.query'
 
 const AuthenticatedRoute = AuthenticatedRouteImport.update({
   id: '/_authenticated',
@@ -64,17 +69,47 @@ const AuthForgotPasswordRoute = AuthForgotPasswordRouteImport.update({
   path: '/forgot-password',
   getParentRoute: () => AuthRoute,
 } as any)
+const AuthenticatedTeamTeamSlugRoute =
+  AuthenticatedTeamTeamSlugRouteImport.update({
+    id: '/team/$teamSlug',
+    path: '/team/$teamSlug',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
+const AuthenticatedTeamTeamSlugIndexRoute =
+  AuthenticatedTeamTeamSlugIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => AuthenticatedTeamTeamSlugRoute,
+  } as any)
 const AuthenticatedCanvasConnIdIndexRoute =
   AuthenticatedCanvasConnIdIndexRouteImport.update({
     id: '/canvas/$connId/',
     path: '/canvas/$connId/',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
+const AuthenticatedTeamTeamSlugConnectRoute =
+  AuthenticatedTeamTeamSlugConnectRouteImport.update({
+    id: '/connect',
+    path: '/connect',
+    getParentRoute: () => AuthenticatedTeamTeamSlugRoute,
+  } as any)
 const AuthenticatedCanvasConnIdQueryRoute =
   AuthenticatedCanvasConnIdQueryRouteImport.update({
     id: '/canvas/$connId/query',
     path: '/canvas/$connId/query',
     getParentRoute: () => AuthenticatedRoute,
+  } as any)
+const AuthenticatedTeamTeamSlugCanvasConnIdIndexRoute =
+  AuthenticatedTeamTeamSlugCanvasConnIdIndexRouteImport.update({
+    id: '/canvas/$connId/',
+    path: '/canvas/$connId/',
+    getParentRoute: () => AuthenticatedTeamTeamSlugRoute,
+  } as any)
+const AuthenticatedTeamTeamSlugCanvasConnIdQueryRoute =
+  AuthenticatedTeamTeamSlugCanvasConnIdQueryRouteImport.update({
+    id: '/canvas/$connId/query',
+    path: '/canvas/$connId/query',
+    getParentRoute: () => AuthenticatedTeamTeamSlugRoute,
   } as any)
 
 export interface FileRoutesByFullPath {
@@ -85,8 +120,13 @@ export interface FileRoutesByFullPath {
   '/verify-email': typeof AuthVerifyEmailRoute
   '/connect': typeof AuthenticatedConnectRoute
   '/': typeof AuthenticatedIndexRoute
+  '/team/$teamSlug': typeof AuthenticatedTeamTeamSlugRouteWithChildren
   '/canvas/$connId/query': typeof AuthenticatedCanvasConnIdQueryRoute
+  '/team/$teamSlug/connect': typeof AuthenticatedTeamTeamSlugConnectRoute
   '/canvas/$connId': typeof AuthenticatedCanvasConnIdIndexRoute
+  '/team/$teamSlug/': typeof AuthenticatedTeamTeamSlugIndexRoute
+  '/team/$teamSlug/canvas/$connId/query': typeof AuthenticatedTeamTeamSlugCanvasConnIdQueryRoute
+  '/team/$teamSlug/canvas/$connId': typeof AuthenticatedTeamTeamSlugCanvasConnIdIndexRoute
 }
 export interface FileRoutesByTo {
   '/forgot-password': typeof AuthForgotPasswordRoute
@@ -97,7 +137,11 @@ export interface FileRoutesByTo {
   '/connect': typeof AuthenticatedConnectRoute
   '/': typeof AuthenticatedIndexRoute
   '/canvas/$connId/query': typeof AuthenticatedCanvasConnIdQueryRoute
+  '/team/$teamSlug/connect': typeof AuthenticatedTeamTeamSlugConnectRoute
   '/canvas/$connId': typeof AuthenticatedCanvasConnIdIndexRoute
+  '/team/$teamSlug': typeof AuthenticatedTeamTeamSlugIndexRoute
+  '/team/$teamSlug/canvas/$connId/query': typeof AuthenticatedTeamTeamSlugCanvasConnIdQueryRoute
+  '/team/$teamSlug/canvas/$connId': typeof AuthenticatedTeamTeamSlugCanvasConnIdIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -110,8 +154,13 @@ export interface FileRoutesById {
   '/_auth/verify-email': typeof AuthVerifyEmailRoute
   '/_authenticated/connect': typeof AuthenticatedConnectRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
+  '/_authenticated/team/$teamSlug': typeof AuthenticatedTeamTeamSlugRouteWithChildren
   '/_authenticated/canvas/$connId/query': typeof AuthenticatedCanvasConnIdQueryRoute
+  '/_authenticated/team/$teamSlug/connect': typeof AuthenticatedTeamTeamSlugConnectRoute
   '/_authenticated/canvas/$connId/': typeof AuthenticatedCanvasConnIdIndexRoute
+  '/_authenticated/team/$teamSlug/': typeof AuthenticatedTeamTeamSlugIndexRoute
+  '/_authenticated/team/$teamSlug/canvas/$connId/query': typeof AuthenticatedTeamTeamSlugCanvasConnIdQueryRoute
+  '/_authenticated/team/$teamSlug/canvas/$connId/': typeof AuthenticatedTeamTeamSlugCanvasConnIdIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -123,8 +172,13 @@ export interface FileRouteTypes {
     | '/verify-email'
     | '/connect'
     | '/'
+    | '/team/$teamSlug'
     | '/canvas/$connId/query'
+    | '/team/$teamSlug/connect'
     | '/canvas/$connId'
+    | '/team/$teamSlug/'
+    | '/team/$teamSlug/canvas/$connId/query'
+    | '/team/$teamSlug/canvas/$connId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/forgot-password'
@@ -135,7 +189,11 @@ export interface FileRouteTypes {
     | '/connect'
     | '/'
     | '/canvas/$connId/query'
+    | '/team/$teamSlug/connect'
     | '/canvas/$connId'
+    | '/team/$teamSlug'
+    | '/team/$teamSlug/canvas/$connId/query'
+    | '/team/$teamSlug/canvas/$connId'
   id:
     | '__root__'
     | '/_auth'
@@ -147,8 +205,13 @@ export interface FileRouteTypes {
     | '/_auth/verify-email'
     | '/_authenticated/connect'
     | '/_authenticated/'
+    | '/_authenticated/team/$teamSlug'
     | '/_authenticated/canvas/$connId/query'
+    | '/_authenticated/team/$teamSlug/connect'
     | '/_authenticated/canvas/$connId/'
+    | '/_authenticated/team/$teamSlug/'
+    | '/_authenticated/team/$teamSlug/canvas/$connId/query'
+    | '/_authenticated/team/$teamSlug/canvas/$connId/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -221,6 +284,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthForgotPasswordRouteImport
       parentRoute: typeof AuthRoute
     }
+    '/_authenticated/team/$teamSlug': {
+      id: '/_authenticated/team/$teamSlug'
+      path: '/team/$teamSlug'
+      fullPath: '/team/$teamSlug'
+      preLoaderRoute: typeof AuthenticatedTeamTeamSlugRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/team/$teamSlug/': {
+      id: '/_authenticated/team/$teamSlug/'
+      path: '/'
+      fullPath: '/team/$teamSlug/'
+      preLoaderRoute: typeof AuthenticatedTeamTeamSlugIndexRouteImport
+      parentRoute: typeof AuthenticatedTeamTeamSlugRoute
+    }
     '/_authenticated/canvas/$connId/': {
       id: '/_authenticated/canvas/$connId/'
       path: '/canvas/$connId'
@@ -228,12 +305,33 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedCanvasConnIdIndexRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/team/$teamSlug/connect': {
+      id: '/_authenticated/team/$teamSlug/connect'
+      path: '/connect'
+      fullPath: '/team/$teamSlug/connect'
+      preLoaderRoute: typeof AuthenticatedTeamTeamSlugConnectRouteImport
+      parentRoute: typeof AuthenticatedTeamTeamSlugRoute
+    }
     '/_authenticated/canvas/$connId/query': {
       id: '/_authenticated/canvas/$connId/query'
       path: '/canvas/$connId/query'
       fullPath: '/canvas/$connId/query'
       preLoaderRoute: typeof AuthenticatedCanvasConnIdQueryRouteImport
       parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/team/$teamSlug/canvas/$connId/': {
+      id: '/_authenticated/team/$teamSlug/canvas/$connId/'
+      path: '/canvas/$connId'
+      fullPath: '/team/$teamSlug/canvas/$connId'
+      preLoaderRoute: typeof AuthenticatedTeamTeamSlugCanvasConnIdIndexRouteImport
+      parentRoute: typeof AuthenticatedTeamTeamSlugRoute
+    }
+    '/_authenticated/team/$teamSlug/canvas/$connId/query': {
+      id: '/_authenticated/team/$teamSlug/canvas/$connId/query'
+      path: '/canvas/$connId/query'
+      fullPath: '/team/$teamSlug/canvas/$connId/query'
+      preLoaderRoute: typeof AuthenticatedTeamTeamSlugCanvasConnIdQueryRouteImport
+      parentRoute: typeof AuthenticatedTeamTeamSlugRoute
     }
   }
 }
@@ -256,9 +354,33 @@ const AuthRouteChildren: AuthRouteChildren = {
 
 const AuthRouteWithChildren = AuthRoute._addFileChildren(AuthRouteChildren)
 
+interface AuthenticatedTeamTeamSlugRouteChildren {
+  AuthenticatedTeamTeamSlugConnectRoute: typeof AuthenticatedTeamTeamSlugConnectRoute
+  AuthenticatedTeamTeamSlugIndexRoute: typeof AuthenticatedTeamTeamSlugIndexRoute
+  AuthenticatedTeamTeamSlugCanvasConnIdQueryRoute: typeof AuthenticatedTeamTeamSlugCanvasConnIdQueryRoute
+  AuthenticatedTeamTeamSlugCanvasConnIdIndexRoute: typeof AuthenticatedTeamTeamSlugCanvasConnIdIndexRoute
+}
+
+const AuthenticatedTeamTeamSlugRouteChildren: AuthenticatedTeamTeamSlugRouteChildren =
+  {
+    AuthenticatedTeamTeamSlugConnectRoute:
+      AuthenticatedTeamTeamSlugConnectRoute,
+    AuthenticatedTeamTeamSlugIndexRoute: AuthenticatedTeamTeamSlugIndexRoute,
+    AuthenticatedTeamTeamSlugCanvasConnIdQueryRoute:
+      AuthenticatedTeamTeamSlugCanvasConnIdQueryRoute,
+    AuthenticatedTeamTeamSlugCanvasConnIdIndexRoute:
+      AuthenticatedTeamTeamSlugCanvasConnIdIndexRoute,
+  }
+
+const AuthenticatedTeamTeamSlugRouteWithChildren =
+  AuthenticatedTeamTeamSlugRoute._addFileChildren(
+    AuthenticatedTeamTeamSlugRouteChildren,
+  )
+
 interface AuthenticatedRouteChildren {
   AuthenticatedConnectRoute: typeof AuthenticatedConnectRoute
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
+  AuthenticatedTeamTeamSlugRoute: typeof AuthenticatedTeamTeamSlugRouteWithChildren
   AuthenticatedCanvasConnIdQueryRoute: typeof AuthenticatedCanvasConnIdQueryRoute
   AuthenticatedCanvasConnIdIndexRoute: typeof AuthenticatedCanvasConnIdIndexRoute
 }
@@ -266,6 +388,7 @@ interface AuthenticatedRouteChildren {
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedConnectRoute: AuthenticatedConnectRoute,
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
+  AuthenticatedTeamTeamSlugRoute: AuthenticatedTeamTeamSlugRouteWithChildren,
   AuthenticatedCanvasConnIdQueryRoute: AuthenticatedCanvasConnIdQueryRoute,
   AuthenticatedCanvasConnIdIndexRoute: AuthenticatedCanvasConnIdIndexRoute,
 }

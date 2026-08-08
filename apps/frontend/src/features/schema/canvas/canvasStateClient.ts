@@ -31,8 +31,10 @@ export interface CanvasStatePutResponse {
  * `window.CONTEXT` est un injecté à runtime par Vite (voir index.html + config),
  * indispo lors du eager import de certains tests si on lit au top-level.
  */
-function endpoint(): string {
-	return `${window.CONTEXT.apiBaseUrl}/api/canvas-state`;
+function endpoint(teamSlug: string | null = null): string {
+	return teamSlug
+		? `${window.CONTEXT.apiBaseUrl}/api/teams/${encodeURIComponent(teamSlug)}/canvas-state`
+		: `${window.CONTEXT.apiBaseUrl}/api/canvas-state`;
 }
 
 /**
@@ -45,9 +47,10 @@ function endpoint(): string {
  *   propage en `isError` et retombe en mode offline.
  */
 export async function fetchCanvasState(
-	connectionId: string
+	connectionId: string,
+	teamSlug: string | null = null
 ): Promise<CanvasStateGetResponse | null> {
-	const url = `${endpoint()}?connectionId=${encodeURIComponent(connectionId)}`;
+	const url = `${endpoint(teamSlug)}?connectionId=${encodeURIComponent(connectionId)}`;
 	const res = await fetch(url, {
 		method: "GET",
 		credentials: "include"
@@ -68,9 +71,10 @@ export async function fetchCanvasState(
  */
 export async function putCanvasState(
 	connectionId: string,
-	payload: Record<string, unknown>
+	payload: Record<string, unknown>,
+	teamSlug: string | null = null
 ): Promise<CanvasStatePutResponse> {
-	const res = await fetch(endpoint(), {
+	const res = await fetch(endpoint(teamSlug), {
 		method: "PUT",
 		credentials: "include",
 		headers: { "Content-Type": "application/json" },
@@ -88,8 +92,11 @@ export async function putCanvasState(
  * Idempotent côté backend (204 renvoyé même si aucune row n'existait) — on
  * n'a donc pas à distinguer « inexistant » de « supprimé ».
  */
-export async function deleteCanvasState(connectionId: string): Promise<void> {
-	const url = `${endpoint()}?connectionId=${encodeURIComponent(connectionId)}`;
+export async function deleteCanvasState(
+	connectionId: string,
+	teamSlug: string | null = null
+): Promise<void> {
+	const url = `${endpoint(teamSlug)}?connectionId=${encodeURIComponent(connectionId)}`;
 	const res = await fetch(url, {
 		method: "DELETE",
 		credentials: "include"

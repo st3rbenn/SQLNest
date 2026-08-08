@@ -1,24 +1,22 @@
+/**
+ * Route `/team/:teamSlug/canvas/:connId` — canvas d'une db_connection
+ * dans la team courante (C.21.5). Miroir de la route legacy
+ * `/canvas/:connId` — même component, mais les hooks lisent le team
+ * slug depuis le contexte pour appeler les routes team-scoped.
+ */
+
 import { createFileRoute } from "@tanstack/react-router";
 import { type CSSProperties, useEffect } from "react";
 import { useDbConnections } from "../features/db-connections/useDbConnections";
 import { pushRecentConnection } from "../features/db-connections/useRecentConnections";
 import { SchemaCanvas } from "../features/schema/SchemaCanvas";
 import { useSchema } from "../features/schema/useSchema";
+import { useCurrentTeamSlug } from "../features/teams/useCurrentTeam";
 
-/**
- * Route `/canvas/$connId` — canvas Schéma d'une db_connection donnée.
- *
- * `$connId` est un path segment (bookmarkable, cohérent avec la gallery
- * qui link vers `/canvas/<id>`). Si `$connId` ne matche aucune connection
- * du user, on rend un empty-state (pas de redirect ; l'user peut relancer
- * son CLI puis F5).
- *
- * Au mount, on push l'id en tête de la liste MRU (`~/.sqlnest:recent-
- * connections` localStorage) — la gallery s'en sert pour la section
- * "Récentes".
- */
-export const Route = createFileRoute("/_authenticated/canvas/$connId/")({
-	component: CanvasPage
+export const Route = createFileRoute(
+	"/_authenticated/team/$teamSlug/canvas/$connId/"
+)({
+	component: TeamCanvasPage
 });
 
 const pageStyle: CSSProperties = {
@@ -38,22 +36,18 @@ const loadingStyle: CSSProperties = {
 	color: "var(--sqlnest-text-tertiary)"
 };
 
-function CanvasPage() {
+function TeamCanvasPage() {
 	const { connId } = Route.useParams();
-	const { data: connections } = useDbConnections();
-	const { data, error } = useSchema(connId);
+	const teamSlug = useCurrentTeamSlug();
+	const { data: connections } = useDbConnections(teamSlug);
+	const { data, error } = useSchema(connId, teamSlug);
 	const connection = connections?.find((c) => c.id === connId);
 	const dbName = connection?.name ?? connId;
 
-	// MRU : push l'id au top au mount + à chaque changement de connId
-	// (navigation entre canvases sans démonter le composant).
 	useEffect(() => {
 		pushRecentConnection(connId);
 	}, [connId]);
 
-	// Cas explicite : la liste est chargée ET l'id n'existe pas → pas
-	// juste "loading" mais "unknown". Évite de laisser l'user regarder
-	// un spinner en boucle sur un id supprimé.
 	const isUnknown =
 		connections !== undefined && !connections.some((c) => c.id === connId);
 

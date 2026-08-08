@@ -27,6 +27,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { type CSSProperties, type FormEvent, useEffect, useState } from "react";
 import { DismissibleAlert } from "../auth/DismissibleAlert";
+import { useCurrentTeamSlug } from "../teams/useCurrentTeam";
 
 /** Lazy — évite de figer la valeur au module-load, ce qui casserait les
  *  tests qui installent `window.CONTEXT` après l'import. */
@@ -98,6 +99,7 @@ interface StatusResponse {
 export function ConnectPage() {
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
+	const teamSlug = useCurrentTeamSlug();
 	const [code, setCode] = useState("");
 	const [deviceName, setDeviceName] = useState("");
 	const [isSubmitting, setIsSubmitting] = useState(false);
@@ -121,10 +123,13 @@ export function ConnectPage() {
 		const controller = new AbortController();
 		const timer = setTimeout(async () => {
 			try {
-				const res = await fetch(
-					`${apiBase()}/api/tunnels/pairings/${encodeURIComponent(normalized)}/status`,
-					{ credentials: "include", signal: controller.signal }
-				);
+				const statusUrl = teamSlug
+					? `${apiBase()}/api/teams/${encodeURIComponent(teamSlug)}/tunnels/pairings/${encodeURIComponent(normalized)}/status`
+					: `${apiBase()}/api/tunnels/pairings/${encodeURIComponent(normalized)}/status`;
+				const res = await fetch(statusUrl, {
+					credentials: "include",
+					signal: controller.signal
+				});
 				if (!res.ok) {
 					setExistingConnection(null);
 					return;
@@ -140,7 +145,7 @@ export function ConnectPage() {
 			controller.abort();
 			clearTimeout(timer);
 		};
-	}, [code]);
+	}, [code, teamSlug]);
 
 	async function handleSubmit(e: FormEvent<HTMLFormElement>): Promise<void> {
 		e.preventDefault();
@@ -160,15 +165,15 @@ export function ConnectPage() {
 			// existant). Nouveau pairing : deviceName saisi.
 			const body =
 				existingConnection == null ? { deviceName: deviceName.trim() } : {};
-			const res = await fetch(
-				`${apiBase()}/api/tunnels/pairings/${encodeURIComponent(normalized)}/approve`,
-				{
-					method: "POST",
-					credentials: "include",
-					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify(body)
-				}
-			);
+			const approveUrl = teamSlug
+				? `${apiBase()}/api/teams/${encodeURIComponent(teamSlug)}/tunnels/pairings/${encodeURIComponent(normalized)}/approve`
+				: `${apiBase()}/api/tunnels/pairings/${encodeURIComponent(normalized)}/approve`;
+			const res = await fetch(approveUrl, {
+				method: "POST",
+				credentials: "include",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(body)
+			});
 			const resBody = (await res.json().catch(() => ({}))) as {
 				message?: string;
 			};
@@ -192,8 +197,12 @@ export function ConnectPage() {
 	useEffect(() => {
 		if (!success) return;
 		void queryClient.invalidateQueries({ queryKey: ["db-connections"] });
-		void navigate({ to: "/" });
-	}, [success, navigate, queryClient]);
+		if (teamSlug) {
+			void navigate({ to: "/team/$teamSlug", params: { teamSlug } });
+		} else {
+			void navigate({ to: "/" });
+		}
+	}, [success, navigate, queryClient, teamSlug]);
 
 	return (
 		<div style={containerStyle}>

@@ -2,6 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { type MouseEvent, useCallback, useState } from "react";
 import { fetchSchema } from "../schema/useSchema";
+import { useCurrentTeamSlug } from "../teams/useCurrentTeam";
 
 /**
  * Navigation "prefetch-then-navigate" vers un canvas.
@@ -41,6 +42,7 @@ export interface NavigateToCanvasHandle {
 export function useNavigateToCanvas(): NavigateToCanvasHandle {
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
+	const teamSlug = useCurrentTeamSlug();
 	const [pendingId, setPendingId] = useState<string | null>(null);
 
 	const handleClick = useCallback(
@@ -56,8 +58,8 @@ export function useNavigateToCanvas(): NavigateToCanvasHandle {
 			void (async () => {
 				try {
 					await queryClient.prefetchQuery({
-						queryKey: ["schema", connectionId],
-						queryFn: () => fetchSchema(connectionId),
+						queryKey: ["schema", teamSlug, connectionId],
+						queryFn: () => fetchSchema(connectionId, teamSlug),
 						// Aligné sur useSchema — le queryClient default est 60s.
 						staleTime: 60_000
 					});
@@ -66,13 +68,20 @@ export function useNavigateToCanvas(): NavigateToCanvasHandle {
 					// quand même — le canvas montrera son propre état d'erreur.
 				}
 				setPendingId(null);
-				void navigate({
-					to: "/canvas/$connId",
-					params: { connId: connectionId }
-				});
+				if (teamSlug) {
+					void navigate({
+						to: "/team/$teamSlug/canvas/$connId",
+						params: { teamSlug, connId: connectionId }
+					});
+				} else {
+					void navigate({
+						to: "/canvas/$connId",
+						params: { connId: connectionId }
+					});
+				}
 			})();
 		},
-		[navigate, queryClient]
+		[navigate, queryClient, teamSlug]
 	);
 
 	return { pendingId, handleClick };

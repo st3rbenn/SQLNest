@@ -13,18 +13,21 @@ export interface QueryResult {
 export interface RunQueryInput {
 	readonly connectionId: string;
 	readonly source: string;
+	/** C.21.5 : si présent, appelle la route team-scoped ; sinon la
+	 *  route legacy (transitionnel, supprimée en C.21.7). */
+	readonly teamSlug?: string | null;
 }
 
 async function runQueryRequest(input: RunQueryInput): Promise<QueryResult> {
-	const res = await fetch(
-		`${API_BASE}/api/db-connections/${encodeURIComponent(input.connectionId)}/query`,
-		{
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			credentials: "include",
-			body: JSON.stringify({ source: input.source })
-		}
-	);
+	const url = input.teamSlug
+		? `${API_BASE}/api/teams/${encodeURIComponent(input.teamSlug)}/db-connections/${encodeURIComponent(input.connectionId)}/query`
+		: `${API_BASE}/api/db-connections/${encodeURIComponent(input.connectionId)}/query`;
+	const res = await fetch(url, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		credentials: "include",
+		body: JSON.stringify({ source: input.source })
+	});
 	const data = (await res.json().catch(() => ({}))) as QueryResult & {
 		message?: string;
 	};

@@ -5,6 +5,7 @@ import {
 	useDbConnections
 } from "../db-connections/useDbConnections";
 import { useRecentConnectionIds } from "../db-connections/useRecentConnections";
+import { useCurrentTeam } from "../teams/useCurrentTeam";
 import { DbCard } from "./DbCard";
 import { useNavigateToCanvas } from "./useNavigateToCanvas";
 
@@ -118,14 +119,20 @@ const CARD_HOVER_CSS = `
 `;
 
 export function GalleryPage() {
-	const { data: connections, isLoading, error } = useDbConnections();
+	const team = useCurrentTeam();
+	const teamSlug = team?.slug ?? null;
+	const { data: connections, isLoading, error } = useDbConnections(teamSlug);
 	const recentIds = useRecentConnectionIds();
 	const { pendingId, handleClick } = useNavigateToCanvas();
 
 	if (error) {
 		return (
 			<div style={pageStyle}>
-				<Sidebar hasConnections={false} />
+				<Sidebar
+					hasConnections={false}
+					teamName={team?.name ?? null}
+					teamSlug={teamSlug}
+				/>
 				<main style={mainStyle}>
 					<div style={mainHeaderStyle}>
 						<h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Canvas</h1>
@@ -143,7 +150,11 @@ export function GalleryPage() {
 	if (isLoading || connections === undefined) {
 		return (
 			<div style={pageStyle}>
-				<Sidebar hasConnections={false} />
+				<Sidebar
+					hasConnections={false}
+					teamName={team?.name ?? null}
+					teamSlug={teamSlug}
+				/>
 				<main style={mainStyle}>
 					<div style={mainHeaderStyle}>
 						<h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Canvas</h1>
@@ -166,9 +177,13 @@ export function GalleryPage() {
 	if (connections.length === 0) {
 		return (
 			<div style={pageStyle}>
-				<Sidebar hasConnections={false} />
+				<Sidebar
+					hasConnections={false}
+					teamName={team?.name ?? null}
+					teamSlug={teamSlug}
+				/>
 				<main style={mainStyle}>
-					<EmptyHero />
+					<EmptyHero teamSlug={teamSlug} />
 				</main>
 			</div>
 		);
@@ -185,7 +200,12 @@ export function GalleryPage() {
 	return (
 		<div style={pageStyle}>
 			<style>{CARD_HOVER_CSS}</style>
-			<Sidebar hasConnections={true} count={connections.length} />
+			<Sidebar
+				hasConnections={true}
+				count={connections.length}
+				teamName={team?.name ?? null}
+				teamSlug={teamSlug}
+			/>
 			<main style={mainStyle}>
 				<div style={mainHeaderStyle}>
 					<h1
@@ -259,7 +279,7 @@ export function GalleryPage() {
 									isPending={pendingId === c.id}
 								/>
 							))}
-							<NewConnectionCard />
+							<NewConnectionCard teamSlug={teamSlug} />
 						</div>
 					</section>
 				</div>
@@ -270,10 +290,14 @@ export function GalleryPage() {
 
 function Sidebar({
 	hasConnections,
-	count
+	count,
+	teamName,
+	teamSlug
 }: {
 	readonly hasConnections: boolean;
 	readonly count?: number;
+	readonly teamName: string | null;
+	readonly teamSlug: string | null;
 }): React.ReactNode {
 	return (
 		<aside style={sidebarStyle}>
@@ -306,10 +330,14 @@ function Sidebar({
 					style={{
 						fontSize: 12.5,
 						fontWeight: 600,
-						color: "var(--sqlnest-text-primary)"
+						color: "var(--sqlnest-text-primary)",
+						whiteSpace: "nowrap",
+						overflow: "hidden",
+						textOverflow: "ellipsis"
 					}}
+					title={teamName ?? "SQLNest"}
 				>
-					SQLNest
+					{teamName ?? "SQLNest"}
 				</span>
 			</div>
 
@@ -366,56 +394,111 @@ function Sidebar({
 			<div style={{ flex: 1 }} />
 
 			<div style={{ padding: "10px 10px 12px" }}>
-				<Link
-					to="/connect"
-					className="sqlnest-sidebar-item"
-					style={{
-						display: "flex",
-						width: "100%",
-						alignItems: "center",
-						gap: 7,
-						padding: "6px 10px",
-						color: "var(--sqlnest-text-secondary)",
-						borderRadius: 6,
-						fontSize: 12,
-						textDecoration: "none",
-						boxSizing: "border-box"
-					}}
-				>
-					<svg
-						width={12}
-						height={12}
-						viewBox="0 0 24 24"
-						fill="none"
-						stroke="currentColor"
-						strokeWidth={2}
-						aria-hidden="true"
+				{teamSlug ? (
+					<Link
+						to="/team/$teamSlug/connect"
+						params={{ teamSlug }}
+						className="sqlnest-sidebar-item"
+						style={{
+							display: "flex",
+							width: "100%",
+							alignItems: "center",
+							gap: 7,
+							padding: "6px 10px",
+							color: "var(--sqlnest-text-secondary)",
+							borderRadius: 6,
+							fontSize: 12,
+							textDecoration: "none",
+							boxSizing: "border-box"
+						}}
 					>
-						<title>Nouveau canvas</title>
-						<path d="M12 5v14M5 12h14" />
-					</svg>
-					<span style={{ flex: 1 }}>Nouveau canvas</span>
-					{hasConnections ? (
-						<span
-							title="Au moins une connection"
-							style={{
-								width: 5,
-								height: 5,
-								borderRadius: "50%",
-								background: "var(--sqlnest-success)"
-							}}
-						/>
-					) : null}
-				</Link>
+						<svg
+							width={12}
+							height={12}
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							strokeWidth={2}
+							aria-hidden="true"
+						>
+							<title>Nouveau canvas</title>
+							<path d="M12 5v14M5 12h14" />
+						</svg>
+						<span style={{ flex: 1 }}>Nouveau canvas</span>
+						{hasConnections ? (
+							<span
+								title="Au moins une connection"
+								style={{
+									width: 5,
+									height: 5,
+									borderRadius: "50%",
+									background: "var(--sqlnest-success)"
+								}}
+							/>
+						) : null}
+					</Link>
+				) : (
+					<Link
+						to="/connect"
+						className="sqlnest-sidebar-item"
+						style={{
+							display: "flex",
+							width: "100%",
+							alignItems: "center",
+							gap: 7,
+							padding: "6px 10px",
+							color: "var(--sqlnest-text-secondary)",
+							borderRadius: 6,
+							fontSize: 12,
+							textDecoration: "none",
+							boxSizing: "border-box"
+						}}
+					>
+						<svg
+							width={12}
+							height={12}
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							strokeWidth={2}
+							aria-hidden="true"
+						>
+							<title>Nouveau canvas</title>
+							<path d="M12 5v14M5 12h14" />
+						</svg>
+						<span style={{ flex: 1 }}>Nouveau canvas</span>
+						{hasConnections ? (
+							<span
+								title="Au moins une connection"
+								style={{
+									width: 5,
+									height: 5,
+									borderRadius: "50%",
+									background: "var(--sqlnest-success)"
+								}}
+							/>
+						) : null}
+					</Link>
+				)}
 			</div>
 		</aside>
 	);
 }
 
-function NewConnectionCard(): React.ReactNode {
+function NewConnectionCard({
+	teamSlug
+}: {
+	readonly teamSlug: string | null;
+}): React.ReactNode {
+	const linkProps = teamSlug
+		? ({
+				to: "/team/$teamSlug/connect" as const,
+				params: { teamSlug }
+			} as const)
+		: ({ to: "/connect" as const } as const);
 	return (
 		<Link
-			to="/connect"
+			{...linkProps}
 			style={{
 				display: "flex",
 				flexDirection: "column",
@@ -474,7 +557,17 @@ function NewConnectionCard(): React.ReactNode {
 	);
 }
 
-function EmptyHero(): React.ReactNode {
+function EmptyHero({
+	teamSlug
+}: {
+	readonly teamSlug: string | null;
+}): React.ReactNode {
+	const linkProps = teamSlug
+		? ({
+				to: "/team/$teamSlug/connect" as const,
+				params: { teamSlug }
+			} as const)
+		: ({ to: "/connect" as const } as const);
 	return (
 		<div
 			style={{
@@ -548,7 +641,7 @@ function EmptyHero(): React.ReactNode {
 					pour créer ton premier canvas.
 				</p>
 				<Link
-					to="/connect"
+					{...linkProps}
 					style={{
 						display: "inline-flex",
 						alignItems: "center",

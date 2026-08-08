@@ -16,18 +16,18 @@ const API_BASE = window.CONTEXT.apiBaseUrl;
 export async function putPreviewSnapshot(
 	connectionId: string,
 	snapshot: PreviewSnapshot,
-	init?: { keepalive?: boolean }
+	init?: { keepalive?: boolean; teamSlug?: string | null }
 ): Promise<void> {
-	const res = await fetch(
-		`${API_BASE}/api/db-connections/${encodeURIComponent(connectionId)}/preview-snapshot`,
-		{
-			method: "PUT",
-			credentials: "include",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ snapshot }),
-			keepalive: init?.keepalive === true
-		}
-	);
+	const url = init?.teamSlug
+		? `${API_BASE}/api/teams/${encodeURIComponent(init.teamSlug)}/db-connections/${encodeURIComponent(connectionId)}/preview-snapshot`
+		: `${API_BASE}/api/db-connections/${encodeURIComponent(connectionId)}/preview-snapshot`;
+	const res = await fetch(url, {
+		method: "PUT",
+		credentials: "include",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ snapshot }),
+		keepalive: init?.keepalive === true
+	});
 	if (!res.ok) {
 		const data = (await res.json().catch(() => ({}))) as { message?: string };
 		throw new Error(data.message ?? `HTTP ${res.status}`);
