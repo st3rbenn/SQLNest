@@ -9,6 +9,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { type CSSProperties, useEffect } from "react";
 import { useDbConnections } from "../features/db-connections/useDbConnections";
 import { pushRecentConnection } from "../features/db-connections/useRecentConnections";
+import { CanvasToast } from "../features/schema/CanvasToast";
 import { SchemaCanvas } from "../features/schema/SchemaCanvas";
 import { useSchema } from "../features/schema/useSchema";
 import { useCurrentTeamSlug } from "../features/teams/useCurrentTeam";
@@ -24,16 +25,6 @@ const pageStyle: CSSProperties = {
 	height: "100vh",
 	background: "var(--sqlnest-canvas-bg)",
 	overflow: "hidden"
-};
-
-const emptyStyle: CSSProperties = {
-	position: "absolute",
-	inset: 0,
-	display: "flex",
-	alignItems: "center",
-	justifyContent: "center",
-	fontSize: 12,
-	color: "var(--sqlnest-text-tertiary)"
 };
 
 function TeamCanvasPage() {
@@ -54,9 +45,9 @@ function TeamCanvasPage() {
 	// Rendu :
 	//   - `data` en cache → SchemaCanvas rend immédiatement (le prefetch
 	//     de `useNavigateToCanvas` warm le cache avant de naviguer).
-	//   - erreur schema OU connection inconnue → message d'erreur, mais
-	//     PAS de "Loading…" — la nav ne se déclenche que quand data est
-	//     prête (voir Promise.allSettled dans useNavigateToCanvas).
+	//   - erreur schema OU connection inconnue → fond canvas visible +
+	//     CanvasToast top-center (au lieu d'un message pleine page qui
+	//     bloquait la lecture visuelle).
 	//   - undefined pur (deep-link sans prefetch, F5) → fond canvas
 	//     silencieux, pas de texte intermédiaire.
 	if (data) {
@@ -69,16 +60,14 @@ function TeamCanvasPage() {
 	if (isUnknown) {
 		return (
 			<div style={pageStyle}>
-				<div style={emptyStyle}>
-					Cette connection n'existe pas ou n'est plus disponible.
-				</div>
+				<CanvasToast message="Cette connection n'existe pas ou n'est plus disponible." />
 			</div>
 		);
 	}
 	if (error) {
 		return (
 			<div style={pageStyle}>
-				<div style={emptyStyle}>{error.message}</div>
+				<CanvasToast message={error.message} />
 			</div>
 		);
 	}
