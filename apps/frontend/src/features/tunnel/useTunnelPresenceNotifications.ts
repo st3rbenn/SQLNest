@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useDbConnections } from "../db-connections/useDbConnections";
-import { notifyInfo } from "../notifications/notify";
+import { notifyInfo, notifySuccess } from "../notifications/notify";
 import { useCurrentTeamSlug } from "../teams/useCurrentTeam";
 
 /**
@@ -50,7 +50,7 @@ export function useTunnelPresenceNotifications(): void {
 				continue;
 			}
 			if (prev === false && c.isOnline === true) {
-				notifyInfo(`Tunnel ${c.name} connecté`);
+				notifySuccess(`Tunnel ${c.name} connecté`);
 			} else if (prev === true && c.isOnline === false) {
 				notifyInfo(`Tunnel ${c.name} déconnecté`);
 			}

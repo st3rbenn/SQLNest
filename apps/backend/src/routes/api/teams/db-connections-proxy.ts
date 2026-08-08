@@ -72,7 +72,7 @@ function mapErrorToReply(
 	if (err instanceof NoTunnelError) {
 		return reply.code(503).send({
 			message:
-				"Aucun CLI n'est actuellement connecté à cette connection. Lance `sqlnest connect` sur ta machine pour démarrer le tunnel."
+				"Aucun tunnel disponible. Lancer `sqlnest connect` dans un terminal pour démarrer un tunnel."
 		});
 	}
 	if (err instanceof TunnelTimeoutError) {

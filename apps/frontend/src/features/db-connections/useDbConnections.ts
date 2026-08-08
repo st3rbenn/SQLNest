@@ -80,15 +80,17 @@ async function fetchDbConnections(
 
 /**
  * Liste les `db_connection` du user courant + leur `isOnline` en quasi
- * temps réel (poll 5s). Alimente :
+ * temps réel (poll 2s). Alimente :
  *   - le sélecteur de connection,
  *   - l'empty-state qui invite à pairer un CLI via `/pair`,
  *   - les cards gallery qui affichent le mini-schema (auto-refetch quand
- *     `isOnline` passe false→true — voir MiniSchemaPreview).
+ *     `isOnline` passe false→true — voir MiniSchemaPreview),
+ *   - `useTunnelPresenceNotifications` qui notifie les transitions.
  *
- * Le poll 5s est intentionnellement fréquent : les cards gallery ont besoin
- * de savoir vite quand un CLI reconnecte pour ré-fetch le mini-schema.
- * Coût backend négligeable (SELECT indexé + O(N) sur registry).
+ * Latence des transitions on↔off visibles côté UI : 0-2s. Coût backend
+ * = SELECT indexé + O(N) sur registry in-memory par tick. À terme,
+ * migrer vers SSE + Redis pub/sub pour zéro latence sans polling
+ * (voir ADR-016 dans le vault).
  *
  * `teamSlug` (C.21.5) : si fourni, appelle la route team-scoped ; sinon
  * la route legacy (transitionnel, supprimée en C.21.7).
@@ -99,6 +101,6 @@ export function useDbConnections(teamSlug: string | null = null) {
 		queryFn: () => fetchDbConnections(teamSlug),
 		retry: false,
 		refetchOnWindowFocus: false,
-		refetchInterval: 5000
+		refetchInterval: 2000
 	});
 }
