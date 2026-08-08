@@ -22,14 +22,18 @@ const AUTO_CLOSE_MS = 5000;
 const COMPACT_STYLES = {
 	root: {
 		padding: "8px 12px",
-		minHeight: "auto"
+		minHeight: "auto",
+		// Border rouge sobre — signale erreur sans crier. Override le
+		// border neutre appliqué par Mantine (avec `withBorder: false`
+		// aucun border n'est ajouté par Mantine, on met le nôtre ici).
+		border: "1px solid var(--sqlnest-danger-border)"
 	},
 	body: {
 		padding: 0,
 		margin: 0
 	},
 	description: {
-		fontSize: 11.5,
+		fontSize: 11,
 		lineHeight: 1.5,
 		color: "var(--sqlnest-text-primary)"
 	},
@@ -49,7 +53,7 @@ const codeChipStyle = {
 	padding: "1px 5px",
 	borderRadius: 3,
 	fontFamily: "var(--mantine-font-family-monospace)",
-	fontSize: 11,
+	fontSize: 10.5,
 	color: "var(--sqlnest-text-title)"
 } as const;
 

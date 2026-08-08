@@ -55,6 +55,10 @@
 	/* Danger — utilisé pour les erreurs de requête, actions destructives. */
 	--sqlnest-danger: #ef4444;
 	--sqlnest-danger-soft: rgba(239, 68, 68, 0.15);
+	/* Border rouge sobre pour signaler une erreur sans crier — ex.
+	 * outline des notifications d'erreur. Plus visible que -soft
+	 * (fond), moins que -danger (icon/text). */
+	--sqlnest-danger-border: rgba(239, 68, 68, 0.4);
 
 	/* Succès — connexion live, notif positive. */
 	--sqlnest-success: #10b981;
