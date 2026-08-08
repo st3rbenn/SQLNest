@@ -33,8 +33,12 @@ export function GallerySidebar({
 	const team = useCurrentTeam();
 	return (
 		<aside style={sidebarStyle}>
-			{/* ── Bloc PERSONAL : user + nav cross-team. ──────────────── */}
-			<div style={{ padding: "8px 12px 4px" }}>
+			{/* ── Bloc PERSONAL : user + nav cross-team. ────────────────
+			    Padding top/bottom = 12px pour matcher le header (56px min
+			    height → centre à 28px, trigger UserBadge à ~28px du top
+			    du wrapper). Sans ça l'avatar sidebar remonte 5px au-dessus
+			    du CTA header — désaligné à l'œil. */}
+			<div style={{ padding: "12px 12px 8px" }}>
 				<UserBadge />
 			</div>
 			<div style={{ padding: "2px 12px 8px" }}>

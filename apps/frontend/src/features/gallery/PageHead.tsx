@@ -4,13 +4,15 @@ import type { CSSProperties, ReactNode } from "react";
 
 /**
  * Header d'une page main — même height que le bloc user de la sidebar
- * (~45px). Alignement horizontal top garanti : la baseline visuelle du
+ * (~56px). Alignement horizontal top garanti : la baseline visuelle du
  * titre matche celle du nom user à sa gauche. `actions` (optionnel) est
  * un slot à droite pour un CTA (ex. « Nouveau canvas » sur la gallery).
+ * Padding vertical généreux (14px) pour que le CTA ne colle pas aux
+ * borders top/bottom du header.
  */
 
 const headStyle: CSSProperties = {
-	minHeight: 45,
+	minHeight: 56,
 	boxSizing: "border-box",
 	display: "flex",
 	alignItems: "center",
