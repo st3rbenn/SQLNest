@@ -82,21 +82,6 @@ const mainContentStyle: CSSProperties = {
 	gap: 32
 };
 
-const sectionHeadingStyle: CSSProperties = {
-	display: "flex",
-	alignItems: "center",
-	gap: 8,
-	marginBottom: 14
-};
-
-const sectionLabelStyle: CSSProperties = {
-	fontSize: 11,
-	fontWeight: 700,
-	color: "var(--sqlnest-text-tertiary)",
-	letterSpacing: "0.5px",
-	textTransform: "uppercase"
-};
-
 const gridStyle: CSSProperties = {
 	display: "grid",
 	gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))",
@@ -210,42 +195,30 @@ export function GalleryPage() {
 						transition: "filter 180ms ease"
 					}}
 				>
-					{recent.length > 0 ? (
-						<section>
-							<div style={sectionHeadingStyle}>
-								<span style={sectionLabelStyle}>Récents</span>
-							</div>
-							<div style={gridStyle}>
-								{recent.map((c) => (
-									<DbCard
-										key={c.id}
-										connection={c}
-										onClick={handleClick}
-										isPending={pendingId === c.id}
-									/>
-								))}
-							</div>
-						</section>
-					) : null}
-
-					<section>
-						<div style={sectionHeadingStyle}>
-							<span style={sectionLabelStyle}>
-								{recent.length > 0 ? "Autres canvas" : "Tous les canvas"}
-							</span>
-						</div>
-						<div style={gridStyle}>
-							{others.map((c) => (
-								<DbCard
-									key={c.id}
-									connection={c}
-									onClick={handleClick}
-									isPending={pendingId === c.id}
-								/>
-							))}
-							<NewConnectionCard teamSlug={teamSlug} />
-						</div>
-					</section>
+					{/* Ordre : récents (MRU localStorage) d'abord, puis les
+					    autres, puis card « + Nouveau canvas ». La page
+					    entière EST « Recents » (PageHead + sidebar) — pas
+					    besoin de sub-headings. En V2 le choix de team dans
+					    le sélecteur pilote quels canvas apparaissent. */}
+					<div style={gridStyle}>
+						{recent.map((c) => (
+							<DbCard
+								key={c.id}
+								connection={c}
+								onClick={handleClick}
+								isPending={pendingId === c.id}
+							/>
+						))}
+						{others.map((c) => (
+							<DbCard
+								key={c.id}
+								connection={c}
+								onClick={handleClick}
+								isPending={pendingId === c.id}
+							/>
+						))}
+						<NewConnectionCard teamSlug={teamSlug} />
+					</div>
 				</div>
 			</main>
 		</div>
