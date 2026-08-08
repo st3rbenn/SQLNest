@@ -1,4 +1,5 @@
 import { useHotkeys } from "@mantine/hooks";
+import { useQuery } from "@tanstack/react-query";
 import {
 	Background,
 	Controls,
@@ -116,18 +117,25 @@ function CanvasInner({
 	connectionId,
 	dbName
 }: CanvasInnerProps) {
-	// Layout ELK — async. Le composant est **remonté** au changement de schéma
-	// (clé sur ReactFlowProvider), donc pas de course entre deux layouts.
-	const [base, setBase] = useState<LayoutResult | null>(null);
-	useEffect(() => {
-		let cancelled = false;
-		buildLayout(schema, makeNode(schema), makeEdge).then((result) => {
-			if (!cancelled) setBase(result);
-		});
-		return () => {
-			cancelled = true;
-		};
-	}, [schema]);
+	// Layout ELK — async, mais caché par connectionId dans le queryClient
+	// TanStack. Sans ça, chaque re-mount (retour gallery → canvas) refait
+	// un compute ELK à froid (~500ms-1s) → flick visible avant le rendu
+	// final. Avec le cache, le 2ᵉ mount rend `base` immédiatement.
+	//
+	// Le queryKey inclut `connectionId` — 2 canvases distincts n'écrasent
+	// pas leurs layouts respectifs. `staleTime: Infinity` : le layout ne
+	// dépend que du schéma, qui est lui-même cache-warm par le prefetch
+	// de useNavigateToCanvas.
+	const layoutQuery = useQuery({
+		queryKey: ["canvas-layout", connectionId],
+		queryFn: () => buildLayout(schema, makeNode(schema), makeEdge),
+		staleTime: Number.POSITIVE_INFINITY,
+		gcTime: Number.POSITIVE_INFINITY,
+		refetchOnMount: false,
+		refetchOnWindowFocus: false,
+		refetchOnReconnect: false
+	});
+	const base: LayoutResult | null = layoutQuery.data ?? null;
 	// Ref sur `base` — lue par le callback `onRestore` de useCanvasHistory
 	// pour retomber sur les positions ELK d'origine quand un node n'a pas
 	// d'override dans le snapshot restauré. Ref (pas dep du useCallback)
