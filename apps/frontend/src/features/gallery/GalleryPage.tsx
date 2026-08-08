@@ -214,13 +214,6 @@ export function GalleryPage() {
 						<section>
 							<div style={sectionHeadingStyle}>
 								<span style={sectionLabelStyle}>Récents</span>
-								<div
-									style={{
-										flex: 1,
-										height: 1,
-										background: "var(--sqlnest-border-subtle)"
-									}}
-								/>
 							</div>
 							<div style={gridStyle}>
 								{recent.map((c) => (
@@ -240,13 +233,6 @@ export function GalleryPage() {
 							<span style={sectionLabelStyle}>
 								{recent.length > 0 ? "Autres canvas" : "Tous les canvas"}
 							</span>
-							<div
-								style={{
-									flex: 1,
-									height: 1,
-									background: "var(--sqlnest-border-subtle)"
-								}}
-							/>
 						</div>
 						<div style={gridStyle}>
 							{others.map((c) => (
@@ -280,6 +266,16 @@ function Sidebar({
 			<div style={{ padding: "8px 8px 4px" }}>
 				<UserBadge />
 			</div>
+
+			{/* Séparateur user / team — border-subtle qui matche celui du
+			    borderRight du sidebar et du borderBottom de la PageHead. */}
+			<div
+				style={{
+					height: 1,
+					background: "var(--sqlnest-border-subtle)",
+					margin: "4px 12px 8px"
+				}}
+			/>
 
 			{/* Team courante en dessous — dropdown pour V2 multi-teams. */}
 			<div style={{ padding: "0 8px 8px" }}>
