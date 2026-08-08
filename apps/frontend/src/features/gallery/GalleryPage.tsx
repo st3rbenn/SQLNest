@@ -52,6 +52,28 @@ const mainStyle: CSSProperties = {
 	minWidth: 0
 };
 
+/**
+ * Head de la page main — même height que le bloc user de la sidebar
+ * (UserBadge trigger ~32px + padding 8px top + 4px bottom = 44px).
+ * Alignement horizontal top garanti : la baseline visuelle du titre
+ * matche celle du nom user à sa gauche.
+ */
+const mainHeadStyle: CSSProperties = {
+	minHeight: 44,
+	display: "flex",
+	alignItems: "center",
+	padding: "0 32px",
+	borderBottom: "1px solid var(--sqlnest-border-subtle)",
+	flexShrink: 0
+};
+
+const mainHeadTitleStyle: CSSProperties = {
+	fontSize: 13,
+	fontWeight: 500,
+	color: "var(--sqlnest-text-secondary)",
+	margin: 0
+};
+
 const mainContentStyle: CSSProperties = {
 	flex: 1,
 	padding: "24px 32px 32px",
@@ -116,11 +138,9 @@ export function GalleryPage() {
 	if (error) {
 		return (
 			<div style={pageStyle}>
-				<Sidebar
-					hasConnections={false}
-					teamSlug={teamSlug}
-				/>
+				<Sidebar hasConnections={false} teamSlug={teamSlug} />
 				<main style={mainStyle}>
+					<PageHead title="Recents" />
 					<div style={mainContentStyle}>
 						<div style={{ color: "var(--sqlnest-danger)" }}>
 							Impossible de charger les connections : {error.message}
@@ -134,11 +154,9 @@ export function GalleryPage() {
 	if (isLoading || connections === undefined) {
 		return (
 			<div style={pageStyle}>
-				<Sidebar
-					hasConnections={false}
-					teamSlug={teamSlug}
-				/>
+				<Sidebar hasConnections={false} teamSlug={teamSlug} />
 				<main style={mainStyle}>
+					<PageHead title="Recents" />
 					<div
 						style={{
 							...mainContentStyle,
@@ -157,11 +175,9 @@ export function GalleryPage() {
 	if (connections.length === 0) {
 		return (
 			<div style={pageStyle}>
-				<Sidebar
-					hasConnections={false}
-					teamSlug={teamSlug}
-				/>
+				<Sidebar hasConnections={false} teamSlug={teamSlug} />
 				<main style={mainStyle}>
+					<PageHead title="Recents" />
 					<EmptyHero teamSlug={teamSlug} />
 				</main>
 			</div>
@@ -181,6 +197,7 @@ export function GalleryPage() {
 			<style>{CARD_HOVER_CSS}</style>
 			<Sidebar hasConnections={true} teamSlug={teamSlug} />
 			<main style={mainStyle}>
+				<PageHead title="Recents" />
 				<div
 					style={{
 						...mainContentStyle,
@@ -264,15 +281,6 @@ function Sidebar({
 				<UserBadge />
 			</div>
 
-			{/* Séparateur entre l'user et la team, façon Figma. */}
-			<div
-				style={{
-					height: 1,
-					background: "var(--sqlnest-border-subtle)",
-					margin: "4px 12px 8px"
-				}}
-			/>
-
 			{/* Team courante en dessous — dropdown pour V2 multi-teams. */}
 			<div style={{ padding: "0 8px 8px" }}>
 				{team ? (
@@ -302,7 +310,9 @@ function Sidebar({
 					style={{
 						display: "flex",
 						alignItems: "center",
-						gap: 8,
+						// gap 10 = même que UserBadge / TeamSelector triggers,
+						// alignement horizontal cohérent icon → label.
+						gap: 10,
 						padding: "6px 8px",
 						color: "var(--sqlnest-text-primary)",
 						borderRadius: 6,
@@ -311,21 +321,34 @@ function Sidebar({
 						cursor: "default"
 					}}
 				>
-					<svg
-						width={13}
-						height={13}
-						viewBox="0 0 24 24"
-						fill="none"
-						stroke="var(--sqlnest-text-cream)"
-						strokeWidth={2}
-						strokeLinecap="round"
-						strokeLinejoin="round"
-						aria-hidden="true"
+					{/* Wrapper 20x20 — matche l'avatar rond user / team pour
+					    aligner l'icône au même centre horizontal. */}
+					<span
+						style={{
+							width: 20,
+							height: 20,
+							display: "inline-flex",
+							alignItems: "center",
+							justifyContent: "center",
+							flexShrink: 0
+						}}
 					>
-						<title>Recents</title>
-						<circle cx={12} cy={12} r={9} />
-						<path d="M12 7v5l3 2" />
-					</svg>
+						<svg
+							width={14}
+							height={14}
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="var(--sqlnest-text-cream)"
+							strokeWidth={2}
+							strokeLinecap="round"
+							strokeLinejoin="round"
+							aria-hidden="true"
+						>
+							<title>Recents</title>
+							<circle cx={12} cy={12} r={9} />
+							<path d="M12 7v5l3 2" />
+						</svg>
+					</span>
 					Recents
 				</div>
 			</div>
@@ -597,6 +620,14 @@ function EmptyHero({
 					Nouveau canvas
 				</Link>
 			</div>
+		</div>
+	);
+}
+
+function PageHead({ title }: { readonly title: string }): React.ReactNode {
+	return (
+		<div style={mainHeadStyle}>
+			<h1 style={mainHeadTitleStyle}>{title}</h1>
 		</div>
 	);
 }
