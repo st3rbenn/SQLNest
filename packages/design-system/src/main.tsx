@@ -22,7 +22,11 @@ export const DesignSystemProvider = ({
 	// thème.
 	return (
 		<MantineProvider theme={theme} forceColorScheme="dark">
-			<Notifications />
+			{/* Notifications center global — n'importe quel consumer peut push
+			    via `import { notifications } from "@mantine/notifications"`
+			    puis `notifications.show({...})`. Position top-center pour ne
+			    pas gêner la navigation top-right (UserMenu / avatar). */}
+			<Notifications position="top-center" limit={5} />
 			{children}
 		</MantineProvider>
 	);
