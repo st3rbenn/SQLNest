@@ -109,17 +109,16 @@ export function DbCard({ connection, isPending, onClick }: Props) {
 }
 
 function EngineIcon({ engine }: { readonly engine: string }): React.ReactNode {
-	const stroke =
-		engine === "postgres"
-			? "var(--sqlnest-accent)"
-			: "var(--sqlnest-text-secondary)";
+	// Même couleur que les icônes sidebar (Recents/Drafts) — neutre, ne
+	// tire pas l'attention comme le bleu accent qui suggérait qu'on peut
+	// interagir avec.
 	return (
 		<svg
 			width={12}
 			height={12}
 			viewBox="0 0 24 24"
 			fill="none"
-			stroke={stroke}
+			stroke="var(--sqlnest-text-cream)"
 			strokeWidth={2}
 			aria-hidden="true"
 		>
