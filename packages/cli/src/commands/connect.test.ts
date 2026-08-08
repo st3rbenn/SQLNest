@@ -150,7 +150,7 @@ describe("connect — happy path", () => {
 		expect(onCodeDisplayed).toHaveBeenCalledTimes(1);
 		expect(onCodeDisplayed.mock.calls[0]?.[0].code).toBe("ABCD-1234");
 		expect(onCodeDisplayed.mock.calls[0]?.[0].connectUrl).toBe(
-			"http://localhost:3000/connect"
+			"http://localhost:3000/pair"
 		);
 
 		// Browser tenté 1 fois.

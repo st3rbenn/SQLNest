@@ -1,14 +1,13 @@
 import { Link } from "@tanstack/react-router";
 import type { CSSProperties } from "react";
-import { UserBadge } from "../auth/UserBadge";
 import {
 	type DbConnection,
 	useDbConnections
 } from "../db-connections/useDbConnections";
 import { useRecentConnectionIds } from "../db-connections/useRecentConnections";
-import { TeamSelector } from "../teams/TeamSelector";
 import { useCurrentTeam } from "../teams/useCurrentTeam";
 import { DbCard } from "./DbCard";
+import { GallerySidebar } from "./GallerySidebar";
 import { useNavigateToCanvas } from "./useNavigateToCanvas";
 
 /**
@@ -25,7 +24,7 @@ import { useNavigateToCanvas } from "./useNavigateToCanvas";
  *     encore dans la liste backend.
  *
  * Empty state (0 db_connection) : hero centré avec instructions pour
- * connecter la première base via `/connect`.
+ * connecter la première base via `/pair`.
  */
 
 const pageStyle: CSSProperties = {
@@ -37,15 +36,6 @@ const pageStyle: CSSProperties = {
 	background: "var(--sqlnest-surface)",
 	color: "var(--sqlnest-text-primary)",
 	fontFamily: "'Inter', ui-sans-serif, system-ui, sans-serif"
-};
-
-const sidebarStyle: CSSProperties = {
-	width: 260,
-	background: "var(--sqlnest-surface)",
-	borderRight: "1px solid var(--sqlnest-border)",
-	display: "flex",
-	flexDirection: "column",
-	flexShrink: 0
 };
 
 const mainStyle: CSSProperties = {
@@ -137,7 +127,11 @@ export function GalleryPage({ view = "drafts" }: { readonly view?: GalleryView }
 	if (error) {
 		return (
 			<div style={pageStyle}>
-				<Sidebar hasConnections={false} teamSlug={teamSlug} view={view} />
+				<GallerySidebar
+					hasConnections={false}
+					teamSlug={teamSlug}
+					activeItem={view}
+				/>
 				<main style={mainStyle}>
 					<PageHead title={title} />
 					<div style={mainContentStyle}>
@@ -155,7 +149,11 @@ export function GalleryPage({ view = "drafts" }: { readonly view?: GalleryView }
 		// contenu attend sans afficher de "Loading…" (bruit visuel).
 		return (
 			<div style={pageStyle}>
-				<Sidebar hasConnections={false} teamSlug={teamSlug} view={view} />
+				<GallerySidebar
+					hasConnections={false}
+					teamSlug={teamSlug}
+					activeItem={view}
+				/>
 				<main style={mainStyle}>
 					<PageHead title={title} />
 					<div style={mainContentStyle} />
@@ -164,11 +162,15 @@ export function GalleryPage({ view = "drafts" }: { readonly view?: GalleryView }
 		);
 	}
 
-	// Empty state : 0 db_connection dispo. Hero centré, CTA vers /connect.
+	// Empty state : 0 db_connection dispo. Hero centré, CTA vers /pair.
 	if (connections.length === 0) {
 		return (
 			<div style={pageStyle}>
-				<Sidebar hasConnections={false} teamSlug={teamSlug} view={view} />
+				<GallerySidebar
+					hasConnections={false}
+					teamSlug={teamSlug}
+					activeItem={view}
+				/>
 				<main style={mainStyle}>
 					<PageHead title={title} />
 					<EmptyHero teamSlug={teamSlug} />
@@ -188,7 +190,11 @@ export function GalleryPage({ view = "drafts" }: { readonly view?: GalleryView }
 	return (
 		<div style={pageStyle}>
 			<style>{CARD_HOVER_CSS}</style>
-			<Sidebar hasConnections={true} teamSlug={teamSlug} view={view} />
+			<GallerySidebar
+				hasConnections={true}
+				teamSlug={teamSlug}
+				activeItem={view}
+			/>
 			<main style={mainStyle}>
 				<PageHead title={title} />
 				<div
@@ -233,168 +239,6 @@ export function GalleryPage({ view = "drafts" }: { readonly view?: GalleryView }
 	);
 }
 
-function Sidebar({
-	hasConnections,
-	teamSlug,
-	view
-}: {
-	readonly hasConnections: boolean;
-	readonly teamSlug: string | null;
-	readonly view: GalleryView;
-}): React.ReactNode {
-	const team = useCurrentTeam();
-	return (
-		<aside style={sidebarStyle}>
-			{/* ── Bloc PERSONAL : user + nav cross-team. ────────────────
-			    En V2 « Recents » agrégera les canvas récemment ouverts
-			    tous workspaces confondus (own team, external teams,
-			    communautaire). En V1 la route n'existe pas encore →
-			    marqué disabled avec « bientôt ». */}
-			<div style={{ padding: "8px 12px 4px" }}>
-				<UserBadge />
-			</div>
-			<div style={{ padding: "2px 12px 8px" }}>
-				{teamSlug ? (
-					<NavItem
-						label="Recents"
-						icon={<ClockIcon />}
-						active={view === "recents"}
-						to="/team/$teamSlug/recents"
-						params={{ teamSlug }}
-					/>
-				) : (
-					<NavItem label="Recents" icon={<ClockIcon />} active={false} />
-				)}
-			</div>
-
-			{/* Séparateur bloc perso / bloc team — full width. */}
-			<div
-				style={{
-					height: 1,
-					background: "var(--sqlnest-border)",
-					margin: 0
-				}}
-			/>
-
-			{/* ── Bloc TEAM : sélecteur team + nav team-scoped. ──────── */}
-			<div style={{ padding: "8px 12px 4px" }}>
-				{team ? (
-					<TeamSelector currentTeam={team} />
-				) : (
-					// Team pas encore résolue — pas de « Loading… », on
-					// laisse juste un slot vide de la même hauteur qu'un
-					// trigger pour éviter le layout shift.
-					<div style={{ height: 32 }} />
-				)}
-			</div>
-			<div style={{ padding: "2px 12px" }}>
-				{teamSlug ? (
-					<NavItem
-						label="Drafts"
-						icon={<DraftIcon />}
-						active={view === "drafts"}
-						to="/team/$teamSlug"
-						params={{ teamSlug }}
-					/>
-				) : (
-					<NavItem label="Drafts" icon={<DraftIcon />} active={false} />
-				)}
-			</div>
-
-			<div style={{ flex: 1 }} />
-
-			<div style={{ padding: "10px 10px 12px" }}>
-				{teamSlug ? (
-					<Link
-						to="/team/$teamSlug/connect"
-						params={{ teamSlug }}
-						className="sqlnest-sidebar-item"
-						style={{
-							display: "flex",
-							width: "100%",
-							alignItems: "center",
-							gap: 7,
-							padding: "6px 10px",
-							color: "var(--sqlnest-text-secondary)",
-							borderRadius: 6,
-							fontSize: 12,
-							textDecoration: "none",
-							boxSizing: "border-box"
-						}}
-					>
-						<svg
-							width={12}
-							height={12}
-							viewBox="0 0 24 24"
-							fill="none"
-							stroke="currentColor"
-							strokeWidth={2}
-							aria-hidden="true"
-						>
-							<title>Nouveau canvas</title>
-							<path d="M12 5v14M5 12h14" />
-						</svg>
-						<span style={{ flex: 1 }}>Nouveau canvas</span>
-						{hasConnections ? (
-							<span
-								title="Au moins une connection"
-								style={{
-									width: 5,
-									height: 5,
-									borderRadius: "50%",
-									background: "var(--sqlnest-success)"
-								}}
-							/>
-						) : null}
-					</Link>
-				) : (
-					<Link
-						to="/connect"
-						className="sqlnest-sidebar-item"
-						style={{
-							display: "flex",
-							width: "100%",
-							alignItems: "center",
-							gap: 7,
-							padding: "6px 10px",
-							color: "var(--sqlnest-text-secondary)",
-							borderRadius: 6,
-							fontSize: 12,
-							textDecoration: "none",
-							boxSizing: "border-box"
-						}}
-					>
-						<svg
-							width={12}
-							height={12}
-							viewBox="0 0 24 24"
-							fill="none"
-							stroke="currentColor"
-							strokeWidth={2}
-							aria-hidden="true"
-						>
-							<title>Nouveau canvas</title>
-							<path d="M12 5v14M5 12h14" />
-						</svg>
-						<span style={{ flex: 1 }}>Nouveau canvas</span>
-						{hasConnections ? (
-							<span
-								title="Au moins une connection"
-								style={{
-									width: 5,
-									height: 5,
-									borderRadius: "50%",
-									background: "var(--sqlnest-success)"
-								}}
-							/>
-						) : null}
-					</Link>
-				)}
-			</div>
-		</aside>
-	);
-}
-
 function NewConnectionCard({
 	teamSlug
 }: {
@@ -402,10 +246,10 @@ function NewConnectionCard({
 }): React.ReactNode {
 	const linkProps = teamSlug
 		? ({
-				to: "/team/$teamSlug/connect" as const,
+				to: "/team/$teamSlug/pair" as const,
 				params: { teamSlug }
 			} as const)
-		: ({ to: "/connect" as const } as const);
+		: ({ to: "/pair" as const } as const);
 	return (
 		<Link
 			{...linkProps}
@@ -474,10 +318,10 @@ function EmptyHero({
 }): React.ReactNode {
 	const linkProps = teamSlug
 		? ({
-				to: "/team/$teamSlug/connect" as const,
+				to: "/team/$teamSlug/pair" as const,
 				params: { teamSlug }
 			} as const)
-		: ({ to: "/connect" as const } as const);
+		: ({ to: "/pair" as const } as const);
 	return (
 		<div
 			style={{
@@ -577,112 +421,5 @@ function PageHead({ title }: { readonly title: string }): React.ReactNode {
 		<div style={mainHeadStyle}>
 			<h1 style={mainHeadTitleStyle}>{title}</h1>
 		</div>
-	);
-}
-
-/** Item de navigation sidebar (Recents, Drafts, …). Un seul composant
- *  pour homogénéiser padding / gap / icon-slot avec les triggers
- *  UserBadge / TeamSelector. Le hover est porté par la classe
- *  `sqlnest-sidebar-item` du DS.
- *
- *  Si `to` est fourni → rendu en <Link> TanStack Router (cliquable
- *  vers la route). Sinon → <div> statique (fallback, ex. quand le
- *  slug de team n'est pas encore chargé). */
-function NavItem({
-	label,
-	icon,
-	active,
-	to,
-	params
-}: {
-	readonly label: string;
-	readonly icon: React.ReactNode;
-	readonly active: boolean;
-	readonly to?: "/team/$teamSlug" | "/team/$teamSlug/recents";
-	readonly params?: { readonly teamSlug: string };
-}): React.ReactNode {
-	const className = active
-		? "sqlnest-sidebar-item sqlnest-sidebar-item--active"
-		: "sqlnest-sidebar-item";
-	const style: CSSProperties = {
-		display: "flex",
-		alignItems: "center",
-		gap: 10,
-		padding: "6px 8px",
-		color: "var(--sqlnest-text-title)",
-		borderRadius: 6,
-		fontSize: 12,
-		fontWeight: 500,
-		cursor: to ? "pointer" : "default",
-		textDecoration: "none"
-	};
-	const inner = (
-		<>
-			<span
-				style={{
-					width: 20,
-					height: 20,
-					display: "inline-flex",
-					alignItems: "center",
-					justifyContent: "center",
-					flexShrink: 0
-				}}
-			>
-				{icon}
-			</span>
-			<span style={{ flex: 1 }}>{label}</span>
-		</>
-	);
-	if (to && params) {
-		return (
-			<Link to={to} params={params} className={className} style={style}>
-				{inner}
-			</Link>
-		);
-	}
-	return (
-		<div className={className} style={style}>
-			{inner}
-		</div>
-	);
-}
-
-function ClockIcon(): React.ReactNode {
-	return (
-		<svg
-			width={14}
-			height={14}
-			viewBox="0 0 24 24"
-			fill="none"
-			stroke="var(--sqlnest-text-cream)"
-			strokeWidth={2}
-			strokeLinecap="round"
-			strokeLinejoin="round"
-			aria-hidden="true"
-		>
-			<title>Recents</title>
-			<circle cx={12} cy={12} r={9} />
-			<path d="M12 7v5l3 2" />
-		</svg>
-	);
-}
-
-function DraftIcon(): React.ReactNode {
-	return (
-		<svg
-			width={14}
-			height={14}
-			viewBox="0 0 24 24"
-			fill="none"
-			stroke="var(--sqlnest-text-cream)"
-			strokeWidth={2}
-			strokeLinecap="round"
-			strokeLinejoin="round"
-			aria-hidden="true"
-		>
-			<title>Drafts</title>
-			<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
-			<path d="M14 3v5h5" />
-		</svg>
 	);
 }

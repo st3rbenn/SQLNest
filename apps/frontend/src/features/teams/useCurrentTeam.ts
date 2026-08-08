@@ -9,8 +9,8 @@
  *
  * ─── Tolérant hors Router ────────────────────────────────────────────
  * Les tests unitaires qui mount un composant sans `RouterProvider`
- * (`ConnectPage.test.tsx`, `useCanvasSync.test.ts`) crasheraient sur
- * `useMatches()` sinon. On try/catch et fallback à `null`.
+ * (`useCanvasSync.test.ts`) crasheraient sur `useMatches()` sinon. On
+ * try/catch et fallback à `null`.
  */
 
 import { useMatches } from "@tanstack/react-router";

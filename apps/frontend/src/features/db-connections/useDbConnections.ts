@@ -82,7 +82,7 @@ async function fetchDbConnections(
  * Liste les `db_connection` du user courant + leur `isOnline` en quasi
  * temps réel (poll 5s). Alimente :
  *   - le sélecteur de connection,
- *   - l'empty-state qui invite à pairer un CLI via `/connect`,
+ *   - l'empty-state qui invite à pairer un CLI via `/pair`,
  *   - les cards gallery qui affichent le mini-schema (auto-refetch quand
  *     `isOnline` passe false→true — voir MiniSchemaPreview).
  *

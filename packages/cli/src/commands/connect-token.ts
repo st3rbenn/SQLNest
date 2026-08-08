@@ -55,7 +55,7 @@ export async function connectWithToken(
 
 	// Le deviceName choisi par le user en CI est source de vérité pour le
 	// label local (contrairement au device flow où on prend le nom saisi
-	// dans /connect côté browser).
+	// dans /pair côté browser).
 	const label = opts.deviceName || opts.deviceLabelFallback || hostname();
 	// `connectionName` retourné pilote `resolveLocalConnectionUrl` dans le
 	// serve loop — DOIT être la DSN locale (pas le label serveur). Fallback

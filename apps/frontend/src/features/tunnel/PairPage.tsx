@@ -1,24 +1,23 @@
 /**
- * Page `/connect` — finalise le pairing device flow lancé par le CLI.
+ * Page `/team/:slug/pair` — finalise le pairing device flow lancé par le
+ * CLI (`sqlnest connect`).
  *
  * ─── Flow user ────────────────────────────────────────────────────────
  *   1. L'user tape `sqlnest connect` dans son terminal. Le CLI affiche
  *      un code type `ABCD-1234` et une URL à visiter.
- *   2. L'user ouvre `sqlnest.app/connect` (auth-required) et saisit
- *      le code. La page poll `/pairings/:code/status` :
- *      - Si le CLI est INCONNU (nouveau pairing) → demande un nom court
- *        pour cette connexion (`prod`, `apollon`, `local`…).
- *      - Si le CLI est DÉJÀ CONNU (fingerprint match, C.7) → n'affiche
- *        PAS le champ nom. Titre "Reconnexion à `<name>`", bouton unique
- *        "Approuver la reconnexion". Le backend autofill le deviceName.
- *   3. Clique « Approuver ». POST `/api/tunnels/pairings/:code/approve`
- *      avec le cookie de session Better Auth.
- *   4. Le CLI en polling détecte l'approbation, finalise l'authentification
- *      Ed25519, sauvegarde le token de session tunnel dans
- *      `~/.sqlnest/config.toml`.
+ *   2. L'user ouvre `sqlnest.app/team/:slug/pair` (auth-required) et
+ *      saisit le code. La page poll `/pairings/:code/status` :
+ *      - Si le CLI est INCONNU (nouveau pairing) → demande un nom court.
+ *      - Si le CLI est DÉJÀ CONNU (fingerprint match, C.7) → cache le
+ *        champ nom, propose "Approuver la reconnexion".
+ *   3. Clique « Autoriser ». POST `/api/tunnels/pairings/:code/approve`.
+ *   4. Le CLI en polling détecte l'approbation, finalise l'auth Ed25519.
  *
- * ─── Rappel labels terses ─────────────────────────────────────────────
- * Pas de sub-messages « ce bouton fait X ». Action + le minimum nécessaire.
+ * ─── Layout ───────────────────────────────────────────────────────────
+ * Réutilise `GallerySidebar` — même sidebar que la gallery, `activeItem="pair"`
+ * highlight le CTA « Nouveau canvas ». Form centré dans le main sous le
+ * PageHead. Pas de sub-title (AI slop) — l'user vient du CLI, il sait ce
+ * qu'il fait.
  */
 
 import { TextInput } from "@mantine/core";
@@ -27,38 +26,63 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { type CSSProperties, type FormEvent, useEffect, useState } from "react";
 import { DismissibleAlert } from "../auth/DismissibleAlert";
+import { useDbConnections } from "../db-connections/useDbConnections";
+import { GallerySidebar } from "../gallery/GallerySidebar";
 import { useCurrentTeamSlug } from "../teams/useCurrentTeam";
 
-/** Lazy — évite de figer la valeur au module-load, ce qui casserait les
- *  tests qui installent `window.CONTEXT` après l'import. */
 function apiBase(): string {
 	return window.CONTEXT.apiBaseUrl;
 }
 
-/** Debounce du poll `/status` sur input du code. Assez court pour un
- *  feedback réactif, assez long pour ne pas spammer pendant la saisie. */
 const STATUS_POLL_DEBOUNCE_MS = 350;
-
-/** Longueur canonique d'un code après `normalizeCode` (`XXXX-XXXX` → 8). */
 const CODE_CANONICAL_LEN = 8;
 
-const containerStyle: CSSProperties = {
-	maxWidth: 420,
-	margin: "48px auto",
-	padding: "0 20px"
-};
-
-const titleStyle: CSSProperties = {
-	fontSize: 20,
-	fontWeight: 600,
+const pageStyle: CSSProperties = {
+	display: "flex",
+	minHeight: "100vh",
+	background: "var(--sqlnest-surface)",
 	color: "var(--sqlnest-text-primary)",
-	margin: "0 0 6px"
+	fontFamily: "'Inter', ui-sans-serif, system-ui, sans-serif"
 };
 
-const subtitleStyle: CSSProperties = {
+const mainStyle: CSSProperties = {
+	flex: 1,
+	display: "flex",
+	flexDirection: "column",
+	minWidth: 0
+};
+
+const mainHeadStyle: CSSProperties = {
+	minHeight: 45,
+	boxSizing: "border-box",
+	display: "flex",
+	alignItems: "center",
+	padding: "0 32px",
+	borderBottom: "1px solid var(--sqlnest-border)",
+	flexShrink: 0
+};
+
+const mainHeadTitleStyle: CSSProperties = {
 	fontSize: 13,
-	color: "var(--sqlnest-text-secondary)",
-	margin: "0 0 20px"
+	fontWeight: 500,
+	color: "var(--sqlnest-text-title)",
+	margin: 0
+};
+
+const contentStyle: CSSProperties = {
+	flex: 1,
+	display: "flex",
+	alignItems: "center",
+	justifyContent: "center",
+	padding: "48px 32px"
+};
+
+const formWrapperStyle: CSSProperties = {
+	width: "100%",
+	maxWidth: 380,
+	display: "flex",
+	flexDirection: "column",
+	gap: 20
 };
 
 const formStyle: CSSProperties = {
@@ -74,6 +98,22 @@ const reconnectBannerStyle: CSSProperties = {
 	padding: "10px 12px",
 	fontSize: 13,
 	color: "var(--sqlnest-text-primary)"
+};
+
+const helpStyle: CSSProperties = {
+	fontSize: 12,
+	color: "var(--sqlnest-text-tertiary)",
+	textAlign: "center",
+	lineHeight: 1.6
+};
+
+const codeChipStyle: CSSProperties = {
+	background: "var(--sqlnest-surface-hover)",
+	padding: "2px 6px",
+	borderRadius: 4,
+	fontSize: 12,
+	fontFamily: "var(--mantine-font-family-monospace)",
+	color: "var(--sqlnest-text-secondary)"
 };
 
 /** Normalise l'input code — strip espaces/dash, upper-case, remap
@@ -96,24 +136,19 @@ interface StatusResponse {
 	} | null;
 }
 
-export function ConnectPage() {
+export function PairPage() {
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
 	const teamSlug = useCurrentTeamSlug();
+	const { data: connections } = useDbConnections(teamSlug);
 	const [code, setCode] = useState("");
 	const [deviceName, setDeviceName] = useState("");
 	const [isSubmitting, setIsSubmitting] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [success, setSuccess] = useState(false);
-	// existingConnection résolu par le poll `/status` — quand présent,
-	// l'UI cache le champ nom et propose "Approuver la reconnexion".
 	const [existingConnection, setExistingConnection] =
 		useState<StatusResponse["existingConnection"]>(null);
 
-	// Poll `/status` quand le code est valide (canonique 8 chars). Debounce
-	// pour ne pas taper l'endpoint à chaque frappe. Le status endpoint est
-	// authenticated via cookie, donc renvoie `existingConnection` si le
-	// fingerprint du CLI matche une db_connection du user courant.
 	useEffect(() => {
 		const normalized = normalizeCode(code);
 		if (normalized.length !== CODE_CANONICAL_LEN) {
@@ -137,7 +172,6 @@ export function ConnectPage() {
 				const body = (await res.json()) as StatusResponse;
 				setExistingConnection(body.existingConnection);
 			} catch {
-				// Erreur réseau ou abort — reset pour repartir sur le flow "nouveau"
 				setExistingConnection(null);
 			}
 		}, STATUS_POLL_DEBOUNCE_MS);
@@ -161,8 +195,6 @@ export function ConnectPage() {
 		}
 		setIsSubmitting(true);
 		try {
-			// Reconnexion : deviceName omis (autofill backend avec le nom
-			// existant). Nouveau pairing : deviceName saisi.
 			const body =
 				existingConnection == null ? { deviceName: deviceName.trim() } : {};
 			const approveUrl = teamSlug
@@ -189,11 +221,9 @@ export function ConnectPage() {
 		}
 	}
 
-	// Redirect immédiat vers la gallery au succès. Invalide aussi
-	// `db-connections` — sans ça, la gallery affiche le cache TanStack
-	// existant (staleTime 5s) et la nouvelle card n'apparaît pas avant
-	// le prochain poll. Le CLI continue son authenticate en parallèle ;
-	// le refetch triggered par l'invalidation renverra la row fraîche.
+	// Redirect immédiat vers la gallery au succès. Invalide `db-connections`
+	// — sans ça, la gallery affiche le cache (staleTime 5s) et la nouvelle
+	// card n'apparaît pas avant le prochain poll.
 	useEffect(() => {
 		if (!success) return;
 		void queryClient.invalidateQueries({ queryKey: ["db-connections"] });
@@ -204,55 +234,76 @@ export function ConnectPage() {
 		}
 	}, [success, navigate, queryClient, teamSlug]);
 
+	const hasConnections = (connections?.length ?? 0) > 0;
+
 	return (
-		<div style={containerStyle}>
-			<h1 style={titleStyle}>Connecter un device</h1>
-			<p style={subtitleStyle}>
-				Saisis le code affiché par ton terminal après{" "}
-				<code>sqlnest connect</code>.
-			</p>
-			{error && (
-				<DismissibleAlert onDismiss={() => setError(null)}>
-					{error}
-				</DismissibleAlert>
-			)}
-			<form onSubmit={handleSubmit} style={formStyle}>
-				<TextInput
-					label="Code"
-					placeholder="ABCD-1234"
-					value={code}
-					onChange={(e) => setCode(e.currentTarget.value)}
-					autoComplete="off"
-					autoFocus
-					required
-					disabled={isSubmitting}
-					data-testid="code-input"
-				/>
-				{existingConnection ? (
-					<div style={reconnectBannerStyle} data-testid="reconnect-banner">
-						Ce CLI est déjà pairé à{" "}
-						<strong>« {existingConnection.name} »</strong>.
+		<div style={pageStyle}>
+			<GallerySidebar
+				teamSlug={teamSlug}
+				hasConnections={hasConnections}
+				activeItem="pair"
+			/>
+			<main style={mainStyle}>
+				<div style={mainHeadStyle}>
+					<h1 style={mainHeadTitleStyle}>Nouveau canvas</h1>
+				</div>
+				<div style={contentStyle}>
+					<div style={formWrapperStyle}>
+						{error && (
+							<DismissibleAlert onDismiss={() => setError(null)}>
+								{error}
+							</DismissibleAlert>
+						)}
+						<form onSubmit={handleSubmit} style={formStyle}>
+							<TextInput
+								label="Code"
+								placeholder="ABCD-1234"
+								value={code}
+								onChange={(e) => setCode(e.currentTarget.value)}
+								autoComplete="off"
+								autoFocus
+								required
+								disabled={isSubmitting}
+								data-testid="code-input"
+								styles={{
+									input: {
+										fontFamily: "var(--mantine-font-family-monospace)",
+										textTransform: "uppercase",
+										letterSpacing: "0.05em"
+									}
+								}}
+							/>
+							{existingConnection ? (
+								<div
+									style={reconnectBannerStyle}
+									data-testid="reconnect-banner"
+								>
+									Ce CLI est déjà pairé à{" "}
+									<strong>« {existingConnection.name} »</strong>.
+								</div>
+							) : (
+								<TextInput
+									label="Nom"
+									placeholder="Nom de la connexion"
+									value={deviceName}
+									onChange={(e) => setDeviceName(e.currentTarget.value)}
+									autoComplete="off"
+									required
+									disabled={isSubmitting}
+									data-testid="name-input"
+								/>
+							)}
+							<Button type="submit" disabled={isSubmitting} data-testid="submit">
+								{existingConnection ? "Approuver la reconnexion" : "Autoriser"}
+							</Button>
+						</form>
+						<div style={helpStyle}>
+							Lance <code style={codeChipStyle}>sqlnest connect</code> dans ton
+							terminal pour obtenir un code.
+						</div>
 					</div>
-				) : (
-					<TextInput
-						label="Nom"
-						placeholder="Nom de la connexion"
-						value={deviceName}
-						onChange={(e) => setDeviceName(e.currentTarget.value)}
-						autoComplete="off"
-						required
-						disabled={isSubmitting}
-						data-testid="name-input"
-					/>
-				)}
-				<Button type="submit" disabled={isSubmitting} data-testid="submit">
-					{isSubmitting
-						? "En cours…"
-						: existingConnection
-							? "Approuver la reconnexion"
-							: "Autoriser"}
-				</Button>
-			</form>
+				</div>
+			</main>
 		</div>
 	);
 }

@@ -343,7 +343,7 @@ export const apiToken = pgTable(
 // Cycle de vie :
 //   1. CLI POST /tunnels/pairings → INSERT row avec `code`, `cli_pubkey`
 //      et `expires_at = now + 5min`. `user_id` NULL (pas encore lié).
-//   2. User visite /connect, tape le code → POST /pairings/:code/approve.
+//   2. User visite /pair, tape le code → POST /pairings/:code/approve.
 //      Le backend renseigne `user_id` + `device_name` + `approved_at`.
 //   3. CLI poll `/status` détecte `approved_at`, envoie POST /authenticate
 //      avec `signature_of_code`. Backend valide contre `cli_pubkey` (Ed25519),

@@ -91,7 +91,7 @@ export interface CodeDisplayInfo {
 export interface ConnectOptions {
 	/** URL du backend (ex `https://api.sqlnest.app`). */
 	readonly baseUrl: string;
-	/** URL du frontend où visiter `/connect` (ex `https://sqlnest.app`). */
+	/** URL du frontend où visiter `/pair` (ex `https://sqlnest.app`). */
 	readonly frontendUrl: string;
 	/** Ouvrir le browser automatiquement (défaut: true). */
 	readonly openBrowserOnDisplay?: boolean;
@@ -138,7 +138,7 @@ export async function connect(opts: ConnectOptions): Promise<ConnectResult> {
 		config.keypair.public,
 		opts.cliConnectionName ?? null
 	);
-	const connectUrl = `${opts.frontendUrl.replace(TRAILING_SLASH_RE, "")}/connect`;
+	const connectUrl = `${opts.frontendUrl.replace(TRAILING_SLASH_RE, "")}/pair`;
 	const expiresAt = new Date(pairing.expiresAt);
 
 	// ─── 3. Émit affichage + open browser ─────────────────────────────

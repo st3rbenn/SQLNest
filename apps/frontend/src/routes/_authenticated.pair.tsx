@@ -1,7 +1,7 @@
 /**
- * Route legacy `/connect` (C.21.7) — redirect vers `/team/:defaultSlug/connect`.
- * Conservée pour les bookmarks existants ; la vraie route vit sous
- * `/team/:teamSlug/connect`.
+ * Route legacy `/pair` — redirect vers `/team/:defaultSlug/pair`.
+ * Conservée pour les bookmarks et les URLs affichées par le CLI sans
+ * team-slug ; la vraie route vit sous `/team/:teamSlug/pair`.
  */
 
 import { queryOptions } from "@tanstack/react-query";
@@ -14,13 +14,13 @@ const defaultTeamQueryOptions = queryOptions({
 	staleTime: 60_000
 });
 
-export const Route = createFileRoute("/_authenticated/connect")({
+export const Route = createFileRoute("/_authenticated/pair")({
 	beforeLoad: async ({ context }) => {
 		const team = await context.queryClient.ensureQueryData(
 			defaultTeamQueryOptions
 		);
 		throw redirect({
-			to: "/team/$teamSlug/connect",
+			to: "/team/$teamSlug/pair",
 			params: { teamSlug: team.slug }
 		});
 	}

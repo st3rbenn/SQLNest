@@ -4,7 +4,7 @@ import { UserMenu } from "../features/auth/UserMenu";
 
 /**
  * Layout pathless des pages **authentifiées** — gallery `/`, canvas
- * `/canvas/$connId`, query `/canvas/$connId/query`, `/connect`.
+ * `/canvas/$connId`, query `/canvas/$connId/query`, `/pair`.
  *
  * Guard : `beforeLoad` charge la session via le `queryClient` du router
  * context (F2) — `ensureQueryData` hit le cache si frais (staleTime 60s),
