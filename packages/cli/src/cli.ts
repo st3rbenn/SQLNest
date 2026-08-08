@@ -42,6 +42,7 @@ import {
 	RevokeConnectionError
 } from "./commands/revoke-connection";
 import { serveTunnel as defaultServeTunnel } from "./commands/serve";
+import { loadConfig, type TunnelEntry } from "./config";
 import {
 	LocalConnectionNotFoundError,
 	loadLocalConnections
@@ -314,18 +315,31 @@ async function resolveCliConnectionName(
 	// ≥2 DSN : prompt select interactif (flèches ↑↓, Enter valide, Ctrl-C
 	// annule via `ExitPromptError`). Sur non-TTY (CI, stdin pipé), inquirer
 	// throw → fallback silencieux sur le prompt numéroté classique.
+	//
+	// Chaque item est enrichi avec le status du tunnel_session existant :
+	//   - `apollon (valide 20j)` → auto-resume (skip /pair) au select.
+	//   - `apollon (expiré il y a 3j)` → device flow au select.
+	//   - `apollon` (sans suffix) → jamais paired, device flow au select.
+	// Le branchement est géré côté `connect()` via `findResumableTunnel`.
+	const tunnels = loadConfig()?.tunnels ?? [];
+	const nowMs = Date.now();
+	const decorate = (name: string): string => {
+		const status = describeTunnelStatus(tunnels, name, nowMs);
+		return status === null ? name : `${name} (${status})`;
+	};
 	const prompter = ctx.io.prompter ?? defaultPrompter();
 	try {
 		if (process.stdin.isTTY === true) {
 			return await prompter.select({
 				message: "DSN à servir",
-				choices: entries.map((c) => ({ value: c.name, label: c.name }))
+				choices: entries.map((c) => ({ value: c.name, label: decorate(c.name) }))
 			});
 		}
 		// Fallback non-TTY : prompt numéroté ligne par ligne.
 		ctx.stdout("▲ Plusieurs DSN locales configurées :");
 		for (let i = 0; i < entries.length; i++) {
-			ctx.stdout(`  ${i + 1}) ${entries[i]?.name}`);
+			const name = entries[i]?.name;
+			if (name !== undefined) ctx.stdout(`  ${i + 1}) ${decorate(name)}`);
 		}
 		while (true) {
 			const raw = await prompter.line("Choisis la DSN à servir [1] : ");
@@ -341,6 +355,44 @@ async function resolveCliConnectionName(
 	} finally {
 		prompter.close?.();
 	}
+}
+
+/**
+ * Cherche le tunnel le plus récent pour une DSN locale donnée dans la
+ * config et retourne un status human-readable :
+ *   - `"valide 20j"` — token pas expiré (matching strict par `connection_name`).
+ *   - `"expiré il y a 3j"` — token expiré.
+ *   - `null` — aucun tunnel taggé pour cette DSN (jamais paired ou entry
+ *     legacy sans `connection_name`).
+ * Utilisé pour enrichir le menu de sélection `sqlnest connect`.
+ */
+export function describeTunnelStatus(
+	tunnels: readonly TunnelEntry[],
+	connectionName: string,
+	nowMs: number
+): string | null {
+	// Le plus récent d'abord — reflète le dernier pair effectué.
+	for (let i = tunnels.length - 1; i >= 0; i--) {
+		const t = tunnels[i];
+		if (t?.connection_name !== connectionName) continue;
+		const expiresMs = Date.parse(t.expires_at);
+		if (Number.isNaN(expiresMs)) return null;
+		const delta = expiresMs - nowMs;
+		if (delta > 0) return `valide ${humanDuration(delta)}`;
+		return `expiré il y a ${humanDuration(-delta)}`;
+	}
+	return null;
+}
+
+const MINUTE_MS = 60 * 1000;
+const HOUR_MS = 60 * MINUTE_MS;
+const DAY_MS = 24 * HOUR_MS;
+
+function humanDuration(ms: number): string {
+	if (ms < MINUTE_MS) return "moins d'une minute";
+	if (ms < HOUR_MS) return `${Math.floor(ms / MINUTE_MS)}min`;
+	if (ms < DAY_MS) return `${Math.floor(ms / HOUR_MS)}h`;
+	return `${Math.floor(ms / DAY_MS)}j`;
 }
 
 function runLogout(args: string[], ctx: Omit<RunContext, "env">): number {

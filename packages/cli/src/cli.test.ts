@@ -9,8 +9,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { runCli } from "./cli";
+import { describeTunnelStatus, runCli } from "./cli";
 import { ConnectError } from "./commands/connect";
+import type { TunnelEntry } from "./config";
 import { addLocalConnection } from "./local-connections";
 
 // Isolation obligatoire : `runCli connect` (via `resolveCliConnectionName`
@@ -499,5 +500,67 @@ describe("runCli — logout", () => {
 			logoutFn: stub as any
 		});
 		expect(code).toBe(1);
+	});
+});
+
+describe("describeTunnelStatus", () => {
+	const nowMs = Date.parse("2026-08-08T12:00:00Z");
+	function makeTunnel(overrides: Partial<TunnelEntry> = {}): TunnelEntry {
+		return {
+			id: "t",
+			name: "apollon",
+			connection_id: "c",
+			session_token: "tn_xxx",
+			expires_at: "2026-09-06T00:00:00Z",
+			connection_name: "apollon",
+			...overrides
+		};
+	}
+
+	test("aucun tunnel taggé → null (rien à afficher)", () => {
+		expect(describeTunnelStatus([], "apollon", nowMs)).toBeNull();
+	});
+
+	test("entry legacy sans connection_name → null (ignoré)", () => {
+		const legacy = makeTunnel({ connection_name: undefined });
+		expect(describeTunnelStatus([legacy], "apollon", nowMs)).toBeNull();
+	});
+
+	test("token valide → « valide Xj »", () => {
+		// 20 jours dans le futur
+		const t = makeTunnel({
+			expires_at: new Date(nowMs + 20 * 24 * 60 * 60 * 1000).toISOString()
+		});
+		expect(describeTunnelStatus([t], "apollon", nowMs)).toBe("valide 20j");
+	});
+
+	test("token valide < 1j → heures", () => {
+		const t = makeTunnel({
+			expires_at: new Date(nowMs + 3 * 60 * 60 * 1000).toISOString()
+		});
+		expect(describeTunnelStatus([t], "apollon", nowMs)).toBe("valide 3h");
+	});
+
+	test("token expiré → « expiré il y a Xj »", () => {
+		const t = makeTunnel({
+			expires_at: new Date(nowMs - 3 * 24 * 60 * 60 * 1000).toISOString()
+		});
+		expect(describeTunnelStatus([t], "apollon", nowMs)).toBe(
+			"expiré il y a 3j"
+		);
+	});
+
+	test("plusieurs tunnels matchants → le plus récent (dernier index)", () => {
+		const older = makeTunnel({
+			id: "old",
+			expires_at: new Date(nowMs + 1 * 24 * 60 * 60 * 1000).toISOString()
+		});
+		const newer = makeTunnel({
+			id: "new",
+			expires_at: new Date(nowMs + 30 * 24 * 60 * 60 * 1000).toISOString()
+		});
+		expect(describeTunnelStatus([older, newer], "apollon", nowMs)).toBe(
+			"valide 30j"
+		);
 	});
 });
