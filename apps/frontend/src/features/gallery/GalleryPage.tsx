@@ -62,15 +62,12 @@ const mainStyle: CSSProperties = {
  * matche celle du nom user à sa gauche.
  */
 const mainHeadStyle: CSSProperties = {
-	// Height = bloc user (44). Pas de borderBottom : le divider sidebar
-	// descend maintenant sous le bloc [user + Recents] et ne matcherait
-	// pas ce header. Sans trait, le PageHead reste juste un titre
-	// discret — pattern Notion/Linear.
-	minHeight: 44,
+	minHeight: 45,
 	boxSizing: "border-box",
 	display: "flex",
 	alignItems: "center",
 	padding: "0 32px",
+	borderBottom: "1px solid var(--sqlnest-border)",
 	flexShrink: 0
 };
 
@@ -118,19 +115,31 @@ const CARD_HOVER_CSS = `
 }
 `;
 
-export function GalleryPage() {
+/** Vue de la gallery — pilote le titre PageHead ET l'item actif dans
+ *  la sidebar. En V1 les 2 vues affichent la même liste (canvas de la
+ *  team courante), seul l'affichage change. En V2 « recents » agrégera
+ *  cross-team. */
+export type GalleryView = "drafts" | "recents";
+
+const VIEW_TITLES: Record<GalleryView, string> = {
+	drafts: "Drafts",
+	recents: "Recents"
+};
+
+export function GalleryPage({ view = "drafts" }: { readonly view?: GalleryView }) {
 	const team = useCurrentTeam();
 	const teamSlug = team?.slug ?? null;
 	const { data: connections, isLoading, error } = useDbConnections(teamSlug);
 	const recentIds = useRecentConnectionIds();
 	const { pendingId, handleClick } = useNavigateToCanvas();
+	const title = VIEW_TITLES[view];
 
 	if (error) {
 		return (
 			<div style={pageStyle}>
-				<Sidebar hasConnections={false} teamSlug={teamSlug} />
+				<Sidebar hasConnections={false} teamSlug={teamSlug} view={view} />
 				<main style={mainStyle}>
-					<PageHead title="Recents" />
+					<PageHead title={title} />
 					<div style={mainContentStyle}>
 						<div style={{ color: "var(--sqlnest-danger)" }}>
 							Impossible de charger les connections : {error.message}
@@ -144,9 +153,9 @@ export function GalleryPage() {
 	if (isLoading || connections === undefined) {
 		return (
 			<div style={pageStyle}>
-				<Sidebar hasConnections={false} teamSlug={teamSlug} />
+				<Sidebar hasConnections={false} teamSlug={teamSlug} view={view} />
 				<main style={mainStyle}>
-					<PageHead title="Recents" />
+					<PageHead title={title} />
 					<div
 						style={{
 							...mainContentStyle,
@@ -165,9 +174,9 @@ export function GalleryPage() {
 	if (connections.length === 0) {
 		return (
 			<div style={pageStyle}>
-				<Sidebar hasConnections={false} teamSlug={teamSlug} />
+				<Sidebar hasConnections={false} teamSlug={teamSlug} view={view} />
 				<main style={mainStyle}>
-					<PageHead title="Recents" />
+					<PageHead title={title} />
 					<EmptyHero teamSlug={teamSlug} />
 				</main>
 			</div>
@@ -185,9 +194,9 @@ export function GalleryPage() {
 	return (
 		<div style={pageStyle}>
 			<style>{CARD_HOVER_CSS}</style>
-			<Sidebar hasConnections={true} teamSlug={teamSlug} />
+			<Sidebar hasConnections={true} teamSlug={teamSlug} view={view} />
 			<main style={mainStyle}>
-				<PageHead title="Recents" />
+				<PageHead title={title} />
 				<div
 					style={{
 						...mainContentStyle,
@@ -232,10 +241,12 @@ export function GalleryPage() {
 
 function Sidebar({
 	hasConnections,
-	teamSlug
+	teamSlug,
+	view
 }: {
 	readonly hasConnections: boolean;
 	readonly teamSlug: string | null;
+	readonly view: GalleryView;
 }): React.ReactNode {
 	const team = useCurrentTeam();
 	return (
@@ -249,12 +260,17 @@ function Sidebar({
 				<UserBadge />
 			</div>
 			<div style={{ padding: "2px 12px 8px" }}>
-				<NavItem
-					label="Recents"
-					icon={<ClockIcon />}
-					disabled
-					disabledHint="bientôt"
-				/>
+				{teamSlug ? (
+					<NavItem
+						label="Recents"
+						icon={<ClockIcon />}
+						active={view === "recents"}
+						to="/team/$teamSlug/recents"
+						params={{ teamSlug }}
+					/>
+				) : (
+					<NavItem label="Recents" icon={<ClockIcon />} active={false} />
+				)}
 			</div>
 
 			{/* Séparateur bloc perso / bloc team — full width. */}
@@ -283,7 +299,17 @@ function Sidebar({
 				)}
 			</div>
 			<div style={{ padding: "2px 12px" }}>
-				<NavItem label="Drafts" icon={<DraftIcon />} active />
+				{teamSlug ? (
+					<NavItem
+						label="Drafts"
+						icon={<DraftIcon />}
+						active={view === "drafts"}
+						to="/team/$teamSlug"
+						params={{ teamSlug }}
+					/>
+				) : (
+					<NavItem label="Drafts" icon={<DraftIcon />} active={false} />
+				)}
 			</div>
 
 			<div style={{ flex: 1 }} />
@@ -568,19 +594,23 @@ function PageHead({ title }: { readonly title: string }): React.ReactNode {
 /** Item de navigation sidebar (Recents, Drafts, …). Un seul composant
  *  pour homogénéiser padding / gap / icon-slot avec les triggers
  *  UserBadge / TeamSelector. Le hover est porté par la classe
- *  `sqlnest-sidebar-item` du DS. */
+ *  `sqlnest-sidebar-item` du DS.
+ *
+ *  Si `to` est fourni → rendu en <Link> TanStack Router (cliquable
+ *  vers la route). Sinon → <div> statique (fallback, ex. quand le
+ *  slug de team n'est pas encore chargé). */
 function NavItem({
 	label,
 	icon,
-	active = false,
-	disabled = false,
-	disabledHint
+	active,
+	to,
+	params
 }: {
 	readonly label: string;
 	readonly icon: React.ReactNode;
-	readonly active?: boolean;
-	readonly disabled?: boolean;
-	readonly disabledHint?: string;
+	readonly active: boolean;
+	readonly to?: "/team/$teamSlug" | "/team/$teamSlug/recents";
+	readonly params?: { readonly teamSlug: string };
 }): React.ReactNode {
 	const className = active
 		? "sqlnest-sidebar-item sqlnest-sidebar-item--active"
@@ -590,17 +620,15 @@ function NavItem({
 		alignItems: "center",
 		gap: 10,
 		padding: "6px 8px",
-		color: disabled
-			? "var(--sqlnest-text-tertiary)"
-			: "var(--sqlnest-text-title)",
+		color: "var(--sqlnest-text-title)",
 		borderRadius: 6,
 		fontSize: 12,
 		fontWeight: 500,
-		cursor: disabled ? "not-allowed" : "default",
-		opacity: disabled ? 0.75 : 1
+		cursor: to ? "pointer" : "default",
+		textDecoration: "none"
 	};
-	return (
-		<div className={className} style={style} title={disabledHint}>
+	const inner = (
+		<>
 			<span
 				style={{
 					width: 20,
@@ -614,16 +642,18 @@ function NavItem({
 				{icon}
 			</span>
 			<span style={{ flex: 1 }}>{label}</span>
-			{disabled && disabledHint ? (
-				<span
-					style={{
-						fontSize: 10,
-						color: "var(--sqlnest-text-tertiary)"
-					}}
-				>
-					{disabledHint}
-				</span>
-			) : null}
+		</>
+	);
+	if (to && params) {
+		return (
+			<Link to={to} params={params} className={className} style={style}>
+				{inner}
+			</Link>
+		);
+	}
+	return (
+		<div className={className} style={style}>
+			{inner}
 		</div>
 	);
 }
