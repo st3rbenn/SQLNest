@@ -33,8 +33,9 @@
 	--sqlnest-text-tertiary: #7a7a7a;
 	/* Gris clair mais < blanc pur — headings de nav, noms de compte/team
 	 * dans la sidebar. Cohérent : les 3 « labels de structure » utilisent
-	 * la même intensité. */
-	--sqlnest-text-title: #cfcfcf;
+	 * la même intensité. `#e6e6e6` sur `--sqlnest-surface` (#2c2c2c) =
+	 * contraste ~10.9:1 (WCAG AAA large marge, passe Lighthouse). */
+	--sqlnest-text-title: #e6e6e6;
 	/* Blanc cassé beige — accents doux, icônes qui ne veulent pas
 	 * appeler l'accent bleu (nav neutre, séparateurs iconiques…). */
 	--sqlnest-text-cream: #ebe3d0;
