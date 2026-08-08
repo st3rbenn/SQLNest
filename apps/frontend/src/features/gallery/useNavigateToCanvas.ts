@@ -1,12 +1,12 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { type MouseEvent, useCallback, useState } from "react";
+import { notifyError } from "../notifications/notify";
 import { fetchCanvasState } from "../schema/canvas/canvasStateClient";
 import {
 	canvasLayoutQueryKey,
 	computeCanvasLayout
 } from "../schema/SchemaCanvas";
-import type { SchemaModel } from "../schema/schema-model";
 import { fetchSchema } from "../schema/useSchema";
 import { useCurrentTeamSlug } from "../teams/useCurrentTeam";
 
@@ -62,59 +62,56 @@ export function useNavigateToCanvas(): NavigateToCanvasHandle {
 			e.preventDefault();
 			setPendingId(connectionId);
 			void (async () => {
-				// Phase 1 — fetch schema + canvas-state en parallèle.
-				// Le schema est nécessaire pour la phase 2 (compute
-				// ELK), on l'attend explicitement via `ensureQueryData`
-				// pour récupérer sa valeur.
-				let schema: SchemaModel | undefined;
 				try {
-					const [schemaResult] = await Promise.allSettled([
-						queryClient.ensureQueryData({
-							queryKey: ["schema", teamSlug, connectionId],
-							queryFn: () => fetchSchema(connectionId, teamSlug),
-							staleTime: 60_000
-						}),
-						queryClient.prefetchQuery({
-							queryKey: ["canvas-state", teamSlug, connectionId],
-							queryFn: () => fetchCanvasState(connectionId, teamSlug),
-							staleTime: Number.POSITIVE_INFINITY
-						})
-					]);
-					if (schemaResult.status === "fulfilled") {
-						schema = schemaResult.value;
-					}
-				} catch {
-					// Ignore — la navigation se fait quand même en dessous.
-				}
+					// Phase 1 — fetch schema. Bloquant : sans schema, pas
+					// de canvas à ouvrir. On lance canvas_state en parallèle
+					// (best-effort) pour warm le cache pendant le fetch schema.
+					void queryClient.prefetchQuery({
+						queryKey: ["canvas-state", teamSlug, connectionId],
+						queryFn: () => fetchCanvasState(connectionId, teamSlug),
+						staleTime: Number.POSITIVE_INFINITY
+					});
+					const schema = await queryClient.ensureQueryData({
+						queryKey: ["schema", teamSlug, connectionId],
+						queryFn: () => fetchSchema(connectionId, teamSlug),
+						staleTime: 60_000
+					});
 
-				// Phase 2 — compute ELK layout (peut prendre ~500ms-1s
-				// sur un gros graphe). Sans ça, l'user voit un fond
-				// opaque au mount du canvas le temps du compute. On
-				// keep le blur pendant tout ce temps.
-				if (schema) {
+					// Phase 2 — compute ELK layout (peut prendre ~500ms-1s
+					// sur un gros graphe). Sans ça, l'user voit un fond
+					// opaque au mount du canvas le temps du compute. On
+					// keep le blur pendant tout ce temps.
 					try {
 						await queryClient.ensureQueryData({
 							queryKey: canvasLayoutQueryKey(connectionId),
-							queryFn: () => computeCanvasLayout(schema as SchemaModel),
+							queryFn: () => computeCanvasLayout(schema),
 							staleTime: Number.POSITIVE_INFINITY,
 							gcTime: Number.POSITIVE_INFINITY
 						});
 					} catch {
-						// Layout KO → le canvas mount quand même et fallback.
+						// Layout KO → le canvas mount quand même et fallback ELK.
 					}
-				}
 
-				setPendingId(null);
-				if (teamSlug) {
-					void navigate({
-						to: "/team/$teamSlug/canvas/$connId",
-						params: { teamSlug, connId: connectionId }
-					});
-				} else {
-					void navigate({
-						to: "/canvas/$connId",
-						params: { connId: connectionId }
-					});
+					if (teamSlug) {
+						void navigate({
+							to: "/team/$teamSlug/canvas/$connId",
+							params: { teamSlug, connId: connectionId }
+						});
+					} else {
+						void navigate({
+							to: "/canvas/$connId",
+							params: { connId: connectionId }
+						});
+					}
+				} catch (err) {
+					// Fetch schema échoue → notif + rester sur la gallery.
+					// L'user retrouve son contexte, la notif indique la raison
+					// (CLI offline, timeout, backend down…).
+					notifyError(
+						err instanceof Error ? err.message : "Impossible d'ouvrir le canvas"
+					);
+				} finally {
+					setPendingId(null);
 				}
 			})();
 		},

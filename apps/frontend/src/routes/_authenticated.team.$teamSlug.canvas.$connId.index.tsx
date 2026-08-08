@@ -6,11 +6,11 @@
  */
 
 import { notifications } from "@mantine/notifications";
-import { IconPlugConnectedX } from "@tabler/icons-react";
 import { createFileRoute } from "@tanstack/react-router";
-import { type CSSProperties, type ReactNode, useEffect } from "react";
+import { type CSSProperties, useEffect } from "react";
 import { useDbConnections } from "../features/db-connections/useDbConnections";
 import { pushRecentConnection } from "../features/db-connections/useRecentConnections";
+import { notifyError } from "../features/notifications/notify";
 import { SchemaCanvas } from "../features/schema/SchemaCanvas";
 import { useSchema } from "../features/schema/useSchema";
 import { useCurrentTeamSlug } from "../features/teams/useCurrentTeam";
@@ -63,10 +63,11 @@ function TeamCanvasPage() {
 }
 
 /**
- * Route error → notification Mantine. Deps primitives (`errorMessage` /
- * `isUnknown`) → l'effet ne re-run que sur changement réel. Cleanup
- * `notifications.hide(id)` automatiquement quand l'erreur disparaît ou
- * change (ou au unmount de la page).
+ * Route error → notification. Cas deep-link ou F5 direct sur `/canvas/:id`
+ * — le flow normal depuis la gallery notify + reste sur la gallery
+ * (voir `useNavigateToCanvas`), donc ce hook ne fire qu'en fallback.
+ * Deps primitives → l'effet ne re-run que sur changement réel, cleanup
+ * `notifications.hide(id)` au unmount.
  */
 function useCanvasErrorNotif({
 	error,
@@ -84,44 +85,7 @@ function useCanvasErrorNotif({
 			message = errorMessage;
 		}
 		if (message === null) return;
-		const id = notifications.show({
-			color: "red",
-			message: parseInlineCode(message),
-			icon: <IconPlugConnectedX size={14} stroke={2} />,
-			autoClose: false,
-			withBorder: true
-		});
+		const id = notifyError(message);
 		return () => notifications.hide(id);
 	}, [errorMessage, isUnknown]);
-}
-
-/**
- * Rend un message texte avec des segments backtickés en `<code>` inline.
- * Le message backend est du texte brut ("Lance `sqlnest connect`…") —
- * sans ce parse l'user voit les backticks bruts. Simple state machine
- * sur split.
- */
-function parseInlineCode(message: string): ReactNode[] {
-	const parts = message.split("`");
-	return parts.map((part, i) =>
-		i % 2 === 0 ? (
-			// biome-ignore lint/suspicious/noArrayIndexKey: parts stable per split
-			<span key={i}>{part}</span>
-		) : (
-			<code
-				// biome-ignore lint/suspicious/noArrayIndexKey: parts stable per split
-				key={i}
-				style={{
-					background: "var(--sqlnest-surface-hover)",
-					padding: "1px 5px",
-					borderRadius: 3,
-					fontFamily: "var(--mantine-font-family-monospace)",
-					fontSize: 11.5,
-					color: "var(--sqlnest-text-title)"
-				}}
-			>
-				{part}
-			</code>
-		)
-	);
 }
