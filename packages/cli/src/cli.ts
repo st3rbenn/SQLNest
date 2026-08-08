@@ -209,9 +209,15 @@ async function runConnect(args: string[], ctx: RunContext): Promise<number> {
 					ctx.stdout("En attente d'approbation…");
 				}
 			});
-			ctx.stdout(
-				`✓ Pairing OK : « ${result.connectionName} » — ${result.tunnelId}`
-			);
+			if (result.resumed) {
+				ctx.stdout(
+					`↻ Tunnel repris : « ${result.connectionName} » — ${result.tunnelId}`
+				);
+			} else {
+				ctx.stdout(
+					`✓ Pairing OK : « ${result.connectionName} » — ${result.tunnelId}`
+				);
+			}
 			sessionId = result.tunnelId;
 			token = result.sessionToken;
 			connectionName = result.connectionName;

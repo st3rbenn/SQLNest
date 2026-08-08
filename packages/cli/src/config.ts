@@ -56,6 +56,13 @@ export interface TunnelEntry {
 	readonly session_token: string;
 	readonly expires_at: string;
 	readonly last_used?: string;
+	/** Nom de la DSN LOCALE (`cliConnectionName`) que ce tunnel sert.
+	 *  Persisté pour permettre à `connect()` de retrouver un tunnel
+	 *  réutilisable et bypass le device flow quand le token est encore
+	 *  valide. `undefined` sur les vieilles entries pré-auto-resume —
+	 *  celles-là ne matchent jamais un `cliConnectionName` explicite,
+	 *  donc l'user re-pair une fois puis a la persistance. */
+	readonly connection_name?: string;
 }
 
 export interface SqlnestConfig {
@@ -162,6 +169,7 @@ export function saveConfig(config: SqlnestConfig): void {
 				expires_at: t.expires_at
 			};
 			if (t.last_used) base.last_used = t.last_used;
+			if (t.connection_name) base.connection_name = t.connection_name;
 			return base;
 		})
 	});
@@ -265,7 +273,10 @@ function validateTunnelEntry(raw: unknown, index: number): TunnelEntry {
 		connection_id: t.connection_id as string,
 		session_token: t.session_token as string,
 		expires_at: t.expires_at as string,
-		...(typeof t.last_used === "string" ? { last_used: t.last_used } : {})
+		...(typeof t.last_used === "string" ? { last_used: t.last_used } : {}),
+		...(typeof t.connection_name === "string"
+			? { connection_name: t.connection_name }
+			: {})
 	};
 	return entry;
 }

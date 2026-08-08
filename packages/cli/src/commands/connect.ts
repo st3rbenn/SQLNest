@@ -62,6 +62,12 @@ export const POLL_INTERVAL_MS = 2_000;
 /** Durée max du polling avant abandon local (aligné sur le TTL backend). */
 export const POLL_TIMEOUT_MS = 5 * 60 * 1_000;
 
+/** Marge de sécurité avant `expires_at` — sous ce seuil on considère le
+ *  token trop proche de l'expiration pour re-tenter, on fait un fresh
+ *  pair pour obtenir un token neuf. Évite les rejets 401 au milieu d'une
+ *  session tunnel qui vient tout juste d'être ouverte. */
+export const TOKEN_EXPIRY_BUFFER_MS = 60 * 1_000;
+
 export type ConnectFailureReason = "timeout" | "expired" | "consumed";
 
 export class ConnectError extends Error {
@@ -79,6 +85,10 @@ export interface ConnectResult {
 	readonly sessionToken: string;
 	readonly expiresAt: Date;
 	readonly connectionName: string;
+	/** `true` si le tunnel a été **réutilisé** depuis un token
+	 *  `session_token` existant dans `config.tunnels[]` (skip du device
+	 *  flow). `false` si device flow interactif complet a été effectué. */
+	readonly resumed: boolean;
 }
 
 /** Info affichable côté user à la 1re étape. */
@@ -129,6 +139,28 @@ export async function connect(opts: ConnectOptions): Promise<ConnectResult> {
 
 	// ─── 1. Load/init config, obtenir la privkey en clair ─────────────
 	const { config, privateKeyHex } = loadOrInitConfig();
+
+	// ─── 1.5. Auto-resume — si un tunnel valide existe déjà pour ce
+	// `cliConnectionName`, on skip complètement le device flow. Le CLI
+	// ré-ouvre juste sa WSS avec le token existant, l'user ne visite
+	// jamais /pair après le 1er pairing. Si le token est révoqué
+	// serveur-side, l'ouverture WSS échouera et le wrapper CLI pourra
+	// re-tenter avec `--force` (à implémenter séparément). ────────────
+	const resumable = findResumableTunnel(
+		config.tunnels,
+		opts.cliConnectionName ?? null,
+		now()
+	);
+	if (resumable !== null) {
+		return {
+			tunnelId: resumable.id,
+			connectionId: resumable.connection_id,
+			sessionToken: resumable.session_token,
+			expiresAt: new Date(resumable.expires_at),
+			connectionName: resumable.connection_name ?? resumable.name,
+			resumed: true
+		};
+	}
 
 	// ─── 2. POST /pairings ────────────────────────────────────────────
 	// On envoie `cliConnectionName` : le backend l'utilise pour scoper le
@@ -198,7 +230,12 @@ export async function connect(opts: ConnectOptions): Promise<ConnectResult> {
 		name: deviceLabel,
 		connection_id: auth.connectionId,
 		session_token: auth.token,
-		expires_at: auth.expiresAt
+		expires_at: auth.expiresAt,
+		// Persist le nom DSN local pour permettre l'auto-resume au
+		// prochain `sqlnest connect` (voir `findResumableTunnel`).
+		...(opts.cliConnectionName
+			? { connection_name: opts.cliConnectionName }
+			: {})
 	};
 	saveConfig({
 		...config,
@@ -210,8 +247,45 @@ export async function connect(opts: ConnectOptions): Promise<ConnectResult> {
 		connectionId: auth.connectionId,
 		sessionToken: auth.token,
 		expiresAt: new Date(auth.expiresAt),
-		connectionName: localConnectionName
+		connectionName: localConnectionName,
+		resumed: false
 	};
+}
+
+/**
+ * Cherche un tunnel réutilisable dans `config.tunnels[]` — retourne
+ * le plus récemment ajouté qui matche le `cliConnectionName` et dont
+ * le token n'expire pas avant `TOKEN_EXPIRY_BUFFER_MS`. `null` sinon.
+ *
+ * Matching :
+ *   - Si `cliConnectionName` est fourni (multi-DSN), on matche par
+ *     `entry.connection_name === cliConnectionName`. Les vieilles
+ *     entries sans `connection_name` sont ignorées.
+ *   - Si `null` (single-DSN legacy), on prend le premier tunnel non
+ *     scopé (sans `connection_name`) ou n'importe lequel — comportement
+ *     tolérant vu que le fingerprint effectif backend est le même.
+ */
+export function findResumableTunnel(
+	tunnels: readonly TunnelEntry[],
+	cliConnectionName: string | null,
+	nowMs: number
+): TunnelEntry | null {
+	const cutoff = nowMs + TOKEN_EXPIRY_BUFFER_MS;
+	// Itère à l'envers — le tunnel le plus récent (append à la fin) a
+	// priorité si plusieurs matchent, ce qui reflète le dernier pair
+	// effectué par l'user.
+	for (let i = tunnels.length - 1; i >= 0; i--) {
+		const t = tunnels[i];
+		if (t === undefined) continue;
+		const expiresMs = Date.parse(t.expires_at);
+		if (Number.isNaN(expiresMs) || expiresMs <= cutoff) continue;
+		if (cliConnectionName !== null) {
+			if (t.connection_name === cliConnectionName) return t;
+		} else if (t.connection_name === undefined) {
+			return t;
+		}
+	}
+	return null;
 }
 
 /**

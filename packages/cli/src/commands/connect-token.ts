@@ -66,7 +66,10 @@ export async function connectWithToken(
 		name: label,
 		connection_id: auth.connectionId,
 		session_token: auth.token,
-		expires_at: auth.expiresAt
+		expires_at: auth.expiresAt,
+		...(opts.cliConnectionName
+			? { connection_name: opts.cliConnectionName }
+			: {})
 	};
 	saveConfig({ ...config, tunnels: [...config.tunnels, entry] });
 
@@ -75,6 +78,7 @@ export async function connectWithToken(
 		connectionId: auth.connectionId,
 		sessionToken: auth.token,
 		expiresAt: new Date(auth.expiresAt),
-		connectionName: localConnectionName
+		connectionName: localConnectionName,
+		resumed: false
 	};
 }

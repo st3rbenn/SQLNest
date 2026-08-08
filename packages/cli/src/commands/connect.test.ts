@@ -18,8 +18,13 @@ import type {
 	PairingStatus,
 	StatusPairingResult
 } from "../api-client";
-import { loadConfig } from "../config";
-import { ConnectError, connect, loadOrInitConfig } from "./connect";
+import { type TunnelEntry, loadConfig, saveConfig } from "../config";
+import {
+	ConnectError,
+	connect,
+	findResumableTunnel,
+	loadOrInitConfig
+} from "./connect";
 
 /** Fabrique un ApiClient contrôlé par vi.fn — permet les assertions et
  * scénarios (approve après N polls, timeout, etc.). */
@@ -328,5 +333,191 @@ describe("connect — cas d'erreur", () => {
 		expect(err.kind).toBe("timeout");
 		expect(err.message).toBe("boom");
 		expect(err.name).toBe("ConnectError");
+	});
+});
+
+describe("findResumableTunnel", () => {
+	const nowMs = Date.parse("2026-08-08T12:00:00Z");
+	const futureIso = new Date(nowMs + 30 * 24 * 60 * 60 * 1000).toISOString();
+	const pastIso = new Date(nowMs - 1000).toISOString();
+
+	function makeEntry(overrides: Partial<TunnelEntry> = {}): TunnelEntry {
+		return {
+			id: "t1",
+			name: "apollon",
+			connection_id: "c1",
+			session_token: "tn_xxx",
+			expires_at: futureIso,
+			...overrides
+		};
+	}
+
+	test("matche par connection_name et retourne le tunnel valide", () => {
+		const t = makeEntry({ connection_name: "apollon" });
+		const result = findResumableTunnel([t], "apollon", nowMs);
+		expect(result).toBe(t);
+	});
+
+	test("ignore les tunnels d'un autre connection_name", () => {
+		const t = makeEntry({ connection_name: "delphi" });
+		expect(findResumableTunnel([t], "apollon", nowMs)).toBeNull();
+	});
+
+	test("ignore les tunnels sans connection_name quand nom demandé", () => {
+		const t = makeEntry({ connection_name: undefined });
+		expect(findResumableTunnel([t], "apollon", nowMs)).toBeNull();
+	});
+
+	test("mode single-DSN (null) matche entry sans connection_name", () => {
+		const t = makeEntry({ connection_name: undefined });
+		expect(findResumableTunnel([t], null, nowMs)).toBe(t);
+	});
+
+	test("mode single-DSN (null) ignore entry avec connection_name scopé", () => {
+		const t = makeEntry({ connection_name: "apollon" });
+		expect(findResumableTunnel([t], null, nowMs)).toBeNull();
+	});
+
+	test("ignore les tunnels expirés", () => {
+		const t = makeEntry({ connection_name: "apollon", expires_at: pastIso });
+		expect(findResumableTunnel([t], "apollon", nowMs)).toBeNull();
+	});
+
+	test("ignore les tunnels qui expirent DANS la marge de sécurité (60s)", () => {
+		const almostExpired = new Date(nowMs + 30_000).toISOString();
+		const t = makeEntry({
+			connection_name: "apollon",
+			expires_at: almostExpired
+		});
+		expect(findResumableTunnel([t], "apollon", nowMs)).toBeNull();
+	});
+
+	test("plusieurs tunnels matchants → prend le plus récent (dernier ajouté)", () => {
+		const older = makeEntry({
+			id: "old",
+			connection_name: "apollon",
+			session_token: "tn_old"
+		});
+		const newer = makeEntry({
+			id: "new",
+			connection_name: "apollon",
+			session_token: "tn_new"
+		});
+		const result = findResumableTunnel([older, newer], "apollon", nowMs);
+		expect(result?.id).toBe("new");
+	});
+
+	test("array vide → null", () => {
+		expect(findResumableTunnel([], "apollon", nowMs)).toBeNull();
+	});
+
+	test("expires_at malformé → tunnel ignoré", () => {
+		const t = makeEntry({
+			connection_name: "apollon",
+			expires_at: "not-a-date"
+		});
+		expect(findResumableTunnel([t], "apollon", nowMs)).toBeNull();
+	});
+});
+
+describe("connect — auto-resume", () => {
+	test("tunnel valide en config → return direct avec resumed:true, aucun API call", async () => {
+		// Seed la config avec un tunnel valide pour "apollon".
+		loadOrInitConfig(); // écrit une config fraîche avec keypair
+		const initial = loadConfig();
+		if (initial === null) throw new Error("config not initialized");
+		const futureIso = new Date(
+			Date.now() + 30 * 24 * 60 * 60 * 1000
+		).toISOString();
+		saveConfig({
+			...initial,
+			tunnels: [
+				{
+					id: "resumed-tunnel-id",
+					name: "apollon",
+					connection_id: "connection-uuid",
+					session_token: `tn_${"z".repeat(64)}`,
+					expires_at: futureIso,
+					connection_name: "apollon"
+				}
+			]
+		});
+
+		const { api, stubs } = makeMockApi();
+		const result = await connect({
+			baseUrl: "http://localhost:4000",
+			frontendUrl: "http://localhost:3000",
+			cliConnectionName: "apollon",
+			api,
+			sleep: vi.fn().mockResolvedValue(undefined),
+			openBrowserOnDisplay: false
+		});
+
+		expect(result.resumed).toBe(true);
+		expect(result.tunnelId).toBe("resumed-tunnel-id");
+		expect(result.connectionName).toBe("apollon");
+		// Zéro API call — pas de re-pair.
+		expect(stubs.createPairing).not.toHaveBeenCalled();
+		expect(stubs.getPairingStatus).not.toHaveBeenCalled();
+		expect(stubs.authenticatePairing).not.toHaveBeenCalled();
+	});
+
+	test("tunnel expiré en config → device flow classique, resumed:false", async () => {
+		loadOrInitConfig();
+		const initial = loadConfig();
+		if (initial === null) throw new Error("config not initialized");
+		saveConfig({
+			...initial,
+			tunnels: [
+				{
+					id: "expired-id",
+					name: "apollon",
+					connection_id: "connection-uuid",
+					session_token: `tn_${"a".repeat(64)}`,
+					expires_at: new Date(Date.now() - 1000).toISOString(),
+					connection_name: "apollon"
+				}
+			]
+		});
+
+		const { api, stubs } = makeMockApi();
+		stubs.createPairing.mockResolvedValue(makeCreatePairingResult());
+		stubs.getPairingStatus.mockResolvedValue(
+			makeStatusResult("approved", "apollon")
+		);
+		stubs.authenticatePairing.mockResolvedValue(makeAuthResult());
+
+		const result = await connect({
+			baseUrl: "http://localhost:4000",
+			frontendUrl: "http://localhost:3000",
+			cliConnectionName: "apollon",
+			api,
+			sleep: vi.fn().mockResolvedValue(undefined),
+			openBrowserOnDisplay: false
+		});
+
+		expect(result.resumed).toBe(false);
+		expect(stubs.createPairing).toHaveBeenCalledTimes(1);
+	});
+
+	test("nouveau pair persist connection_name pour resume ultérieur", async () => {
+		const { api, stubs } = makeMockApi();
+		stubs.createPairing.mockResolvedValue(makeCreatePairingResult());
+		stubs.getPairingStatus.mockResolvedValue(
+			makeStatusResult("approved", "apollon")
+		);
+		stubs.authenticatePairing.mockResolvedValue(makeAuthResult());
+
+		await connect({
+			baseUrl: "http://localhost:4000",
+			frontendUrl: "http://localhost:3000",
+			cliConnectionName: "apollon",
+			api,
+			sleep: vi.fn().mockResolvedValue(undefined),
+			openBrowserOnDisplay: false
+		});
+
+		const final = loadConfig();
+		expect(final?.tunnels[0]?.connection_name).toBe("apollon");
 	});
 });
