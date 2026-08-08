@@ -5,6 +5,7 @@ import {
 	useDbConnections
 } from "../db-connections/useDbConnections";
 import { useRecentConnectionIds } from "../db-connections/useRecentConnections";
+import { TeamSelector } from "../teams/TeamSelector";
 import { useCurrentTeam } from "../teams/useCurrentTeam";
 import { DbCard } from "./DbCard";
 import { useNavigateToCanvas } from "./useNavigateToCanvas";
@@ -130,7 +131,6 @@ export function GalleryPage() {
 			<div style={pageStyle}>
 				<Sidebar
 					hasConnections={false}
-					teamName={team?.name ?? null}
 					teamSlug={teamSlug}
 				/>
 				<main style={mainStyle}>
@@ -152,7 +152,6 @@ export function GalleryPage() {
 			<div style={pageStyle}>
 				<Sidebar
 					hasConnections={false}
-					teamName={team?.name ?? null}
 					teamSlug={teamSlug}
 				/>
 				<main style={mainStyle}>
@@ -179,7 +178,6 @@ export function GalleryPage() {
 			<div style={pageStyle}>
 				<Sidebar
 					hasConnections={false}
-					teamName={team?.name ?? null}
 					teamSlug={teamSlug}
 				/>
 				<main style={mainStyle}>
@@ -203,7 +201,6 @@ export function GalleryPage() {
 			<Sidebar
 				hasConnections={true}
 				count={connections.length}
-				teamName={team?.name ?? null}
 				teamSlug={teamSlug}
 			/>
 			<main style={mainStyle}>
@@ -291,54 +288,55 @@ export function GalleryPage() {
 function Sidebar({
 	hasConnections,
 	count,
-	teamName,
 	teamSlug
 }: {
 	readonly hasConnections: boolean;
 	readonly count?: number;
-	readonly teamName: string | null;
 	readonly teamSlug: string | null;
 }): React.ReactNode {
+	const team = useCurrentTeam();
 	return (
 		<aside style={sidebarStyle}>
-			<div
-				style={{
-					padding: "14px 14px",
-					display: "flex",
-					alignItems: "center",
-					gap: 8
-				}}
-			>
-				<span
-					style={{
-						width: 22,
-						height: 22,
-						borderRadius: 6,
-						background: "linear-gradient(135deg, #0D99FF, #6B4FE0)",
-						display: "flex",
-						alignItems: "center",
-						justifyContent: "center",
-						fontWeight: 700,
-						fontSize: 11,
-						color: "#fff",
-						flexShrink: 0
-					}}
-				>
-					S
-				</span>
-				<span
-					style={{
-						fontSize: 12.5,
-						fontWeight: 600,
-						color: "var(--sqlnest-text-primary)",
-						whiteSpace: "nowrap",
-						overflow: "hidden",
-						textOverflow: "ellipsis"
-					}}
-					title={teamName ?? "SQLNest"}
-				>
-					{teamName ?? "SQLNest"}
-				</span>
+			<div style={{ padding: "8px 8px" }}>
+				{team ? (
+					<TeamSelector currentTeam={team} />
+				) : (
+					<div
+						style={{
+							display: "flex",
+							alignItems: "center",
+							gap: 8,
+							padding: "6px 6px"
+						}}
+					>
+						<span
+							style={{
+								width: 22,
+								height: 22,
+								borderRadius: 6,
+								background: "linear-gradient(135deg, #0D99FF, #6B4FE0)",
+								display: "flex",
+								alignItems: "center",
+								justifyContent: "center",
+								fontWeight: 700,
+								fontSize: 11,
+								color: "#fff",
+								flexShrink: 0
+							}}
+						>
+							S
+						</span>
+						<span
+							style={{
+								fontSize: 12.5,
+								fontWeight: 600,
+								color: "var(--sqlnest-text-primary)"
+							}}
+						>
+							SQLNest
+						</span>
+					</div>
+				)}
 			</div>
 
 			<div
