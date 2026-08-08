@@ -33,14 +33,7 @@
  */
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-	useCallback,
-	useEffect,
-	useLayoutEffect,
-	useMemo,
-	useRef,
-	useState
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useCurrentUser } from "../../auth/sessionQuery";
 import type { Frame } from "../frames";
 import type { AnchorMap } from "../useEdgeAnchors";
@@ -256,18 +249,13 @@ export function useCanvasSync(opts: UseCanvasSyncOptions): UseCanvasSyncReturn {
 	}, [enabled, query.isFetching, hydrated]);
 
 	// ─── Effet d'hydratation (one-shot) ───────────────────────────────────
-	// Effet séparé du push — hydrate dès que la query settle, quelle que
-	// soit l'issue. Écrit lastSyncedSerializedRef pour amorcer la comparaison
-	// du push effect ci-dessous.
-	//
-	// `useLayoutEffect` (pas `useEffect`) : quand le prefetch de
-	// `useNavigateToCanvas` a warm le cache, `query.data` est disponible
-	// dès le 1er render du composant parent. Un `useEffect` classique
-	// fire APRÈS le browser paint → l'user voit un frame d'overlay
-	// opaque puis le canvas. `useLayoutEffect` fire SYNCHRONE avant
-	// paint → hydratation appliquée, `hydrated=true` posé, re-render
-	// avant que le browser dessine → zéro flick.
-	useLayoutEffect(() => {
+	// `useEffect` (pas useLayoutEffect) — fire APRÈS le seed useEffect
+	// de useCanvasNodes qui initialise les nodes depuis `base` +
+	// `tablePositionsRef.current`. Si l'hydratation fire AVANT
+	// (useLayoutEffect), le seed écrase avec les refs stales (positions
+	// pas encore commit-updated par setState) et les positions
+	// server sont perdues.
+	useEffect(() => {
 		if (!enabled) return;
 		if (hydrated) return;
 		// Attendre que la query settle (success ou error, plus de fetching).
