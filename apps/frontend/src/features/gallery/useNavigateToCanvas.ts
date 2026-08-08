@@ -1,6 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { type MouseEvent, useCallback, useState } from "react";
+import { fetchCanvasState } from "../schema/canvas/canvasStateClient";
 import { fetchSchema } from "../schema/useSchema";
 import { useCurrentTeamSlug } from "../teams/useCurrentTeam";
 
@@ -56,17 +57,29 @@ export function useNavigateToCanvas(): NavigateToCanvasHandle {
 			e.preventDefault();
 			setPendingId(connectionId);
 			void (async () => {
-				try {
-					await queryClient.prefetchQuery({
+				// Prefetch EN PARALLÈLE tout ce dont la page canvas a
+				// besoin pour rendre sans état intermédiaire :
+				//   - `schema` (introspection tunnel WSS) — SchemaCanvas
+				//     ne mount qu'avec ce data.
+				//   - `canvas-state` (positions/sizes/frames sauvegardés)
+				//     — useCanvasSync hydrate au mount, sans prefetch
+				//     l'user voit le layout ELK par défaut puis un saut
+				//     vers ses positions.
+				// Un échec (503 CLI offline, 404, réseau) ne bloque PAS
+				// la navigation — le canvas montrera son propre état
+				// d'erreur au mount.
+				await Promise.allSettled([
+					queryClient.prefetchQuery({
 						queryKey: ["schema", teamSlug, connectionId],
 						queryFn: () => fetchSchema(connectionId, teamSlug),
-						// Aligné sur useSchema — le queryClient default est 60s.
 						staleTime: 60_000
-					});
-				} catch {
-					// Prefetch KO (503 CLI hors ligne, 404, …). On navigate
-					// quand même — le canvas montrera son propre état d'erreur.
-				}
+					}),
+					queryClient.prefetchQuery({
+						queryKey: ["canvas-state", teamSlug, connectionId],
+						queryFn: () => fetchCanvasState(connectionId, teamSlug),
+						staleTime: Number.POSITIVE_INFINITY
+					})
+				]);
 				setPendingId(null);
 				if (teamSlug) {
 					void navigate({

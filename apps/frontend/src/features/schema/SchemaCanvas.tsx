@@ -695,17 +695,10 @@ function CanvasInner({
 					style={{
 						position: "absolute",
 						inset: 0,
-						display: "flex",
-						alignItems: "center",
-						justifyContent: "center",
-						fontSize: 12,
-						color: "var(--sqlnest-text-tertiary)",
 						background: "var(--sqlnest-canvas-bg)",
 						zIndex: 100
 					}}
-				>
-					Chargement du canvas…
-				</div>
+				/>
 			)}
 
 			<ReactFlow

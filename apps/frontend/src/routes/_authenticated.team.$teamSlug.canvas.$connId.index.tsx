@@ -26,7 +26,7 @@ const pageStyle: CSSProperties = {
 	overflow: "hidden"
 };
 
-const loadingStyle: CSSProperties = {
+const emptyStyle: CSSProperties = {
 	position: "absolute",
 	inset: 0,
 	display: "flex",
@@ -51,19 +51,36 @@ function TeamCanvasPage() {
 	const isUnknown =
 		connections !== undefined && !connections.some((c) => c.id === connId);
 
-	return (
-		<div style={pageStyle}>
-			{data ? (
+	// Rendu :
+	//   - `data` en cache → SchemaCanvas rend immédiatement (le prefetch
+	//     de `useNavigateToCanvas` warm le cache avant de naviguer).
+	//   - erreur schema OU connection inconnue → message d'erreur, mais
+	//     PAS de "Loading…" — la nav ne se déclenche que quand data est
+	//     prête (voir Promise.allSettled dans useNavigateToCanvas).
+	//   - undefined pur (deep-link sans prefetch, F5) → fond canvas
+	//     silencieux, pas de texte intermédiaire.
+	if (data) {
+		return (
+			<div style={pageStyle}>
 				<SchemaCanvas schema={data} connectionId={connId} dbName={dbName} />
-			) : (
-				<div style={loadingStyle}>
-					{isUnknown
-						? "Cette connection n'existe pas ou n'est plus disponible."
-						: error
-							? error.message
-							: "Introspection…"}
+			</div>
+		);
+	}
+	if (isUnknown) {
+		return (
+			<div style={pageStyle}>
+				<div style={emptyStyle}>
+					Cette connection n'existe pas ou n'est plus disponible.
 				</div>
-			)}
-		</div>
-	);
+			</div>
+		);
+	}
+	if (error) {
+		return (
+			<div style={pageStyle}>
+				<div style={emptyStyle}>{error.message}</div>
+			</div>
+		);
+	}
+	return <div style={pageStyle} />;
 }

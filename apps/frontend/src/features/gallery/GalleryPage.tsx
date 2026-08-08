@@ -151,20 +151,14 @@ export function GalleryPage({ view = "drafts" }: { readonly view?: GalleryView }
 	}
 
 	if (isLoading || connections === undefined) {
+		// Chargement silencieux — la sidebar + PageHead sont posées, le
+		// contenu attend sans afficher de "Loading…" (bruit visuel).
 		return (
 			<div style={pageStyle}>
 				<Sidebar hasConnections={false} teamSlug={teamSlug} view={view} />
 				<main style={mainStyle}>
 					<PageHead title={title} />
-					<div
-						style={{
-							...mainContentStyle,
-							color: "var(--sqlnest-text-tertiary)",
-							fontSize: 13
-						}}
-					>
-						Chargement…
-					</div>
+					<div style={mainContentStyle} />
 				</main>
 			</div>
 		);
@@ -287,15 +281,10 @@ function Sidebar({
 				{team ? (
 					<TeamSelector currentTeam={team} />
 				) : (
-					<div
-						style={{
-							padding: "6px 8px",
-							fontSize: 12,
-							color: "var(--sqlnest-text-tertiary)"
-						}}
-					>
-						Chargement de la team…
-					</div>
+					// Team pas encore résolue — pas de « Loading… », on
+					// laisse juste un slot vide de la même hauteur qu'un
+					// trigger pour éviter le layout shift.
+					<div style={{ height: 32 }} />
 				)}
 			</div>
 			<div style={{ padding: "2px 12px" }}>
