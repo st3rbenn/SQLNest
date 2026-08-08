@@ -46,10 +46,12 @@ export function UserMenu() {
 	const location = useLocation();
 
 	if (!session?.user) return null;
-	// Sur la gallery `/`, l'avatar n'a rien d'utile à proposer — le seul
-	// item du menu est "Retour aux canvas" et on y est déjà. On cache
-	// entièrement le trigger pour éviter l'incohérence visuelle.
+	// Sur la gallery `/` OU `/team/:slug` (C.21.5+), le sidebar affiche
+	// déjà un `UserBadge` — on cache le trigger flottant pour éviter le
+	// doublon UX. Sur les pages sans sidebar (canvas, connect, query),
+	// UserMenu reste le seul accès au menu compte.
 	if (location.pathname === "/") return null;
+	if (/^\/team\/[0-9a-f]{6}\/?$/.test(location.pathname)) return null;
 
 	const user = session.user;
 	const displayName = user.name?.trim() || user.email;

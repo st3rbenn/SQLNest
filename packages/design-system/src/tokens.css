@@ -18,6 +18,9 @@
 	--sqlnest-surface: #2c2c2c;
 	/* Surface légèrement plus claire pour hover / rows actives. */
 	--sqlnest-surface-hover: #363636;
+	/* Élevée — dropdowns, popovers, menus flottants. Plus claire que la
+	 * surface sidebar pour ressortir contre elle sans transparence. */
+	--sqlnest-elevated: #3a3a3a;
 
 	/* Bordures */
 	--sqlnest-border: #444444;

@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import type { CSSProperties } from "react";
+import { UserBadge } from "../auth/UserBadge";
 import {
 	type DbConnection,
 	useDbConnections
@@ -297,44 +298,33 @@ function Sidebar({
 	const team = useCurrentTeam();
 	return (
 		<aside style={sidebarStyle}>
-			<div style={{ padding: "8px 8px" }}>
+			{/* User en top — style Figma "workspace switcher". */}
+			<div style={{ padding: "8px 8px 4px" }}>
+				<UserBadge />
+			</div>
+
+			{/* Séparateur entre l'user et la team, façon Figma. */}
+			<div
+				style={{
+					height: 1,
+					background: "var(--sqlnest-border-subtle)",
+					margin: "4px 12px 8px"
+				}}
+			/>
+
+			{/* Team courante en dessous — dropdown pour V2 multi-teams. */}
+			<div style={{ padding: "0 8px 8px" }}>
 				{team ? (
 					<TeamSelector currentTeam={team} />
 				) : (
 					<div
 						style={{
-							display: "flex",
-							alignItems: "center",
-							gap: 8,
-							padding: "6px 6px"
+							padding: "6px 8px",
+							fontSize: 12,
+							color: "var(--sqlnest-text-tertiary)"
 						}}
 					>
-						<span
-							style={{
-								width: 22,
-								height: 22,
-								borderRadius: 6,
-								background: "linear-gradient(135deg, #0D99FF, #6B4FE0)",
-								display: "flex",
-								alignItems: "center",
-								justifyContent: "center",
-								fontWeight: 700,
-								fontSize: 11,
-								color: "#fff",
-								flexShrink: 0
-							}}
-						>
-							S
-						</span>
-						<span
-							style={{
-								fontSize: 12.5,
-								fontWeight: 600,
-								color: "var(--sqlnest-text-primary)"
-							}}
-						>
-							SQLNest
-						</span>
+						Chargement de la team…
 					</div>
 				)}
 			</div>
