@@ -5,16 +5,14 @@
  * Clic → dropdown avec l'unique team surlignée + « Nouvelle team »
  * disabled (V2). Ferme au clic outside / Escape.
  *
- * ─── Décisions UX ────────────────────────────────────────────────────
- * - Le trigger est un bouton PLEIN (pas d'inline avec le container) —
- *   au hover, léger surface-hover pour signaler l'interactivité.
- * - Le nom déborde en ellipsis quand long (emails de team en attendant
- *   des noms courts). Titre HTML pour tooltip natif.
- * - Le badge « Free » est décoratif (V1 pas de billing) — reste visible
- *   pour préparer la V2 pricing tiers.
- * - Menu absolu positionné SOUS le trigger, background solide
- *   `--sqlnest-elevated` pour ressortir contre la sidebar (bug de
- *   layering précédent : var undefined = transparent = illisible).
+ * ─── Style ────────────────────────────────────────────────────────────
+ * Hover / active / disabled états portés par les classes DS
+ * `sqlnest-sidebar-item*` + `sqlnest-menu-item*` (tokens.css). Pas de
+ * useState hover à la main.
+ *
+ * ─── Bug de layering précédent ────────────────────────────────────────
+ * Le menu utilise `--sqlnest-elevated` (surface plus claire que la
+ * sidebar) + z-index 100 pour ressortir sans transparence.
  */
 
 import { Link } from "@tanstack/react-router";
@@ -33,21 +31,21 @@ const triggerStyle: CSSProperties = {
 	gap: 10,
 	padding: "6px 8px",
 	width: "100%",
-	background: "transparent",
 	border: "none",
 	borderRadius: 6,
 	cursor: "pointer",
 	textAlign: "left",
 	color: "var(--sqlnest-text-primary)",
-	font: "inherit",
+	fontFamily: "inherit",
+	fontSize: 12,
 	minWidth: 0
 };
 
 // Avatar rond sobre — sera remplacé par une image profil quand
 // l'user en aura une (params compte, à venir).
 const avatarStyle: CSSProperties = {
-	width: 22,
-	height: 22,
+	width: 20,
+	height: 20,
 	borderRadius: "50%",
 	background: "var(--sqlnest-surface-hover)",
 	border: "1px solid var(--sqlnest-border-subtle)",
@@ -55,13 +53,13 @@ const avatarStyle: CSSProperties = {
 	alignItems: "center",
 	justifyContent: "center",
 	fontWeight: 600,
-	fontSize: 11,
+	fontSize: 10.5,
 	color: "var(--sqlnest-text-primary)",
 	flexShrink: 0
 };
 
 const nameStyle: CSSProperties = {
-	fontSize: 12.5,
+	fontSize: 12,
 	fontWeight: 600,
 	flex: 1,
 	minWidth: 0,
@@ -100,30 +98,17 @@ const menuItemBase: CSSProperties = {
 	gap: 8,
 	padding: "6px 8px",
 	borderRadius: 4,
-	fontSize: 12.5,
+	fontSize: 12,
 	color: "var(--sqlnest-text-secondary)",
 	cursor: "pointer",
 	textDecoration: "none",
-	background: "transparent",
 	border: "none",
 	width: "100%",
 	textAlign: "left",
 	whiteSpace: "nowrap",
 	overflow: "hidden",
 	textOverflow: "ellipsis",
-	font: "inherit"
-};
-
-const menuItemActive: CSSProperties = {
-	...menuItemBase,
-	background: "var(--sqlnest-accent-soft)",
-	color: "var(--sqlnest-text-primary)"
-};
-
-const menuItemDisabled: CSSProperties = {
-	...menuItemBase,
-	color: "var(--sqlnest-text-tertiary)",
-	cursor: "not-allowed"
+	fontFamily: "inherit"
 };
 
 export interface TeamSelectorProps {
@@ -152,7 +137,6 @@ export function TeamSelector({ currentTeam }: TeamSelectorProps) {
 	}, [open]);
 
 	const displayTeams = teams ?? [currentTeam];
-	const shortName = shortenName(currentTeam.name);
 
 	return (
 		<div ref={containerRef} style={containerStyle}>
@@ -167,7 +151,7 @@ export function TeamSelector({ currentTeam }: TeamSelectorProps) {
 			>
 				<span style={avatarStyle}>{initialOf(currentTeam.name)}</span>
 				<span style={nameStyle} title={currentTeam.name}>
-					{shortName}
+					{currentTeam.name}
 				</span>
 				<span style={badgeStyle}>Free</span>
 				<Chevron open={open} />
@@ -181,7 +165,8 @@ export function TeamSelector({ currentTeam }: TeamSelectorProps) {
 							return (
 								<div
 									key={t.id}
-									style={menuItemActive}
+									style={menuItemBase}
+									className="sqlnest-menu-item sqlnest-menu-item--active"
 									role="menuitem"
 									aria-current={true}
 									title={t.name}
@@ -195,7 +180,7 @@ export function TeamSelector({ currentTeam }: TeamSelectorProps) {
 											textOverflow: "ellipsis"
 										}}
 									>
-										{shortenName(t.name)}
+										{t.name}
 									</span>
 								</div>
 							);
@@ -206,6 +191,7 @@ export function TeamSelector({ currentTeam }: TeamSelectorProps) {
 								to="/team/$teamSlug"
 								params={{ teamSlug: t.slug }}
 								style={menuItemBase}
+								className="sqlnest-menu-item"
 								role="menuitem"
 								title={t.name}
 								onClick={() => setOpen(false)}
@@ -219,7 +205,7 @@ export function TeamSelector({ currentTeam }: TeamSelectorProps) {
 										textOverflow: "ellipsis"
 									}}
 								>
-									{shortenName(t.name)}
+									{t.name}
 								</span>
 							</Link>
 						);
@@ -235,7 +221,8 @@ export function TeamSelector({ currentTeam }: TeamSelectorProps) {
 
 					<button
 						type="button"
-						style={menuItemDisabled}
+						style={menuItemBase}
+						className="sqlnest-menu-item"
 						disabled
 						title="Bientôt : créer une team pour inviter des collaborateurs"
 						role="menuitem"
@@ -267,19 +254,10 @@ export function TeamSelector({ currentTeam }: TeamSelectorProps) {
 	);
 }
 
-/** Raccourci un nom trop long en gardant la partie avant `@` (emails
- *  de team) — évite d'afficher `anthonincolas@gmail.com` en entier. */
-function shortenName(name: string): string {
-	const trimmed = name.trim();
-	if (!trimmed) return "Team";
-	const atIdx = trimmed.indexOf("@");
-	if (atIdx > 0) return trimmed.slice(0, atIdx);
-	return trimmed;
-}
-
 function initialOf(name: string): string {
-	const short = shortenName(name);
-	return (short.charAt(0) || "T").toUpperCase();
+	const trimmed = name.trim();
+	if (!trimmed) return "T";
+	return trimmed.charAt(0).toUpperCase();
 }
 
 function Chevron({ open }: { readonly open: boolean }): React.ReactNode {

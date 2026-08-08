@@ -37,7 +37,7 @@ const pageStyle: CSSProperties = {
 };
 
 const sidebarStyle: CSSProperties = {
-	width: 208,
+	width: 260,
 	background: "var(--sqlnest-surface)",
 	borderRight: "1px solid var(--sqlnest-border-subtle)",
 	display: "flex",
@@ -88,6 +88,13 @@ const gridStyle: CSSProperties = {
 	gap: 20
 };
 
+/**
+ * Styles LOCAUX à la gallery : hover des cards + shimmer skeleton.
+ *
+ * Les classes `sqlnest-sidebar-item` / `sqlnest-menu-item` (et leurs
+ * variants `--active`) sont hoistées dans `packages/design-system/src/
+ * tokens.css` — réutilisées par UserBadge, TeamSelector, etc.
+ */
 const CARD_HOVER_CSS = `
 .sqlnest-db-card {
 	transition: border-color 160ms ease, box-shadow 160ms ease;
@@ -99,20 +106,6 @@ const CARD_HOVER_CSS = `
 .sqlnest-db-card--pending {
 	border-color: var(--sqlnest-accent) !important;
 	box-shadow: 0 6px 20px rgba(13, 153, 255, 0.2);
-}
-.sqlnest-sidebar-item {
-	transition: background-color 120ms ease, color 120ms ease;
-}
-.sqlnest-sidebar-item:hover {
-	background: hsla(0, 0%, 100%, 0.05);
-	color: var(--sqlnest-text-primary) !important;
-}
-.sqlnest-sidebar-item--active {
-	background: rgba(13, 153, 255, 0.12);
-	color: var(--sqlnest-text-primary) !important;
-}
-.sqlnest-sidebar-item--active:hover {
-	background: rgba(13, 153, 255, 0.16);
 }
 @keyframes sqlnest-skeleton-shimmer {
 	0% { background-position: 200% 0; }

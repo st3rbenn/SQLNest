@@ -52,3 +52,51 @@
 	/* Grille de points du canvas (React Flow Background). */
 	--sqlnest-canvas-dot: rgba(255, 255, 255, 0.08);
 }
+
+/*
+ * ─── Interactive primitives ─────────────────────────────────────────
+ * Classes partagées entre GalleryPage sidebar, TeamSelector,
+ * UserBadge (et futurs menus). Évite de re-implémenter le hover à la
+ * main dans chaque composant.
+ */
+/*
+ * `!important` sur les hover — les composants React posent souvent un
+ * `style={{ background: "transparent" }}` inline (spécificité infinie
+ * qui bat les pseudo-classes CSS standard sans !important). On assume
+ * ici qu'aucun consumer ne veut override le hover — donc !important
+ * safe.
+ */
+.sqlnest-sidebar-item {
+	transition: background-color 120ms ease, color 120ms ease;
+}
+.sqlnest-sidebar-item:hover {
+	background: var(--sqlnest-surface-hover) !important;
+	color: var(--sqlnest-text-primary) !important;
+}
+.sqlnest-sidebar-item--active {
+	background: var(--sqlnest-accent-soft) !important;
+	color: var(--sqlnest-text-primary) !important;
+}
+.sqlnest-sidebar-item--active:hover {
+	background: var(--sqlnest-accent-soft) !important;
+}
+
+/* Item d'un menu (dropdown popover). Base + variant active + disabled. */
+.sqlnest-menu-item {
+	transition: background-color 120ms ease, color 120ms ease;
+}
+.sqlnest-menu-item:hover:not(:disabled) {
+	background: var(--sqlnest-surface-hover) !important;
+	color: var(--sqlnest-text-primary) !important;
+}
+.sqlnest-menu-item--active {
+	background: var(--sqlnest-accent-soft) !important;
+	color: var(--sqlnest-text-primary) !important;
+}
+.sqlnest-menu-item--active:hover {
+	background: var(--sqlnest-accent-soft) !important;
+}
+.sqlnest-menu-item:disabled {
+	cursor: not-allowed;
+	opacity: 0.55;
+}

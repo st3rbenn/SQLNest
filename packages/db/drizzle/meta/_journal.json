@@ -1,111 +1,118 @@
 {
-	"version": "7",
-	"dialect": "postgresql",
-	"entries": [
-		{
-			"idx": 0,
-			"version": "7",
-			"when": 1785616649941,
-			"tag": "0000_petite_sabretooth",
-			"breakpoints": true
-		},
-		{
-			"idx": 1,
-			"version": "7",
-			"when": 1785618401181,
-			"tag": "0001_skinny_warpath",
-			"breakpoints": true
-		},
-		{
-			"idx": 2,
-			"version": "7",
-			"when": 1785619015575,
-			"tag": "0002_famous_madrox",
-			"breakpoints": true
-		},
-		{
-			"idx": 3,
-			"version": "7",
-			"when": 1785684355481,
-			"tag": "0003_large_mockingbird",
-			"breakpoints": true
-		},
-		{
-			"idx": 4,
-			"version": "7",
-			"when": 1786049888429,
-			"tag": "0004_loud_omega_red",
-			"breakpoints": true
-		},
-		{
-			"idx": 5,
-			"version": "7",
-			"when": 1786050526457,
-			"tag": "0005_parched_moonstone",
-			"breakpoints": true
-		},
-		{
-			"idx": 6,
-			"version": "7",
-			"when": 1786060000000,
-			"tag": "0006_canvas_state_connection",
-			"breakpoints": true
-		},
-		{
-			"idx": 7,
-			"version": "7",
-			"when": 1786060100000,
-			"tag": "0007_db_connection_fingerprint_unique",
-			"breakpoints": true
-		},
-		{
-			"idx": 8,
-			"version": "7",
-			"when": 1786113441126,
-			"tag": "0008_pairing_cli_connection_name",
-			"breakpoints": true
-		},
-		{
-			"idx": 9,
-			"version": "7",
-			"when": 1786132502484,
-			"tag": "0009_db_connection_last_preview_snapshot",
-			"breakpoints": true
-		},
-		{
-			"idx": 10,
-			"version": "7",
-			"when": 1786145628442,
-			"tag": "0010_team",
-			"breakpoints": true
-		},
-		{
-			"idx": 11,
-			"version": "7",
-			"when": 1786145641891,
-			"tag": "0011_team_seed_existing_users",
-			"breakpoints": true
-		},
-		{
-			"idx": 12,
-			"version": "7",
-			"when": 1786146106478,
-			"tag": "0012_db_connection_team_id",
-			"breakpoints": true
-		},
-		{
-			"idx": 13,
-			"version": "7",
-			"when": 1786146807722,
-			"tag": "0013_db_connection_drop_user_scoped_indexes",
-			"breakpoints": true
-		},
-		{
-			"idx": 14,
-			"version": "7",
-			"when": 1786147423793,
-			"tag": "0014_pairing_team_id",
-			"breakpoints": true
-		}
-	]
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1785616649941,
+      "tag": "0000_petite_sabretooth",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1785618401181,
+      "tag": "0001_skinny_warpath",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785619015575,
+      "tag": "0002_famous_madrox",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1785684355481,
+      "tag": "0003_large_mockingbird",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1786049888429,
+      "tag": "0004_loud_omega_red",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1786050526457,
+      "tag": "0005_parched_moonstone",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1786060000000,
+      "tag": "0006_canvas_state_connection",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1786060100000,
+      "tag": "0007_db_connection_fingerprint_unique",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1786113441126,
+      "tag": "0008_pairing_cli_connection_name",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1786132502484,
+      "tag": "0009_db_connection_last_preview_snapshot",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1786145628442,
+      "tag": "0010_team",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1786145641891,
+      "tag": "0011_team_seed_existing_users",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1786146106478,
+      "tag": "0012_db_connection_team_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1786146807722,
+      "tag": "0013_db_connection_drop_user_scoped_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1786147423793,
+      "tag": "0014_pairing_team_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1786150234489,
+      "tag": "0015_team_rename_personal",
+      "breakpoints": true
+    }
+  ]
 }

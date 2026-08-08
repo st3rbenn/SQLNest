@@ -105,13 +105,25 @@ export async function createPersonalTeam(
 }
 
 /**
- * Helper — normalise le name : `user.name` si non vide, sinon « Personal ».
- * Extrait pour être partagé entre le hook Better Auth et la route de
- * fallback.
+ * Helper — nom par défaut de la team perso auto-créée à la signup.
+ *
+ * ─── Décision UX ─────────────────────────────────────────────────────
+ * Retourne `<shortName>'s team` (pattern Notion : « zhack37's team »).
+ * Différencie visuellement le user (« anthonincolas ») et la team
+ * (« anthonincolas's team ») dans la sidebar sans redondance nominative.
+ *
+ * ─── Normalisation ───────────────────────────────────────────────────
+ * Certains user ont `user.name` = leur email complet (Better Auth
+ * fallback quand `name` n'est pas fourni au signup). On prend la
+ * partie avant `@` pour éviter « anthonincolas@gmail.com's team ».
+ * Fallback « My team » si vide.
  */
 export function defaultTeamNameForUser(
 	userName: string | null | undefined
 ): string {
-	const trimmed = (userName ?? "").trim();
-	return trimmed.length > 0 ? trimmed : "Personal";
+	const raw = (userName ?? "").trim();
+	if (raw.length === 0) return "My team";
+	const atIdx = raw.indexOf("@");
+	const short = atIdx > 0 ? raw.slice(0, atIdx) : raw;
+	return `${short}'s team`;
 }

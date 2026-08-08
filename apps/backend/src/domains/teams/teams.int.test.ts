@@ -79,7 +79,7 @@ describe.skipIf(!DATABASE_URL)("C.21.1 — team auto-signup", () => {
 		await truncateTunnelsAndAuth(app);
 	});
 
-	test("signup email/password → 1 team « name » auto-créée", async () => {
+	test("signup email/password → 1 team « <name>'s team » auto-créée", async () => {
 		const { userId } = await signup(
 			app,
 			"alice-teams@example.com",
@@ -94,33 +94,23 @@ describe.skipIf(!DATABASE_URL)("C.21.1 — team auto-signup", () => {
 		const first = teams[0];
 		// biome-ignore lint/style/noNonNullAssertion: length checked
 		expect(first!.ownerId).toBe(userId);
+		// Format Notion — nom explicite qui différencie l'user (« Alice »)
+		// de sa team (« Alice's team ») dans la sidebar.
 		// biome-ignore lint/style/noNonNullAssertion: length checked
-		expect(first!.name).toBe("Alice");
+		expect(first!.name).toBe("Alice's team");
 		// biome-ignore lint/style/noNonNullAssertion: length checked
 		expect(first!.slug).toMatch(TEAM_SLUG_REGEX);
 	});
 
-	test("signup sans name → team « Personal »", async () => {
-		// L'API sign-up/email requiert un name — on force '' via un signup
-		// puis UPDATE direct pour simuler un user sans name (rare, mais le
-		// hook doit ne pas planter).
-		const { userId } = await signup(
-			app,
-			"noname@example.com",
-			"noname-noname-noname-noname"
+	test("defaultTeamNameForUser : format « <shortName>'s team »", () => {
+		expect(defaultTeamNameForUser("Alice")).toBe("Alice's team");
+		// email complet → prend la partie avant @
+		expect(defaultTeamNameForUser("anthonincolas@gmail.com")).toBe(
+			"anthonincolas's team"
 		);
-		// Remet name à vide + re-run le seed logic manuellement pour vérifier
-		// le fallback « Personal ».
-		await app.db
-			.update(schema.team)
-			.set({ name: defaultTeamNameForUser("") })
-			.where(eq(schema.team.ownerId, userId));
-		const t = await app.db
-			.select({ name: schema.team.name })
-			.from(schema.team)
-			.where(eq(schema.team.ownerId, userId))
-			.limit(1);
-		expect(t[0]?.name).toBe("Personal");
+		// vide → fallback
+		expect(defaultTeamNameForUser("")).toBe("My team");
+		expect(defaultTeamNameForUser(null)).toBe("My team");
 	});
 
 	test("createPersonalTeam est idempotent (2 appels = 1 team)", async () => {

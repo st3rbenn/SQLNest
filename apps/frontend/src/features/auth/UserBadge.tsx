@@ -1,18 +1,15 @@
 /**
  * UserBadge — bloc user en top de la sidebar gallery (C.21 refactor).
  *
- * Miroir du menu Figma "workspace switcher > user" en top-left : avatar
- * rond + nom + chevron. Ouvre un dropdown compact avec les actions du
- * compte (settings, logout).
+ * Miroir du menu Figma / Notion "workspace switcher > user" en top-left :
+ * avatar rond + nom + chevron. Ouvre un dropdown compact avec les
+ * actions du compte (settings, logout).
  *
- * ─── V1 minimal ─────────────────────────────────────────────────────
- * V1 propose uniquement « Se déconnecter » — le menu existe déjà pour
- * accueillir « Paramètres du compte », « Profile picture », etc. quand
- * les pages correspondantes existeront.
+ * V1 propose uniquement « Se déconnecter » — les autres items existent
+ * en placeholder (Paramètres, image profil) prêts pour V2.
  *
- * L'avatar est un fond neutre + initiale — placeholder pour une future
- * `user.image` (Better Auth OAuth exposera l'avatar Google/GitHub via
- * `session.user.image`, cf. `UserMenu.safeAvatarSrc`).
+ * Styles hover / active portés par les classes DS `sqlnest-sidebar-item`
+ * + `sqlnest-menu-item` (tokens.css).
  */
 
 import { type CSSProperties, useEffect, useRef, useState } from "react";
@@ -30,19 +27,19 @@ const triggerStyle: CSSProperties = {
 	gap: 10,
 	padding: "6px 8px",
 	width: "100%",
-	background: "transparent",
 	border: "none",
 	borderRadius: 6,
 	cursor: "pointer",
 	textAlign: "left",
 	color: "var(--sqlnest-text-primary)",
-	font: "inherit",
+	fontFamily: "inherit",
+	fontSize: 12,
 	minWidth: 0
 };
 
 const avatarStyle: CSSProperties = {
-	width: 22,
-	height: 22,
+	width: 20,
+	height: 20,
 	borderRadius: "50%",
 	background: "var(--sqlnest-surface-hover)",
 	border: "1px solid var(--sqlnest-border-subtle)",
@@ -50,13 +47,13 @@ const avatarStyle: CSSProperties = {
 	alignItems: "center",
 	justifyContent: "center",
 	fontWeight: 600,
-	fontSize: 11,
+	fontSize: 10.5,
 	color: "var(--sqlnest-text-primary)",
 	flexShrink: 0
 };
 
 const nameStyle: CSSProperties = {
-	fontSize: 12.5,
+	fontSize: 12,
 	fontWeight: 600,
 	flex: 1,
 	minWidth: 0,
@@ -84,20 +81,13 @@ const menuItemBase: CSSProperties = {
 	gap: 8,
 	padding: "6px 8px",
 	borderRadius: 4,
-	fontSize: 12.5,
+	fontSize: 12,
 	color: "var(--sqlnest-text-secondary)",
 	cursor: "pointer",
-	background: "transparent",
 	border: "none",
 	width: "100%",
 	textAlign: "left",
-	font: "inherit"
-};
-
-const menuItemDisabled: CSSProperties = {
-	...menuItemBase,
-	color: "var(--sqlnest-text-tertiary)",
-	cursor: "not-allowed"
+	fontFamily: "inherit"
 };
 
 export function UserBadge() {
@@ -176,17 +166,26 @@ export function UserBadge() {
 					/>
 					<button
 						type="button"
-						style={menuItemDisabled}
+						style={menuItemBase}
+						className="sqlnest-menu-item"
 						disabled
 						title="Bientôt : paramètres du compte + avatar"
 						role="menuitem"
 					>
 						<span style={{ flex: 1 }}>Paramètres</span>
-						<span style={{ fontSize: 10 }}>bientôt</span>
+						<span
+							style={{
+								fontSize: 10,
+								color: "var(--sqlnest-text-tertiary)"
+							}}
+						>
+							bientôt
+						</span>
 					</button>
 					<button
 						type="button"
 						style={menuItemBase}
+						className="sqlnest-menu-item"
 						onClick={handleLogout}
 						role="menuitem"
 						data-testid="user-badge-logout"
