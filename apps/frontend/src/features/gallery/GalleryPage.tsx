@@ -104,15 +104,13 @@ const gridStyle: CSSProperties = {
  */
 const CARD_HOVER_CSS = `
 .sqlnest-db-card {
-	transition: border-color 160ms ease, box-shadow 160ms ease;
+	transition: border-color 160ms ease;
 }
 .sqlnest-db-card:hover {
-	border-color: var(--sqlnest-accent) !important;
-	box-shadow: 0 6px 20px rgba(13, 153, 255, 0.12);
+	border-color: var(--sqlnest-accent-muted) !important;
 }
 .sqlnest-db-card--pending {
-	border-color: var(--sqlnest-accent) !important;
-	box-shadow: 0 6px 20px rgba(13, 153, 255, 0.2);
+	border-color: var(--sqlnest-accent-muted) !important;
 }
 @keyframes sqlnest-skeleton-shimmer {
 	0% { background-position: 200% 0; }

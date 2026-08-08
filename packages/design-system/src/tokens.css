@@ -44,6 +44,9 @@
 	--sqlnest-accent: #0d99ff;
 	--sqlnest-accent-hover: #3aabff;
 	--sqlnest-accent-soft: rgba(13, 153, 255, 0.15);
+	/* Bleu désaturé — hover subtile des cards / éléments qui ne veulent
+	 * pas appeler l'accent vif principal. */
+	--sqlnest-accent-muted: #4a7ba8;
 
 	/* PK / warning — jaune Figma. */
 	--sqlnest-warning: #ffc933;
