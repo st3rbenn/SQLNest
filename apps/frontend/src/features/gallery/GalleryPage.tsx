@@ -52,13 +52,6 @@ const mainStyle: CSSProperties = {
 	minWidth: 0
 };
 
-const mainHeaderStyle: CSSProperties = {
-	display: "flex",
-	alignItems: "center",
-	gap: 16,
-	padding: "22px 32px 8px"
-};
-
 const mainContentStyle: CSSProperties = {
 	flex: 1,
 	padding: "24px 32px 32px",
@@ -128,9 +121,6 @@ export function GalleryPage() {
 					teamSlug={teamSlug}
 				/>
 				<main style={mainStyle}>
-					<div style={mainHeaderStyle}>
-						<h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Canvas</h1>
-					</div>
 					<div style={mainContentStyle}>
 						<div style={{ color: "var(--sqlnest-danger)" }}>
 							Impossible de charger les connections : {error.message}
@@ -149,9 +139,6 @@ export function GalleryPage() {
 					teamSlug={teamSlug}
 				/>
 				<main style={mainStyle}>
-					<div style={mainHeaderStyle}>
-						<h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Canvas</h1>
-					</div>
 					<div
 						style={{
 							...mainContentStyle,
@@ -192,25 +179,8 @@ export function GalleryPage() {
 	return (
 		<div style={pageStyle}>
 			<style>{CARD_HOVER_CSS}</style>
-			<Sidebar
-				hasConnections={true}
-				count={connections.length}
-				teamSlug={teamSlug}
-			/>
+			<Sidebar hasConnections={true} teamSlug={teamSlug} />
 			<main style={mainStyle}>
-				<div style={mainHeaderStyle}>
-					<h1
-						style={{
-							margin: 0,
-							fontSize: 22,
-							fontWeight: 700,
-							letterSpacing: "-0.01em"
-						}}
-					>
-						Canvas
-					</h1>
-				</div>
-
 				<div
 					style={{
 						...mainContentStyle,
@@ -281,11 +251,9 @@ export function GalleryPage() {
 
 function Sidebar({
 	hasConnections,
-	count,
 	teamSlug
 }: {
 	readonly hasConnections: boolean;
-	readonly count?: number;
 	readonly teamSlug: string | null;
 }): React.ReactNode {
 	const team = useCurrentTeam();
@@ -338,7 +306,7 @@ function Sidebar({
 						padding: "6px 8px",
 						color: "var(--sqlnest-text-primary)",
 						borderRadius: 6,
-						fontSize: 12.5,
+						fontSize: 12,
 						fontWeight: 500,
 						cursor: "default"
 					}}
@@ -348,27 +316,17 @@ function Sidebar({
 						height={13}
 						viewBox="0 0 24 24"
 						fill="none"
-						stroke="var(--sqlnest-accent)"
+						stroke="var(--sqlnest-text-cream)"
 						strokeWidth={2}
+						strokeLinecap="round"
+						strokeLinejoin="round"
 						aria-hidden="true"
 					>
-						<title>Canvas</title>
-						<ellipse cx={12} cy={6} rx={8} ry={3} />
-						<path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6" />
-						<path d="M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6" />
+						<title>Recents</title>
+						<circle cx={12} cy={12} r={9} />
+						<path d="M12 7v5l3 2" />
 					</svg>
-					Canvas
-					{count !== undefined ? (
-						<span
-							style={{
-								marginLeft: "auto",
-								fontSize: 10.5,
-								color: "var(--sqlnest-text-tertiary)"
-							}}
-						>
-							{count}
-						</span>
-					) : null}
+					Recents
 				</div>
 			</div>
 
