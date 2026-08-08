@@ -27,6 +27,9 @@ const triggerStyle: CSSProperties = {
 	gap: 10,
 	padding: "6px 8px",
 	width: "100%",
+	// Reset user-agent gray sur `<button>`. Le hover CSS (:hover
+	// `!important` dans tokens.css) bat cette valeur inline.
+	background: "transparent",
 	border: "none",
 	borderRadius: 6,
 	cursor: "pointer",
@@ -84,6 +87,7 @@ const menuItemBase: CSSProperties = {
 	fontSize: 12,
 	color: "var(--sqlnest-text-secondary)",
 	cursor: "pointer",
+	background: "transparent",
 	border: "none",
 	width: "100%",
 	textAlign: "left",
