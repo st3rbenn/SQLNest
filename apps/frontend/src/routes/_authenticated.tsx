@@ -1,6 +1,7 @@
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 import { sessionQueryOptions } from "../features/auth/sessionQuery";
 import { UserMenu } from "../features/auth/UserMenu";
+import { useTunnelPresenceNotifications } from "../features/tunnel/useTunnelPresenceNotifications";
 
 /**
  * Layout pathless des pages **authentifiées** — gallery `/`, canvas
@@ -42,8 +43,18 @@ export const Route = createFileRoute("/_authenticated")({
 function AuthenticatedLayout() {
 	return (
 		<>
+			<TunnelPresenceListener />
 			<Outlet />
 			<UserMenu />
 		</>
 	);
+}
+
+/** Composant invisible qui monte le hook de tracking presence tunnel.
+ *  Isolé pour éviter que le re-render du hook (poll 5s) ne cascade
+ *  sur `<Outlet />` — le composant retourne null donc son re-render
+ *  ne coûte que le diff React interne. */
+function TunnelPresenceListener(): null {
+	useTunnelPresenceNotifications();
+	return null;
 }

@@ -94,7 +94,7 @@ function renderMessage(message: string): ReactNode {
 }
 
 /**
- * Notification d'erreur — compact, sans icon, sans bande de couleur,
+ * Notification d'erreur — border rouge sobre, compact, sans icon,
  * auto-hide 5s. Retourne l'id pour dismiss manuel via `notifications.hide(id)`.
  */
 export function notifyError(message: string): string {
@@ -103,6 +103,50 @@ export function notifyError(message: string): string {
 		autoClose: AUTO_CLOSE_MS,
 		withBorder: false,
 		styles: COMPACT_STYLES,
+		classNames: COMPACT_CLASSNAMES
+	});
+}
+
+/** Styles compact + border teinté par level. Le `styles.root.border`
+ *  de `COMPACT_STYLES` définit le rouge par défaut (erreurs) — on
+ *  override ici pour les autres levels. */
+const INFO_STYLES = {
+	...COMPACT_STYLES,
+	root: { ...COMPACT_STYLES.root, border: "1px solid var(--sqlnest-border)" }
+} as const;
+
+const SUCCESS_STYLES = {
+	...COMPACT_STYLES,
+	root: {
+		...COMPACT_STYLES.root,
+		border: "1px solid rgba(34, 197, 94, 0.4)"
+	}
+} as const;
+
+/**
+ * Notification neutre — border discret, compact, auto-hide 5s.
+ * Usage : événements d'info (tunnel connecté, canvas sauvegardé, …).
+ */
+export function notifyInfo(message: string): string {
+	return notifications.show({
+		message: renderMessage(message),
+		autoClose: AUTO_CLOSE_MS,
+		withBorder: false,
+		styles: INFO_STYLES,
+		classNames: COMPACT_CLASSNAMES
+	});
+}
+
+/**
+ * Notification de succès — border vert discret, compact, auto-hide 5s.
+ * Usage : opérations réussies user-triggered (import terminé, sync OK…).
+ */
+export function notifySuccess(message: string): string {
+	return notifications.show({
+		message: renderMessage(message),
+		autoClose: AUTO_CLOSE_MS,
+		withBorder: false,
+		styles: SUCCESS_STYLES,
 		classNames: COMPACT_CLASSNAMES
 	});
 }
