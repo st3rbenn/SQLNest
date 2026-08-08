@@ -19,6 +19,8 @@
 
 import { schema as dbSchema } from "@sqlnest/db";
 import { and, eq } from "drizzle-orm";
+import { createPersonalTeam, defaultTeamNameForUser } from "../../teams/create";
+import { getDefaultTeamOfUser } from "../../teams/get";
 import type { DbOrTx } from "../db";
 import { computeCliFingerprint } from "./crypto";
 
@@ -38,12 +40,13 @@ export async function approvePairing(
 	codeCanonical: string,
 	userId: string,
 	deviceName: string | undefined,
-	nowMs: number = Date.now()
+	nowMs: number = Date.now(),
+	teamIdOverride: string | null = null
 ): Promise<ApproveResult> {
 	// Transaction : le check de collision `db_connection` doit être
 	// atomique avec l'UPDATE — sinon 2 approves concurrents pourraient
 	// tous deux voir "libre" et créer plus tard 2 db_connections avec le
-	// même (user_id, deviceName) au /authenticate (violation contrainte).
+	// même (team, deviceName) au /authenticate (violation contrainte).
 	return db.transaction(async (tx) => {
 		const rows = await tx
 			.select({
@@ -52,7 +55,8 @@ export async function approvePairing(
 				consumedAt: dbSchema.tunnelPairing.consumedAt,
 				expiresAt: dbSchema.tunnelPairing.expiresAt,
 				cliPubkey: dbSchema.tunnelPairing.cliPubkeyEd25519,
-				cliConnectionName: dbSchema.tunnelPairing.cliConnectionName
+				cliConnectionName: dbSchema.tunnelPairing.cliConnectionName,
+				teamId: dbSchema.tunnelPairing.teamId
 			})
 			.from(dbSchema.tunnelPairing)
 			.where(eq(dbSchema.tunnelPairing.code, codeCanonical))
@@ -68,10 +72,38 @@ export async function approvePairing(
 			return { ok: false, reason: "expired" as const };
 		}
 
+		// C.21.4 — résout la team dans laquelle la db_connection sera créée
+		// à l'authenticate. Priorité :
+		//   1) `teamIdOverride` (route team-scoped `/api/teams/:slug/...`)
+		//   2) `pairing.teamId` (déjà set par un précédent approve idempotent)
+		//   3) team perso de l'user (fallback pour route legacy
+		//      `/api/tunnels/pairings/:code/approve`)
+		let effectiveTeamId: string;
+		if (teamIdOverride) {
+			effectiveTeamId = teamIdOverride;
+		} else if (row.teamId) {
+			effectiveTeamId = row.teamId;
+		} else {
+			const defaultTeam = await getDefaultTeamOfUser(tx, userId);
+			if (defaultTeam) {
+				effectiveTeamId = defaultTeam.id;
+			} else {
+				// Filet lazy — un user qui approuve avant que sa team perso
+				// soit crée (race Better Auth hook).
+				const created = await createPersonalTeam(
+					tx,
+					userId,
+					defaultTeamNameForUser(deviceName)
+				);
+				effectiveTeamId = created.teamId;
+			}
+		}
+
 		// C.7 — Lookup db_connection existante par fingerprint SCOPÉ (C.13 :
-		// SHA256(pubkey || "|" || cliConnectionName) si le CLI a envoyé son
-		// nom local, sinon legacy pubkey-only). Si match, on autofill le
-		// deviceName avec le nom existant côté serveur.
+		// SHA256(pubkey || "|" || cliConnectionName)). C.21.4 : on scope par
+		// team_id — un même CLI peut exister dans plusieurs teams du user,
+		// chacune reconnue indépendamment. Si match dans la team courante,
+		// on autofill le deviceName avec le nom existant côté serveur.
 		const fingerprint = computeCliFingerprint(
 			row.cliPubkey,
 			row.cliConnectionName
@@ -84,7 +116,7 @@ export async function approvePairing(
 			.from(dbSchema.dbConnection)
 			.where(
 				and(
-					eq(dbSchema.dbConnection.userId, userId),
+					eq(dbSchema.dbConnection.teamId, effectiveTeamId),
 					eq(dbSchema.dbConnection.cliFingerprint, fingerprint)
 				)
 			)
@@ -99,7 +131,7 @@ export async function approvePairing(
 			return { ok: false, reason: "name_required" as const };
 		}
 
-		// Check collision `(user, name)` UNIQUEMENT pour un nouveau CLI —
+		// Check collision `(team, name)` UNIQUEMENT pour un nouveau CLI —
 		// pour un fingerprint existant, on réutilise le nom déjà valide.
 		if (!existingConn) {
 			const nameCollision = await tx
@@ -107,7 +139,7 @@ export async function approvePairing(
 				.from(dbSchema.dbConnection)
 				.where(
 					and(
-						eq(dbSchema.dbConnection.userId, userId),
+						eq(dbSchema.dbConnection.teamId, effectiveTeamId),
 						eq(dbSchema.dbConnection.name, effectiveDeviceName)
 					)
 				)
@@ -118,13 +150,15 @@ export async function approvePairing(
 		}
 
 		// Re-approve possible (même user, même code, avant expi/consume) :
-		// idempotent — on écrase `approved_at` et `device_name`. Utile si
-		// l'user tape un mauvais nom, corrige, resubmit.
+		// idempotent — on écrase `approved_at`, `device_name` et `team_id`.
+		// Utile si l'user tape un mauvais nom, corrige, resubmit ; ou
+		// change de team via un autre onglet.
 		await tx
 			.update(dbSchema.tunnelPairing)
 			.set({
 				userId,
 				deviceName: effectiveDeviceName,
+				teamId: effectiveTeamId,
 				approvedAt: new Date(nowMs)
 			})
 			.where(eq(dbSchema.tunnelPairing.code, codeCanonical));

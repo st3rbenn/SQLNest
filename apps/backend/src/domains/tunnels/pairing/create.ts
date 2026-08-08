@@ -29,6 +29,18 @@ export interface CreatePairingResult {
 	readonly expiresAt: Date;
 }
 
+export interface CreatePairingOptions {
+	/** Nom de la DSN locale au CLI (C.13). NULL = CLI legacy pré-C.13. */
+	cliConnectionName?: string | null;
+	/** Team dans laquelle la db_connection sera créée à l'authenticate
+	 *  (C.21.4). Renseignée par les routes team-scoped depuis le browser.
+	 *  NULL = pairing initié par le flow global public (CLI → POST
+	 *  /api/tunnels/pairings sans savoir la team) → l'authenticate
+	 *  fallback à la team perso de l'user. */
+	teamId?: string | null;
+	nowMs?: number;
+}
+
 /**
  * INSERT un pairing pending et retourne le code affichable.
  *
@@ -43,7 +55,8 @@ export async function createPairing(
 	db: DbOrTx,
 	cliPubkeyEd25519: string,
 	cliConnectionName: string | null = null,
-	nowMs: number = Date.now()
+	nowMs: number = Date.now(),
+	teamId: string | null = null
 ): Promise<CreatePairingResult> {
 	const canonical = generatePairingCode();
 	// Sanity — devrait être garanti par `generatePairingCode`, cette
@@ -58,6 +71,7 @@ export async function createPairing(
 		code: canonical,
 		cliPubkeyEd25519,
 		cliConnectionName,
+		teamId,
 		expiresAt
 	});
 

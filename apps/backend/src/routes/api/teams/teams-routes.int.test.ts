@@ -9,6 +9,7 @@
 
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ed25519 } from "@noble/curves/ed25519.js";
 import { schema } from "@sqlnest/db";
 import { config as loadEnv } from "dotenv";
 import { eq } from "drizzle-orm";
@@ -27,9 +28,11 @@ import {
 	ensureTeamForUser,
 	truncateTunnelsAndAuth
 } from "../../../utils/testapp";
+import tunnelsRoute from "../tunnels/root";
 import teamsCanvasStateRoute from "./canvas-state";
 import teamsDbConnectionsRoute from "./db-connections";
 import teamsRoute from "./root";
+import teamsTunnelsRoute from "./tunnels";
 
 const rootEnv = resolve(
 	dirname(fileURLToPath(import.meta.url)),
@@ -94,6 +97,8 @@ describe.skipIf(!DATABASE_URL)("C.21.3 — /api/teams routes", () => {
 		await app.register(teamsRoute, { prefix: "/api/teams" });
 		await app.register(teamsDbConnectionsRoute, { prefix: "/api/teams" });
 		await app.register(teamsCanvasStateRoute, { prefix: "/api/teams" });
+		await app.register(teamsTunnelsRoute, { prefix: "/api/teams" });
+		await app.register(tunnelsRoute, { prefix: "/api/tunnels" });
 		await app.ready();
 	});
 
@@ -372,6 +377,98 @@ describe.skipIf(!DATABASE_URL)("C.21.3 — /api/teams routes", () => {
 			}
 		});
 		expect(res.statusCode).toBe(404);
+	});
+
+	// ─── C.21.4 — pairing team-scoped ────────────────────────────────
+	test("C.21.4 — POST /:slug/tunnels/pairings crée un pairing avec team_id", async () => {
+		const { cookie, userId } = await signup(
+			app,
+			"pair-team@example.com",
+			"pair-team-pair-team-pair-1"
+		);
+		const t = (
+			await app.db
+				.select()
+				.from(schema.team)
+				.where(eq(schema.team.ownerId, userId))
+		)[0];
+		expect(t).toBeDefined();
+		const priv = ed25519.utils.randomSecretKey();
+		const pub = ed25519.getPublicKey(priv);
+		const pubkeyHex = Buffer.from(pub).toString("hex");
+		const res = await app.inject({
+			method: "POST",
+			url: `/api/teams/${t?.slug}/tunnels/pairings`,
+			headers: {
+				"content-type": "application/json",
+				cookie,
+				origin: "http://localhost:3000"
+			},
+			payload: { cliPubkeyEd25519: pubkeyHex, cliConnectionName: "local" }
+		});
+		expect(res.statusCode).toBe(200);
+		const body = res.json() as { code: string };
+		const codeCanonical = body.code.replace("-", "");
+		const pairing = await app.db
+			.select()
+			.from(schema.tunnelPairing)
+			.where(eq(schema.tunnelPairing.code, codeCanonical));
+		// biome-ignore lint/style/noNonNullAssertion: checked above
+		expect(pairing[0]!.teamId).toBe(t!.id);
+	});
+
+	test("C.21.4 — approve set team_id + fingerprint match trouve la db_connection dans la team", async () => {
+		const { cookie, userId } = await signup(
+			app,
+			"approve-team@example.com",
+			"approve-team-approve-team-"
+		);
+		const t = (
+			await app.db
+				.select()
+				.from(schema.team)
+				.where(eq(schema.team.ownerId, userId))
+		)[0];
+		expect(t).toBeDefined();
+		const priv = ed25519.utils.randomSecretKey();
+		const pub = ed25519.getPublicKey(priv);
+		const pubkeyHex = Buffer.from(pub).toString("hex");
+		// Crée un pairing via la route team-scoped
+		const created = await app.inject({
+			method: "POST",
+			url: `/api/teams/${t?.slug}/tunnels/pairings`,
+			headers: {
+				"content-type": "application/json",
+				cookie,
+				origin: "http://localhost:3000"
+			},
+			payload: { cliPubkeyEd25519: pubkeyHex, cliConnectionName: "prod" }
+		});
+		const created_body = created.json() as { code: string };
+		// Approve via route team-scoped avec un name
+		const approved = await app.inject({
+			method: "POST",
+			url: `/api/teams/${t?.slug}/tunnels/pairings/${created_body.code}/approve`,
+			headers: {
+				"content-type": "application/json",
+				cookie,
+				origin: "http://localhost:3000"
+			},
+			payload: { deviceName: "my-cli" }
+		});
+		expect(approved.statusCode).toBe(200);
+		// Vérifie pairing.team_id + pairing.device_name
+		const codeCanonical = created_body.code.replace("-", "");
+		const pairing = (
+			await app.db
+				.select()
+				.from(schema.tunnelPairing)
+				.where(eq(schema.tunnelPairing.code, codeCanonical))
+		)[0];
+		// biome-ignore lint/style/noNonNullAssertion: checked above
+		expect(pairing!.teamId).toBe(t!.id);
+		// biome-ignore lint/style/noNonNullAssertion: checked above
+		expect(pairing!.deviceName).toBe("my-cli");
 	});
 
 	// ─── GET /:slug/canvas-state ─────────────────────────────────────

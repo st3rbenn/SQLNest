@@ -370,6 +370,14 @@ export const tunnelPairing = pgTable(
 		// côté serveur, chacune ayant sa propre db_connection.
 		// NULL = CLI legacy (pré-C.13) → fingerprint = SHA256(pubkey) seul.
 		cliConnectionName: text("cli_connection_name"),
+		// C.21.4 : la team dans laquelle la db_connection sera créée.
+		// Renseignée au moment du /approve (l'user choisit dans quelle
+		// team ce CLI est intégré). Reste nullable pour compat CLI legacy
+		// / routes globales pre-C.21 — le fallback dans
+		// `authenticatePairing` prend la team perso de l'user si NULL.
+		teamId: uuid("team_id").references(() => team.id, {
+			onDelete: "cascade"
+		}),
 		approvedAt: timestamp("approved_at", { withTimezone: true }),
 		consumedAt: timestamp("consumed_at", { withTimezone: true }),
 		expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),

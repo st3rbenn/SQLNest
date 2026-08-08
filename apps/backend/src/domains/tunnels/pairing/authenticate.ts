@@ -74,6 +74,7 @@ export async function authenticatePairing(
 				cliPubkey: dbSchema.tunnelPairing.cliPubkeyEd25519,
 				cliConnectionName: dbSchema.tunnelPairing.cliConnectionName,
 				deviceName: dbSchema.tunnelPairing.deviceName,
+				teamId: dbSchema.tunnelPairing.teamId,
 				approvedAt: dbSchema.tunnelPairing.approvedAt,
 				consumedAt: dbSchema.tunnelPairing.consumedAt,
 				expiresAt: dbSchema.tunnelPairing.expiresAt
@@ -103,26 +104,33 @@ export async function authenticatePairing(
 			return { ok: false, reason: "signature_invalid" as const };
 		}
 
-		// Pairing idempotent (C.6/C.13/C.21.2) : le fingerprint est SCOPÉ
-		// par la DSN locale du CLI (C.13) + par la team (C.21.2) → un
+		// Pairing idempotent (C.6/C.13/C.21.2/C.21.4) : le fingerprint est
+		// SCOPÉ par la DSN locale du CLI (C.13) + par la team (C.21.2) → un
 		// même install CLI peut avoir N db_connection distinctes, chacune
 		// identifiée par (team, DSN locale).
 		//
-		// En C.21.2 : le pairing n'a pas encore de champ `team_id` (arrive
-		// en C.21.4). On fallback sur la team perso de l'user. Si l'user
-		// n'en a pas (race Better Auth hook), on la crée lazy — filet de
-		// sécurité pour ne jamais bloquer un `sqlnest connect`.
+		// Priorité pour la team :
+		//   1) `pairing.teamId` set au /approve (C.21.4) — l'user a
+		//      explicitement choisi la team via l'UI team-scoped.
+		//   2) team perso de l'user (fallback pour flow legacy où le
+		//      pairing n'a pas de team_id).
+		//   3) createPersonalTeam lazy (filet si l'user n'a même pas de
+		//      team — race Better Auth hook).
 		let teamId: string;
-		const defaultTeam = await getDefaultTeamOfUser(tx, row.userId);
-		if (defaultTeam) {
-			teamId = defaultTeam.id;
+		if (row.teamId) {
+			teamId = row.teamId;
 		} else {
-			const created = await createPersonalTeam(
-				tx,
-				row.userId,
-				defaultTeamNameForUser(row.deviceName)
-			);
-			teamId = created.teamId;
+			const defaultTeam = await getDefaultTeamOfUser(tx, row.userId);
+			if (defaultTeam) {
+				teamId = defaultTeam.id;
+			} else {
+				const created = await createPersonalTeam(
+					tx,
+					row.userId,
+					defaultTeamNameForUser(row.deviceName)
+				);
+				teamId = created.teamId;
+			}
 		}
 
 		const upsert = await upsertDbConnectionByFingerprint(tx, {

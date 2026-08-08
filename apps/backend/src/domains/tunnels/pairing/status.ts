@@ -33,7 +33,11 @@ import type { StatusPairingResponseT } from "./schema";
 export async function getPairingStatus(
 	db: DbOrTx,
 	codeCanonical: string,
-	options: { readonly userId?: string; readonly nowMs?: number } = {}
+	options: {
+		readonly userId?: string;
+		readonly teamId?: string;
+		readonly nowMs?: number;
+	} = {}
 ): Promise<StatusPairingResponseT> {
 	const nowMs = options.nowMs ?? Date.now();
 	const rows = await db
@@ -57,12 +61,17 @@ export async function getPairingStatus(
 	// Lookup existingConnection quand un user est identifié — fingerprint
 	// SCOPÉ par la DSN CLI (C.13) : SHA256(pubkey || "|" || connectionName)
 	// si le CLI a envoyé son nom local, sinon fingerprint legacy pubkey-only.
+	// C.21.4 : si `teamId` est fourni (route team-scoped), on scope aussi
+	// par team_id. Sinon lookup par user_id (legacy).
 	let existingConnection: { id: string; name: string } | null = null;
 	if (options.userId !== undefined) {
 		const fingerprint = computeCliFingerprint(
 			row.cliPubkey,
 			row.cliConnectionName
 		);
+		const scopeFilter = options.teamId
+			? eq(dbSchema.dbConnection.teamId, options.teamId)
+			: eq(dbSchema.dbConnection.userId, options.userId);
 		const existing = await db
 			.select({
 				id: dbSchema.dbConnection.id,
@@ -70,10 +79,7 @@ export async function getPairingStatus(
 			})
 			.from(dbSchema.dbConnection)
 			.where(
-				and(
-					eq(dbSchema.dbConnection.userId, options.userId),
-					eq(dbSchema.dbConnection.cliFingerprint, fingerprint)
-				)
+				and(scopeFilter, eq(dbSchema.dbConnection.cliFingerprint, fingerprint))
 			)
 			.limit(1);
 		const match = existing[0];

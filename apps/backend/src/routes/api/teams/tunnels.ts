@@ -84,14 +84,16 @@ export default function teamsTunnelsRoute(fastify: FastifyInstance) {
 		async (request, reply) => {
 			assertTeamAccess(request);
 			try {
-				// La team est capturée dans le contexte de l'user (via cookie),
-				// pas dans le pairing DB (arrive en C.21.4). En attendant, le
-				// pairing reste global — l'authenticate fallback à la team
-				// perso de l'user via `getDefaultTeamOfUser`.
+				// C.21.4 : le pairing est créé DÉJÀ scopé à la team courante —
+				// à l'authenticate, `authenticatePairing` lira `pairing.teamId`
+				// pour créer la db_connection dans la bonne team, sans avoir
+				// besoin de fallback.
 				const result = await createPairing(
 					fastify.db,
 					request.body.cliPubkeyEd25519,
-					request.body.cliConnectionName ?? null
+					request.body.cliConnectionName ?? null,
+					Date.now(),
+					request.team.id
 				);
 				return {
 					code: result.code,
@@ -127,7 +129,8 @@ export default function teamsTunnelsRoute(fastify: FastifyInstance) {
 				return reply.code(400).send({ message: "Code invalide" });
 			}
 			return getPairingStatus(fastify.db, canonical, {
-				userId: request.user.id
+				userId: request.user.id,
+				teamId: request.team.id
 			});
 		}
 	);
@@ -167,11 +170,17 @@ export default function teamsTunnelsRoute(fastify: FastifyInstance) {
 				return reply.code(400).send({ message: "Code invalide" });
 			}
 
+			// C.21.4 : `teamIdOverride` = request.team.id — enforce que la
+			// db_connection sera créée dans CETTE team, même si le pairing
+			// avait un team_id différent (rare : l'user a scanné un code
+			// depuis une autre team). Garantit l'invariant URL ↔ team.
 			const result = await approvePairing(
 				fastify.db,
 				canonical,
 				request.user.id,
-				request.body.deviceName
+				request.body.deviceName,
+				undefined,
+				request.team.id
 			);
 			if (result.ok) return { ok: true as const };
 			switch (result.reason) {

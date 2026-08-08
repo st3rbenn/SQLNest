@@ -99,6 +99,13 @@
 			"when": 1786146807722,
 			"tag": "0013_db_connection_drop_user_scoped_indexes",
 			"breakpoints": true
+		},
+		{
+			"idx": 14,
+			"version": "7",
+			"when": 1786147423793,
+			"tag": "0014_pairing_team_id",
+			"breakpoints": true
 		}
 	]
 }
