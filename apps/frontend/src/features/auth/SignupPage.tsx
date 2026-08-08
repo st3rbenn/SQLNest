@@ -144,7 +144,7 @@ export function SignupPage() {
 
 			<form style={formStyle} onSubmit={handleSubmit} noValidate>
 				<TextInput
-					label="Nom (optionnel)"
+					label="Nom"
 					value={name}
 					onChange={(e) => setName(e.currentTarget.value)}
 					autoComplete="off"
