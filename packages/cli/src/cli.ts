@@ -600,10 +600,4 @@ Usage :
   sqlnest revoke-connection --name <n> --yes  Skip la confirmation
   sqlnest --help                           Affiche cette aide
   sqlnest --version                        Affiche la version
-
-Env vars :
-  SQLNEST_API_URL       URL du backend      (défaut: ${DEFAULT_API_URL})
-  SQLNEST_FRONTEND_URL  URL de /connect     (défaut: ${DEFAULT_FRONTEND_URL})
-  SQLNEST_CONFIG_DIR    Dossier config      (défaut: ~/.sqlnest)
-  SQLNEST_PG_URL_<NAME>  DSN Postgres jetable (override du fichier local pour un tunnel donné)
 `;

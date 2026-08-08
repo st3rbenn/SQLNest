@@ -257,13 +257,17 @@ export async function connect(opts: ConnectOptions): Promise<ConnectResult> {
  * le plus récemment ajouté qui matche le `cliConnectionName` et dont
  * le token n'expire pas avant `TOKEN_EXPIRY_BUFFER_MS`. `null` sinon.
  *
- * Matching :
- *   - Si `cliConnectionName` est fourni (multi-DSN), on matche par
- *     `entry.connection_name === cliConnectionName`. Les vieilles
- *     entries sans `connection_name` sont ignorées.
- *   - Si `null` (single-DSN legacy), on prend le premier tunnel non
- *     scopé (sans `connection_name`) ou n'importe lequel — comportement
- *     tolérant vu que le fingerprint effectif backend est le même.
+ * Matching (2 passes) :
+ *   1. **Strict** — `entry.connection_name === cliConnectionName`.
+ *      C'est le match propre pour les tunnels créés après ce fix.
+ *   2. **Fallback legacy** — pour les entries pré-fix qui n'ont pas
+ *      `connection_name` set, on tolère `entry.name === cliConnectionName`.
+ *      Par convention le deviceLabel serveur (= `name`) est souvent le
+ *      même que le nom DSN local, donc on rattrape gratuitement les
+ *      vieilles configs sans forcer l'user à re-pair.
+ *
+ * Mode single-DSN (`cliConnectionName === null`) : matche n'importe
+ * quelle entry sans `connection_name` (comportement legacy pré-C.13).
  */
 export function findResumableTunnel(
 	tunnels: readonly TunnelEntry[],
@@ -274,18 +278,31 @@ export function findResumableTunnel(
 	// Itère à l'envers — le tunnel le plus récent (append à la fin) a
 	// priorité si plusieurs matchent, ce qui reflète le dernier pair
 	// effectué par l'user.
+	let legacyFallback: TunnelEntry | null = null;
 	for (let i = tunnels.length - 1; i >= 0; i--) {
 		const t = tunnels[i];
 		if (t === undefined) continue;
 		const expiresMs = Date.parse(t.expires_at);
 		if (Number.isNaN(expiresMs) || expiresMs <= cutoff) continue;
 		if (cliConnectionName !== null) {
+			// Pass 1 strict : entry taggée avec le bon connection_name.
 			if (t.connection_name === cliConnectionName) return t;
+			// Pass 2 fallback : entry legacy sans connection_name mais dont
+			// le `name` matche. On garde le PREMIER trouvé (le plus récent)
+			// et on continue à chercher un match strict — un strict-match
+			// wins toujours sur un legacy-fallback.
+			if (
+				legacyFallback === null &&
+				t.connection_name === undefined &&
+				t.name === cliConnectionName
+			) {
+				legacyFallback = t;
+			}
 		} else if (t.connection_name === undefined) {
 			return t;
 		}
 	}
-	return null;
+	return legacyFallback;
 }
 
 /**
