@@ -184,10 +184,8 @@ export function GalleryPage({ view = "drafts" }: { readonly view?: GalleryView }
 					}}
 				>
 					{/* Ordre : récents (MRU localStorage) d'abord, puis les
-					    autres, puis card « + Nouveau canvas ». La page
-					    entière EST « Recents » (PageHead + sidebar) — pas
-					    besoin de sub-headings. En V2 le choix de team dans
-					    le sélecteur pilote quels canvas apparaissent. */}
+					    autres. La CTA « Nouveau canvas » vit dans le PageHead
+					    à droite (plus dans la grid — évite le doublon). */}
 					<div style={gridStyle}>
 						{recent.map((c) => (
 							<DbCard
@@ -205,83 +203,10 @@ export function GalleryPage({ view = "drafts" }: { readonly view?: GalleryView }
 								isPending={pendingId === c.id}
 							/>
 						))}
-						<NewConnectionCard teamSlug={teamSlug} />
 					</div>
 				</div>
 			</main>
 		</div>
-	);
-}
-
-function NewConnectionCard({
-	teamSlug
-}: {
-	readonly teamSlug: string | null;
-}): React.ReactNode {
-	const linkProps = teamSlug
-		? ({
-				to: "/team/$teamSlug/pair" as const,
-				params: { teamSlug }
-			} as const)
-		: ({ to: "/pair" as const } as const);
-	return (
-		<Link
-			{...linkProps}
-			style={{
-				display: "flex",
-				flexDirection: "column",
-				gap: 10,
-				textDecoration: "none",
-				color: "inherit"
-			}}
-		>
-			<div
-				style={{
-					aspectRatio: "325 / 200",
-					background: "transparent",
-					border: "1.5px dashed var(--sqlnest-border)",
-					borderRadius: 12,
-					display: "flex",
-					flexDirection: "column",
-					alignItems: "center",
-					justifyContent: "center",
-					gap: 8,
-					color: "var(--sqlnest-text-tertiary)"
-				}}
-			>
-				<div
-					style={{
-						width: 36,
-						height: 36,
-						borderRadius: 10,
-						background: "var(--sqlnest-surface)",
-						border: "1px solid var(--sqlnest-border-subtle)",
-						display: "flex",
-						alignItems: "center",
-						justifyContent: "center"
-					}}
-				>
-					<svg
-						width={16}
-						height={16}
-						viewBox="0 0 24 24"
-						fill="none"
-						stroke="var(--sqlnest-accent)"
-						strokeWidth={2.5}
-						aria-hidden="true"
-					>
-						<title>Nouveau canvas</title>
-						<path d="M12 5v14M5 12h14" />
-					</svg>
-				</div>
-				<div style={{ fontSize: 12, color: "var(--sqlnest-text-secondary)" }}>
-					Nouveau canvas
-				</div>
-				<div style={{ fontSize: 10.5, color: "var(--sqlnest-text-tertiary)" }}>
-					Connexion via CLI
-				</div>
-			</div>
-		</Link>
 	);
 }
 
