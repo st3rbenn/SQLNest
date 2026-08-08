@@ -668,22 +668,20 @@ function CanvasInner({
 			className={activeTool === "frame" ? "canvas-tool-frame" : undefined}
 			style={{ position: "relative", width: "100%", height: "100%" }}
 		>
+			{/* Pendant le calcul du layout ELK, on garde juste un fond
+			 * opaque (pas de texte) — le canvas apparaît d'un coup quand
+			 * ELK settle. Overlay z-index 3 = juste au-dessus du fond
+			 * ReactFlow, mais sous l'overlay canvasReady (z-index 100). */}
 			{base === null ? (
 				<div
 					style={{
 						position: "absolute",
 						inset: 0,
-						display: "flex",
-						alignItems: "center",
-						justifyContent: "center",
-						fontSize: 13,
-						color: "var(--sqlnest-text-secondary)",
+						background: "var(--sqlnest-canvas-bg)",
 						pointerEvents: "none",
 						zIndex: 3
 					}}
-				>
-					Calcul du layout…
-				</div>
+				/>
 			) : null}
 
 			{/* Overlay OPAQUE tant que useCanvasSync n'a pas hydraté depuis le
