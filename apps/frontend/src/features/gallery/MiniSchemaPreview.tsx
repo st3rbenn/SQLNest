@@ -54,7 +54,7 @@ interface Props {
 
 const wrapperStyle: CSSProperties = {
 	position: "relative",
-	aspectRatio: "16 / 9",
+	aspectRatio: "325 / 225",
 	background: "var(--sqlnest-canvas-bg)",
 	overflow: "hidden"
 };

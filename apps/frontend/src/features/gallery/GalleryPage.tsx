@@ -88,7 +88,7 @@ const mainContentStyle: CSSProperties = {
 
 const gridStyle: CSSProperties = {
 	display: "grid",
-	gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))",
+	gridTemplateColumns: "repeat(auto-fill, minmax(325px, 1fr))",
 	gap: 20
 };
 
@@ -419,7 +419,7 @@ function NewConnectionCard({
 		>
 			<div
 				style={{
-					aspectRatio: "16 / 9",
+					aspectRatio: "325 / 225",
 					background: "transparent",
 					border: "1.5px dashed var(--sqlnest-border)",
 					borderRadius: 12,
