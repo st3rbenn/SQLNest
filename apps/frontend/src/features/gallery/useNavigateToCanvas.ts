@@ -2,6 +2,11 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { type MouseEvent, useCallback, useState } from "react";
 import { fetchCanvasState } from "../schema/canvas/canvasStateClient";
+import {
+	canvasLayoutQueryKey,
+	computeCanvasLayout
+} from "../schema/SchemaCanvas";
+import type { SchemaModel } from "../schema/schema-model";
 import { fetchSchema } from "../schema/useSchema";
 import { useCurrentTeamSlug } from "../teams/useCurrentTeam";
 
@@ -57,29 +62,48 @@ export function useNavigateToCanvas(): NavigateToCanvasHandle {
 			e.preventDefault();
 			setPendingId(connectionId);
 			void (async () => {
-				// Prefetch EN PARALLÈLE tout ce dont la page canvas a
-				// besoin pour rendre sans état intermédiaire :
-				//   - `schema` (introspection tunnel WSS) — SchemaCanvas
-				//     ne mount qu'avec ce data.
-				//   - `canvas-state` (positions/sizes/frames sauvegardés)
-				//     — useCanvasSync hydrate au mount, sans prefetch
-				//     l'user voit le layout ELK par défaut puis un saut
-				//     vers ses positions.
-				// Un échec (503 CLI offline, 404, réseau) ne bloque PAS
-				// la navigation — le canvas montrera son propre état
-				// d'erreur au mount.
-				await Promise.allSettled([
-					queryClient.prefetchQuery({
-						queryKey: ["schema", teamSlug, connectionId],
-						queryFn: () => fetchSchema(connectionId, teamSlug),
-						staleTime: 60_000
-					}),
-					queryClient.prefetchQuery({
-						queryKey: ["canvas-state", teamSlug, connectionId],
-						queryFn: () => fetchCanvasState(connectionId, teamSlug),
-						staleTime: Number.POSITIVE_INFINITY
-					})
-				]);
+				// Phase 1 — fetch schema + canvas-state en parallèle.
+				// Le schema est nécessaire pour la phase 2 (compute
+				// ELK), on l'attend explicitement via `ensureQueryData`
+				// pour récupérer sa valeur.
+				let schema: SchemaModel | undefined;
+				try {
+					const [schemaResult] = await Promise.allSettled([
+						queryClient.ensureQueryData({
+							queryKey: ["schema", teamSlug, connectionId],
+							queryFn: () => fetchSchema(connectionId, teamSlug),
+							staleTime: 60_000
+						}),
+						queryClient.prefetchQuery({
+							queryKey: ["canvas-state", teamSlug, connectionId],
+							queryFn: () => fetchCanvasState(connectionId, teamSlug),
+							staleTime: Number.POSITIVE_INFINITY
+						})
+					]);
+					if (schemaResult.status === "fulfilled") {
+						schema = schemaResult.value;
+					}
+				} catch {
+					// Ignore — la navigation se fait quand même en dessous.
+				}
+
+				// Phase 2 — compute ELK layout (peut prendre ~500ms-1s
+				// sur un gros graphe). Sans ça, l'user voit un fond
+				// opaque au mount du canvas le temps du compute. On
+				// keep le blur pendant tout ce temps.
+				if (schema) {
+					try {
+						await queryClient.ensureQueryData({
+							queryKey: canvasLayoutQueryKey(connectionId),
+							queryFn: () => computeCanvasLayout(schema as SchemaModel),
+							staleTime: Number.POSITIVE_INFINITY,
+							gcTime: Number.POSITIVE_INFINITY
+						});
+					} catch {
+						// Layout KO → le canvas mount quand même et fallback.
+					}
+				}
+
 				setPendingId(null);
 				if (teamSlug) {
 					void navigate({

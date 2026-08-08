@@ -60,6 +60,20 @@ const edgeTypes = { fk: InteractiveEdge };
 
 type SchemaNode = TableNodeType | FrameNodeType;
 
+/** Exportées + queryKey helper — permet à `useNavigateToCanvas` de
+ *  prefetch le layout ELK dans le queryClient AVANT de naviguer. Le
+ *  compute ELK peut prendre ~500ms-1s sur un gros graphe, sans
+ *  prefetch l'user voit un fond opaque le temps que ça settle. */
+export function canvasLayoutQueryKey(connectionId: string): readonly [
+	string,
+	string
+] {
+	return ["canvas-layout", connectionId] as const;
+}
+export function computeCanvasLayout(schema: SchemaModel): Promise<LayoutResult> {
+	return buildLayout(schema, makeNode(schema), makeEdge);
+}
+
 function makeNode(schema: SchemaModel) {
 	return (name: string): TableNodeType => {
 		const collection = schema.collections.find((c) => c.name === name);
@@ -127,8 +141,8 @@ function CanvasInner({
 	// dépend que du schéma, qui est lui-même cache-warm par le prefetch
 	// de useNavigateToCanvas.
 	const layoutQuery = useQuery({
-		queryKey: ["canvas-layout", connectionId],
-		queryFn: () => buildLayout(schema, makeNode(schema), makeEdge),
+		queryKey: canvasLayoutQueryKey(connectionId),
+		queryFn: () => computeCanvasLayout(schema),
 		staleTime: Number.POSITIVE_INFINITY,
 		gcTime: Number.POSITIVE_INFINITY,
 		refetchOnMount: false,
