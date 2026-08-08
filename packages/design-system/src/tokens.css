@@ -124,3 +124,11 @@
 	background: var(--sqlnest-surface-hover) !important;
 	border-color: var(--sqlnest-accent-muted) !important;
 }
+
+/* Override du left color bar `::before` de Mantine notification.
+ * Le `styles` prop ne supporte pas les pseudo-elements — obligation
+ * de passer par une classe CSS globale, appliquée via classNames.root
+ * dans `notify.tsx`. */
+.sqlnest-notification::before {
+	display: none !important;
+}

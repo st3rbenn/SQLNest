@@ -3,9 +3,10 @@ import type { ReactNode } from "react";
 
 /**
  * Helpers centralisés pour push une notification Mantine avec les
- * defaults visuels SQLNest (compact, sans icon, autoClose 5s).
+ * defaults visuels SQLNest (compact, sans icon, auto-hide 5s, sans
+ * bande de couleur à gauche).
  *
- * `<Notifications position="top-center" />` est monté dans
+ * `<Notifications position="top-center" limit={2} />` est monté dans
  * `DesignSystemProvider`. Import direct :
  *   `import { notifyError } from "../notifications/notify"`
  */
@@ -15,7 +16,9 @@ import type { ReactNode } from "react";
 const AUTO_CLOSE_MS = 5000;
 
 /** Override compact du style Mantine : padding réduit, texte 11.5px,
- *  bouton close 18px. Pas d'icon (`icon` prop non passé). */
+ *  bouton close 18px. La bande de couleur à gauche (`::before`) est kill
+ *  via la classe `.sqlnest-notification` dans `tokens.css` — le `styles`
+ *  prop de Mantine ne supporte pas les pseudo-elements. */
 const COMPACT_STYLES = {
 	root: {
 		padding: "8px 12px",
@@ -37,30 +40,32 @@ const COMPACT_STYLES = {
 	}
 } as const;
 
+const COMPACT_CLASSNAMES = {
+	root: "sqlnest-notification"
+} as const;
+
+const codeChipStyle = {
+	background: "var(--sqlnest-surface-hover)",
+	padding: "1px 5px",
+	borderRadius: 3,
+	fontFamily: "var(--mantine-font-family-monospace)",
+	fontSize: 11,
+	color: "var(--sqlnest-text-title)"
+} as const;
+
 /**
- * Parse un message avec des segments backtickés en `<code>` inline. Le
- * message backend est du texte brut ("Lance `sqlnest connect`…") — sans
- * ce parse l'user voit les backticks bruts.
+ * Rend une seule phrase — parse les backticks (`code`) en `<code>` chip
+ * inline. Simple state machine sur split.
  */
-export function parseInlineCode(message: string): ReactNode[] {
-	const parts = message.split("`");
+function renderSentence(sentence: string): ReactNode[] {
+	const parts = sentence.split("`");
 	return parts.map((part, i) =>
 		i % 2 === 0 ? (
 			// biome-ignore lint/suspicious/noArrayIndexKey: parts stable per split
 			<span key={i}>{part}</span>
 		) : (
-			<code
-				// biome-ignore lint/suspicious/noArrayIndexKey: parts stable per split
-				key={i}
-				style={{
-					background: "var(--sqlnest-surface-hover)",
-					padding: "1px 5px",
-					borderRadius: 3,
-					fontFamily: "var(--mantine-font-family-monospace)",
-					fontSize: 11,
-					color: "var(--sqlnest-text-title)"
-				}}
-			>
+			// biome-ignore lint/suspicious/noArrayIndexKey: parts stable per split
+			<code key={i} style={codeChipStyle}>
 				{part}
 			</code>
 		)
@@ -68,16 +73,32 @@ export function parseInlineCode(message: string): ReactNode[] {
 }
 
 /**
- * Notification d'erreur — accent rouge (bord gauche Mantine), compact,
- * sans icon, auto-hide 5s. Retourne l'id pour dismiss manuel via
- * `notifications.hide(id)`.
+ * Split le message par phrases (`. ` ou `.\n`) puis rend chaque phrase
+ * sur sa propre ligne. Wrap si trop long. Résout le cas messages backend
+ * multi-phrases genre « Aucun CLI. Lance `sqlnest connect` » qui
+ * s'entassaient sur des lignes coupées de façon peu lisible.
+ */
+function renderMessage(message: string): ReactNode {
+	const sentences = message
+		.split(/(?<=\.)\s+/)
+		.map((s) => s.trim())
+		.filter((s) => s.length > 0);
+	return sentences.map((s, i) => (
+		// biome-ignore lint/suspicious/noArrayIndexKey: sentences stable per split
+		<div key={i}>{renderSentence(s)}</div>
+	));
+}
+
+/**
+ * Notification d'erreur — compact, sans icon, sans bande de couleur,
+ * auto-hide 5s. Retourne l'id pour dismiss manuel via `notifications.hide(id)`.
  */
 export function notifyError(message: string): string {
 	return notifications.show({
-		color: "red",
-		message: parseInlineCode(message),
+		message: renderMessage(message),
 		autoClose: AUTO_CLOSE_MS,
 		withBorder: false,
-		styles: COMPACT_STYLES
+		styles: COMPACT_STYLES,
+		classNames: COMPACT_CLASSNAMES
 	});
 }

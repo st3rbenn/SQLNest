@@ -26,7 +26,7 @@ export const DesignSystemProvider = ({
 			    via `import { notifications } from "@mantine/notifications"`
 			    puis `notifications.show({...})`. Position top-center pour ne
 			    pas gêner la navigation top-right (UserMenu / avatar). */}
-			<Notifications position="top-center" limit={5} />
+			<Notifications position="top-center" limit={2} />
 			{children}
 		</MantineProvider>
 	);
