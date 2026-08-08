@@ -52,6 +52,14 @@ const metaStyle: CSSProperties = {
 	gap: 6
 };
 
+// Nom d'engine à côté du canvas name — même weight/color que le meta
+// footer, distinct du name (font-weight 600).
+const engineLabelStyle: CSSProperties = {
+	fontSize: 12,
+	fontWeight: 400,
+	color: "var(--sqlnest-text-secondary)"
+};
+
 /**
  * Card d'une db_connection dans la gallery. Click → navigate vers son
  * canvas. Rendu = preview mini-schema + nom + engine + last-seen relatif.
@@ -88,11 +96,13 @@ export function DbCard({ connection, isPending, onClick }: Props) {
 				<div style={{ display: "flex", alignItems: "center", gap: 6 }}>
 					<EngineIcon engine={connection.engine} />
 					<span style={nameStyle}>{connection.name}</span>
+					<span style={{ color: "var(--sqlnest-border)" }}>·</span>
+					<span style={engineLabelStyle}>
+						{engineLabel(connection.engine)}
+					</span>
 				</div>
 				<div style={metaStyle}>
 					<span>{meta}</span>
-					<span style={{ color: "var(--sqlnest-border)" }}>·</span>
-					<span>{engineLabel(connection.engine)}</span>
 					{schema ? (
 						<>
 							<span style={{ color: "var(--sqlnest-border)" }}>·</span>
