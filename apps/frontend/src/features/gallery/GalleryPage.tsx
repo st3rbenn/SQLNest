@@ -31,7 +31,10 @@ import { useNavigateToCanvas } from "./useNavigateToCanvas";
 const pageStyle: CSSProperties = {
 	display: "flex",
 	minHeight: "100vh",
-	background: "var(--sqlnest-canvas-bg)",
+	// Sidebar + main partagent la même surface — les 3 « barres » du
+	// layout (borderRight sidebar, divider user/team, borderBottom
+	// PageHead) forment un T régulier qui délimite les zones.
+	background: "var(--sqlnest-surface)",
 	color: "var(--sqlnest-text-primary)",
 	fontFamily: "'Inter', ui-sans-serif, system-ui, sans-serif"
 };
@@ -39,7 +42,7 @@ const pageStyle: CSSProperties = {
 const sidebarStyle: CSSProperties = {
 	width: 260,
 	background: "var(--sqlnest-surface)",
-	borderRight: "1px solid var(--sqlnest-border-subtle)",
+	borderRight: "1px solid var(--sqlnest-border)",
 	display: "flex",
 	flexDirection: "column",
 	flexShrink: 0
@@ -59,11 +62,15 @@ const mainStyle: CSSProperties = {
  * matche celle du nom user à sa gauche.
  */
 const mainHeadStyle: CSSProperties = {
-	minHeight: 44,
+	// 45px = padding user block (8+4) + UserBadge trigger (32) + divider
+	// sidebar (1). Alignement pixel-perfect entre la borderBottom du
+	// header et le divider sidebar (mesures via getBoundingClientRect).
+	minHeight: 45,
+	boxSizing: "border-box",
 	display: "flex",
 	alignItems: "center",
 	padding: "0 32px",
-	borderBottom: "1px solid var(--sqlnest-border-subtle)",
+	borderBottom: "1px solid var(--sqlnest-border)",
 	flexShrink: 0
 };
 
@@ -240,13 +247,18 @@ function Sidebar({
 				<UserBadge />
 			</div>
 
-			{/* Séparateur user / team — border-subtle qui matche celui du
-			    borderRight du sidebar et du borderBottom de la PageHead. */}
+			{/* Séparateur user / team — full width (pas de gap horizontal)
+			    pour aligner visuellement avec la borderBottom de la
+			    PageHead à sa droite. `margin: 0` colle le divider au bas
+			    du user wrapper — le padding-bottom 4px de ce wrapper
+			    fournit l'air au-dessus, et le team wrapper (padding-top
+			    0) le padding-top 8px du team wrapper donne l'air en
+			    dessous. */}
 			<div
 				style={{
 					height: 1,
-					background: "var(--sqlnest-border-subtle)",
-					margin: "4px 12px 8px"
+					background: "var(--sqlnest-border)",
+					margin: 0
 				}}
 			/>
 
