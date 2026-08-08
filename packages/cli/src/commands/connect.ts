@@ -254,20 +254,24 @@ export async function connect(opts: ConnectOptions): Promise<ConnectResult> {
 
 /**
  * Cherche un tunnel réutilisable dans `config.tunnels[]` — retourne
- * le plus récemment ajouté qui matche le `cliConnectionName` et dont
- * le token n'expire pas avant `TOKEN_EXPIRY_BUFFER_MS`. `null` sinon.
+ * le plus récemment ajouté qui matche STRICTEMENT le `cliConnectionName`
+ * et dont le token n'expire pas avant `TOKEN_EXPIRY_BUFFER_MS`. `null`
+ * sinon.
  *
- * Matching (2 passes) :
- *   1. **Strict** — `entry.connection_name === cliConnectionName`.
- *      C'est le match propre pour les tunnels créés après ce fix.
- *   2. **Fallback legacy** — pour les entries pré-fix qui n'ont pas
- *      `connection_name` set, on tolère `entry.name === cliConnectionName`.
- *      Par convention le deviceLabel serveur (= `name`) est souvent le
- *      même que le nom DSN local, donc on rattrape gratuitement les
- *      vieilles configs sans forcer l'user à re-pair.
+ * Matching strict par `connection_name` uniquement — pas de fallback
+ * sur `name` (deviceLabel serveur). Le `name` est déclaratif côté user
+ * dans /pair, il peut collision entre plusieurs tunnels et n'est pas
+ * lié au fingerprint local. Réutiliser un token via un match approximatif
+ * risque d'ouvrir un tunnel qui ne correspond pas à la DSN locale
+ * attendue.
  *
- * Mode single-DSN (`cliConnectionName === null`) : matche n'importe
- * quelle entry sans `connection_name` (comportement legacy pré-C.13).
+ * Les tunnels pré-fix sans `connection_name` sont ignorés → l'user
+ * doit re-pair UNE fois pour bootstrap la nouvelle entry taggée, puis
+ * les relances suivantes utilisent l'auto-resume propre.
+ *
+ * Mode single-DSN (`cliConnectionName === null`) : matche une entry
+ * sans `connection_name` (comportement legacy pré-C.13, safe car un
+ * seul tunnel par install).
  */
 export function findResumableTunnel(
 	tunnels: readonly TunnelEntry[],
@@ -278,31 +282,18 @@ export function findResumableTunnel(
 	// Itère à l'envers — le tunnel le plus récent (append à la fin) a
 	// priorité si plusieurs matchent, ce qui reflète le dernier pair
 	// effectué par l'user.
-	let legacyFallback: TunnelEntry | null = null;
 	for (let i = tunnels.length - 1; i >= 0; i--) {
 		const t = tunnels[i];
 		if (t === undefined) continue;
 		const expiresMs = Date.parse(t.expires_at);
 		if (Number.isNaN(expiresMs) || expiresMs <= cutoff) continue;
 		if (cliConnectionName !== null) {
-			// Pass 1 strict : entry taggée avec le bon connection_name.
 			if (t.connection_name === cliConnectionName) return t;
-			// Pass 2 fallback : entry legacy sans connection_name mais dont
-			// le `name` matche. On garde le PREMIER trouvé (le plus récent)
-			// et on continue à chercher un match strict — un strict-match
-			// wins toujours sur un legacy-fallback.
-			if (
-				legacyFallback === null &&
-				t.connection_name === undefined &&
-				t.name === cliConnectionName
-			) {
-				legacyFallback = t;
-			}
 		} else if (t.connection_name === undefined) {
 			return t;
 		}
 	}
-	return legacyFallback;
+	return null;
 }
 
 /**

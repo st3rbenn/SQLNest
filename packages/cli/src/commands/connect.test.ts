@@ -363,32 +363,13 @@ describe("findResumableTunnel", () => {
 		expect(findResumableTunnel([t], "apollon", nowMs)).toBeNull();
 	});
 
-	test("fallback legacy: tunnel sans connection_name dont name matche → OK", () => {
+	test("ignore les tunnels sans connection_name quand nom demandé (strict)", () => {
+		// Vieilles entries pré-fix (sans connection_name) : même si `name`
+		// matche, on refuse. L'user doit re-pair une fois pour bootstrap
+		// une entry taggée — pas de fuzzy match approximatif qui pourrait
+		// ouvrir un mauvais tunnel.
 		const t = makeEntry({ name: "apollon", connection_name: undefined });
-		expect(findResumableTunnel([t], "apollon", nowMs)).toBe(t);
-	});
-
-	test("fallback legacy: tunnel sans connection_name dont name mismatch → null", () => {
-		const t = makeEntry({ name: "delphi", connection_name: undefined });
 		expect(findResumableTunnel([t], "apollon", nowMs)).toBeNull();
-	});
-
-	test("strict match wins sur fallback legacy même si legacy plus récent", () => {
-		const legacy = makeEntry({
-			id: "legacy",
-			name: "apollon",
-			connection_name: undefined
-		});
-		const strict = makeEntry({
-			id: "strict",
-			name: "apollon-server-label",
-			connection_name: "apollon"
-		});
-		// legacy est ajouté APRÈS strict (dernier index) → si on prenait
-		// juste le plus récent, on prendrait legacy. Mais le strict match
-		// doit gagner.
-		const result = findResumableTunnel([strict, legacy], "apollon", nowMs);
-		expect(result?.id).toBe("strict");
 	});
 
 	test("mode single-DSN (null) matche entry sans connection_name", () => {
