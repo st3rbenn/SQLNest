@@ -1,6 +1,7 @@
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 import { sessionQueryOptions } from "../features/auth/sessionQuery";
 import { UserMenu } from "../features/auth/UserMenu";
+import { NotificationsProvider } from "../features/notifications/notifications-context";
 
 /**
  * Layout pathless des pages **authentifiées** — gallery `/`, canvas
@@ -41,9 +42,9 @@ export const Route = createFileRoute("/_authenticated")({
 
 function AuthenticatedLayout() {
 	return (
-		<>
+		<NotificationsProvider>
 			<Outlet />
 			<UserMenu />
-		</>
+		</NotificationsProvider>
 	);
 }
