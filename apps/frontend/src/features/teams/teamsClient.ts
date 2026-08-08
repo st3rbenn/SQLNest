@@ -8,7 +8,11 @@ const API_BASE = window.CONTEXT.apiBaseUrl;
 export interface TeamSummary {
 	readonly id: string;
 	readonly slug: string;
+	/** Name stocké. Vide pour les teams perso (`isPersonal=true`) — le
+	 *  frontend affiche `${user.name}'s team` dans ce cas. Non-vide pour
+	 *  les teams custom (V2 invitations). */
 	readonly name: string;
+	readonly isPersonal: boolean;
 	readonly createdAt: string;
 }
 

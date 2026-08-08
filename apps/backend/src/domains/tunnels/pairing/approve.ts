@@ -19,7 +19,7 @@
 
 import { schema as dbSchema } from "@sqlnest/db";
 import { and, eq } from "drizzle-orm";
-import { createPersonalTeam, defaultTeamNameForUser } from "../../teams/create";
+import { createPersonalTeam } from "../../teams/create";
 import { getDefaultTeamOfUser } from "../../teams/get";
 import type { DbOrTx } from "../db";
 import { computeCliFingerprint } from "./crypto";
@@ -89,12 +89,8 @@ export async function approvePairing(
 				effectiveTeamId = defaultTeam.id;
 			} else {
 				// Filet lazy — un user qui approuve avant que sa team perso
-				// soit crée (race Better Auth hook).
-				const created = await createPersonalTeam(
-					tx,
-					userId,
-					defaultTeamNameForUser(deviceName)
-				);
+				// soit créée (race Better Auth hook).
+				const created = await createPersonalTeam(tx, userId);
 				effectiveTeamId = created.teamId;
 			}
 		}

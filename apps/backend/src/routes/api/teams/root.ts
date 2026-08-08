@@ -16,10 +16,7 @@ import {
 	assertAuthenticated,
 	requireUser
 } from "../../../domains/auth/require";
-import {
-	createPersonalTeam,
-	defaultTeamNameForUser
-} from "../../../domains/teams/create";
+import { createPersonalTeam } from "../../../domains/teams/create";
 import {
 	getDefaultTeamOfUser,
 	listTeamsOfUser
@@ -56,6 +53,7 @@ export default function teamsRoute(fastify: FastifyInstance) {
 						id: t.id,
 						slug: t.slug,
 						name: t.name,
+						isPersonal: t.isPersonal,
 						createdAt: t.createdAt.toISOString()
 					}))
 				};
@@ -93,19 +91,17 @@ export default function teamsRoute(fastify: FastifyInstance) {
 						id: existing.id,
 						slug: existing.slug,
 						name: existing.name,
+						isPersonal: existing.isPersonal,
 						createdAt: existing.createdAt.toISOString()
 					};
 				}
 				// Fallback lazy
-				const created = await createPersonalTeam(
-					fastify.db,
-					request.user.id,
-					defaultTeamNameForUser(request.user.name)
-				);
+				const created = await createPersonalTeam(fastify.db, request.user.id);
 				return {
 					id: created.teamId,
 					slug: created.slug,
 					name: created.name,
+					isPersonal: created.isPersonal,
 					createdAt: new Date().toISOString()
 				};
 			} catch (err) {
@@ -137,6 +133,7 @@ export default function teamsRoute(fastify: FastifyInstance) {
 					id: "",
 					slug: "",
 					name: "",
+					isPersonal: false,
 					createdAt: new Date(0).toISOString()
 				};
 			}
@@ -144,6 +141,7 @@ export default function teamsRoute(fastify: FastifyInstance) {
 				id: t.id,
 				slug: t.slug,
 				name: t.name,
+				isPersonal: t.isPersonal,
 				createdAt: t.createdAt.toISOString()
 			};
 		}

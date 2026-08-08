@@ -16,7 +16,10 @@ export type TeamSlugParamsT = z.infer<typeof TeamSlugParams>;
 export const TeamSummaryResponse = z.object({
 	id: z.string(),
 	slug: z.string(),
+	/** Name stocké — chaîne vide si `isPersonal=true` (frontend affiche
+	 *  `${user.name}'s team`). Non-vide pour les teams custom (V2). */
 	name: z.string(),
+	isPersonal: z.boolean(),
 	createdAt: z.string()
 });
 z.globalRegistry.add(TeamSummaryResponse, { id: "TeamSummaryResponse" });

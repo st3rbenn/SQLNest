@@ -18,7 +18,28 @@ import { useMatches } from "@tanstack/react-router";
 export interface TeamContext {
 	readonly id: string;
 	readonly slug: string;
+	/** Name stocké (vide pour team perso). Utilise
+	 *  `displayTeamName(team, user.name)` pour l'affichage — la team perso
+	 *  affiche `${user.name}'s team` calculé dynamiquement. */
 	readonly name: string;
+	readonly isPersonal: boolean;
+}
+
+/** Compose le display name d'une team.
+ *  - Team perso (`isPersonal=true`, `name=""`) : `${user.name}'s team`
+ *    (strip la partie avant `@` si `user.name` est un email).
+ *  - Team custom : `team.name` tel quel.
+ *  - Fallback si tout est vide : `My team`. */
+export function displayTeamName(
+	team: Pick<TeamContext, "name" | "isPersonal">,
+	userName: string | null | undefined
+): string {
+	if (!team.isPersonal) return team.name || "Team";
+	const raw = (userName ?? "").trim();
+	if (raw.length === 0) return "My team";
+	const atIdx = raw.indexOf("@");
+	const short = atIdx > 0 ? raw.slice(0, atIdx) : raw;
+	return `${short}'s team`;
 }
 
 /** Renvoie la team courante décorée par le layout `_authenticated.team.$teamSlug`

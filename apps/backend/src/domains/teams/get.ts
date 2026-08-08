@@ -9,10 +9,22 @@ import type { DbOrTx } from "./db";
 export interface TeamSummary {
 	readonly id: string;
 	readonly slug: string;
+	/** Name stocké — vide pour les teams perso (voir `isPersonal`).
+	 *  Le frontend affiche `${user.name}'s team` quand isPersonal=true. */
 	readonly name: string;
+	readonly isPersonal: boolean;
 	readonly ownerId: string;
 	readonly createdAt: Date;
 }
+
+const SELECT_COLUMNS = {
+	id: dbSchema.team.id,
+	slug: dbSchema.team.slug,
+	name: dbSchema.team.name,
+	isPersonal: dbSchema.team.isPersonal,
+	ownerId: dbSchema.team.ownerId,
+	createdAt: dbSchema.team.createdAt
+} as const;
 
 /** Retrouve une team par slug. `null` si inconnu. */
 export async function getTeamBySlug(
@@ -20,13 +32,7 @@ export async function getTeamBySlug(
 	slug: string
 ): Promise<TeamSummary | null> {
 	const rows = await db
-		.select({
-			id: dbSchema.team.id,
-			slug: dbSchema.team.slug,
-			name: dbSchema.team.name,
-			ownerId: dbSchema.team.ownerId,
-			createdAt: dbSchema.team.createdAt
-		})
+		.select(SELECT_COLUMNS)
 		.from(dbSchema.team)
 		.where(eq(dbSchema.team.slug, slug))
 		.limit(1);
@@ -39,13 +45,7 @@ export async function listTeamsOfUser(
 	userId: string
 ): Promise<TeamSummary[]> {
 	return db
-		.select({
-			id: dbSchema.team.id,
-			slug: dbSchema.team.slug,
-			name: dbSchema.team.name,
-			ownerId: dbSchema.team.ownerId,
-			createdAt: dbSchema.team.createdAt
-		})
+		.select(SELECT_COLUMNS)
 		.from(dbSchema.team)
 		.where(eq(dbSchema.team.ownerId, userId))
 		.orderBy(asc(dbSchema.team.createdAt));
@@ -60,13 +60,7 @@ export async function getDefaultTeamOfUser(
 	userId: string
 ): Promise<TeamSummary | null> {
 	const rows = await db
-		.select({
-			id: dbSchema.team.id,
-			slug: dbSchema.team.slug,
-			name: dbSchema.team.name,
-			ownerId: dbSchema.team.ownerId,
-			createdAt: dbSchema.team.createdAt
-		})
+		.select(SELECT_COLUMNS)
 		.from(dbSchema.team)
 		.where(eq(dbSchema.team.ownerId, userId))
 		.orderBy(asc(dbSchema.team.createdAt))
@@ -83,13 +77,7 @@ export async function getTeamForOwner(
 	userId: string
 ): Promise<TeamSummary | null> {
 	const rows = await db
-		.select({
-			id: dbSchema.team.id,
-			slug: dbSchema.team.slug,
-			name: dbSchema.team.name,
-			ownerId: dbSchema.team.ownerId,
-			createdAt: dbSchema.team.createdAt
-		})
+		.select(SELECT_COLUMNS)
 		.from(dbSchema.team)
 		.where(and(eq(dbSchema.team.slug, slug), eq(dbSchema.team.ownerId, userId)))
 		.limit(1);

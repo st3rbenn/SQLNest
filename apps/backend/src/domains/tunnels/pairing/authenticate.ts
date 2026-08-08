@@ -27,7 +27,7 @@
 import { schema as dbSchema } from "@sqlnest/db";
 import { eq } from "drizzle-orm";
 import { upsertDbConnectionByFingerprint } from "../../db-connections/upsert";
-import { createPersonalTeam, defaultTeamNameForUser } from "../../teams/create";
+import { createPersonalTeam } from "../../teams/create";
 import { getDefaultTeamOfUser } from "../../teams/get";
 import type { DbOrTx } from "../db";
 import { generateSessionToken, hashSha256Hex, verifyEd25519 } from "./crypto";
@@ -124,11 +124,7 @@ export async function authenticatePairing(
 			if (defaultTeam) {
 				teamId = defaultTeam.id;
 			} else {
-				const created = await createPersonalTeam(
-					tx,
-					row.userId,
-					defaultTeamNameForUser(row.deviceName)
-				);
+				const created = await createPersonalTeam(tx, row.userId);
 				teamId = created.teamId;
 			}
 		}

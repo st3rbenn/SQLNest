@@ -18,7 +18,7 @@ import {
 	test
 } from "vitest";
 import { createTestApp, truncateTunnelsAndAuth } from "../../utils/testapp";
-import { createPersonalTeam, defaultTeamNameForUser } from "./create";
+import { createPersonalTeam } from "./create";
 import { TEAM_SLUG_REGEX } from "./slug";
 
 const rootEnv = resolve(
@@ -79,7 +79,7 @@ describe.skipIf(!DATABASE_URL)("C.21.1 — team auto-signup", () => {
 		await truncateTunnelsAndAuth(app);
 	});
 
-	test("signup email/password → 1 team « <name>'s team » auto-créée", async () => {
+	test("signup email/password → 1 team perso auto-créée (name vide, is_personal=true)", async () => {
 		const { userId } = await signup(
 			app,
 			"alice-teams@example.com",
@@ -94,23 +94,14 @@ describe.skipIf(!DATABASE_URL)("C.21.1 — team auto-signup", () => {
 		const first = teams[0];
 		// biome-ignore lint/style/noNonNullAssertion: length checked
 		expect(first!.ownerId).toBe(userId);
-		// Format Notion — nom explicite qui différencie l'user (« Alice »)
-		// de sa team (« Alice's team ») dans la sidebar.
+		// Le name stocké est VIDE — le frontend compose `${user.name}'s team`
+		// à l'affichage à partir de la source of truth `user.name`.
 		// biome-ignore lint/style/noNonNullAssertion: length checked
-		expect(first!.name).toBe("Alice's team");
+		expect(first!.name).toBe("");
+		// biome-ignore lint/style/noNonNullAssertion: length checked
+		expect(first!.isPersonal).toBe(true);
 		// biome-ignore lint/style/noNonNullAssertion: length checked
 		expect(first!.slug).toMatch(TEAM_SLUG_REGEX);
-	});
-
-	test("defaultTeamNameForUser : format « <shortName>'s team »", () => {
-		expect(defaultTeamNameForUser("Alice")).toBe("Alice's team");
-		// email complet → prend la partie avant @
-		expect(defaultTeamNameForUser("anthonincolas@gmail.com")).toBe(
-			"anthonincolas's team"
-		);
-		// vide → fallback
-		expect(defaultTeamNameForUser("")).toBe("My team");
-		expect(defaultTeamNameForUser(null)).toBe("My team");
 	});
 
 	test("createPersonalTeam est idempotent (2 appels = 1 team)", async () => {

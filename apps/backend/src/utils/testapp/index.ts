@@ -164,15 +164,14 @@ export async function truncateCanvasAndAuth(
  * appeler N fois pour le même userId. */
 export async function ensureTeamForUser(
 	app: FastifyInstance,
-	userId: string,
-	name: string = "Personal"
+	userId: string
 ): Promise<string> {
 	if (app.db == null) {
 		throw new Error(
 			"ensureTeamForUser: fastify.db introuvable — appelle createTestApp({ withAuth: true }) et await app.ready() d'abord."
 		);
 	}
-	const result = await createPersonalTeam(app.db, userId, name);
+	const result = await createPersonalTeam(app.db, userId);
 	return result.teamId;
 }
 

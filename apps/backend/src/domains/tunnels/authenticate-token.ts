@@ -33,7 +33,7 @@
 import { schema as dbSchema } from "@sqlnest/db";
 import { authenticateBearer } from "../api-tokens/authenticate-bearer";
 import { upsertDbConnectionByFingerprint } from "../db-connections/upsert";
-import { createPersonalTeam, defaultTeamNameForUser } from "../teams/create";
+import { createPersonalTeam } from "../teams/create";
 import { getDefaultTeamOfUser } from "../teams/get";
 import type { DbOrTx } from "./db";
 import { TUNNEL_SESSION_TTL_MS } from "./pairing/authenticate";
@@ -82,11 +82,7 @@ export async function authenticateTunnelWithToken(
 		if (defaultTeam) {
 			teamId = defaultTeam.id;
 		} else {
-			const created = await createPersonalTeam(
-				tx,
-				auth.userId,
-				defaultTeamNameForUser(deviceName)
-			);
+			const created = await createPersonalTeam(tx, auth.userId);
 			teamId = created.teamId;
 		}
 

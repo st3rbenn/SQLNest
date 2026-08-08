@@ -224,7 +224,16 @@ export const team = pgTable(
 	{
 		id: uuid("id").defaultRandom().primaryKey(),
 		slug: text("slug").notNull().unique(),
-		name: text("name").notNull(),
+		// Pour une team personnelle (`is_personal = true`) le name reste
+		// vide en DB — l'UI affiche `${user.name}'s team` (le name suit
+		// alors les rename user). Pour une team custom (V2) le name est
+		// stocké tel quel.
+		name: text("name").notNull().default(""),
+		// C.21 UX fix : marker qui distingue la team perso auto-créée
+		// à la signup des futures teams collaboratives (V2). Piloté par
+		// `createPersonalTeam` (true) vs `createTeam(name)` (false, V2).
+		// Frontend s'en sert pour calculer le display name dynamiquement.
+		isPersonal: boolean("is_personal").notNull().default(false),
 		ownerId: text("owner_id")
 			.notNull()
 			.references(() => user.id, { onDelete: "cascade" }),

@@ -2,10 +2,7 @@ import { schema as dbSchema } from "@sqlnest/db";
 import { type Auth, type BetterAuthOptions, betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import fp from "fastify-plugin";
-import {
-	createPersonalTeam,
-	defaultTeamNameForUser
-} from "../domains/teams/create";
+import { createPersonalTeam } from "../domains/teams/create";
 import { createHashedSessionStorage } from "./03-auth/hashedSessionStorage";
 
 // Regex top-level — Vite/Vitest injecte `process.env.BASE_URL = "/"` par
@@ -184,11 +181,7 @@ export default fp(
 					create: {
 						after: async (createdUser) => {
 							try {
-								await createPersonalTeam(
-									fastify.db,
-									createdUser.id,
-									defaultTeamNameForUser(createdUser.name)
-								);
+								await createPersonalTeam(fastify.db, createdUser.id);
 							} catch (err) {
 								fastify.log.error(
 									{ err, userId: createdUser.id },

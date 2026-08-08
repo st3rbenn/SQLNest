@@ -113,6 +113,13 @@
       "when": 1786150234489,
       "tag": "0015_team_rename_personal",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1786151170795,
+      "tag": "0016_team_is_personal",
+      "breakpoints": true
     }
   ]
 }

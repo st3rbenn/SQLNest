@@ -17,7 +17,8 @@
 
 import { Link } from "@tanstack/react-router";
 import { type CSSProperties, useEffect, useRef, useState } from "react";
-import type { TeamContext } from "./useCurrentTeam";
+import { useCurrentUser } from "../auth/sessionQuery";
+import { displayTeamName, type TeamContext } from "./useCurrentTeam";
 import { useMyTeams } from "./useMyTeams";
 
 const containerStyle: CSSProperties = {
@@ -124,6 +125,8 @@ export function TeamSelector({ currentTeam }: TeamSelectorProps) {
 	const [open, setOpen] = useState(false);
 	const containerRef = useRef<HTMLDivElement>(null);
 	const { data: teams } = useMyTeams();
+	const { data: session } = useCurrentUser();
+	const userName = session?.user?.name ?? null;
 
 	useEffect(() => {
 		if (!open) return;
@@ -142,6 +145,7 @@ export function TeamSelector({ currentTeam }: TeamSelectorProps) {
 	}, [open]);
 
 	const displayTeams = teams ?? [currentTeam];
+	const currentDisplayName = displayTeamName(currentTeam, userName);
 
 	return (
 		<div ref={containerRef} style={containerStyle}>
@@ -154,9 +158,9 @@ export function TeamSelector({ currentTeam }: TeamSelectorProps) {
 				aria-haspopup="menu"
 				data-testid="team-selector-trigger"
 			>
-				<span style={avatarStyle}>{initialOf(currentTeam.name)}</span>
-				<span style={nameStyle} title={currentTeam.name}>
-					{currentTeam.name}
+				<span style={avatarStyle}>{initialOf(currentDisplayName)}</span>
+				<span style={nameStyle} title={currentDisplayName}>
+					{currentDisplayName}
 				</span>
 				<span style={badgeStyle}>Free</span>
 				<Chevron open={open} />
@@ -166,6 +170,7 @@ export function TeamSelector({ currentTeam }: TeamSelectorProps) {
 				<div style={menuStyle} role="menu">
 					{displayTeams.map((t) => {
 						const isActive = t.slug === currentTeam.slug;
+						const label = displayTeamName(t, userName);
 						if (isActive) {
 							return (
 								<div
@@ -174,7 +179,7 @@ export function TeamSelector({ currentTeam }: TeamSelectorProps) {
 									className="sqlnest-menu-item sqlnest-menu-item--active"
 									role="menuitem"
 									aria-current={true}
-									title={t.name}
+									title={label}
 								>
 									<Dot />
 									<span
@@ -185,7 +190,7 @@ export function TeamSelector({ currentTeam }: TeamSelectorProps) {
 											textOverflow: "ellipsis"
 										}}
 									>
-										{t.name}
+										{label}
 									</span>
 								</div>
 							);
@@ -198,7 +203,7 @@ export function TeamSelector({ currentTeam }: TeamSelectorProps) {
 								style={menuItemBase}
 								className="sqlnest-menu-item"
 								role="menuitem"
-								title={t.name}
+								title={label}
 								onClick={() => setOpen(false)}
 							>
 								<span style={{ width: 6, flexShrink: 0 }} />
@@ -210,7 +215,7 @@ export function TeamSelector({ currentTeam }: TeamSelectorProps) {
 										textOverflow: "ellipsis"
 									}}
 								>
-									{t.name}
+									{label}
 								</span>
 							</Link>
 						);
