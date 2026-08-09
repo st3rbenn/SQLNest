@@ -1,9 +1,11 @@
 import { Menu, UnstyledButton } from "@mantine/core";
 import {
+	IconArrowLeft,
 	IconChevronDown,
 	IconLayoutSidebarLeftCollapse,
 	IconLayoutSidebarLeftExpand
 } from "@tabler/icons-react";
+import { Link } from "@tanstack/react-router";
 import type { CSSProperties } from "react";
 
 /**
@@ -200,7 +202,14 @@ function FilesMenu({
 				</UnstyledButton>
 			</Menu.Target>
 			<Menu.Dropdown>
-				<Menu.Item disabled>Retour aux canvas</Menu.Item>
+				<Menu.Item
+					component={Link}
+					to="/"
+					leftSection={<IconArrowLeft size={13} stroke={2} />}
+				>
+					Retour aux canvas
+				</Menu.Item>
+				<Menu.Divider />
 				<Menu.Item disabled>Exporter le schéma</Menu.Item>
 				<Menu.Item disabled>Exporter sous…</Menu.Item>
 				<Menu.Divider />
