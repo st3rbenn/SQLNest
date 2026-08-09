@@ -447,7 +447,7 @@ function CanvasInner({
 	// de l'espace. État volatile (reset au refresh) : la persistance était
 	// plus embêtante qu'utile (le drawer revient à sa position par défaut
 	// à chaque rechargement, plus prévisible que "ce qu'il était avant").
-	const [leftDrawerVisible, setLeftDrawerVisible] = useState(true);
+	const [leftDrawerVisible, setLeftDrawerVisible] = useState(false);
 
 	// Largeur du drawer — resizable via le handle droit. State + handlers
 	// encapsulés dans `useResizableDrawer` (persistance localStorage,
