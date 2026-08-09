@@ -83,6 +83,7 @@ export function useResizableDrawer(): {
 
 interface DrawerPaneProps {
 	readonly schema: SchemaModel;
+	readonly dbName: string;
 	readonly width: number;
 	readonly handleProps: ResizableDrawerHandleProps;
 	readonly search: string;
@@ -109,6 +110,7 @@ interface DrawerPaneProps {
  */
 export function DrawerPane({
 	schema,
+	dbName,
 	width,
 	handleProps,
 	search,
@@ -139,7 +141,7 @@ export function DrawerPane({
 			<SidebarDrawer
 				variant="docked"
 				width={width}
-				{...(isDetailsView ? {} : { title: "Schéma" })}
+				{...(isDetailsView ? {} : { title: dbName })}
 				header={
 					isDetailsView ? (
 						<UnstyledButton
@@ -155,7 +157,7 @@ export function DrawerPane({
 							aria-label="Retour au schéma"
 						>
 							<IconChevronLeft size={14} stroke={2} />
-							<span>Schéma</span>
+							<span>{dbName}</span>
 						</UnstyledButton>
 					) : (
 						<SearchInput

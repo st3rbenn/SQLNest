@@ -10,15 +10,16 @@ import {
 	useCanvasUI
 } from "../CanvasContext";
 import { DrawerPane } from "../DrawerPane";
+import { CanvasFilesHUD } from "./CanvasFilesHUD";
 
 /**
- * Colonne gauche du canvas : toggle button flottant + `DrawerPane` docké.
+ * Colonne gauche du canvas : toggle + `DrawerPane` docké (ouvert) ou
+ * `CanvasFilesHUD` flottant top-left (fermé).
  *
  * Consomme les 4 contexts — 0 prop parent.
- * Ajouter un contrôle gauche (2e drawer, tabs verticaux) = 1 endroit.
  */
 export function CanvasLeftPanel() {
-	const { schema, framesApi } = useCanvasData();
+	const { schema, dbName, framesApi } = useCanvasData();
 	const {
 		focusId,
 		focusFrameKey,
@@ -39,9 +40,10 @@ export function CanvasLeftPanel() {
 	return (
 		<>
 			<ActionIcon
-				variant="filled"
+				variant="subtle"
 				size="lg"
 				radius="md"
+				className="sqlnest-menu-item"
 				onClick={() => setLeftDrawerVisible((x) => !x)}
 				aria-label={
 					leftDrawerVisible
@@ -49,17 +51,13 @@ export function CanvasLeftPanel() {
 						: "Afficher le drawer gauche"
 				}
 				style={{
-					// Ouvert : logé DANS le panel en haut à droite (aligné
-					// au titre « Schéma »). Fermé : flottant à gauche du
-					// canvas pour rouvrir le panel.
 					position: "absolute",
 					top: 12,
 					left: leftDrawerVisible ? leftDrawerWidth - 44 : 8,
 					zIndex: 5,
-					background: "var(--sqlnest-surface)",
+					background: "transparent",
 					color: "var(--sqlnest-text-secondary)",
-					border: "1px solid var(--sqlnest-border)",
-					boxShadow: "var(--sqlnest-shadow-floating)"
+					border: "none"
 				}}
 			>
 				{leftDrawerVisible ? (
@@ -72,6 +70,7 @@ export function CanvasLeftPanel() {
 			{leftDrawerVisible ? (
 				<DrawerPane
 					schema={schema}
+					dbName={dbName}
 					width={leftDrawerWidth}
 					handleProps={drawerHandleProps}
 					search={search}
@@ -86,7 +85,9 @@ export function CanvasLeftPanel() {
 					onFrameRename={handleFrameRename}
 					onFrameDelete={handleFrameDelete}
 				/>
-			) : null}
+			) : (
+				<CanvasFilesHUD dbName={dbName} />
+			)}
 		</>
 	);
 }
