@@ -1,11 +1,5 @@
 import { Box, UnstyledButton } from "@mantine/core";
-import {
-	HintPill,
-	SearchInput,
-	SidebarDrawer,
-	spotlight,
-	useModKeyLabel
-} from "@sqlnest/design-system";
+import { SearchInput, SidebarDrawer } from "@sqlnest/design-system";
 import { IconChevronLeft } from "@tabler/icons-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FrameDetails } from "../FrameDetails";
@@ -129,7 +123,6 @@ export function DrawerPane({
 	onFrameRename,
 	onFrameDelete
 }: DrawerPaneProps) {
-	const modKey = useModKeyLabel();
 	const isDetailsView = focusId !== null || focusFrameKey !== null;
 
 	return (
@@ -171,23 +164,6 @@ export function DrawerPane({
 							placeholder={`Rechercher parmi ${schema.collections.length} tables…`}
 						/>
 					)
-				}
-				footer={
-					<UnstyledButton
-						onClick={() => spotlight.open()}
-						aria-label="Ouvrir la palette de commandes"
-						style={{ width: "100%" }}
-					>
-						<HintPill
-							keys={[`${modKey}K`]}
-							bg="transparent"
-							withBorder={false}
-							shadow="none"
-							style={{ display: "flex", justifyContent: "center" }}
-						>
-							Actions rapides
-						</HintPill>
-					</UnstyledButton>
 				}
 				style={{ height: "100%" }}
 			>
