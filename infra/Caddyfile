@@ -7,6 +7,11 @@
 
 {
     email admin@sqlnest.io
+
+    # ⚠ TEMPORAIRE — LE staging (rate limits énormes, cert non-trusted).
+    # À retirer une fois le challenge validé + storage staging purgé, sinon
+    # le browser affichera un warning cert.
+    acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
 }
 
 dev.sqlnest.io {
