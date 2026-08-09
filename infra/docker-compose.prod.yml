@@ -9,17 +9,14 @@
 name: sqlnest
 
 services:
-  # ─── Reverse proxy + TLS Let's Encrypt ────────────────────────────────
+  # ─── Reverse proxy HTTP (TLS géré en amont par l'openresty archi) ─────
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
     ports:
       - "80:80"
-      - "443:443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
     depends_on:
       - frontend
       - backend
@@ -97,8 +94,6 @@ services:
 
 volumes:
   pgdata:
-  caddy_data:
-  caddy_config:
 
 networks:
   internal:

@@ -1,20 +1,15 @@
-# SQLNest — prod Caddyfile
-# Origine unique dev.sqlnest.io. Caddy fait :
-#   1. TLS Let's Encrypt (HTTP-01 sur port 80, Cloudflare DNS-only)
-#   2. Compression zstd + gzip
-#   3. Reverse proxy /api/* → backend (WS upgrade auto)
-#   4. Reverse proxy /* → frontend static
+# SQLNest — Caddyfile derrière un TLS terminator upstream
+# L'architecte réseau termine TLS chez son openresty et forward en HTTP
+# clair vers cette VM sur le port 80. Aucun cert à gérer côté Caddy —
+# on ne fait que du reverse proxy interne : /api/* → backend, /* → frontend.
 
 {
-    email admin@sqlnest.io
-
-    # ⚠ TEMPORAIRE — LE staging (rate limits énormes, cert non-trusted).
-    # À retirer une fois le challenge validé + storage staging purgé, sinon
-    # le browser affichera un warning cert.
-    acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+    # Auto-HTTPS off : l'upstream gère TLS, on ne veut ni ACME ni redirect
+    # 80→443 côté Caddy.
+    auto_https off
 }
 
-dev.sqlnest.io {
+:80 {
     encode zstd gzip
 
     handle /api/* {
