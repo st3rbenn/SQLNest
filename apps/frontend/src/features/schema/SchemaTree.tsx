@@ -153,7 +153,7 @@ export function SchemaTree({
 	const totalMatch = filtered.reduce((s, g) => s + g.tables.length, 0);
 
 	return (
-		<Box>
+		<Box pt={8}>
 			{query !== "" ? (
 				<Text px="sm" pt={4} pb={4} size="xs" c="dimmed">
 					{totalMatch} résultat(s)

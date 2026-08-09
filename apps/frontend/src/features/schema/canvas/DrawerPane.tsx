@@ -151,32 +151,47 @@ export function DrawerPane({
 					<>
 						{topBar}
 						{isDetailsView ? (
-							<UnstyledButton
-								onClick={onClearFocus}
+							<div
 								style={{
-									display: "inline-flex",
-									alignItems: "center",
-									gap: 4,
 									marginTop: topBar ? 12 : 0,
-									paddingTop: topBar ? 12 : 0,
+									marginLeft: -12,
+									marginRight: -12,
+									paddingLeft: 12,
+									paddingRight: 12,
+									paddingTop: topBar ? 14 : 0,
+									paddingBottom: 4,
 									borderTop: topBar
 										? "1px solid var(--sqlnest-border-subtle)"
-										: undefined,
-									width: "100%",
-									fontSize: 12.5,
-									color: "var(--sqlnest-text-secondary)",
-									fontWeight: 500
+										: undefined
 								}}
-								aria-label="Retour au schéma"
 							>
-								<IconChevronLeft size={14} stroke={2} />
-								<span>{dbName}</span>
-							</UnstyledButton>
+								<UnstyledButton
+									onClick={onClearFocus}
+									style={{
+										display: "inline-flex",
+										alignItems: "center",
+										gap: 4,
+										width: "100%",
+										fontSize: 12.5,
+										color: "var(--sqlnest-text-secondary)",
+										fontWeight: 500
+									}}
+									aria-label="Retour au schéma"
+								>
+									<IconChevronLeft size={14} stroke={2} />
+									<span>{dbName}</span>
+								</UnstyledButton>
+							</div>
 						) : (
 							<div
 								style={{
-									marginTop: topBar ? 8 : 0,
-									paddingTop: topBar ? 8 : 0,
+									marginTop: topBar ? 12 : 0,
+									marginLeft: -12,
+									marginRight: -12,
+									paddingLeft: 12,
+									paddingRight: 12,
+									paddingTop: topBar ? 14 : 0,
+									paddingBottom: 4,
 									borderTop: topBar
 										? "1px solid var(--sqlnest-border-subtle)"
 										: undefined
