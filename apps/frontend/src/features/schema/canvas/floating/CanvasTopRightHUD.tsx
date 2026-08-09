@@ -1,5 +1,5 @@
 import { ActionIcon, Avatar, Menu, UnstyledButton } from "@mantine/core";
-import { IconArrowLeft, IconCheck, IconChevronDown } from "@tabler/icons-react";
+import { IconArrowLeft, IconChevronDown } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 import { useReactFlow, useViewport } from "@xyflow/react";
 import type { CSSProperties } from "react";
@@ -23,12 +23,12 @@ import { useCurrentUser } from "../../../auth/sessionQuery";
 const containerStyle: CSSProperties = {
 	display: "flex",
 	alignItems: "center",
-	gap: 4,
-	padding: 4,
+	gap: 6,
+	padding: 7,
 	background: "var(--sqlnest-elevated)",
 	border: "1px solid var(--sqlnest-border-subtle)",
 	borderRadius: 10,
-	boxShadow: "0 4px 12px rgba(0, 0, 0, 0.35)"
+	boxShadow: "0 1px 4px rgba(0, 0, 0, 0.22)"
 };
 
 const zoomTriggerStyle: CSSProperties = {
@@ -59,6 +59,13 @@ const menuStyles = {
 		borderRadius: 5,
 		minHeight: 0
 	}
+} as const;
+
+/** Hover state via la classe DS `sqlnest-menu-item` (tokens.css) —
+ *  Mantine ne fournit pas de hover natif visible en dark sur ses items
+ *  Menu, on prend le nôtre. */
+const menuClassNames = {
+	item: "sqlnest-menu-item"
 } as const;
 
 /** Allowlist stricte des hosts OAuth pour éviter fetch d'un CDN tiers.
@@ -105,6 +112,7 @@ function UserAvatarMenu(): React.ReactNode {
 			offset={8}
 			radius={8}
 			styles={menuStyles}
+			classNames={menuClassNames}
 		>
 			<Menu.Target>
 				<ActionIcon
@@ -141,10 +149,6 @@ function ZoomControl(): React.ReactNode {
 	const { zoom } = useViewport();
 	const { zoomIn, zoomOut, zoomTo, fitView } = useReactFlow();
 	const percent = Math.round(zoom * 100);
-	// Match imprécis pour cocher le preset actif — un zoom exact 1.0 peut
-	// être stocké 0.9999 côté RF selon la précision.
-	const isPresetActive = (target: number): boolean =>
-		Math.abs(zoom - target) < 0.01;
 	return (
 		<Menu
 			shadow="md"
@@ -154,6 +158,7 @@ function ZoomControl(): React.ReactNode {
 			offset={8}
 			radius={8}
 			styles={menuStyles}
+			classNames={menuClassNames}
 		>
 			<Menu.Target>
 				<UnstyledButton
@@ -175,24 +180,11 @@ function ZoomControl(): React.ReactNode {
 					Adapter à la fenêtre
 				</Menu.Item>
 				<Menu.Divider />
-				{ZOOM_PRESETS.map((preset) => {
-					const active = isPresetActive(preset);
-					return (
-						<Menu.Item
-							key={preset}
-							onClick={() => zoomTo(preset)}
-							leftSection={
-								active ? (
-									<IconCheck size={12} stroke={2} />
-								) : (
-									<span style={{ width: 12, display: "inline-block" }} />
-								)
-							}
-						>
-							Zoom à {Math.round(preset * 100)}%
-						</Menu.Item>
-					);
-				})}
+				{ZOOM_PRESETS.map((preset) => (
+					<Menu.Item key={preset} onClick={() => zoomTo(preset)}>
+						Zoom à {Math.round(preset * 100)}%
+					</Menu.Item>
+				))}
 			</Menu.Dropdown>
 		</Menu>
 	);

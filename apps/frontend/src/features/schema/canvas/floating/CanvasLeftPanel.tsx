@@ -56,7 +56,7 @@ export function CanvasLeftPanel() {
 					background: "var(--sqlnest-surface)",
 					color: "var(--sqlnest-text-secondary)",
 					border: "1px solid var(--sqlnest-border)",
-					boxShadow: "0 2px 6px rgba(0,0,0,0.32)"
+					boxShadow: "0 1px 4px rgba(0,0,0,0.22)"
 				}}
 			>
 				{leftDrawerVisible ? (
