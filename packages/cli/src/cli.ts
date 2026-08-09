@@ -17,14 +17,13 @@
  *   sqlnest --version
  *
  * ─── Env vars ─────────────────────────────────────────────────────────
- *   SQLNEST_API_URL       (défaut: https://dev.sqlnest.io — override
- *                          strictement usage dev interne équipe)
- *   SQLNEST_FRONTEND_URL  (défaut: https://dev.sqlnest.io — idem)
  *   SQLNEST_CONFIG_DIR    (défaut: ~/.sqlnest — utile pour tests)
  *
- * Les env vars API/FRONTEND servent au dev local uniquement (backend
- * localhost:4000, frontend localhost:3000). Non documentées côté user
- * final — pas de risque de MITM tant que ça reste équipe.
+ * L'URL du backend / frontend est bakée AU BUILD TIME via esbuild
+ * `--define:process.env.NODE_ENV="production"`. Le binaire publié est
+ * donc littéralement gravé sur https://dev.sqlnest.io — impossible
+ * de rediriger via env var côté user. Pour dev local depuis les sources
+ * (tsx), NODE_ENV=development active les URLs localhost. Voir README.
  *
  * ─── Exit codes ───────────────────────────────────────────────────────
  *   0 : succès
@@ -54,11 +53,22 @@ import {
 } from "./local-connections";
 import { defaultPrompter, type Prompter } from "./prompts";
 
-// Défauts prod — la CLI publiée pointe sur dev.sqlnest.io.
-// Override via env pour le dev local équipe (SQLNEST_API_URL,
-// SQLNEST_FRONTEND_URL). Voir docstring haut de fichier.
-const DEFAULT_API_URL = "https://dev.sqlnest.io";
-const DEFAULT_FRONTEND_URL = "https://dev.sqlnest.io";
+// URLs sélectionnées à la compile via `process.env.NODE_ENV`.
+// esbuild remplace cette expression par la string littérale "production"
+// au build (`--define:process.env.NODE_ENV="production"`) puis fait du
+// dead code elimination avec `--minify-syntax`. Résultat dans le bundle
+// publié : seule la string prod survit, les URLs localhost ne sont PAS
+// présentes dans le binaire — impossible pour un user d'override via
+// NODE_ENV côté runtime, la valeur est déjà substituée avant DCE.
+// Ternary inline (pas d'intermédiaire) pour permettre le DCE.
+const API_URL =
+	process.env.NODE_ENV === "development"
+		? "http://localhost:4000"
+		: "https://dev.sqlnest.io";
+const FRONTEND_URL =
+	process.env.NODE_ENV === "development"
+		? "http://localhost:3000"
+		: "https://dev.sqlnest.io";
 const CLI_VERSION = "0.0.1"; // TODO Bloc 10 : lire depuis package.json au build.
 
 export interface CliIO {
@@ -149,9 +159,8 @@ async function runConnect(args: string[], ctx: RunContext): Promise<number> {
 		return 2;
 	}
 
-	const env = ctx.env ?? {};
-	const baseUrl = env.SQLNEST_API_URL ?? DEFAULT_API_URL;
-	const frontendUrl = env.SQLNEST_FRONTEND_URL ?? DEFAULT_FRONTEND_URL;
+	const baseUrl = API_URL;
+	const frontendUrl = FRONTEND_URL;
 
 	// ─── Résolution de la DSN locale à servir (C.13) ─────────────────
 	// Un même install CLI (une seule keypair) peut manager plusieurs DSN

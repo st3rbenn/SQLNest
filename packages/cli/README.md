@@ -89,23 +89,15 @@ SQLNEST_CONFIG_DIR=/tmp/sqlnest-test sqlnest connect
 
 ## Contributing
 
-Le paquet publié pointe par défaut sur `https://dev.sqlnest.io`. Pour dev local (équipe interne uniquement — pas documenté côté user final) :
+Le paquet publié pointe **en dur** sur `https://dev.sqlnest.io` — les URLs sont bakées à la compile via esbuild `--define:process.env.NODE_ENV="production"` + `--minify-syntax`. Aucune env var ne peut les override runtime — les strings `localhost` ne sont même pas présentes dans le binaire publié.
+
+Pour dev local depuis les sources (jamais depuis le binaire publié) :
 
 ```bash
-export SQLNEST_API_URL=http://localhost:4000
-export SQLNEST_FRONTEND_URL=http://localhost:3000
-sqlnest connect
+NODE_ENV=development pnpm --filter @sqlnest/cli exec tsx src/bin.ts connect
 ```
 
-Ou en one-shot :
-
-```bash
-SQLNEST_API_URL=http://localhost:4000 \
-SQLNEST_FRONTEND_URL=http://localhost:3000 \
-  pnpm --filter @sqlnest/cli exec tsx src/bin.ts connect
-```
-
-Les env vars sont volontairement omises de la doc publique pour garder le comportement `npx @sqlnest/cli` verrouillé sur la prod hébergée.
+En dev-from-source, `tsx` évalue `process.env.NODE_ENV === "development"` à `true` → les URLs deviennent `http://localhost:4000` / `http://localhost:3000`. Rien de baké, c'est le code source qui branche.
 
 ## License
 

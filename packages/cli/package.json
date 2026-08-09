@@ -21,7 +21,7 @@
 		"README.md"
 	],
 	"scripts": {
-		"build": "esbuild src/bin.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/sqlnest.mjs --banner:js='#!/usr/bin/env node' --external:@noble/curves --external:@noble/hashes --external:@noble/ciphers --external:msgpackr --external:smol-toml --external:ws --external:mongodb --external:pg --external:@inquirer/* --external:mute-stream --external:cli-width --external:@sindresorhus/is --external:signal-exit --external:yoctocolors-cjs",
+		"build": "esbuild src/bin.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/sqlnest.mjs --banner:js='#!/usr/bin/env node' --define:process.env.NODE_ENV=\\\"production\\\" --minify-syntax --external:@noble/curves --external:@noble/hashes --external:@noble/ciphers --external:msgpackr --external:smol-toml --external:ws --external:mongodb --external:pg --external:@inquirer/* --external:mute-stream --external:cli-width --external:@sindresorhus/is --external:signal-exit --external:yoctocolors-cjs",
 		"postbuild": "chmod +x dist/sqlnest.mjs",
 		"prepublishOnly": "pnpm build",
 		"test": "vitest run",
