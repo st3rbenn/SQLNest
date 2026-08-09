@@ -74,7 +74,7 @@ describe("snqlCompletionSource — verbes", () => {
 		expect(res).not.toBeNull();
 		const labels = res?.options.map((o) => o.label);
 		expect(labels).toEqual(
-			expect.arrayContaining(["get", "find", "add", "update", "remove"])
+			expect.arrayContaining(["get", "add", "update", "remove"])
 		);
 	});
 
@@ -106,7 +106,7 @@ describe("snqlCompletionSource — collections", () => {
 
 describe("snqlCompletionSource — champs après `where`", () => {
 	it("propose les champs de la collection source", () => {
-		const res = complete("get users | where ");
+		const res = complete("get users where ");
 		const labels = res?.options.map((o) => o.label);
 		expect(labels).toEqual(
 			expect.arrayContaining(["id", "email", "display_name"])
@@ -114,7 +114,7 @@ describe("snqlCompletionSource — champs après `where`", () => {
 	});
 
 	it("mappe les champs vers le type CM `property` et porte le type SNQL en `detail`", () => {
-		const res = complete("get users | where ");
+		const res = complete("get users where ");
 		const email = res?.options.find((o) => o.label === "email");
 		expect(email?.type).toBe("property");
 		expect(email?.detail).toBe("string");
@@ -126,7 +126,7 @@ describe("snqlCompletionSource — champs après `where`", () => {
 
 describe("snqlCompletionSource — cibles de jointure après `with`", () => {
 	it("propose la collection liée en tête, annotée `relation`", () => {
-		const res = complete("get orders | with ");
+		const res = complete("get orders with ");
 		const first = res?.options[0];
 		expect(first?.label).toBe("users");
 		expect(first?.type).toBe("function"); // relation → CM `function`
@@ -134,13 +134,13 @@ describe("snqlCompletionSource — cibles de jointure après `with`", () => {
 	});
 
 	it("pré-remplit la clause `on` via `apply` pour une relation à champ unique", () => {
-		const res = complete("get orders | with ");
+		const res = complete("get orders with ");
 		const users = res?.options.find((o) => o.label === "users");
 		expect(users?.apply).toBe("users on user_id = id");
 	});
 
 	it("liste les collections non liées derrière, sans `apply`", () => {
-		const res = complete("get users | with ");
+		const res = complete("get users with ");
 		const orders = res?.options.find((o) => o.label === "orders");
 		expect(orders?.type).toBe("function"); // orders reste lié à users (via FK)
 		// La collection source n'apparaît jamais comme cible.
@@ -149,7 +149,7 @@ describe("snqlCompletionSource — cibles de jointure après `with`", () => {
 });
 
 describe("snqlCompletionSource — tolérance à l'input incomplet", () => {
-	it("ne lève pas et propose les collections après un `|` orphelin puis `from`", () => {
+	it("propose les collections après `delete from` (alias de remove)", () => {
 		expect(() => complete("delete from ")).not.toThrow();
 		const res = complete("delete from ");
 		expect(res?.options.map((o) => o.label)).toEqual(
@@ -159,13 +159,13 @@ describe("snqlCompletionSource — tolérance à l'input incomplet", () => {
 
 	it("retourne null (aucun candidat) sur un chemin pointé non supporté en v1", () => {
 		// `alias.` → completeSnql renvoie 0 options ; la source doit retourner null.
-		const res = complete("get users | pick users.");
+		const res = complete("get users pick users.");
 		expect(res).toBeNull();
 	});
 
 	it("retourne null quand aucune complétion n'est pertinente au curseur", () => {
 		// Après une string littérale ouverte, aucun candidat structurel n'a de sens.
-		const res = complete('get users | where email = "foo');
+		const res = complete('get users where email = "foo');
 		expect(res).toBeNull();
 	});
 

@@ -9,7 +9,7 @@ interface TableDetailsSuggestionProps {
 
 /**
  * Section SUGGESTION IA — placeholder cliquable qui affiche une requête
- * heuristique (`get X | count`) et notifie « Bientôt disponible ». À brancher
+ * heuristique (`get X count`) et notifie « Bientôt disponible ». À brancher
  * au vrai moteur IA plus tard.
  */
 export function TableDetailsSuggestion({ table }: TableDetailsSuggestionProps) {
@@ -55,7 +55,7 @@ export function TableDetailsSuggestion({ table }: TableDetailsSuggestionProps) {
 							color: "var(--sqlnest-text-secondary)"
 						}}
 					>
-						{`get ${table.name}${suggestPredicate(table)} | count`}
+						{`get ${table.name}${suggestPredicate(table)} count`}
 					</Text>
 				</UnstyledButton>
 			</Box>
@@ -69,6 +69,6 @@ export function TableDetailsSuggestion({ table }: TableDetailsSuggestionProps) {
  */
 function suggestPredicate(table: Collection): string {
 	const boolField = table.fields.find((f) => f.type === "bool");
-	if (boolField !== undefined) return ` | where ${boolField.name} = true`;
+	if (boolField !== undefined) return ` where ${boolField.name} = true`;
 	return "";
 }

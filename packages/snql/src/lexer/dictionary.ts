@@ -6,25 +6,16 @@
 
 export type OperationKind = "select" | "insert" | "update" | "delete";
 
-/** Verbes d'intention → opération canonique. Les synonymes collapsent ici. */
+/** Verbes d'intention → opération canonique. Un canonique + un alias par opération. */
 export const VERB_SYNONYMS: Readonly<Record<string, OperationKind>> = {
 	get: "select",
 	find: "select",
-	show: "select",
-	fetch: "select",
 	add: "insert",
-	inject: "insert",
-	append: "insert",
 	create: "insert",
 	update: "update",
-	modify: "update",
 	edit: "update",
-	patch: "update",
-	change: "update",
 	remove: "delete",
-	erase: "delete",
-	obliterate: "delete",
-	clear: "delete"
+	delete: "delete"
 };
 
 /**
@@ -37,6 +28,7 @@ export const KEYWORDS: ReadonlySet<string> = new Set([
 	"pick",
 	"sort",
 	"limit",
+	"take",
 	"offset",
 	"into",
 	"set",
@@ -44,6 +36,8 @@ export const KEYWORDS: ReadonlySet<string> = new Set([
 	"as",
 	"with",
 	"on",
+	"one",
+	"many",
 	"group",
 	"by",
 	"and",
@@ -54,6 +48,11 @@ export const KEYWORDS: ReadonlySet<string> = new Set([
 	"asc",
 	"desc"
 ]);
+
+/** Alias de mots-clés normalisés à la lecture (ex. `take` → `limit`). */
+export const KEYWORD_ALIASES: Readonly<Record<string, string>> = {
+	take: "limit"
+};
 
 /**
  * Retourne l'opération canonique d'un verbe, ou `undefined` si le mot n'est pas un verbe.

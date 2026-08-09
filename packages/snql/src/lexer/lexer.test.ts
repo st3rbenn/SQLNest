@@ -2,16 +2,20 @@ import { describe, expect, it } from "vitest";
 import { tokenize } from "./lexer";
 
 describe("lexer", () => {
-	it("tokenise un pipeline simple", () => {
-		const kinds = tokenize("get users | limit 10").map((t) => t.kind);
-		expect(kinds).toEqual([
-			"verb",
-			"ident",
-			"pipe",
-			"keyword",
-			"number",
-			"eof"
-		]);
+	it("tokenise une requête simple sans séparateur", () => {
+		const kinds = tokenize("get users limit 10").map((t) => t.kind);
+		expect(kinds).toEqual(["verb", "ident", "keyword", "number", "eof"]);
+	});
+
+	it("rejette le pipe '|' avec un message de migration", () => {
+		expect(() => tokenize("get users | limit 10")).toThrow(
+			/ne sépare plus/i
+		);
+	});
+
+	it("normalise `take` en `limit` (alias)", () => {
+		const toks = tokenize("get users take 5");
+		expect(toks[2]).toMatchObject({ kind: "keyword", value: "limit" });
 	});
 
 	it("reconnaît opérateurs et chaînes", () => {
@@ -59,15 +63,8 @@ describe("lexer", () => {
 
 	it("ignore les commentaires '#'", () => {
 		const kinds = tokenize(
-			"get users # ceci est un commentaire\n| limit 1"
+			"get users # ceci est un commentaire\nlimit 1"
 		).map((t) => t.kind);
-		expect(kinds).toEqual([
-			"verb",
-			"ident",
-			"pipe",
-			"keyword",
-			"number",
-			"eof"
-		]);
+		expect(kinds).toEqual(["verb", "ident", "keyword", "number", "eof"]);
 	});
 });

@@ -20,6 +20,36 @@ import { introspectPostgres } from "./introspect";
 
 const { Pool } = pg;
 
+/**
+ * Compose un message utilisable côté UI à partir d'une erreur `pg`. On garde le
+ * message natif du driver (ex. `syntax error at or near "and"`, `relation "foo"
+ * does not exist`) — c'est ce qui pointe le doigt sur la vraie cause — puis on
+ * annote le SQLSTATE et le `detail`/`hint` s'ils sont là. Fallback si `cause`
+ * n'est pas une Error : on renvoie le message générique historique.
+ */
+function describePgExecutionError(cause: unknown): string {
+	if (!(cause instanceof Error)) {
+		return "Exécution Postgres échouée";
+	}
+	const props = cause as {
+		message: string;
+		code?: string;
+		detail?: string;
+		hint?: string;
+	};
+	const parts: string[] = [props.message];
+	if (typeof props.code === "string" && props.code.length > 0) {
+		parts.push(`SQLSTATE ${props.code}`);
+	}
+	if (typeof props.detail === "string" && props.detail.length > 0) {
+		parts.push(props.detail);
+	}
+	if (typeof props.hint === "string" && props.hint.length > 0) {
+		parts.push(`hint: ${props.hint}`);
+	}
+	return parts.join(" — ");
+}
+
 function createPool(config: PostgresConnectionConfig): PgPool {
 	const options: PoolConfig = {
 		host: config.host,
@@ -129,7 +159,9 @@ class PostgresConnection implements Connection {
 				rowCount: result.rowCount ?? result.rows.length
 			};
 		} catch (cause) {
-			throw new EngineExecutionError("Exécution Postgres échouée", { cause });
+			throw new EngineExecutionError(describePgExecutionError(cause), {
+				cause
+			});
 		} finally {
 			client.release();
 		}

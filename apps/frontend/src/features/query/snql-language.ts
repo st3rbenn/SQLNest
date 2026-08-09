@@ -124,10 +124,6 @@ const snqlStream = StreamLanguage.define<StreamState>({
 			state.inString = ch;
 			return consumeString(stream, state);
 		}
-		if (ch === "|") {
-			stream.next();
-			return "operator";
-		}
 		if (ch >= "0" && ch <= "9") {
 			stream.eatWhile(NUMBER_PART);
 			return "number";
@@ -173,22 +169,11 @@ function classifyWord(word: string): string {
 	return "variableName";
 }
 
-/**
- * Palette de coloration syntaxique dark-first.
- * - keyword (verbes SNQL, connecteurs) : accent — mise en avant du
- *   squelette de la requête.
- * - string : vert clair (lisible sur #2C2C2C).
- * - number : jaune warning — chiffres sortent visuellement du texte.
- * - atom (true/false/null) : mauve pastel.
- * - operator (`|`) + comment : text-tertiary — décor, pas de bruit.
- * - variableName (identifiants) : text-primary — c'est le corps de la requête.
- */
 const highlightStyle = HighlightStyle.define([
 	{ tag: t.keyword, color: "#0d99ff", fontWeight: "600" },
 	{ tag: t.string, color: "#4ddb99" },
 	{ tag: t.number, color: "#ffc933" },
 	{ tag: t.atom, color: "#c084fc" },
-	{ tag: t.operator, color: "#7a7a7a" },
 	{ tag: t.comment, color: "#7a7a7a", fontStyle: "italic" },
 	{ tag: t.variableName, color: "#ffffff" }
 ]);

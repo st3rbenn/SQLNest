@@ -83,6 +83,12 @@ export type Stage =
 			readonly alias?: string;
 			readonly localField: readonly string[];
 			readonly foreignField: readonly string[];
+			/**
+			 * Multiplicité **forcée** par l'utilisateur (`with one X` / `with many X`).
+			 * Absent = inférence via [[SchemaModel]] au lower (relations → embed/join).
+			 * Sert d'escape hatch quand l'inférence rate ou n'a pas de schéma.
+			 */
+			readonly multiplicity?: "one" | "many";
 			readonly span: Span;
 	  };
 
@@ -108,7 +114,7 @@ export interface Assignment {
 	readonly span: Span;
 }
 
-/** `update <coll> [| where <pred>] | set <affectations>`. `where` optionnel : sans lui, toutes les lignes. */
+/** `update <coll> [where <pred>] set <affectations>`. `where` optionnel : sans lui, toutes les lignes. */
 export interface UpdateStatement {
 	readonly operation: "update";
 	readonly verb: string;

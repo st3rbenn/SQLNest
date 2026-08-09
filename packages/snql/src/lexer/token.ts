@@ -20,7 +20,6 @@ export type TokenKind =
 	| "boolean"
 	| "null"
 	| "op" // = != < > <= >=
-	| "pipe" // |
 	| "comma" // ,
 	| "dot" // .
 	| "plus" // +

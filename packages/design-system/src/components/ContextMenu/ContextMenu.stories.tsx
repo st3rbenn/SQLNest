@@ -131,7 +131,7 @@ export const LongLabelAndHint: Story = {
 				kind: "action",
 				id: "long",
 				label: "Ouvrir cette table extrêmement longue dans l'éditeur SNQL",
-				hint: "get resource_software_link | limit 100",
+				hint: "get resource_software_link limit 100",
 			},
 			{
 				kind: "action",

@@ -12,6 +12,11 @@ import type {
 	UpdateStatement
 } from "../parser/ast";
 import type {
+	Relation,
+	RelationKind,
+	SchemaModel
+} from "../schema/model";
+import type {
 	CompareOp,
 	LogicalPlan,
 	MutationPlan,
@@ -21,8 +26,17 @@ import type {
 	SqlValue
 } from "./plan";
 
-/** Abaisse l'AST de surface en Logical Plan canonique (collapse des synonymes, etc.). */
-export function lower(query: Query): LogicalPlan {
+/**
+ * Abaisse l'AST de surface en Logical Plan canonique (collapse des synonymes, etc.).
+ *
+ * Le [[SchemaModel]] optionnel permet d'inférer la multiplicité des joins `with`
+ * depuis les relations introspectées : une relation many-to-one/one-to-one produit
+ * un vrai LEFT JOIN (`kind: "join"`), une one-to-many/many-to-many produit un
+ * embed en array (`kind: "embed"`). Sans schéma ou sans relation matchante, on
+ * retombe sur `embed` (comportement historique). L'utilisateur peut forcer via
+ * `with one X` / `with many X`.
+ */
+export function lower(query: Query, schema?: SchemaModel): LogicalPlan {
 	if (query.operation !== "select") {
 		throw new SnqlError(
 			`Opération '${query.operation}' non supportée en Slice 1`,
@@ -41,17 +55,67 @@ export function lower(query: Query): LogicalPlan {
 
 	// null = toutes les colonnes disponibles ; après un `pick`, seules celles projetées le restent.
 	let available: ReadonlySet<string> | null = null;
+	// Alias des joins déjà rencontrés en mode `embed` — leurs champs sont
+	// enveloppés dans un array JSON, `alias.field` n'est pas résolvable.
+	const embedAliases = new Set<string>();
 	for (const stage of query.stages) {
 		checkColumnsAvailable(stage, available);
-		plan = lowerStage(plan, stage, query.source.alias);
+		if (stage.type !== "with") {
+			checkNoEmbedAliasDeref(stage, embedAliases);
+		}
+		plan = lowerStage(plan, stage, query.source.collection, query.source.alias, schema);
 		if (stage.type === "pick") {
 			available = projectionKeys(stage.fields);
-		} else if (stage.type === "with" && available !== null) {
-			// le join ajoute un champ imbriqué (`as`) aux colonnes disponibles
-			available = new Set([...available, stage.alias ?? stage.collection]);
+		} else if (stage.type === "with") {
+			// Le join ajoute un champ imbriqué (`as`) aux colonnes disponibles.
+			if (available !== null) {
+				available = new Set([...available, stage.alias ?? stage.collection]);
+			}
+			// Le kind vient d'être décidé dans lowerStage — le plan racine est
+			// forcément un `join` maintenant.
+			if (plan.op === "join" && plan.kind === "embed") {
+				embedAliases.add(stage.alias ?? stage.collection);
+			}
 		}
 	}
 	return plan;
+}
+
+/**
+ * Un `alias.field` en pick/where/sort où `alias` a été introduit par un `with`
+ * en mode `embed` (one-to-many / many-to-many) n'a pas de valeur unique — le
+ * codegen ne peut pas le traduire proprement. On lève ici une erreur explicite
+ * plutôt que de laisser Postgres/Mongo remonter un message obscur.
+ */
+function checkNoEmbedAliasDeref(
+	stage: Stage,
+	embedAliases: ReadonlySet<string>
+): void {
+	if (embedAliases.size === 0) {
+		return;
+	}
+	const referenced: (readonly string[])[] = [];
+	switch (stage.type) {
+		case "where":
+			collectExprFields(stage.predicate, referenced);
+			break;
+		case "sort":
+			for (const key of stage.keys) referenced.push(key.path);
+			break;
+		case "pick":
+			for (const field of stage.fields) referenced.push(field.path);
+			break;
+		case "limit":
+			return;
+	}
+	for (const path of referenced) {
+		if (path.length >= 2 && embedAliases.has(path[0] ?? "")) {
+			throw new SnqlError(
+				`'${path.join(".")}' pointe dans '${path[0]}' qui est un join one-to-many (embed array) — la ligne source a plusieurs valeurs, pas une. Utilise 'pick ${path[0]}' pour l'array complet, ou force 'with one ${path[0]} on …' si tu attends une seule row.`,
+				"lower_embed_alias_deref"
+			);
+		}
+	}
 }
 
 /** Abaisse une mutation (insert / update / delete) en [[MutationPlan]]. */
@@ -258,7 +322,9 @@ function stripAlias(
 function lowerStage(
 	input: LogicalPlan,
 	stage: Stage,
-	sourceAlias: string | undefined
+	sourceCollection: string,
+	sourceAlias: string | undefined,
+	schema: SchemaModel | undefined
 ): LogicalPlan {
 	switch (stage.type) {
 		case "where":
@@ -274,20 +340,122 @@ function lowerStage(
 			return stage.offset !== undefined
 				? { op: "limit", input, count: stage.count, offset: stage.offset }
 				: { op: "limit", input, count: stage.count };
-		case "with":
+		case "with": {
+			// localField vient de la source (strip son alias), foreignField de la collection jointe.
+			const localField = stripAlias(stage.localField, sourceAlias);
+			const foreignField = stripAlias(
+				stage.foreignField,
+				stage.alias ?? stage.collection
+			);
+			const kind = resolveJoinKind(
+				sourceCollection,
+				stage.collection,
+				localField,
+				foreignField,
+				stage.multiplicity,
+				schema
+			);
 			return {
 				op: "join",
 				input,
 				collection: stage.collection,
 				as: stage.alias ?? stage.collection,
-				// localField vient de la source (strip son alias), foreignField de la collection jointe.
-				localField: stripAlias(stage.localField, sourceAlias),
-				foreignField: stripAlias(
-					stage.foreignField,
-					stage.alias ?? stage.collection
-				)
+				localField,
+				foreignField,
+				kind
 			};
+		}
 	}
+}
+
+/**
+ * Choix de la multiplicité d'un join. Ordre :
+ * 1. Mot-clé utilisateur (`with one X` / `with many X`) — override total.
+ * 2. Inférence via [[SchemaModel]] : cherche une relation matchant
+ *    (source, joined, localField, foreignField) dans les deux orientations,
+ *    lit le `kind`, l'oriente depuis la source. many-to-one/one-to-one → `join`,
+ *    one-to-many/many-to-many → `embed`.
+ * 3. Fallback `embed` — comportement historique, ne casse pas l'existant quand
+ *    l'introspection n'a pas tourné ou n'a pas trouvé la FK.
+ */
+function resolveJoinKind(
+	sourceCollection: string,
+	joinedCollection: string,
+	localField: readonly string[],
+	foreignField: readonly string[],
+	multiplicity: "one" | "many" | undefined,
+	schema: SchemaModel | undefined
+): "embed" | "join" {
+	if (multiplicity === "one") {
+		return "join";
+	}
+	if (multiplicity === "many") {
+		return "embed";
+	}
+	if (schema === undefined) {
+		return "embed";
+	}
+	for (const rel of schema.relations) {
+		const oriented = orientRelation(
+			rel,
+			sourceCollection,
+			joinedCollection,
+			localField,
+			foreignField
+		);
+		if (oriented !== undefined) {
+			return oriented === "one-to-one" || oriented === "many-to-one"
+				? "join"
+				: "embed";
+		}
+	}
+	return "embed";
+}
+
+/**
+ * Une relation matche notre join ssi ses collections et fields correspondent
+ * dans l'une des deux orientations. Retourne le `kind` **du POV de la source**
+ * (inversé si la relation est écrite dans l'autre sens).
+ */
+function orientRelation(
+	rel: Relation,
+	source: string,
+	joined: string,
+	localField: readonly string[],
+	foreignField: readonly string[]
+): RelationKind | undefined {
+	if (
+		rel.from.collection === source &&
+		rel.to.collection === joined &&
+		fieldsEqual(rel.from.fields, localField) &&
+		fieldsEqual(rel.to.fields, foreignField)
+	) {
+		return rel.kind;
+	}
+	if (
+		rel.to.collection === source &&
+		rel.from.collection === joined &&
+		fieldsEqual(rel.to.fields, localField) &&
+		fieldsEqual(rel.from.fields, foreignField)
+	) {
+		return invertKind(rel.kind);
+	}
+	return undefined;
+}
+
+function invertKind(kind: RelationKind): RelationKind {
+	if (kind === "many-to-one") return "one-to-many";
+	if (kind === "one-to-many") return "many-to-one";
+	// one-to-one et many-to-many sont symétriques.
+	return kind;
+}
+
+function fieldsEqual(a: readonly string[], b: readonly string[]): boolean {
+	if (a.length !== b.length) return false;
+	for (let i = 0; i < a.length; i += 1) {
+		if (a[i] !== b[i]) return false;
+	}
+	return true;
 }
 
 function lowerField(field: FieldSelection): PlanProjectField {

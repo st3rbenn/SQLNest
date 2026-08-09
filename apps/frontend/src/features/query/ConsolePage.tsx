@@ -19,6 +19,7 @@
  */
 
 import { useHotkeys, useLocalStorage } from "@mantine/hooks";
+import { formatSnql } from "@sqlnest/snql";
 import { useNavigate } from "@tanstack/react-router";
 import {
 	type CSSProperties,
@@ -33,7 +34,6 @@ import { useConsolePersistence } from "../schema/console/useConsolePersistence";
 import { useSchema } from "../schema/useSchema";
 import { ConsoleHeader } from "./ConsoleHeader";
 import { ConsoleResultsPanel } from "./ConsoleResultsPanel";
-import { ConsoleTabs } from "./ConsoleTabs";
 import { SnqlEditor } from "./SnqlEditor";
 import { openConsoleInPopout, useIsPopout } from "./usePopoutWindow";
 import { useConsoleTabs } from "./useConsoleTabs";
@@ -42,7 +42,7 @@ import { useRunQuery } from "./useRunQuery";
 const SPLIT_STORAGE_KEY = "sqlnest.console.editorHeight";
 const SPLIT_MIN_TOP = 120;
 const SPLIT_MIN_BOTTOM = 200;
-const SPLIT_DEFAULT = 320;
+const SPLIT_DEFAULT = 220;
 
 const pageStyle: CSSProperties = {
 	position: "fixed",
@@ -64,7 +64,16 @@ const bodyStyle: CSSProperties = {
 const editorWrapperStyle: CSSProperties = {
 	background: "var(--sqlnest-canvas-bg)",
 	overflow: "hidden",
-	minHeight: SPLIT_MIN_TOP
+	minHeight: SPLIT_MIN_TOP,
+	display: "flex",
+	flexDirection: "column"
+};
+
+const editorFillStyle: CSSProperties = {
+	flex: 1,
+	minHeight: 0,
+	display: "flex",
+	flexDirection: "column"
 };
 
 const resizeHandleStyle: CSSProperties = {
@@ -143,6 +152,14 @@ export function ConsolePage({
 	const [lastRunAt, setLastRunAt] = useState<number | undefined>(undefined);
 	const [timingMs, setTimingMs] = useState<number | undefined>(undefined);
 
+	// Le panel results n'apparaît qu'après la première interaction avec la
+	// query (pending, résultat ou erreur). Avant : l'éditeur prend tout
+	// l'espace pour ne pas polluer visuellement.
+	const hasRun =
+		runQuery.isPending ||
+		runQuery.data !== undefined ||
+		runQuery.error !== null;
+
 	// Injection depuis les search params ?source= (avant tout run éventuel).
 	// Le hook n'écrase que si le tab actif est vide (évite d'effacer un
 	// travail en cours).
@@ -177,6 +194,15 @@ export function ConsolePage({
 			}
 		);
 	}, [runQuery, connId, teamSlug, tabs, activeTabId, persistence]);
+
+	const format = useCallback(() => {
+		const src = tabs.activeTab.source;
+		if (src.trim() === "") return;
+		const formatted = formatSnql(src);
+		if (formatted !== src) {
+			tabs.updateSource(activeTabId, formatted);
+		}
+	}, [tabs, activeTabId]);
 
 	// Autorun depuis ?autorun=1 — one-shot au mount.
 	const autoranRef = useRef(false);
@@ -219,6 +245,7 @@ export function ConsolePage({
 	useHotkeys(
 		[
 			["mod+shift+K", handleDetach, { preventDefault: true }],
+			["mod+shift+F", format, { preventDefault: true }],
 			["Escape", handleBack, { preventDefault: false }],
 			["mod+T", tabs.newTab, { preventDefault: true }],
 			[
@@ -240,54 +267,70 @@ export function ConsolePage({
 				canExecute={
 					activeSource.trim() !== "" && connection !== undefined
 				}
+				canFormat={activeSource.trim() !== ""}
 				isRunning={runQuery.isPending}
 				onExecute={execute}
+				onFormat={format}
 				onDetach={handleDetach}
 				history={persistence.history}
 				onHistorySelect={(source) =>
 					tabs.updateSource(activeTabId, source)
 				}
 				onHistoryClear={persistence.clearHistory}
-			/>
-
-			<ConsoleTabs
 				tabs={tabs.state.tabs}
 				activeTabId={activeTabId}
-				onSelect={tabs.setActive}
-				onClose={tabs.closeTab}
-				onNew={tabs.newTab}
-				onRename={tabs.renameTab}
-				onReorder={tabs.reorderTabs}
+				onSelectTab={tabs.setActive}
+				onCloseTab={tabs.closeTab}
+				onNewTab={tabs.newTab}
+				onRenameTab={tabs.renameTab}
+				onReorderTabs={tabs.reorderTabs}
 			/>
 
 			<div ref={bodyRef} style={bodyStyle}>
-				<div style={{ ...editorWrapperStyle, height: editorHeight }}>
-					<SnqlEditor
-						value={activeSource}
-						onChange={(v) => tabs.updateSource(activeTabId, v)}
-						onRun={execute}
-						schema={schemaQuery.data ?? null}
-						placeholder="get <table> | pick <fields>"
-					/>
-				</div>
+				{/* Résultats masqués tant qu'aucune query n'a été lancée — évite
+				    le "vide flou" au premier chargement, laisse l'éditeur
+				    respirer tout seul. Apparaît dès qu'un run est pending / OK /
+				    en erreur. */}
 				<div
 					style={{
-						...resizeHandleStyle,
-						background: isDragging
-							? "var(--sqlnest-accent-muted)"
-							: "var(--sqlnest-border-subtle)"
+						...editorWrapperStyle,
+						...(hasRun
+							? { height: editorHeight }
+							: { flex: 1, minHeight: 0 })
 					}}
-					onPointerDown={startDrag}
-					role="separator"
-					aria-orientation="horizontal"
-					aria-label="Redimensionner l'éditeur"
-				/>
-				<ConsoleResultsPanel
-					result={runQuery.data}
-					error={runQuery.error}
-					isPending={runQuery.isPending}
-					timingMs={lastRunAt !== undefined ? timingMs : undefined}
-				/>
+				>
+					<div style={editorFillStyle}>
+						<SnqlEditor
+							value={activeSource}
+							onChange={(v) => tabs.updateSource(activeTabId, v)}
+							onRun={execute}
+							schema={schemaQuery.data ?? null}
+							placeholder="get <table> pick <fields>"
+						/>
+					</div>
+				</div>
+				{hasRun ? (
+					<>
+						<div
+							style={{
+								...resizeHandleStyle,
+								background: isDragging
+									? "var(--sqlnest-accent-muted)"
+									: "var(--sqlnest-border)"
+							}}
+							onPointerDown={startDrag}
+							role="separator"
+							aria-orientation="horizontal"
+							aria-label="Redimensionner l'éditeur"
+						/>
+						<ConsoleResultsPanel
+							result={runQuery.data}
+							error={runQuery.error}
+							isPending={runQuery.isPending}
+							timingMs={lastRunAt !== undefined ? timingMs : undefined}
+						/>
+					</>
+				) : null}
 			</div>
 		</div>
 	);

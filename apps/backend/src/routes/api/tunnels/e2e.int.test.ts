@@ -333,7 +333,7 @@ describe.skipIf(!DATABASE_URL)(
 				// ─── Browser envoie une req (payload = op MessagePack en clair) ─
 				const opPayloadPack = pack({
 					op: "runSnql",
-					src: "get users | limit 1"
+					src: "get users limit 1"
 				}) as Uint8Array | Buffer;
 				const opPayload =
 					opPayloadPack instanceof Uint8Array && !Buffer.isBuffer(opPayloadPack)
@@ -370,7 +370,7 @@ describe.skipIf(!DATABASE_URL)(
 				// ─── Assertion règle 2 sécu — le CLI a bien reçu le SQL du browser
 				expect(runOp).toHaveBeenCalledWith({
 					op: "runSnql",
-					src: "get users | limit 1"
+					src: "get users limit 1"
 				});
 
 				browserWs.close();

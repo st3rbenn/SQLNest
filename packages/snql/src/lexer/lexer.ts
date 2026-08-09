@@ -1,5 +1,5 @@
 import { SnqlError } from "../diagnostics";
-import { KEYWORDS, verbOperation } from "./dictionary";
+import { KEYWORD_ALIASES, KEYWORDS, verbOperation } from "./dictionary";
 import type { Position, Span, Token, TokenKind } from "./token";
 
 const isDigit = (c: string): boolean => c >= "0" && c <= "9";
@@ -9,7 +9,6 @@ const isIdentPart = (c: string): boolean => isIdentStart(c) || isDigit(c);
 
 /** Ponctuation / opérateurs mono-caractère → kind de token. */
 const SINGLE: Readonly<Record<string, TokenKind>> = {
-	"|": "pipe",
 	",": "comma",
 	".": "dot",
 	"(": "lparen",
@@ -115,6 +114,13 @@ class Lexer {
 		}
 
 		this.advance();
+		if (c === "|") {
+			throw new SnqlError(
+				"SNQL ne sépare plus les étapes par '|' : écris-les à la suite (ex. `get users where age > 30 limit 10`)",
+				"lex_pipe_removed",
+				this.spanFrom(start)
+			);
+		}
 		throw new SnqlError(
 			`Caractère inattendu '${c}'`,
 			"lex_unexpected",
@@ -222,7 +228,16 @@ class Lexer {
 		}
 		// Verbes/mots-clés/littéraux sont normalisés en minuscules ;
 		// les identifiants gardent leur casse (noms réels en base).
-		const value = kind === "ident" ? raw : lower;
+		// Les alias de mots-clés (`take` → `limit`) sont collapsés ici pour que
+		// le parser n'ait qu'une valeur canonique à matcher.
+		let value: string;
+		if (kind === "ident") {
+			value = raw;
+		} else if (kind === "keyword" && Object.hasOwn(KEYWORD_ALIASES, lower)) {
+			value = KEYWORD_ALIASES[lower] as string;
+		} else {
+			value = lower;
+		}
 		this.tokens.push({ kind, value, span: this.spanFrom(start) });
 	}
 }

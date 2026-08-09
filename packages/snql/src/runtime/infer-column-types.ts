@@ -9,10 +9,10 @@
  *
  * ─── Cases supportés ─────────────────────────────────────────────────────
  *   get <coll>                       → toutes les colonnes de la collection
- *   get <coll> | pick a, b           → a et b (typés depuis le schéma)
- *   get <coll> as u | pick u.email   → email typé (alias source strippé)
- *   get a | with b as x on ... | pick x  → x typé "array" (join embed)
- *   get a | with b as x on ... | pick x.field  → unknown (nested paths V2)
+ *   get <coll> pick a, b           → a et b (typés depuis le schéma)
+ *   get <coll> as u pick u.email   → email typé (alias source strippé)
+ *   get a with b as x on ... pick x  → x typé "array" (join embed)
+ *   get a with b as x on ... pick x.field  → unknown (nested paths V2)
  *   get <coll> | filter/sort/limit ... → transparent (pass-through)
  *
  * ─── Fallback ────────────────────────────────────────────────────────────
@@ -210,7 +210,7 @@ function resolveProjectField(
 		return { name: outputName, ...UNKNOWN_FIELD, collection: "" };
 	}
 
-	// Cas alias source : `get users as u | pick u.email`
+	// Cas alias source : `get users as u pick u.email`
 	if (prefix === state.sourceAlias) {
 		if (rest.length === 1) {
 			const name = rest[0];

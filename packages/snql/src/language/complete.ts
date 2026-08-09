@@ -41,22 +41,31 @@ export interface SnqlCompletionResult {
 	readonly options: readonly SnqlCompletion[];
 }
 
-/** Verbes proposés en début de requête (un par opération canonique). */
+/** Verbes proposés en début de requête (canonique par opération). */
 const PRIMARY_VERBS: readonly { label: string; detail: string }[] = [
 	{ label: "get", detail: "lecture" },
-	{ label: "find", detail: "lecture" },
 	{ label: "add", detail: "insertion" },
 	{ label: "update", detail: "mise à jour" },
 	{ label: "remove", detail: "suppression" }
 ];
 
-/** Étapes de pipeline valides après `|`, par opération. */
+/** Étapes valides par opération, dans l'ordre canonique imposé par le parser. */
 const STAGES: Readonly<Record<OperationKind, readonly string[]>> = {
-	select: ["where", "with", "pick", "sort", "limit"],
+	select: ["with", "where", "sort", "pick", "limit"],
 	update: ["where", "set"],
 	delete: ["where"],
 	insert: []
 };
+
+/** Mots-clés de stage (utilisés pour détecter l'étape active dans un flux tokens). */
+const STAGE_KEYWORDS: ReadonlySet<string> = new Set([
+	"with",
+	"where",
+	"sort",
+	"pick",
+	"limit",
+	"set"
+]);
 
 /** Mot courant en cours de frappe (identifiant) juste avant le curseur. */
 const TRAILING_WORD = /[A-Za-z0-9_]*$/;
@@ -105,8 +114,8 @@ function contextOptions(
 	const scope = extractScope(toks, operation);
 
 	// Un verbe ne pilote le contexte qu'en **tête de requête**. Le lexer classe
-	// `verb` tout synonyme (change, clear, edit…) où qu'il apparaisse : sans ce
-	// garde, `… | where change ` proposerait des collections.
+	// `verb` tout synonyme (create, edit, delete…) où qu'il apparaisse : sans ce
+	// garde, un ident nommé comme un verbe proposerait des collections.
 	if (last.kind === "verb" && toks.length === 1) {
 		const op = verbOperation(last.value);
 		// `get <coll>` / `update <coll>` : le mot suivant est la collection cible.
@@ -119,16 +128,18 @@ function contextOptions(
 		return [];
 	}
 
-	if (last.kind === "pipe") {
-		return (operation ? STAGES[operation] : STAGES.select).map(keyword);
-	}
-
 	if (last.kind === "keyword") {
+		// `and` a deux rôles : chaînage entre joins (`with A on … and B on …`) ou
+		// opérateur booléen dans un prédicat. On propose les collections jointes
+		// uniquement quand on est encore en clause `with`.
+		if (last.value === "and" && isChainingJoin(toks)) {
+			return joinTargets(schema, scope);
+		}
 		return keywordContext(last.value, schema, scope);
 	}
 
 	if (last.kind === "comma") {
-		// Continuation d'une liste : dépend de l'étape active depuis le dernier `|`.
+		// Continuation d'une liste : dépend de l'étape active.
 		return commaContext(toks, schema, scope);
 	}
 
@@ -137,14 +148,6 @@ function contextOptions(
 		const foreign = onForeignCollection(toks);
 		if (foreign !== undefined) {
 			return fieldsOf(schema, foreign);
-		}
-		return [];
-	}
-
-	if (last.kind === "minus" || last.kind === "plus") {
-		// Signe de direction dans `sort` : un champ suit.
-		if (activeStage(toks) === "sort") {
-			return fields(schema, scope, false);
 		}
 		return [];
 	}
@@ -163,7 +166,59 @@ function contextOptions(
 		return [];
 	}
 
+	if (last.kind === "ident" || last.kind === "number" || last.kind === "rparen") {
+		// Fin d'une valeur, d'une source, ou d'un chemin de champ : propose les
+		// stages restants dans l'ordre canonique (moins ceux déjà présents).
+		return remainingStages(toks, operation);
+	}
+
 	return [];
+}
+
+/** Stages non encore consommés pour l'opération courante, dans l'ordre canonique. */
+function remainingStages(
+	toks: readonly Token[],
+	operation: OperationKind | undefined
+): readonly SnqlCompletion[] {
+	const available = operation ? STAGES[operation] : STAGES.select;
+	const seen = new Set<string>();
+	for (const tok of toks) {
+		if (tok.kind === "keyword" && available.includes(tok.value)) {
+			seen.add(tok.value);
+		}
+	}
+	// `with` est répétable via `and` — pas de restriction sur lui.
+	return available
+		.filter((stage) => stage === "with" || !seen.has(stage))
+		.map(keyword);
+}
+
+/**
+ * Vrai si le `and` en fin de flux est un chaînage de joins (`with … on … = … and`),
+ * plutôt qu'un opérateur booléen dans un prédicat. On regarde le dernier stage
+ * ouvert : s'il s'agit d'un `with` et qu'une valeur foreign a été fournie, c'est
+ * un chaînage.
+ */
+function isChainingJoin(toks: readonly Token[]): boolean {
+	// L'`and` en question est le dernier token — on regarde ce qui précède.
+	if (activeStage(toks.slice(0, -1)) !== "with") {
+		return false;
+	}
+	// Un chaînage suit un `on <local> = <foreign>` complet : on cherche un `=`
+	// après le dernier `on` ; s'il est là et qu'un ident/rien de « prédicat »
+	// ne le sépare pas d'`and`, on est en position de chaînage.
+	let sawOn = false;
+	let sawEq = false;
+	for (let i = 0; i < toks.length - 1; i += 1) {
+		const t = toks[i];
+		if (t?.kind === "keyword" && t.value === "on") {
+			sawOn = true;
+			sawEq = false;
+		} else if (sawOn && t?.kind === "op" && t.value === "=") {
+			sawEq = true;
+		}
+	}
+	return sawOn && sawEq;
 }
 
 /** Une liste de documents `[ … ` est-elle encore ouverte ? */
@@ -288,38 +343,42 @@ function identAfter(toks: readonly Token[], kw: string): string | undefined {
 	return undefined;
 }
 
-/** Mot-clé d'étape suivant le dernier `|` (ou undefined si hors pipeline). */
+/** Dernier stage keyword vu — sans pipe, on scanne à rebours le flux. */
 function activeStage(toks: readonly Token[]): string | undefined {
-	let pipeIdx = -1;
 	for (let i = toks.length - 1; i >= 0; i -= 1) {
-		if (toks[i]?.kind === "pipe") {
-			pipeIdx = i;
-			break;
+		const tok = toks[i];
+		if (tok?.kind === "keyword" && STAGE_KEYWORDS.has(tok.value)) {
+			return tok.value;
 		}
 	}
-	const stage = toks[pipeIdx + 1];
-	return stage?.kind === "keyword" ? stage.value : undefined;
+	return undefined;
 }
 
 /**
- * Dans l'étape `with` active, la collection jointe (l'ident après `with`) — pour
- * compléter le membre droit de `on <local> = <foreign>`. undefined hors `with`.
+ * Dans l'étape `with` active, la collection jointe (l'ident après `with` ou après
+ * un `and` de chaînage) — pour compléter le membre droit de `on <local> = <foreign>`.
  */
 function onForeignCollection(toks: readonly Token[]): string | undefined {
-	let pipeIdx = -1;
+	// L'introducteur du join courant est le dernier `with` OU le dernier `and`
+	// en position de chaînage (les deux valides comme début d'un join).
+	let introIdx = -1;
 	for (let i = toks.length - 1; i >= 0; i -= 1) {
-		if (toks[i]?.kind === "pipe") {
-			pipeIdx = i;
+		const tok = toks[i];
+		if (tok?.kind === "keyword" && (tok.value === "with" || tok.value === "and")) {
+			introIdx = i;
 			break;
 		}
+		// Si un autre stage keyword est plus récent, on n'est plus dans un with.
+		if (tok?.kind === "keyword" && STAGE_KEYWORDS.has(tok.value)) {
+			return undefined;
+		}
 	}
-	const stage = toks[pipeIdx + 1];
-	if (!(stage?.kind === "keyword" && stage.value === "with")) {
+	if (introIdx === -1) {
 		return undefined;
 	}
-	// On n'est en position « champ distant » que si `on` a déjà été vu.
+	// On n'est en position « champ distant » que si `on` a déjà été vu depuis l'intro.
 	let sawOn = false;
-	for (let i = pipeIdx + 1; i < toks.length; i += 1) {
+	for (let i = introIdx + 1; i < toks.length; i += 1) {
 		if (toks[i]?.kind === "keyword" && toks[i]?.value === "on") {
 			sawOn = true;
 		}
@@ -327,7 +386,7 @@ function onForeignCollection(toks: readonly Token[]): string | undefined {
 	if (!sawOn) {
 		return undefined;
 	}
-	const coll = toks[pipeIdx + 2];
+	const coll = toks[introIdx + 1];
 	return coll?.kind === "ident" ? coll.value : undefined;
 }
 

@@ -152,7 +152,7 @@ function appendStage(
 			pipeline.push({ $limit: op.count });
 			return;
 		case "join":
-			// Embed natif : $lookup imbrique les documents matchés dans le champ `as`.
+			// $lookup : imbrique les documents matchés dans le champ `as` (array).
 			pipeline.push({
 				$lookup: {
 					from: op.collection,
@@ -161,6 +161,18 @@ function appendStage(
 					as: op.as
 				}
 			});
+			// Kind `join` (many-to-one / one-to-one) : on aplatit l'array en objet unique
+			// via $unwind avec preserveNullAndEmptyArrays (garde les lignes sans match,
+			// équivalent LEFT JOIN vs INNER JOIN). Kind `embed` : on laisse l'array tel
+			// quel (comportement historique, one-to-many).
+			if (op.kind === "join") {
+				pipeline.push({
+					$unwind: {
+						path: `$${op.as}`,
+						preserveNullAndEmptyArrays: true
+					}
+				});
+			}
 			return;
 	}
 }

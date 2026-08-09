@@ -68,7 +68,9 @@ export async function runQuery(
 		return { ...(await connection.execute(native)), written: true };
 	}
 
-	const physical = plan(lower(statement), capabilities);
+	// Le schéma pilote l'inférence de multiplicité des joins `with` (many-to-one
+	// → LEFT JOIN, one-to-many → embed array). Sans schéma, fallback embed.
+	const physical = plan(lower(statement, schema), capabilities);
 	const native = mapper.map(physical.pushdown);
 
 	const pushed = await connection.execute(native);

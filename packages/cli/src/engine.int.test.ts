@@ -95,7 +95,7 @@ describe.skipIf(!dockerAvailable)(
 		test('runSnqlOnTunnel("shop", ...) — SNQL simple retourne des rows', async () => {
 			const result = await runSnqlOnTunnel(
 				"shop",
-				"get users | pick id | limit 3"
+				"get users pick id limit 3"
 			);
 			expect(result.written).toBe(false);
 			expect(result.rows.length).toBeGreaterThan(0);
@@ -110,7 +110,7 @@ describe.skipIf(!dockerAvailable)(
 			const introspect = await introspectTunnel("shop");
 			const query = await runSnqlOnTunnel(
 				"shop",
-				"get users | pick id | limit 1"
+				"get users pick id limit 1"
 			);
 			for (const obj of [ping, introspect, query]) {
 				const raw = JSON.stringify(obj);

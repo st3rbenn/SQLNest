@@ -226,7 +226,7 @@ export function CanvasContextMenu({
 			label: "Voir les 100 premières lignes",
 			icon: <IconTable {...ICON} />,
 			hint: <Kbd size="xs">↵</Kbd>,
-			onClick: () => goToEditor(`get ${tableName} | limit 100`, true)
+			onClick: () => goToEditor(`get ${tableName} limit 100`, true)
 		},
 		{
 			kind: "action",

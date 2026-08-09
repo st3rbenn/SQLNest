@@ -88,10 +88,9 @@ export function useConsoleTabs(connectionId: string): UseConsoleTabsApi {
 
 	const newTab = useCallback(() => {
 		setState((s) => {
-			const nextIndex = s.tabs.length + 1;
 			const tab: ConsoleTab = {
 				id: makeId(),
-				name: `Query ${nextIndex}`,
+				name: "Sans titre",
 				source: ""
 			};
 			return { tabs: [...s.tabs, tab], activeTabId: tab.id };

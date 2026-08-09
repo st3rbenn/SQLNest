@@ -8,9 +8,9 @@ const stringify = (value: unknown): string =>
 // --- Codegen dual-moteur (Slices 1–2) ---
 console.log("=== Codegen : 1 SNQL → 2 moteurs natifs ===\n");
 const reads = [
-	`get users | where age > 30 and status = "active" | sort -created_at | limit 10 offset 20 | pick name, email`,
-	`get users | limit 5 | where age > 30`,
-	`get users | with orders on id = user_id | pick name, orders`
+	`get users where age > 30 and status = "active" sort created_at desc pick name, email limit 10 offset 20`,
+	`get users where age > 30 limit 5`,
+	`get users with orders on id = user_id pick name, orders`
 ];
 for (const source of reads) {
 	console.log("SNQL :", source);
@@ -29,7 +29,7 @@ for (const source of reads) {
 
 // --- Planner capability-aware : pushdown vs compensation (Slice 3) ---
 console.log("=== Planner : pushdown vs compensation ===\n");
-const query = "get users | where age > 30 | sort -age | limit 2";
+const query = "get users where age > 30 sort age desc limit 2";
 console.log("SNQL :", query, "\n");
 for (const engine of ["postgres", "kv"]) {
 	const physical = planFor(query, engine);

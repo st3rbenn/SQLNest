@@ -92,6 +92,14 @@ interface JoinSpec {
 	readonly localField: readonly string[];
 	readonly foreignField: readonly string[];
 	readonly innerAlias: string; // alias de la table interne (évite le shadowing en self-join)
+	/**
+	 * `embed` : json_agg corrélé — l'alias devient un tableau JSON dans la sortie
+	 *   (one-to-many). Les refs `alias.field` en pick/where ne sont pas résolvables.
+	 * `join` : LEFT JOIN classique — l'alias est une vraie source SQL, ses colonnes
+	 *   sont projetables et filtrables. `pick alias` seul rend un objet unique via
+	 *   `row_to_json(alias)`.
+	 */
+	readonly kind: "embed" | "join";
 }
 
 interface Select {
@@ -156,7 +164,13 @@ function canAbsorb(sel: Select, op: LogicalPlan): boolean {
 		case "scan":
 			return false;
 		case "filter":
-			return sel.maxPhase <= PHASE.filter;
+			// Un WHERE après un LEFT JOIN est standard SQL — pas besoin de matérialiser
+			// tant que les joins déjà absorbés sont tous `kind: "join"`. Un embed
+			// json_agg reste dans la SELECT-list, on ne peut pas WHERE dessus.
+			return (
+				sel.maxPhase <= PHASE.filter ||
+				sel.joins.every((j) => j.kind === "join")
+			);
 		case "join":
 			return sel.maxPhase <= PHASE.join;
 		case "project":
@@ -184,7 +198,8 @@ function absorb(sel: Select, op: LogicalPlan): void {
 				as: op.as,
 				localField: op.localField,
 				foreignField: op.foreignField,
-				innerAlias: `__j${sel.joins.length}`
+				innerAlias: `__j${sel.joins.length}`,
+				kind: op.kind
 			});
 			sel.maxPhase = Math.max(sel.maxPhase, PHASE.join);
 			return;
@@ -209,6 +224,15 @@ function renderSelect(sel: Select, params: ParamList): string {
 		`SELECT ${renderSelectList(sel)}`,
 		`FROM ${sel.from}`
 	];
+
+	// Les joins `kind: "join"` sont matérialisés en LEFT JOIN — leurs colonnes
+	// sont directement projetables/filtrables. Les `embed` restent des sous-
+	// requêtes json_agg tirées dans la SELECT-list.
+	for (const join of sel.joins) {
+		if (join.kind === "join") {
+			parts.push(renderLeftJoin(join, sel.base));
+		}
+	}
 
 	if (sel.where.length > 0) {
 		parts.push(
@@ -236,27 +260,44 @@ function renderSelectList(sel: Select): string {
 	if (sel.joins.length > 0) {
 		const columns = [`${quoteIdent(sel.base)}.*`];
 		for (const join of sel.joins) {
-			columns.push(
-				`${renderJoinSubquery(join, sel.base)} AS ${quoteIdent(join.as)}`
-			);
+			columns.push(`${renderJoinAliasSource(join, sel.base)} AS ${quoteIdent(join.as)}`);
 		}
 		return columns.join(", ");
 	}
 	return "*";
 }
 
-/** Un champ projeté qui correspond à un join devient sa sous-requête json_agg. */
+/**
+ * Un champ projeté qui pointe vers un alias de join `embed` devient sa sous-
+ * requête json_agg. Pour un `join`, si l'utilisateur pointe l'alias entier
+ * (`pick x`), on retourne `row_to_json(x)` pour homogénéiser avec l'embed
+ * (un seul champ = un objet). Sinon, un chemin qualifié `alias.field` traverse
+ * naturellement le LEFT JOIN et devient une ref SQL directe.
+ */
 function renderProjectField(field: PlanProjectField, sel: Select): string {
 	if (field.path.length === 1) {
 		const join = sel.joins.find((candidate) => candidate.as === field.path[0]);
 		if (join !== undefined) {
-			return `${renderJoinSubquery(join, sel.base)} AS ${quoteIdent(field.alias ?? join.as)}`;
+			return `${renderJoinAliasSource(join, sel.base)} AS ${quoteIdent(field.alias ?? join.as)}`;
 		}
 	}
 	return renderProjection(field);
 }
 
-function renderJoinSubquery(join: JoinSpec, base: string): string {
+/**
+ * Source SQL de l'alias d'un join projeté ou sélectionné en globalité :
+ *  - `embed` → sous-requête `json_agg` corrélée (comportement historique) ;
+ *  - `join`  → `row_to_json(alias)` pour rendre l'objet unique de la row jointe.
+ */
+function renderJoinAliasSource(join: JoinSpec, base: string): string {
+	if (join.kind === "embed") {
+		return renderEmbedSubquery(join, base);
+	}
+	// LEFT JOIN déjà émis dans le FROM — on projette juste l'objet.
+	return `row_to_json(${quoteIdent(join.as)})`;
+}
+
+function renderEmbedSubquery(join: JoinSpec, base: string): string {
 	// Self-join : le nom de la table interne masquerait la base → on l'aliase.
 	const selfJoin = join.collection === base;
 	const innerRef = selfJoin ? join.innerAlias : join.collection;
@@ -267,6 +308,19 @@ function renderJoinSubquery(join: JoinSpec, base: string): string {
 	const foreign = qualify(innerRef, join.foreignField);
 	const local = qualify(base, join.localField);
 	return `(SELECT COALESCE(json_agg(${inner}.*), '[]'::json) FROM ${fromClause} WHERE ${foreign} = ${local})`;
+}
+
+function renderLeftJoin(join: JoinSpec, base: string): string {
+	// Self-join : on aliase toujours pour éviter l'ambigüité avec la base.
+	const selfJoin = join.collection === base;
+	const table = quoteIdent(join.collection);
+	const alias = quoteIdent(join.as);
+	const table_ref = selfJoin || join.as !== join.collection
+		? `${table} AS ${alias}`
+		: table;
+	const local = qualify(base, join.localField);
+	const foreign = qualify(join.as, join.foreignField);
+	return `LEFT JOIN ${table_ref} ON ${foreign} = ${local}`;
 }
 
 function qualify(ref: string, path: readonly string[]): string {

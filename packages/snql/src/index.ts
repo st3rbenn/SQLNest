@@ -10,11 +10,18 @@ import { parse } from "./parser/parser";
 import { capabilitiesFor } from "./planner/capabilities";
 import type { PhysicalPlan, PlanOptions } from "./planner/planner";
 import { plan } from "./planner/planner";
+import type { SchemaModel } from "./schema/model";
 
 export type SupportedEngine = "postgres" | "mongodb";
 
 export interface CompileOptions {
 	readonly engine: SupportedEngine;
+	/**
+	 * Schéma introspecté — utilisé par le lower pour inférer la multiplicité des
+	 * joins `with` (many-to-one → LEFT JOIN, one-to-many → embed array). Absent
+	 * = tous les joins retombent en `embed` (comportement historique).
+	 */
+	readonly schema?: SchemaModel;
 }
 
 export interface CompileResult {
@@ -47,7 +54,7 @@ export function compile(
 			"compile_read_only"
 		);
 	}
-	const logicalPlan = lower(statement);
+	const logicalPlan = lower(statement, options.schema);
 	const native = getMapper(options.engine).map(logicalPlan);
 	return { query: statement, plan: logicalPlan, native };
 }
@@ -55,11 +62,12 @@ export function compile(
 /**
  * Compile puis découpe pour un moteur : tokenize → parse → lower → planner.
  * Retourne le plan physique (pushdown poussé nativement + compensation en runtime).
+ * `schema` est optionnel — voir [[CompileOptions]] pour l'usage.
  */
 export function planFor(
 	source: string,
 	engine: string,
-	options: PlanOptions = {}
+	options: PlanOptions & { readonly schema?: SchemaModel } = {}
 ): PhysicalPlan {
 	const capabilities = capabilitiesFor(engine);
 	if (capabilities === undefined) {
@@ -72,7 +80,7 @@ export function planFor(
 			"plan_read_only"
 		);
 	}
-	return plan(lower(statement), capabilities, options);
+	return plan(lower(statement, options.schema), capabilities, options);
 }
 
 export type {
@@ -106,6 +114,7 @@ export type {
 	SnqlCompletionType
 } from "./language/complete";
 export { completeSnql } from "./language/complete";
+export { formatSnql } from "./language/format";
 export type { OperationKind } from "./lexer/dictionary";
 // Token Dictionary : source de vérité du vocabulaire de surface, exposée pour
 // l'outillage éditeur (coloration/complétion) — pas de redéfinition côté front.

@@ -106,8 +106,16 @@ export type LogicalPlan =
 			readonly count: number;
 			readonly offset?: number;
 	  }
-	// Join embed (imbriqué) : chaque ligne gauche reçoit un tableau des lignes
-	// droites matchées, sous le champ `as`. → ADR-008.
+	// Join. `kind` détermine la sémantique côté codegen :
+	//  - `embed` : chaque ligne gauche reçoit un TABLEAU des lignes droites matchées
+	//    sous le champ `as` (comportement historique, cf. ADR-008). Adapté aux
+	//    relations one-to-many / many-to-many. Les refs `alias.field` en pick/where
+	//    ne sont pas résolvables — utiliser `pick alias` pour l'array complet.
+	//  - `join` : LEFT JOIN classique, `alias` = **une** row unique projetée à côté
+	//    des colonnes de la source. Refs `alias.field` deviennent des refs SQL
+	//    directes. Adapté aux relations many-to-one / one-to-one.
+	// Choisi au lower : mot-clé user (`with one`/`with many`) prioritaire, sinon
+	// inférence via SchemaModel, sinon fallback `embed`.
 	| {
 			readonly op: "join";
 			readonly input: LogicalPlan;
@@ -115,6 +123,7 @@ export type LogicalPlan =
 			readonly as: string;
 			readonly localField: readonly string[];
 			readonly foreignField: readonly string[];
+			readonly kind: "embed" | "join";
 	  };
 
 /** Une affectation de colonne dans un `update` : `column = value`. */

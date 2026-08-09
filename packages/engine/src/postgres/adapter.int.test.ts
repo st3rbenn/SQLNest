@@ -80,7 +80,7 @@ describe.skipIf(!hasPg)("postgres adapter (intégration)", () => {
 		try {
 			const rs = await runQuery(
 				conn,
-				"get users | where is_active = true | pick email"
+				"get users where is_active = true pick email"
 			);
 			const emails = rs.rows.map((row) => row.email).sort();
 			expect(emails).toEqual(["ada@example.com", "alan@example.com"]);
@@ -94,7 +94,7 @@ describe.skipIf(!hasPg)("postgres adapter (intégration)", () => {
 		try {
 			const activated = await runQuery(
 				conn,
-				'update users | where email = "grace@example.com" | set is_active = true'
+				'update users where email = "grace@example.com" set is_active = true'
 			);
 			expect(activated.rowCount).toBe(1);
 			expect(activated.rows[0]?.is_active).toBe(true);
@@ -102,7 +102,7 @@ describe.skipIf(!hasPg)("postgres adapter (intégration)", () => {
 			// Restaure l'état initial (grace inactive) → runs idempotents.
 			await runQuery(
 				conn,
-				'update users | where email = "grace@example.com" | set is_active = false'
+				'update users where email = "grace@example.com" set is_active = false'
 			);
 			await conn.close();
 		}
@@ -113,7 +113,7 @@ describe.skipIf(!hasPg)("postgres adapter (intégration)", () => {
 		try {
 			const removed = await runQuery(
 				conn,
-				'remove from users | where email = "nobody@example.invalid"'
+				'remove from users where email = "nobody@example.invalid"'
 			);
 			expect(removed.rowCount).toBe(0);
 		} finally {
@@ -183,7 +183,7 @@ describe.skipIf(!hasPg)("postgres adapter (intégration)", () => {
 				).toEqual(["id"]);
 
 				// `get gadgets` (non qualifié) résout via search_path → schéma cible.
-				const rs = await runQuery(probe, "get gadgets | pick label");
+				const rs = await runQuery(probe, "get gadgets pick label");
 				expect(rs.rows.map((row) => row.label)).toEqual(["probe"]);
 			} finally {
 				await probe.close();
@@ -196,7 +196,7 @@ describe.skipIf(!hasPg)("postgres adapter (intégration)", () => {
 
 	it("insert : ligne réelle (RETURNING) puis nettoyage", async () => {
 		const conn = await postgresAdapter.connect(loadConfig());
-		const cleanup = 'remove from users | where email = "temp@example.invalid"';
+		const cleanup = 'remove from users where email = "temp@example.invalid"';
 		try {
 			// Nettoie une éventuelle ligne laissée par un run précédent.
 			await runQuery(conn, cleanup);

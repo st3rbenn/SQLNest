@@ -117,14 +117,38 @@ export function hydrateBson(
  * combien de documents ont atterri (et ne re-lance pas à l'aveugle en dupliquant).
  */
 function writeErrorMessage(op: string, cause: unknown): string {
+	const detail = describeMongoExecutionError(cause);
 	if (op === "insert") {
 		const inserted = (cause as { result?: { insertedCount?: number } }).result
 			?.insertedCount;
 		if (typeof inserted === "number" && inserted > 0) {
-			return `Écriture MongoDB échouée après ${inserted} document(s) inséré(s) (insert non atomique)`;
+			return `Écriture MongoDB échouée après ${inserted} document(s) inséré(s) (insert non atomique) — ${detail}`;
 		}
 	}
-	return "Écriture MongoDB échouée";
+	return `Écriture MongoDB échouée — ${detail}`;
+}
+
+/**
+ * Compose un message utilisable côté UI à partir d'une erreur du driver Mongo.
+ * On garde le message natif (ex. `no such collection`, `unknown top-level operator`)
+ * et on annote le `codeName` / `code` du driver s'ils sont là.
+ */
+function describeMongoExecutionError(cause: unknown): string {
+	if (!(cause instanceof Error)) {
+		return "cause inconnue";
+	}
+	const props = cause as {
+		message: string;
+		code?: number | string;
+		codeName?: string;
+	};
+	const parts: string[] = [props.message];
+	if (typeof props.codeName === "string" && props.codeName.length > 0) {
+		parts.push(props.codeName);
+	} else if (props.code !== undefined) {
+		parts.push(`code ${props.code}`);
+	}
+	return parts.join(" — ");
 }
 
 /**
@@ -206,7 +230,10 @@ class MongoConnection implements Connection {
 			const rows = docs.map((doc) => normalizeBson(doc) as Row);
 			return { columns: columnsOf(rows), rows, rowCount: rows.length };
 		} catch (cause) {
-			throw new EngineExecutionError("Exécution MongoDB échouée", { cause });
+			throw new EngineExecutionError(
+				`Exécution MongoDB échouée — ${describeMongoExecutionError(cause)}`,
+				{ cause }
+			);
 		}
 	}
 

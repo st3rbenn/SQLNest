@@ -49,8 +49,8 @@ export function UserMenu() {
 	// propre entrée compte :
 	//   - gallery + variants (sidebar avec UserBadge)
 	//   - canvas (`CanvasTopRightHUD` floating avec l'avatar intégré)
-	// Reste visible sur : `/team/:slug/canvas/:id/query` et autres pages
-	// sans surface dédiée.
+	// Reste visible sur les pages sans surface dédiée. Cache sur : gallery,
+	// canvas view, console fullscreen (surfaces avec propre header).
 	if (location.pathname === "/") return null;
 	if (
 		/^\/team\/[0-9a-f]{6}(\/(recents|canvas|drafts|pair))?\/?$/.test(
@@ -60,7 +60,9 @@ export function UserMenu() {
 		return null;
 	}
 	if (
-		/^\/team\/[0-9a-f]{6}\/canvas\/[a-f0-9-]+\/?$/.test(location.pathname)
+		/^\/team\/[0-9a-f]{6}\/canvas\/[a-f0-9-]+(\/query)?\/?$/.test(
+			location.pathname
+		)
 	) {
 		return null;
 	}

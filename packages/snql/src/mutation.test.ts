@@ -18,7 +18,7 @@ function sql(source: string): { text: string; params: readonly unknown[] } {
 describe("mutations → Postgres", () => {
 	it("update simple", () => {
 		const { text, params } = sql(
-			'update users | where id = 7 | set status = "active"'
+			'update users where id = 7 set status = "active"'
 		);
 		expect(text).toBe(
 			'UPDATE "users" SET "status" = $1 WHERE "id" = $2 RETURNING *'
@@ -28,7 +28,7 @@ describe("mutations → Postgres", () => {
 
 	it("update multi-set", () => {
 		const { text, params } = sql(
-			'update users | where id = 7 | set status = "x", is_active = false'
+			'update users where id = 7 set status = "x", is_active = false'
 		);
 		expect(text).toBe(
 			'UPDATE "users" SET "status" = $1, "is_active" = $2 WHERE "id" = $3 RETURNING *'
@@ -37,14 +37,14 @@ describe("mutations → Postgres", () => {
 	});
 
 	it("delete filtré", () => {
-		const { text, params } = sql("remove from users | where age < 18");
+		const { text, params } = sql("remove from users where age < 18");
 		expect(text).toBe('DELETE FROM "users" WHERE "age" < $1 RETURNING *');
 		expect(params).toEqual([18]);
 	});
 
-	it("plusieurs where → conjonction", () => {
+	it("conjonction dans un where via 'and'", () => {
 		const { text, params } = sql(
-			"remove from orders | where user_id = 1 | where total_cents > 1000"
+			"remove from orders where user_id = 1 and total_cents > 1000"
 		);
 		expect(text).toBe(
 			'DELETE FROM "orders" WHERE ("user_id" = $1 AND "total_cents" > $2) RETURNING *'
@@ -54,13 +54,13 @@ describe("mutations → Postgres", () => {
 
 	it("bigint préservé dans un prédicat de mutation", () => {
 		const { params } = sql(
-			"remove from users | where id = 9223372036854775807"
+			"remove from users where id = 9223372036854775807"
 		);
 		expect(params).toEqual([9223372036854775807n]);
 	});
 
 	it("update sans where affecte toutes les lignes (assumé)", () => {
-		const { text, params } = sql("update users | set is_active = false");
+		const { text, params } = sql("update users set is_active = false");
 		expect(text).toBe('UPDATE "users" SET "is_active" = $1 RETURNING *');
 		expect(params).toEqual([false]);
 	});
@@ -114,14 +114,14 @@ describe("mutations → Postgres", () => {
 
 describe("mutations — règles de correction", () => {
 	it("refuse un update sans set (rien à écrire)", () => {
-		expect(() => parse(tokenize("update users | where id = 1"))).toThrow(
+		expect(() => parse(tokenize("update users where id = 1"))).toThrow(
 			SnqlError
 		);
 	});
 
 	it("refuse une colonne affectée deux fois dans un set", () => {
 		const statement = parse(
-			tokenize("update users | where id = 1 | set x = 1, x = 2")
+			tokenize("update users where id = 1 set x = 1, x = 2")
 		);
 		if (statement.operation === "select") {
 			throw new Error("attendu une mutation");
@@ -180,7 +180,7 @@ describe("mutations → MongoDB", () => {
 	});
 
 	it("update : $set + filtre", () => {
-		const query = mongo('update users | where id = 7 | set status = "active"');
+		const query = mongo('update users where id = 7 set status = "active"');
 		expect(query).toEqual({
 			engine: "mongodb",
 			kind: "mongo-write",
@@ -192,7 +192,7 @@ describe("mutations → MongoDB", () => {
 	});
 
 	it("update : multi-set", () => {
-		const query = mongo("update t | set a = 1, b = false");
+		const query = mongo("update t set a = 1, b = false");
 		expect(query.op === "update" && query.update).toEqual({
 			$set: { a: 1, b: false }
 		});
@@ -202,14 +202,14 @@ describe("mutations → MongoDB", () => {
 		// Seule la forme pipeline (Mongo 4.2+) évalue une expression sur le document.
 		// `$ifNull` : sur un document sans `price`, écrire `null` plutôt que de
 		// SUPPRIMER `total` (un `$set` pipeline omet une clé qui résout à *missing*).
-		const query = mongo("update t | where id = 1 | set total = price");
+		const query = mongo("update t where id = 1 set total = price");
 		expect(query.op === "update" && query.update).toEqual([
 			{ $set: { total: { $ifNull: ["$price", null] } } }
 		]);
 	});
 
 	it("delete : filtre", () => {
-		const query = mongo("remove from users | where age < 18");
+		const query = mongo("remove from users where age < 18");
 		expect(query).toEqual({
 			engine: "mongodb",
 			kind: "mongo-write",
@@ -221,13 +221,13 @@ describe("mutations → MongoDB", () => {
 
 	it("write non filtré : filtre vide = toutes les lignes (assumé, ADR-012)", () => {
 		expect(mongo("remove from logs")).toMatchObject({ filter: {} });
-		expect(mongo("update t | set a = 1")).toMatchObject({ filter: {} });
+		expect(mongo("update t set a = 1")).toMatchObject({ filter: {} });
 	});
 
 	it("forme pipeline : une chaîne littérale `$…` n'est pas prise pour un champ", () => {
 		// En expression d'agrégation, "$price" désignerait la VALEUR du champ price.
 		// Sans `$literal`, `label` recevrait le prix au lieu de la chaîne.
-		const query = mongo('update t | set label = "$price", total = qty');
+		const query = mongo('update t set label = "$price", total = qty');
 		expect(query.op === "update" && query.update).toEqual([
 			{
 				$set: {
@@ -240,14 +240,14 @@ describe("mutations → MongoDB", () => {
 
 	it("forme classique : une chaîne `$…` reste une donnée (pas d'expression)", () => {
 		// Un `$set` classique n'évalue pas d'expression → aucun enrobage nécessaire.
-		const query = mongo('update t | set label = "$price"');
+		const query = mongo('update t set label = "$price"');
 		expect(query.op === "update" && query.update).toEqual({
 			$set: { label: "$price" }
 		});
 	});
 
 	it("prédicats composés et `in` traduits comme en lecture", () => {
-		const query = mongo('remove from t | where a = 1 and b in ["x", "y"]');
+		const query = mongo('remove from t where a = 1 and b in ["x", "y"]');
 		expect(query.op === "delete" && query.filter).toEqual({
 			$and: [{ a: { $eq: 1 } }, { b: { $in: ["x", "y"] } }]
 		});
@@ -265,58 +265,58 @@ describe("mutations MongoDB — négation existence-aware (parité 3VL, anti-per
 
 	it("`!=` exclut l'absent/null (sinon un remove les détruirait)", () => {
 		// `$ne` matcherait les documents où `age` est absent/null → perte de données.
-		expect(filter("remove from t | where age != 30")).toEqual({
+		expect(filter("remove from t where age != 30")).toEqual({
 			age: { $nin: [30, null] }
 		});
 	});
 
 	it("`not (champ = v)` = `!=` existence-aware (pas `$nor`)", () => {
-		expect(filter("remove from t | where not (age = 30)")).toEqual({
+		expect(filter("remove from t where not (age = 30)")).toEqual({
 			age: { $nin: [30, null] }
 		});
 	});
 
 	it("`not (a and b)` → De Morgan (chaque feuille existence-aware)", () => {
 		expect(
-			filter("update t | where not (a = 1 and b = 2) | set x = 0")
+			filter("update t where not (a = 1 and b = 2) set x = 0")
 		).toEqual({
 			$or: [{ a: { $nin: [1, null] } }, { b: { $nin: [2, null] } }]
 		});
 	});
 
 	it("`not (champ > v)` → opérateur inversé (>= exclut déjà l'absent)", () => {
-		expect(filter("remove from t | where not (age > 30)")).toEqual({
+		expect(filter("remove from t where not (age > 30)")).toEqual({
 			age: { $lte: 30 }
 		});
 	});
 
 	it("`not (champ in vals)` → `$nin` existence-aware", () => {
-		expect(filter('remove from t | where not (role in ["a", "b"])')).toEqual({
+		expect(filter('remove from t where not (role in ["a", "b"])')).toEqual({
 			role: { $nin: ["a", "b", null] }
 		});
 	});
 
 	it("double négation revient au positif", () => {
-		expect(filter("remove from t | where not (not (age = 30))")).toEqual({
+		expect(filter("remove from t where not (not (age = 30))")).toEqual({
 			age: { $eq: 30 }
 		});
 	});
 
 	it("les comparaisons positives (`=`, `<`) restent inchangées", () => {
-		expect(filter("remove from t | where age < 18")).toEqual({
+		expect(filter("remove from t where age < 18")).toEqual({
 			age: { $lt: 18 }
 		});
 	});
 
 	it("refuse une comparaison champ↔champ dans un filtre d'écriture (3VL ambiguë)", () => {
 		// `$expr` ne distingue pas absent/null → risque de sur-suppression. On refuse.
-		expect(() => mongo("remove from t | where a = b")).toThrow(SnqlError);
-		expect(() => mongo("remove from t | where a != b")).toThrow(SnqlError);
-		expect(() => mongo("remove from t | where not (a = b)")).toThrow(SnqlError);
+		expect(() => mongo("remove from t where a = b")).toThrow(SnqlError);
+		expect(() => mongo("remove from t where a != b")).toThrow(SnqlError);
+		expect(() => mongo("remove from t where not (a = b)")).toThrow(SnqlError);
 	});
 
 	it("refuse `not (champ like <non-chaîne>)` comme la forme positive", () => {
-		expect(() => mongo("remove from t | where not (x like 5)")).toThrow(
+		expect(() => mongo("remove from t where not (x like 5)")).toThrow(
 			SnqlError
 		);
 	});
@@ -328,7 +328,7 @@ describe("mutations MongoDB — fidélité BSON (correction)", () => {
 			SnqlError
 		);
 		expect(() =>
-			mongo("remove from t | where id = 9223372036854775808")
+			mongo("remove from t where id = 9223372036854775808")
 		).toThrow(SnqlError);
 	});
 

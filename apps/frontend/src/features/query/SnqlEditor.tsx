@@ -1,10 +1,18 @@
 import { completionKeymap } from "@codemirror/autocomplete";
-import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
+import {
+	defaultKeymap,
+	history,
+	historyKeymap,
+	indentWithTab
+} from "@codemirror/commands";
 import { EditorState } from "@codemirror/state";
 import {
 	placeholder as cmPlaceholder,
 	EditorView,
-	keymap
+	highlightActiveLine,
+	highlightActiveLineGutter,
+	keymap,
+	lineNumbers
 } from "@codemirror/view";
 import type { SchemaModel } from "@sqlnest/snql";
 import { useEffect, useRef } from "react";
@@ -34,22 +42,23 @@ const theme = EditorView.theme(
 	{
 		"&": {
 			fontSize: "14px",
-			border: "1px solid var(--sqlnest-border)",
-			borderRadius: "10px",
-			backgroundColor: "var(--sqlnest-surface)",
-			color: "var(--sqlnest-text-primary)"
+			border: "none",
+			backgroundColor: "var(--sqlnest-canvas-bg)",
+			color: "var(--sqlnest-text-primary)",
+			height: "100%"
 		},
 		"&.cm-focused": {
-			outline: "none",
-			borderColor: "var(--sqlnest-accent)"
+			outline: "none"
 		},
 		".cm-content": {
 			fontFamily: "var(--mantine-font-family-monospace)",
 			padding: "12px 14px",
-			minHeight: "84px",
 			caretColor: "var(--sqlnest-accent)"
 		},
-		".cm-scroller": { lineHeight: "1.6" },
+		".cm-scroller": {
+			overflow: "auto",
+			lineHeight: "1.6"
+		},
 		// Sélection texte : accent translucide. `::selection` seul suffit ;
 		// les sélections multi-cursor de CM passent aussi par des spans
 		// `.cm-selectionBackground` qu'on colore identiquement pour
@@ -76,6 +85,27 @@ const theme = EditorView.theme(
 		},
 		".cm-tooltip-autocomplete > ul > li": {
 			padding: "3px 8px"
+		},
+		// Gutter (line numbers) — style IDE : bg canvas-bg subtil, chiffres
+		// text-tertiary, séparé du contenu par une bordure droite discrète.
+		".cm-gutters": {
+			background: "var(--sqlnest-canvas-bg)",
+			borderRight: "1px solid var(--sqlnest-border-subtle)",
+			color: "var(--sqlnest-text-tertiary)"
+		},
+		".cm-lineNumbers .cm-gutterElement": {
+			padding: "0 8px 0 12px",
+			fontSize: "11.5px",
+			fontVariantNumeric: "tabular-nums",
+			minWidth: "24px",
+			textAlign: "right"
+		},
+		".cm-activeLineGutter": {
+			background: "var(--sqlnest-surface-hover)",
+			color: "var(--sqlnest-text-primary)"
+		},
+		".cm-activeLine": {
+			background: "transparent"
 		}
 	},
 	{ dark: true }
@@ -117,6 +147,9 @@ export function SnqlEditor({
 			doc: value,
 			extensions: [
 				history(),
+				lineNumbers(),
+				highlightActiveLine(),
+				highlightActiveLineGutter(),
 				keymap.of([
 					{
 						key: "Mod-Enter",
@@ -125,6 +158,7 @@ export function SnqlEditor({
 							return true;
 						}
 					},
+					indentWithTab,
 					...completionKeymap,
 					...defaultKeymap,
 					...historyKeymap
@@ -159,5 +193,10 @@ export function SnqlEditor({
 		}
 	}, [value]);
 
-	return <div ref={host} />;
+	return (
+		<div
+			ref={host}
+			style={{ height: "100%", display: "flex", flexDirection: "column" }}
+		/>
+	);
 }

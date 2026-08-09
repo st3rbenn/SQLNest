@@ -60,8 +60,8 @@ const labels = (src: string, offset = src.length) =>
 	at(src, offset).options.map((o) => o.label);
 
 describe("completeSnql — début de requête", () => {
-	it("propose les verbes sur une entrée vide", () => {
-		expect(labels("")).toEqual(["get", "find", "add", "update", "remove"]);
+	it("propose les verbes canoniques sur une entrée vide", () => {
+		expect(labels("")).toEqual(["get", "add", "update", "remove"]);
 		expect(at("").options.every((o) => o.type === "verb")).toBe(true);
 	});
 
@@ -99,35 +99,44 @@ describe("completeSnql — collection source", () => {
 	});
 });
 
-describe("completeSnql — étapes de pipeline", () => {
-	it("propose les étapes select après |", () => {
-		expect(labels("get users | ")).toEqual([
-			"where",
+describe("completeSnql — étapes après la source", () => {
+	it("propose les étapes select dans l'ordre canonique", () => {
+		expect(labels("get users ")).toEqual([
 			"with",
-			"pick",
+			"where",
 			"sort",
+			"pick",
 			"limit"
 		]);
 	});
 
-	it("propose les étapes update après |", () => {
-		expect(labels("update users | ")).toEqual(["where", "set"]);
+	it("propose les étapes update", () => {
+		expect(labels("update users ")).toEqual(["where", "set"]);
 	});
 
-	it("propose les étapes delete après |", () => {
-		expect(labels("remove from users | ")).toEqual(["where"]);
+	it("propose l'étape where pour delete", () => {
+		expect(labels("remove from users ")).toEqual(["where"]);
 	});
 
 	it("filtre l'étape partielle depuis son début", () => {
-		const result = at("get users | wh");
-		expect(result.from).toBe("get users | ".length);
+		const result = at("get users wh");
+		expect(result.from).toBe("get users ".length);
 		expect(result.options.map((o) => o.label)).toContain("where");
+	});
+
+	it("ne propose plus une étape déjà présente (sauf `with`, répétable via `and`)", () => {
+		expect(labels("get users where age = 1 ")).toEqual([
+			"with",
+			"sort",
+			"pick",
+			"limit"
+		]);
 	});
 });
 
 describe("completeSnql — champs", () => {
 	it("propose les champs de la source après where", () => {
-		expect(labels("get users | where ")).toEqual([
+		expect(labels("get users where ")).toEqual([
 			"id",
 			"email",
 			"display_name",
@@ -136,7 +145,7 @@ describe("completeSnql — champs", () => {
 	});
 
 	it("annote le type et la nullabilité", () => {
-		const opts = at("get users | where ").options;
+		const opts = at("get users where ").options;
 		expect(opts.find((o) => o.label === "email")?.detail).toBe("string");
 		expect(opts.find((o) => o.label === "display_name")?.detail).toBe(
 			"string ?"
@@ -144,36 +153,35 @@ describe("completeSnql — champs", () => {
 	});
 
 	it("propose les champs après and / or / not", () => {
-		expect(labels("get users | where is_active = true and ")).toContain(
+		expect(labels("get users where is_active = true and ")).toContain(
 			"email"
 		);
-		expect(labels("get users | where not ")).toContain("email");
+		expect(labels("get users where not ")).toContain("email");
 	});
 
 	it("propose les champs après pick et après une virgule de pick", () => {
-		expect(labels("get users | pick ")).toContain("email");
-		expect(labels("get users | pick id, ")).toContain("email");
+		expect(labels("get users pick ")).toContain("email");
+		expect(labels("get users pick id, ")).toContain("email");
 	});
 
-	it("propose les champs après sort, avec ou sans signe", () => {
-		expect(labels("get users | sort ")).toContain("email");
-		expect(labels("get users | sort -")).toContain("email");
-		expect(labels("get users | sort id, ")).toContain("email");
+	it("propose les champs après sort et après une virgule de sort", () => {
+		expect(labels("get users sort ")).toContain("email");
+		expect(labels("get users sort id, ")).toContain("email");
 	});
 
 	it("propose les champs après set (update)", () => {
-		expect(labels("update users | set ")).toContain("is_active");
-		expect(labels("update users | set is_active = true, ")).toContain("email");
+		expect(labels("update users set ")).toContain("is_active");
+		expect(labels("update users set is_active = true, ")).toContain("email");
 	});
 
 	it("ne propose rien pour une source inconnue du schéma", () => {
-		expect(labels("get inconnue | where ")).toEqual([]);
+		expect(labels("get inconnue where ")).toEqual([]);
 	});
 });
 
 describe("completeSnql — jointures (relation-aware)", () => {
 	it("propose la collection liée d'abord, clause on pré-remplie", () => {
-		const opts = at("get orders | with ").options;
+		const opts = at("get orders with ").options;
 		const users = opts.find((o) => o.label === "users");
 		expect(users?.type).toBe("relation");
 		expect(users?.detail).toBe("via user_id = id");
@@ -181,14 +189,14 @@ describe("completeSnql — jointures (relation-aware)", () => {
 	});
 
 	it("oriente la relation selon la source", () => {
-		const opts = at("get users | with ").options;
+		const opts = at("get users with ").options;
 		const orders = opts.find((o) => o.label === "orders");
 		expect(orders?.type).toBe("relation");
 		expect(orders?.apply).toBe("orders on id = user_id");
 	});
 
 	it("membre gauche de on = champ de la source", () => {
-		expect(labels("get orders | with users as u on ")).toEqual([
+		expect(labels("get orders with users as u on ")).toEqual([
 			"id",
 			"user_id",
 			"status",
@@ -197,7 +205,7 @@ describe("completeSnql — jointures (relation-aware)", () => {
 	});
 
 	it("membre droit de on = champ de la collection jointe", () => {
-		expect(labels("get orders | with users as u on user_id = ")).toEqual([
+		expect(labels("get orders with users as u on user_id = ")).toEqual([
 			"id",
 			"email",
 			"display_name",
@@ -207,7 +215,7 @@ describe("completeSnql — jointures (relation-aware)", () => {
 
 	it("inclut l'alias de jointure dans un pick", () => {
 		const opts = at(
-			"get orders | with users as u on user_id = id | pick status, "
+			"get orders with users as u on user_id = id pick status, "
 		).options;
 		const alias = opts.find((o) => o.label === "u");
 		expect(alias?.type).toBe("alias");
@@ -216,17 +224,17 @@ describe("completeSnql — jointures (relation-aware)", () => {
 });
 
 describe("completeSnql — contextes vérifiés en review", () => {
-	it("un synonyme de verbe hors tête de requête ne pilote pas le contexte", () => {
-		// Le lexer classe `change`/`clear`/`edit` en `verb` où qu'ils soient : sans
+	it("un alias de verbe hors tête de requête ne pilote pas le contexte", () => {
+		// Le lexer classe `find`/`edit`/`delete` en `verb` où qu'ils soient : sans
 		// garde de position, ces contextes proposeraient collections ou `from`.
-		expect(labels("get users | where change ")).toEqual([]);
-		expect(labels("get users | pick clear ")).toEqual([]);
-		expect(labels("update users | set edit ")).toEqual([]);
+		expect(labels("get users where find ")).toEqual([]);
+		expect(labels("get users pick delete ")).toEqual([]);
+		expect(labels("update users set edit ")).toEqual([]);
 	});
 
 	it("propose les champs après '(' dans un prédicat groupé", () => {
-		expect(labels("get users | where (")).toContain("email");
-		expect(labels("get users | where (is_active = true) and (")).toContain(
+		expect(labels("get users where (")).toContain("email");
+		expect(labels("get users where (is_active = true) and (")).toContain(
 			"email"
 		);
 	});
@@ -243,12 +251,12 @@ describe("completeSnql — contextes vérifiés en review", () => {
 
 describe("completeSnql — robustesse", () => {
 	it("ne lève pas sur une chaîne non terminée (curseur dans le littéral)", () => {
-		const result = at('get users | where email = "ab');
+		const result = at('get users where email = "ab');
 		expect(result.options).toEqual([]);
 	});
 
 	it("ne complète pas un chemin pointé (champ imbriqué) en v1", () => {
-		expect(at("get orders | pick user.").options).toEqual([]);
+		expect(at("get orders pick user.").options).toEqual([]);
 	});
 
 	it("borne un offset hors limites", () => {
@@ -266,13 +274,12 @@ describe("completeSnql — robustesse", () => {
 		};
 		expect(completeSnql("", 0, empty).options.map((o) => o.label)).toEqual([
 			"get",
-			"find",
 			"add",
 			"update",
 			"remove"
 		]);
 		expect(
-			completeSnql("get users | ", 12, empty).options.map((o) => o.label)
+			completeSnql("get users ", 10, empty).options.map((o) => o.label)
 		).toContain("where");
 	});
 });

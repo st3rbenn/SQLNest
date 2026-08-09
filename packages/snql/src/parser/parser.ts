@@ -19,6 +19,17 @@ import type {
 import { TokenCursor } from "./cursor";
 import { parseExpression, parseFieldPath } from "./expression";
 
+/** Mots-clés de stage d'un select, dans l'ordre canonique imposé. */
+const SELECT_STAGE_ORDER = ["with", "where", "sort", "pick", "limit"] as const;
+const SELECT_STAGE_KEYWORDS: ReadonlySet<string> = new Set(SELECT_STAGE_ORDER);
+const UPDATE_STAGE_KEYWORDS: ReadonlySet<string> = new Set(["where", "set"]);
+const DELETE_STAGE_KEYWORDS: ReadonlySet<string> = new Set(["where"]);
+
+function peekKeyword(cursor: TokenCursor, value: string): boolean {
+	const tok = cursor.peek();
+	return tok.kind === "keyword" && tok.value === value;
+}
+
 /** Parse un flux de tokens en un AST [[Statement]] (lecture ou mutation). */
 export function parse(tokens: readonly Token[]): Statement {
 	const cursor = new TokenCursor(tokens);
@@ -150,12 +161,25 @@ function parseInsertField(cursor: TokenCursor): InsertField {
 
 function parseSelect(cursor: TokenCursor, verbTok: Token): Query {
 	const source = parseSource(cursor);
-
 	const stages: Stage[] = [];
-	while (cursor.peek().kind === "pipe") {
-		cursor.next();
-		stages.push(parseStage(cursor));
+
+	if (peekKeyword(cursor, "with")) {
+		stages.push(...parseWiths(cursor));
 	}
+	if (peekKeyword(cursor, "where")) {
+		stages.push(parseWhere(cursor));
+	}
+	if (peekKeyword(cursor, "sort")) {
+		stages.push(parseSort(cursor));
+	}
+	if (peekKeyword(cursor, "pick")) {
+		stages.push(parsePick(cursor));
+	}
+	if (peekKeyword(cursor, "limit")) {
+		stages.push(parseLimit(cursor));
+	}
+
+	rejectTrailingStage(cursor, SELECT_STAGE_KEYWORDS, SELECT_STAGE_ORDER);
 
 	const lastStage = stages[stages.length - 1];
 	const endSpan = lastStage ? lastStage.span : source.span;
@@ -168,53 +192,61 @@ function parseSelect(cursor: TokenCursor, verbTok: Token): Query {
 	};
 }
 
-function parseUpdate(cursor: TokenCursor, verbTok: Token): UpdateStatement {
-	const nameTok = cursor.expect("ident", "un nom de collection après 'update'");
-	const predicates: Expr[] = [];
-	const assignments: Assignment[] = [];
-	let end = nameTok.span.end;
-
-	while (cursor.peek().kind === "pipe") {
-		cursor.next();
-		const kw = cursor.peek();
-		if (kw.kind === "keyword" && kw.value === "where") {
-			cursor.next();
-			const predicate = parseExpression(cursor);
-			predicates.push(predicate);
-			end = predicate.span.end;
-		} else if (kw.kind === "keyword" && kw.value === "set") {
-			cursor.next();
-			const parsed = parseAssignments(cursor);
-			assignments.push(...parsed);
-			const last = parsed[parsed.length - 1];
-			if (last !== undefined) {
-				end = last.span.end;
-			}
-		} else {
-			throw new SnqlError(
-				`Étape '${kw.value}' invalide dans un 'update' (attendu where, set)`,
-				"parse_unsupported_stage",
-				kw.span
-			);
-		}
-	}
-
-	if (assignments.length === 0) {
+/**
+ * Un keyword de stage encore là après le parsing = ordre non respecté ou clause
+ * dupliquée. L'ordre est figé pour rendre les erreurs prévisibles : on nomme
+ * l'attendu plutôt qu'un « inattendu » cryptique.
+ */
+function rejectTrailingStage(
+	cursor: TokenCursor,
+	stageKeywords: ReadonlySet<string>,
+	order: readonly string[]
+): void {
+	const trailing = cursor.peek();
+	if (trailing.kind === "keyword" && stageKeywords.has(trailing.value)) {
 		throw new SnqlError(
-			"'update' exige au moins un 'set <colonne> = <valeur>'",
-			"parse_update_no_set",
-			verbTok.span
+			`Étape '${trailing.value}' hors ordre ou dupliquée. Ordre attendu : ${order.join(" → ")}.`,
+			"parse_stage_out_of_order",
+			trailing.span
 		);
 	}
+}
+
+function parseUpdate(cursor: TokenCursor, verbTok: Token): UpdateStatement {
+	const nameTok = cursor.expect("ident", "un nom de collection après 'update'");
+	let predicate: Expr | undefined;
+	let end = nameTok.span.end;
+
+	if (peekKeyword(cursor, "where")) {
+		cursor.next();
+		predicate = parseExpression(cursor);
+		end = predicate.span.end;
+	}
+
+	if (!peekKeyword(cursor, "set")) {
+		throw new SnqlError(
+			"'update' exige 'set <colonne> = <valeur>'",
+			"parse_update_no_set",
+			cursor.peek().span
+		);
+	}
+	cursor.next();
+	const assignments = parseAssignments(cursor);
+	const lastAssign = assignments[assignments.length - 1];
+	if (lastAssign !== undefined) {
+		end = lastAssign.span.end;
+	}
+
+	rejectTrailingStage(cursor, UPDATE_STAGE_KEYWORDS, ["where", "set"]);
 
 	// `where` optionnel : sans lui, l'update porte sur toutes les lignes (assumé).
 	const span = { start: verbTok.span.start, end };
-	return predicates.length > 0
+	return predicate !== undefined
 		? {
 				operation: "update",
 				verb: verbTok.value,
 				collection: nameTok.value,
-				predicate: andAll(predicates),
+				predicate,
 				assignments,
 				span
 			}
@@ -239,33 +271,24 @@ function parseDelete(cursor: TokenCursor, verbTok: Token): DeleteStatement {
 	cursor.next();
 	const nameTok = cursor.expect("ident", "un nom de collection après 'from'");
 
-	const predicates: Expr[] = [];
+	let predicate: Expr | undefined;
 	let end = nameTok.span.end;
-	while (cursor.peek().kind === "pipe") {
+	if (peekKeyword(cursor, "where")) {
 		cursor.next();
-		const kw = cursor.peek();
-		if (kw.kind === "keyword" && kw.value === "where") {
-			cursor.next();
-			const predicate = parseExpression(cursor);
-			predicates.push(predicate);
-			end = predicate.span.end;
-		} else {
-			throw new SnqlError(
-				`Étape '${kw.value}' invalide dans un 'remove' (attendu where)`,
-				"parse_unsupported_stage",
-				kw.span
-			);
-		}
+		predicate = parseExpression(cursor);
+		end = predicate.span.end;
 	}
+
+	rejectTrailingStage(cursor, DELETE_STAGE_KEYWORDS, ["where"]);
 
 	// `where` optionnel : sans lui, le remove porte sur toutes les lignes (assumé).
 	const span = { start: verbTok.span.start, end };
-	return predicates.length > 0
+	return predicate !== undefined
 		? {
 				operation: "delete",
 				verb: verbTok.value,
 				collection: nameTok.value,
-				predicate: andAll(predicates),
+				predicate,
 				span
 			}
 		: {
@@ -304,28 +327,6 @@ function parseAssignment(cursor: TokenCursor): Assignment {
 	};
 }
 
-/** Combine plusieurs prédicats en une conjonction `and`. */
-function andAll(predicates: readonly Expr[]): Expr {
-	let combined = predicates[0];
-	if (combined === undefined) {
-		throw new SnqlError("Prédicat manquant", "parse_missing_predicate");
-	}
-	for (let i = 1; i < predicates.length; i += 1) {
-		const next = predicates[i];
-		if (next === undefined) {
-			continue;
-		}
-		combined = {
-			type: "logical",
-			operator: "and",
-			left: combined,
-			right: next,
-			span: { start: combined.span.start, end: next.span.end }
-		};
-	}
-	return combined;
-}
-
 function parseSource(cursor: TokenCursor): Source {
 	const nameTok = cursor.expect("ident", "un nom de collection");
 	let endSpan = nameTok.span;
@@ -342,47 +343,35 @@ function parseSource(cursor: TokenCursor): Source {
 		: { collection: nameTok.value, span };
 }
 
-function parseStage(cursor: TokenCursor): Stage {
-	const tok = cursor.peek();
-	if (tok.kind !== "keyword") {
-		throw new SnqlError(
-			`Étape de pipeline attendue après '|' (where, pick, sort, limit), trouvé '${tok.value}'`,
-			"parse_expected_stage",
-			tok.span
-		);
+/**
+ * Un ou plusieurs joins : `with A on … [and B on … [and …]]`. Le premier `with`
+ * introduit la clause ; les suivants sont enchaînés par `and` seul (le mot
+ * `with` n'est pas répété, cf. grammaire figée).
+ */
+function parseWiths(cursor: TokenCursor): Stage[] {
+	const withTok = cursor.next(); // 'with'
+	const stages: Stage[] = [parseJoinClause(cursor, withTok)];
+	while (peekKeyword(cursor, "and")) {
+		const andTok = cursor.next();
+		stages.push(parseJoinClause(cursor, andTok));
 	}
-	switch (tok.value) {
-		case "where":
-			return parseWhere(cursor);
-		case "pick":
-			return parsePick(cursor);
-		case "sort":
-			return parseSort(cursor);
-		case "limit":
-			return parseLimit(cursor);
-		case "with":
-			return parseWith(cursor);
-		default:
-			throw new SnqlError(
-				`Étape '${tok.value}' inconnue (attendu where, with, pick, sort, limit)`,
-				"parse_unsupported_stage",
-				tok.span
-			);
-	}
+	return stages;
 }
 
-function parseWith(cursor: TokenCursor): Stage {
-	const kw = cursor.next(); // 'with'
-	const collection = cursor.expect(
-		"ident",
-		"un nom de collection après 'with'"
-	);
+function parseJoinClause(cursor: TokenCursor, startTok: Token): Stage {
+	// `with one X on …` / `with many X on …` : escape hatch qui force la
+	// multiplicité. Sans mot-clé, le lower infère depuis le schéma.
+	let multiplicity: "one" | "many" | undefined;
+	if (peekKeyword(cursor, "one") || peekKeyword(cursor, "many")) {
+		multiplicity = cursor.next().value as "one" | "many";
+	}
+	const collection = cursor.expect("ident", "un nom de collection à joindre");
 	let alias: string | undefined;
-	if (cursor.peek().kind === "keyword" && cursor.peek().value === "as") {
+	if (peekKeyword(cursor, "as")) {
 		cursor.next();
 		alias = cursor.expect("ident", "un alias après 'as'").value;
 	}
-	if (!(cursor.peek().kind === "keyword" && cursor.peek().value === "on")) {
+	if (!peekKeyword(cursor, "on")) {
 		throw new SnqlError(
 			"'with' attend une condition : on <champ local> = <champ distant>",
 			"parse_with_missing_on",
@@ -401,23 +390,19 @@ function parseWith(cursor: TokenCursor): Stage {
 	}
 	cursor.next(); // '='
 	const foreign = parseFieldPath(cursor);
-	const span = { start: kw.span.start, end: foreign.span.end };
-	return alias !== undefined
-		? {
-				type: "with",
-				collection: collection.value,
-				alias,
-				localField,
-				foreignField: foreign.path,
-				span
-			}
-		: {
-				type: "with",
-				collection: collection.value,
-				localField,
-				foreignField: foreign.path,
-				span
-			};
+	const span = { start: startTok.span.start, end: foreign.span.end };
+	const base = {
+		type: "with" as const,
+		collection: collection.value,
+		localField,
+		foreignField: foreign.path,
+		span
+	};
+	return {
+		...base,
+		...(alias !== undefined ? { alias } : {}),
+		...(multiplicity !== undefined ? { multiplicity } : {})
+	};
 }
 
 function parseWhere(cursor: TokenCursor): Stage {
@@ -471,38 +456,15 @@ function parseSort(cursor: TokenCursor): Stage {
 }
 
 function parseSortKey(cursor: TokenCursor): SortKey {
-	let direction: "asc" | "desc" = "asc";
-	let signStart: number | null = null;
-	if (cursor.peek().kind === "minus") {
-		direction = "desc";
-		signStart = cursor.next().span.start.offset;
-	} else if (cursor.peek().kind === "plus") {
-		direction = "asc";
-		signStart = cursor.next().span.start.offset;
-	}
-
 	const { path, span } = parseFieldPath(cursor);
+	let direction: "asc" | "desc" = "asc";
 	let endSpan = span;
-
-	if (
-		cursor.peek().kind === "keyword" &&
-		(cursor.peek().value === "asc" || cursor.peek().value === "desc")
-	) {
-		if (signStart !== null) {
-			throw new SnqlError(
-				"Direction de tri redondante (signe +/- et mot-clé asc/desc)",
-				"parse_sort_redundant",
-				cursor.peek().span
-			);
-		}
+	if (peekKeyword(cursor, "asc") || peekKeyword(cursor, "desc")) {
 		const dirTok = cursor.next();
 		direction = dirTok.value === "desc" ? "desc" : "asc";
 		endSpan = dirTok.span;
 	}
-
-	const start =
-		signStart !== null ? { ...span.start, offset: signStart } : span.start;
-	return { path, direction, span: { start, end: endSpan.end } };
+	return { path, direction, span: { start: span.start, end: endSpan.end } };
 }
 
 function parseLimit(cursor: TokenCursor): Stage {

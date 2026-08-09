@@ -40,8 +40,8 @@ const containerStyle: CSSProperties = {
 	minHeight: 0,
 	display: "flex",
 	flexDirection: "column",
-	gap: 8,
-	padding: "10px 14px",
+	gap: 10,
+	padding: "14px 16px 14px",
 	background: "var(--sqlnest-surface)",
 	borderTop: "1px solid var(--sqlnest-border)"
 };
@@ -49,9 +49,9 @@ const containerStyle: CSSProperties = {
 const statusRowStyle: CSSProperties = {
 	display: "flex",
 	alignItems: "center",
-	gap: 12,
+	gap: 10,
 	color: "var(--sqlnest-text-secondary)",
-	fontSize: 11,
+	fontSize: 12,
 	minHeight: 24
 };
 
@@ -83,7 +83,11 @@ const toolbarSearchStyle: CSSProperties = {
 
 const viewGroupStyle: CSSProperties = {
 	display: "inline-flex",
-	gap: 2
+	gap: 2,
+	padding: 2,
+	background: "var(--sqlnest-surface-hover)",
+	border: "1px solid var(--sqlnest-border-subtle)",
+	borderRadius: 6
 };
 
 const paginationRowStyle: CSSProperties = {

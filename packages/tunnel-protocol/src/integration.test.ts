@@ -131,7 +131,7 @@ describe("integration — flow complet CLI ↔ browser", () => {
 
 		// ─── 3. Alice envoie req chiffrée + signée à Bob ──────────────
 		const secret = new TextEncoder().encode(
-			JSON.stringify({ op: "runSnql", src: "get users | limit 3" })
+			JSON.stringify({ op: "runSnql", src: "get users limit 3" })
 		);
 		const cipher1 = encryptPayload(
 			aliceKey,

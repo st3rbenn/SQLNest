@@ -52,7 +52,7 @@ describe("runQuery", () => {
 
 		const result = await runQuery(
 			fake,
-			"get users | where is_active = true | pick email"
+			"get users where is_active = true pick email"
 		);
 
 		// La requête passée à execute est bien du SQL Postgres ciblant `users`.
@@ -84,7 +84,7 @@ describe("runQuery", () => {
 		});
 		const rs = await runQuery(
 			fake,
-			"update users | where id = 1 | set is_active = false"
+			"update users where id = 1 set is_active = false"
 		);
 		expect(fake.lastQuery?.kind).toBe("sql");
 		if (fake.lastQuery?.kind === "sql") {
