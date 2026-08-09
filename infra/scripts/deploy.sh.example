@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# SQLNest — deploy script (template)
+# Copier à la racine du repo sur le serveur : `cp infra/scripts/deploy.sh.example deploy.sh && chmod +x deploy.sh`
+# deploy.sh est GITIGNORED (voir .gitignore) — libre à toi de le customiser.
+#
+# Usage :
+#   ./deploy.sh          # git pull + rebuild + up
+#   ssh serveur "cd /opt/sqlnest && ./deploy.sh"
+
+set -euo pipefail
+
+REPO_DIR="${REPO_DIR:-/opt/sqlnest}"
+COMPOSE_FILE="$REPO_DIR/infra/docker-compose.prod.yml"
+ENV_FILE="$REPO_DIR/infra/.env.prod"
+
+cd "$REPO_DIR"
+
+echo "── git pull ──────────────────────────────────────────────────────"
+git pull --ff-only
+
+echo "── docker build ──────────────────────────────────────────────────"
+docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" build
+
+echo "── docker up ─────────────────────────────────────────────────────"
+docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d
+
+echo "── migrate logs ──────────────────────────────────────────────────"
+docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" logs migrate
+
+echo "── ready ─────────────────────────────────────────────────────────"
+sleep 2
+curl -sf -o /dev/null -w "backend /health → %{http_code}\n" \
+    "http://127.0.0.1:$(docker compose -f "$COMPOSE_FILE" port backend 4000 2>/dev/null | cut -d: -f2 || echo 4000)/health" \
+    || echo "(backend pas encore prêt — retry dans quelques secondes)"
+
+echo "OK."

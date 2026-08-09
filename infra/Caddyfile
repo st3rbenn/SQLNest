@@ -1,0 +1,22 @@
+# SQLNest — prod Caddyfile
+# Origine unique dev.sqlnest.io. Caddy fait :
+#   1. TLS Let's Encrypt (HTTP-01 sur port 80, Cloudflare DNS-only)
+#   2. Compression zstd + gzip
+#   3. Reverse proxy /api/* → backend (WS upgrade auto)
+#   4. Reverse proxy /* → frontend static
+
+{
+    email admin@sqlnest.io
+}
+
+dev.sqlnest.io {
+    encode zstd gzip
+
+    handle /api/* {
+        reverse_proxy backend:4000
+    }
+
+    handle {
+        reverse_proxy frontend:80
+    }
+}

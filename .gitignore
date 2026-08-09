@@ -12,7 +12,12 @@ dist
 # secrets / local env (garder .env.example)
 .env
 .env.local
+.env.prod
 !.env.example
+!.env.prod.example
+
+# deploy script contient chemins/URLs serveur — gitignored
+/deploy.sh
 
 # mac files
 .DS_Store

@@ -1,0 +1,105 @@
+# SQLNest — production compose (self-hosted sur serveur maison)
+# Usage :
+#   docker compose -f infra/docker-compose.prod.yml --env-file infra/.env.prod up -d
+# Rebuild après pull :
+#   docker compose -f infra/docker-compose.prod.yml --env-file infra/.env.prod build
+#
+# Un seul reseau interne — seul Caddy expose 80/443 à l'host.
+
+name: sqlnest
+
+services:
+  # ─── Reverse proxy + TLS Let's Encrypt ────────────────────────────────
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - frontend
+      - backend
+    networks: [internal]
+
+  # ─── SPA statique ─────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ..
+      dockerfile: infra/docker/frontend.Dockerfile
+    image: sqlnest/frontend:latest
+    restart: unless-stopped
+    environment:
+      PUBLIC_API_URL: ${PUBLIC_API_URL:?PUBLIC_API_URL manquant dans .env.prod}
+    networks: [internal]
+
+  # ─── API Fastify + Better Auth + WSS tunnels ──────────────────────────
+  backend:
+    build:
+      context: ..
+      dockerfile: infra/docker/backend.Dockerfile
+    image: sqlnest/backend:latest
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      BASE_URL: ${BASE_URL:?BASE_URL manquant}
+      FRONTEND_URL: ${FRONTEND_URL:?FRONTEND_URL manquant}
+      TRUSTED_ORIGINS: ${TRUSTED_ORIGINS:?TRUSTED_ORIGINS manquant}
+      COOKIE_DOMAIN: ${COOKIE_DOMAIN:?COOKIE_DOMAIN manquant}
+      AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET manquant}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL manquant}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks: [internal]
+
+  # ─── Migrations one-shot ──────────────────────────────────────────────
+  migrate:
+    build:
+      context: ..
+      dockerfile: infra/docker/migrate.Dockerfile
+    image: sqlnest/migrate:latest
+    restart: "no"
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL manquant}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [internal]
+
+  # ─── App database ─────────────────────────────────────────────────────
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER manquant}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD manquant}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB manquant}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks: [internal]
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
+
+networks:
+  internal:
+    driver: bridge

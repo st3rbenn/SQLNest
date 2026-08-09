@@ -1,0 +1,37 @@
+# Ne PAS ship dans le build context Docker
+node_modules
+**/node_modules
+dist
+**/dist
+build
+**/build
+
+# Env / secrets — jamais dans une image
+.env
+.env.local
+.env.prod
+infra/.env.prod
+
+# Deploy script host-specific
+/deploy.sh
+
+# Git
+.git
+.gitignore
+.github
+
+# OS / editor
+.DS_Store
+.vscode
+.idea
+
+# Tests / coverage
+coverage
+.nyc_output
+
+# Docs / build artifacts locaux
+*.log
+.pnpm-store
+
+# Frontend spécifique — le build interne les recrée
+apps/frontend/dist

@@ -1,3 +1,57 @@
+# infra — dev locaux + prod Docker
+
+## Prod (self-hosted)
+
+Voir [`docker-compose.prod.yml`](docker-compose.prod.yml) + [`Caddyfile`](Caddyfile). Origin unique `https://dev.sqlnest.io` (le domaine `sqlnest.io` sera la prod définitive plus tard — pour l'instant `dev.sqlnest.io` fait office de prod).
+
+Setup serveur :
+
+```bash
+# Base + Docker
+sudo apt install -y ca-certificates curl gnupg ufw fail2ban
+sudo ufw allow 22,80,443/tcp && sudo ufw enable
+curl -fsSL https://get.docker.com | sudo sh
+sudo usermod -aG docker $USER && newgrp docker
+
+# Repo + secrets
+sudo mkdir -p /opt/sqlnest /var/backups/sqlnest /var/log/sqlnest
+sudo chown $USER:$USER /opt/sqlnest /var/backups/sqlnest /var/log/sqlnest
+git clone <repo> /opt/sqlnest && cd /opt/sqlnest
+cp infra/.env.prod.example infra/.env.prod && chmod 600 infra/.env.prod
+# Éditer infra/.env.prod avec AUTH_SECRET (openssl rand -hex 32) etc.
+
+# Deploy
+cp infra/scripts/deploy.sh.example deploy.sh && chmod +x deploy.sh
+./deploy.sh
+```
+
+Backups quotidiens (cron) :
+
+```bash
+crontab -e
+# 0 3 * * * /opt/sqlnest/infra/scripts/backup-db.sh >> /var/log/sqlnest/backup.log 2>&1
+```
+
+Restore d'un backup :
+
+```bash
+gunzip -c /var/backups/sqlnest/sqlnest-YYYYMMDD-HHMMSS.sql.gz | \
+    docker exec -i sqlnest-postgres-1 psql -U sqlnest -d sqlnest
+```
+
+## Checks post-deploy
+
+```bash
+curl https://dev.sqlnest.io/health
+# → 200 {"status":"OK", ...}
+
+curl -X POST https://dev.sqlnest.io/api/auth/reset-password \
+    -H 'Content-Type: application/json' -d '{}' -i
+# → HTTP/2 404 {"error":"email_flows_disabled"}
+```
+
+---
+
 # infra — environnements de dev locaux
 
 Bases de données locales pour développer et tester SQLNest (couche connexion et au-delà).
