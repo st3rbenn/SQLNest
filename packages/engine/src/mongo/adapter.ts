@@ -127,7 +127,12 @@ function writeErrorMessage(op: string, cause: unknown): string {
 	return "Écriture MongoDB échouée";
 }
 
-/** Colonnes déduites des lignes (union ordonnée des clés) — Mongo n'a pas de schéma fixe. */
+/**
+ * Colonnes déduites des lignes (union ordonnée des clés) — Mongo n'a pas de
+ * schéma fixe. Types + nullable en fallback safe ; l'enrichissement via
+ * `inferResultColumns` se fait dans `run.ts` quand un SchemaModel est
+ * disponible côté caller.
+ */
 function columnsOf(rows: readonly Row[]): ResultColumn[] {
 	const names: string[] = [];
 	const seen = new Set<string>();
@@ -139,7 +144,11 @@ function columnsOf(rows: readonly Row[]): ResultColumn[] {
 			}
 		}
 	}
-	return names.map((name) => ({ name }));
+	return names.map((name) => ({
+		name,
+		type: "unknown" as const,
+		nullable: true
+	}));
 }
 
 /** Connexion MongoDB : enveloppe un `MongoClient`. */

@@ -1,12 +1,16 @@
+import type { SnqlType } from "../schema/model";
 import type { Row } from "./compensate";
 
 /**
  * Une colonne du résultat, engine-agnostique. `name` est la clé présente dans
- * chaque {@link Row}. Le typage riche (SnqlType) viendra du SchemaModel
- * (introspection) ; ici on garde le strict nécessaire pour l'affichage.
+ * chaque {@link Row}. `type` + `nullable` sont dérivés du SchemaModel via
+ * `inferResultColumns()` quand le contexte le permet, sinon fallback safe
+ * `"unknown"` + `nullable: true` (le rendu UI dégrade gracieusement).
  */
 export interface ResultColumn {
 	readonly name: string;
+	readonly type: SnqlType;
+	readonly nullable: boolean;
 }
 
 /**

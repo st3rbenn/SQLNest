@@ -116,7 +116,15 @@ class PostgresConnection implements Connection {
 		try {
 			const result = await client.query(query.text, Array.from(query.params));
 			return {
-				columns: result.fields.map((field) => ({ name: field.name })),
+				// Types + nullable = fallback safe : le driver `pg` ne remonte pas
+				// le type SNQL. L'enrichissement se fait dans `run.ts` via
+				// `inferResultColumns(physical, schema)` quand un `SchemaModel`
+				// est fourni au caller (CLI cache).
+				columns: result.fields.map((field) => ({
+					name: field.name,
+					type: "unknown" as const,
+					nullable: true
+				})),
 				rows: result.rows as Row[],
 				rowCount: result.rowCount ?? result.rows.length
 			};

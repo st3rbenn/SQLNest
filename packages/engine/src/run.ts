@@ -1,8 +1,15 @@
-import type { ResultColumn, ResultSet, Row, Statement } from "@sqlnest/snql";
+import type {
+	ResultColumn,
+	ResultSet,
+	Row,
+	SchemaModel,
+	Statement
+} from "@sqlnest/snql";
 import {
 	capabilitiesFor,
 	compensate,
 	getMapper,
+	inferResultColumns,
 	lower,
 	lowerMutation,
 	parse,
@@ -31,7 +38,8 @@ export type QueryOutcome = ResultSet & {
  */
 export async function runQuery(
 	connection: Connection,
-	source: string
+	source: string,
+	schema?: SchemaModel
 ): Promise<QueryOutcome> {
 	const engine = connection.engine;
 	const capabilities = capabilitiesFor(engine);
@@ -64,8 +72,15 @@ export async function runQuery(
 	const native = mapper.map(physical.pushdown);
 
 	const pushed = await connection.execute(native);
+	// Enrichit les colonnes avec `type` + `nullable` dérivés du SchemaModel
+	// quand disponible (CLI cache). Sinon on garde le fallback des adapters
+	// (`type: "unknown"`, `nullable: true`).
+	const typedColumns = schema
+		? inferResultColumns(physical, schema)
+		: pushed.columns;
+
 	if (physical.compensation.length === 0) {
-		return { ...pushed, written: false };
+		return { columns: typedColumns, rows: pushed.rows, rowCount: pushed.rowCount, written: false };
 	}
 
 	// La compensation d'un join a besoin des données de la collection droite ;
@@ -79,7 +94,7 @@ export async function runQuery(
 
 	const rows = compensate(physical.compensation, pushed.rows);
 	return {
-		columns: columnsFromRows(rows, pushed.columns),
+		columns: schema ? typedColumns : columnsFromRows(rows, pushed.columns),
 		rows,
 		rowCount: rows.length,
 		written: false
@@ -105,5 +120,11 @@ function columnsFromRows(
 			}
 		}
 	}
-	return names.length > 0 ? names.map((name) => ({ name })) : fallback;
+	return names.length > 0
+		? names.map((name) => ({
+				name,
+				type: "unknown" as const,
+				nullable: true
+			}))
+		: fallback;
 }

@@ -17,7 +17,17 @@ import type { RemoteOp, RemoteResult } from "../ws-client";
 import { createTunnelWsClient } from "../ws-client";
 import { loadOrInitConfig } from "./connect";
 import { runQuery } from "@sqlnest/engine";
+import type { SchemaModel } from "@sqlnest/snql";
 import { openConnectionForTunnel } from "../engine";
+
+/**
+ * Cache in-memory du SchemaModel par `connectionName`. Le schéma est
+ * introspecté à la première query `runSnql` puis réutilisé pour typer
+ * les colonnes du résultat (`inferResultColumns`). Invalidé sur restart
+ * du process CLI — pas de TTL pour l'instant, une DB dont le schéma
+ * change en cours de session n'est pas un cas courant sur un tunnel dev.
+ */
+const schemaCache = new Map<string, SchemaModel>();
 
 const HTTP_PREFIX_RE = /^http(s?):\/\//;
 
@@ -141,6 +151,9 @@ async function dispatchOp(
 		const conn = await openConnectionForTunnel(connectionName, env ?? process.env);
 		try {
 			const schema = await conn.introspect();
+			// Prime le cache pour les prochains `runSnql` — évite un aller-
+			// retour d'introspection dédié.
+			schemaCache.set(connectionName, schema);
 			return { ok: true, data: schema };
 		} finally {
 			await conn.close();
@@ -149,7 +162,19 @@ async function dispatchOp(
 	if (op.op === "runSnql") {
 		const conn = await openConnectionForTunnel(connectionName, env ?? process.env);
 		try {
-			const rs = await runQuery(conn, op.src);
+			// Charge le schéma une fois par process CLI (cache in-memory).
+			// Silence les erreurs d'introspection : si ça échoue, on execute
+			// quand même la query, juste sans les types de colonnes riches.
+			let schema = schemaCache.get(connectionName);
+			if (schema === undefined) {
+				try {
+					schema = await conn.introspect();
+					schemaCache.set(connectionName, schema);
+				} catch {
+					// Introspection non fatale — la query est primaire.
+				}
+			}
+			const rs = await runQuery(conn, op.src, schema);
 			return {
 				ok: true,
 				data: {

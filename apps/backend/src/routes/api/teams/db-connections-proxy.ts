@@ -15,7 +15,8 @@ import z from "zod/v4";
 import { assertConnectionInTeam } from "../../../domains/db-connections/get-in-team";
 import {
 	ProxyErrorResponse,
-	ProxyQueryBody
+	ProxyQueryBody,
+	ProxyQueryResponse
 } from "../../../domains/db-connections/proxy-schema";
 import {
 	assertTeamAccess,
@@ -136,6 +137,7 @@ export default function teamsDbConnectionsProxyRoute(fastify: FastifyInstance) {
 				params: SlugAndConnectionParams,
 				body: ProxyQueryBody,
 				response: {
+					200: ProxyQueryResponse,
 					400: ProxyErrorResponse,
 					404: ProxyErrorResponse,
 					500: ProxyErrorResponse,

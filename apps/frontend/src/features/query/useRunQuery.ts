@@ -2,8 +2,32 @@ import { useMutation } from "@tanstack/react-query";
 
 const API_BASE = window.CONTEXT.apiBaseUrl;
 
+/**
+ * Type SNQL d'une colonne — aligné sur `SnqlType` de
+ * `packages/snql/src/schema/model.ts`. Dupliqué ici pour ne pas ajouter
+ * `@sqlnest/snql` en dep du frontend (types uniquement de toute façon).
+ */
+export type SnqlColumnType =
+	| "string"
+	| "int"
+	| "bigint"
+	| "float"
+	| "decimal"
+	| "bool"
+	| "date"
+	| "json"
+	| "array"
+	| "uuid"
+	| "unknown";
+
+export interface QueryResultColumn {
+	readonly name: string;
+	readonly type: SnqlColumnType;
+	readonly nullable: boolean;
+}
+
 export interface QueryResult {
-	readonly columns: readonly { readonly name: string }[];
+	readonly columns: readonly QueryResultColumn[];
 	readonly rows: readonly Record<string, unknown>[];
 	readonly rowCount: number;
 	/** `true` = écriture (lignes affectées) ; distingue d'une lecture à 0 ligne. */
