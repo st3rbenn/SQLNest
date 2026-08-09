@@ -1,6 +1,5 @@
 import { Menu, UnstyledButton } from "@mantine/core";
 import {
-	IconArrowLeft,
 	IconChevronDown,
 	IconLayoutSidebarLeftCollapse,
 	IconLayoutSidebarLeftExpand
@@ -202,11 +201,7 @@ function FilesMenu({
 				</UnstyledButton>
 			</Menu.Target>
 			<Menu.Dropdown>
-				<Menu.Item
-					component={Link}
-					to="/"
-					leftSection={<IconArrowLeft size={13} stroke={2} />}
-				>
+				<Menu.Item component={Link} to="/">
 					Retour aux canvas
 				</Menu.Item>
 				<Menu.Divider />
