@@ -7,12 +7,17 @@ import {
 import type { CSSProperties } from "react";
 
 /**
- * Bar « fichier » du canvas — chevron dropdown Files + nom de la DB +
- * toggle drawer. Deux variants selon si le drawer est ouvert ou pas :
- *   - `floating` : container flottant top-left du canvas (drawer fermé).
- *   - `embedded` : intégré dans le header du DrawerPane (drawer ouvert).
+ * Bar « fichier » du canvas — chevron dropdown Files + nom de la DB
+ * + accès au drawer schéma.
  *
- * Le toggle change d'icône (collapse ⇄ expand) selon `drawerVisible`.
+ * Deux variants :
+ *   - `floating` : container top-left du canvas quand le drawer est
+ *     fermé. Nom de la DB et bouton d'ouverture drawer sont FUSIONNÉS
+ *     en un seul btn (le click ouvre le drawer, le rename inline se
+ *     fera dans le drawer une fois ouvert).
+ *   - `embedded` : rendu dans le header du DrawerPane quand le drawer
+ *     est ouvert. Nom + toggle collapse séparés (l'user peut cliquer
+ *     le nom pour rename plus tard sans fermer le drawer).
  */
 
 type Variant = "floating" | "embedded";
@@ -20,12 +25,12 @@ type Variant = "floating" | "embedded";
 const floatingContainerStyle: CSSProperties = {
 	position: "absolute",
 	top: 12,
-	left: 8,
+	left: 12,
 	zIndex: 5,
 	display: "flex",
 	alignItems: "stretch",
-	gap: 2,
-	padding: 4,
+	gap: 0,
+	padding: 0,
 	background: "var(--sqlnest-elevated)",
 	border: "1px solid var(--sqlnest-border-subtle)",
 	borderRadius: 10,
@@ -34,45 +39,17 @@ const floatingContainerStyle: CSSProperties = {
 
 const embeddedContainerStyle: CSSProperties = {
 	display: "flex",
-	alignItems: "stretch",
+	alignItems: "center",
 	gap: 2,
-	padding: 0,
-	background: "transparent",
-	border: "none",
-	borderRadius: 0
+	padding: 0
 };
 
-const chevronTriggerStyle: CSSProperties = {
+const baseBtnStyle: CSSProperties = {
 	display: "inline-flex",
 	alignItems: "center",
-	justifyContent: "center",
-	padding: "6px 8px",
-	borderRadius: 6,
-	color: "var(--sqlnest-text-secondary)"
-};
-
-const dbNameStyle: CSSProperties = {
-	display: "inline-flex",
-	alignItems: "center",
-	padding: "6px 10px",
-	borderRadius: 6,
 	color: "var(--sqlnest-text-primary)",
 	fontSize: 13,
-	fontWeight: 500,
-	maxWidth: 220,
-	overflow: "hidden",
-	textOverflow: "ellipsis",
-	whiteSpace: "nowrap"
-};
-
-const toggleStyle: CSSProperties = {
-	display: "inline-flex",
-	alignItems: "center",
-	justifyContent: "center",
-	padding: "6px 8px",
-	borderRadius: 6,
-	color: "var(--sqlnest-text-secondary)",
-	marginLeft: "auto"
+	fontWeight: 500
 };
 
 const menuStyles = {
@@ -105,25 +82,43 @@ export function CanvasFilesHUD({
 	readonly onToggleDrawer: () => void;
 	readonly variant?: Variant;
 }): React.ReactNode {
-	const container =
-		variant === "floating" ? floatingContainerStyle : embeddedContainerStyle;
+	if (variant === "floating") {
+		return (
+			<div style={floatingContainerStyle}>
+				<FilesMenu radius="10px 0 0 10px" padding="11px 14px" />
+				<OpenPanelButton dbName={dbName} onClick={onToggleDrawer} />
+			</div>
+		);
+	}
 	return (
-		<div style={container}>
-			<FilesMenu />
+		<div style={embeddedContainerStyle}>
+			<FilesMenu radius={6} padding="6px 8px" />
 			<UnstyledButton
 				className="sqlnest-menu-item"
 				aria-label={`Renommer ${dbName} (bientôt)`}
-				style={dbNameStyle}
+				style={{
+					...baseBtnStyle,
+					padding: "6px 10px",
+					borderRadius: 6,
+					maxWidth: 220,
+					overflow: "hidden",
+					textOverflow: "ellipsis",
+					whiteSpace: "nowrap"
+				}}
 			>
 				{dbName}
 			</UnstyledButton>
 			<UnstyledButton
 				className="sqlnest-menu-item"
-				aria-label={
-					drawerVisible ? "Masquer le drawer gauche" : "Afficher le drawer gauche"
-				}
+				aria-label="Masquer le drawer gauche"
 				onClick={onToggleDrawer}
-				style={toggleStyle}
+				style={{
+					...baseBtnStyle,
+					padding: "6px 8px",
+					borderRadius: 6,
+					marginLeft: "auto",
+					color: "var(--sqlnest-text-secondary)"
+				}}
 			>
 				{drawerVisible ? (
 					<IconLayoutSidebarLeftCollapse size={16} stroke={2} aria-hidden />
@@ -135,7 +130,52 @@ export function CanvasFilesHUD({
 	);
 }
 
-function FilesMenu(): React.ReactNode {
+function OpenPanelButton({
+	dbName,
+	onClick
+}: {
+	readonly dbName: string;
+	readonly onClick: () => void;
+}): React.ReactNode {
+	return (
+		<UnstyledButton
+			className="sqlnest-menu-item"
+			onClick={onClick}
+			aria-label={`Ouvrir le schéma de ${dbName}`}
+			style={{
+				...baseBtnStyle,
+				gap: 8,
+				padding: "11px 14px",
+				borderRadius: "0 10px 10px 0",
+				maxWidth: 260
+			}}
+		>
+			<span
+				style={{
+					overflow: "hidden",
+					textOverflow: "ellipsis",
+					whiteSpace: "nowrap"
+				}}
+			>
+				{dbName}
+			</span>
+			<IconLayoutSidebarLeftExpand
+				size={16}
+				stroke={2}
+				aria-hidden
+				style={{ color: "var(--sqlnest-text-secondary)" }}
+			/>
+		</UnstyledButton>
+	);
+}
+
+function FilesMenu({
+	radius,
+	padding
+}: {
+	readonly radius: string | number;
+	readonly padding: string;
+}): React.ReactNode {
 	return (
 		<Menu
 			shadow="md"
@@ -152,7 +192,14 @@ function FilesMenu(): React.ReactNode {
 				<UnstyledButton
 					className="sqlnest-menu-item"
 					aria-label="Actions fichier"
-					style={chevronTriggerStyle}
+					style={{
+						display: "inline-flex",
+						alignItems: "center",
+						justifyContent: "center",
+						padding,
+						borderRadius: radius,
+						color: "var(--sqlnest-text-secondary)"
+					}}
 				>
 					<IconChevronDown size={16} stroke={2} aria-hidden />
 				</UnstyledButton>
