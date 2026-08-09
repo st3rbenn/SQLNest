@@ -91,6 +91,12 @@ export interface CanvasUIContextValue {
 	readonly setLayoutConfirmOpen: (o: boolean) => void;
 	readonly selectedTables: readonly string[];
 	readonly clearSelection: () => void;
+	/** Nom de la table survolée dans le side panel (SchemaTree). Alimente
+	 *  le highlight visuel du TableNode correspondant dans le canvas —
+	 *  aide à repérer une table sans cliquer. `null` quand rien n'est
+	 *  survolé. */
+	readonly hoveredTableName: string | null;
+	readonly setHoveredTableName: (name: string | null) => void;
 }
 
 // ─── 4. Actions — callbacks bindés (stables) ───────────────────────────

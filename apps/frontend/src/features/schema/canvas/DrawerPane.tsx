@@ -1,6 +1,6 @@
-import { Box, UnstyledButton } from "@mantine/core";
+import { Box, Menu, Text, UnstyledButton } from "@mantine/core";
 import { SearchInput, SidebarDrawer } from "@sqlnest/design-system";
-import { IconChevronLeft } from "@tabler/icons-react";
+import { IconAdjustmentsHorizontal, IconChevronLeft } from "@tabler/icons-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FrameDetails } from "../FrameDetails";
 import type { Frame } from "../frames";
@@ -95,6 +95,7 @@ interface DrawerPaneProps {
 	readonly onClearFocus: () => void;
 	readonly onClearFocusFrame: () => void;
 	readonly onFocusTable: (name: string) => void;
+	readonly onHoverTable?: (name: string | null) => void;
 	/** Bar rendu en top du drawer (au-dessus du header search/back).
 	 *  Typiquement le `CanvasFilesHUD` embedded. */
 	readonly topBar?: React.ReactNode;
@@ -125,6 +126,7 @@ export function DrawerPane({
 	onClearFocus,
 	onClearFocusFrame,
 	onFocusTable,
+	onHoverTable,
 	onFrameRename,
 	onFrameDelete,
 	topBar
@@ -155,7 +157,12 @@ export function DrawerPane({
 									display: "inline-flex",
 									alignItems: "center",
 									gap: 4,
-									marginTop: topBar ? 8 : 0,
+									marginTop: topBar ? 12 : 0,
+									paddingTop: topBar ? 12 : 0,
+									borderTop: topBar
+										? "1px solid var(--sqlnest-border-subtle)"
+										: undefined,
+									width: "100%",
 									fontSize: 12.5,
 									color: "var(--sqlnest-text-secondary)",
 									fontWeight: 500
@@ -166,12 +173,34 @@ export function DrawerPane({
 								<span>{dbName}</span>
 							</UnstyledButton>
 						) : (
-							<div style={{ marginTop: topBar ? 8 : 0 }}>
+							<div
+								style={{
+									marginTop: topBar ? 8 : 0,
+									paddingTop: topBar ? 8 : 0,
+									borderTop: topBar
+										? "1px solid var(--sqlnest-border-subtle)"
+										: undefined
+								}}
+							>
 								<SearchInput
 									value={search}
 									onChange={(e) => onSearchChange(e.currentTarget.value)}
 									placeholder={`Rechercher parmi ${schema.collections.length} tables…`}
 								/>
+								<Box
+									style={{
+										display: "flex",
+										alignItems: "center",
+										justifyContent: "space-between",
+										paddingTop: 8
+									}}
+								>
+									<Text size="xs" c="dimmed">
+										{schema.collections.length} tables ·{" "}
+										{schema.relations.length} relations
+									</Text>
+									<AutoOrganizeMenu />
+								</Box>
 							</div>
 						)}
 					</>
@@ -206,6 +235,7 @@ export function DrawerPane({
 						focusId={focusId}
 						search={search}
 						onSelect={onFocusTable}
+						onHoverTable={onHoverTable}
 					/>
 				)}
 			</SidebarDrawer>
@@ -229,5 +259,66 @@ export function DrawerPane({
 				}}
 			/>
 		</Box>
+	);
+}
+
+/**
+ * Menu de réorganisation auto de l'arbre — placeholder V1. Les options
+ * apparaissent mais restent inactives (le grouping actuel est par
+ * préfixe hardcoded dans `buildTreeGroups`). Le vrai wiring
+ * multi-mode + le réordonnement custom drag&drop viendront dans un
+ * follow-up dédié.
+ */
+function AutoOrganizeMenu(): React.ReactNode {
+	return (
+		<Menu
+			shadow="md"
+			width={200}
+			position="bottom-end"
+			withArrow={false}
+			offset={6}
+			radius={8}
+			transitionProps={{ duration: 0 }}
+			styles={{
+				dropdown: {
+					background: "var(--sqlnest-surface)",
+					border: "1px solid var(--sqlnest-border-subtle)",
+					padding: 3
+				},
+				item: {
+					fontSize: 12,
+					color: "var(--sqlnest-text-primary)",
+					padding: "5px 8px",
+					borderRadius: 5,
+					minHeight: 0
+				}
+			}}
+			classNames={{ item: "sqlnest-menu-item" }}
+		>
+			<Menu.Target>
+				<UnstyledButton
+					className="sqlnest-menu-item"
+					aria-label="Organisation de l'arbre"
+					style={{
+						display: "inline-flex",
+						alignItems: "center",
+						justifyContent: "center",
+						padding: "4px 6px",
+						borderRadius: 6,
+						color: "var(--sqlnest-text-secondary)"
+					}}
+				>
+					<IconAdjustmentsHorizontal size={14} stroke={2} aria-hidden />
+				</UnstyledButton>
+			</Menu.Target>
+			<Menu.Dropdown>
+				<Menu.Label>Grouper par</Menu.Label>
+				<Menu.Item disabled>Nom (préfixe)</Menu.Item>
+				<Menu.Item disabled>Frame manuel</Menu.Item>
+				<Menu.Item disabled>Foreign-key</Menu.Item>
+				<Menu.Divider />
+				<Menu.Item disabled>Sans grouping</Menu.Item>
+			</Menu.Dropdown>
+		</Menu>
 	);
 }

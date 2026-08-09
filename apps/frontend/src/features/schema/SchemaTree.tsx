@@ -12,6 +12,7 @@ interface SchemaTreeProps {
 	readonly focusId: string | null;
 	readonly search: string;
 	readonly onSelect: (id: string) => void;
+	readonly onHoverTable?: (name: string | null) => void;
 }
 
 const PARTITIONED = /^([a-z][a-z0-9]*)_p\d+/;
@@ -111,7 +112,8 @@ export function SchemaTree({
 	frames,
 	focusId,
 	search,
-	onSelect
+	onSelect,
+	onHoverTable
 }: SchemaTreeProps) {
 	const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(
 		() => new Set()
@@ -152,11 +154,11 @@ export function SchemaTree({
 
 	return (
 		<Box>
-			<Text px="sm" pt={4} pb={4} size="xs" c="dimmed">
-				{query === ""
-					? `${schema.collections.length} tables · ${schema.relations.length} relations`
-					: `${totalMatch} résultat(s)`}
-			</Text>
+			{query !== "" ? (
+				<Text px="sm" pt={4} pb={4} size="xs" c="dimmed">
+					{totalMatch} résultat(s)
+				</Text>
+			) : null}
 			{filtered.map((g) => {
 				const showChildren = !isCollapsed(g.key);
 				// Couleur du badge de groupe : hue explicite du frame si défini,
@@ -223,16 +225,25 @@ export function SchemaTree({
 						</UnstyledButton>
 						{showChildren
 							? g.tables.map((t) => (
-									<RowItem
+									<div
 										key={t}
-										label={t}
-										color={colorFor(t).border}
-										active={t === focusId}
-										onClick={() => onSelect(t)}
-										title={t}
-										paddingLeft={32}
-										size="sm"
-									/>
+										onMouseEnter={
+											onHoverTable ? () => onHoverTable(t) : undefined
+										}
+										onMouseLeave={
+											onHoverTable ? () => onHoverTable(null) : undefined
+										}
+									>
+										<RowItem
+											label={t}
+											color={colorFor(t).border}
+											active={t === focusId}
+											onClick={() => onSelect(t)}
+											title={t}
+											paddingLeft={32}
+											size="sm"
+										/>
+									</div>
 								))
 							: null}
 					</div>

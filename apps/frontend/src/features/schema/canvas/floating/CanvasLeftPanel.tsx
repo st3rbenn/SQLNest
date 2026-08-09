@@ -28,7 +28,8 @@ export function CanvasLeftPanel() {
 		leftDrawerWidth,
 		drawerHandleProps,
 		search,
-		setSearch
+		setSearch,
+		setHoveredTableName
 	} = useCanvasUI();
 	const { handleFrameRename, handleFrameDelete } = useCanvasActionsCtx();
 	const toggleDrawer = () => setLeftDrawerVisible((x) => !x);
@@ -48,6 +49,7 @@ export function CanvasLeftPanel() {
 				onClearFocus={clearFocus}
 				onClearFocusFrame={() => setFocusFrameKey(null)}
 				onFocusTable={focusAndZoom}
+				onHoverTable={setHoveredTableName}
 				onFrameRename={handleFrameRename}
 				onFrameDelete={handleFrameDelete}
 				topBar={

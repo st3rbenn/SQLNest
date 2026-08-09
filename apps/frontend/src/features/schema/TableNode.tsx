@@ -60,6 +60,9 @@ export interface TableNodeData {
 	readonly focused: boolean;
 	/** Correspond à la recherche courante. */
 	readonly matched: boolean;
+	/** Survolé depuis le side panel (SchemaTree). Aide à repérer la
+	 *  table sans cliquer — glow bleu subtil, moins fort que `focused`. */
+	readonly hoverHighlight?: boolean;
 	/** Callback au release du resize (n'importe quel côté ou coin). Fourni par
 	 * SchemaCanvas → persist localStorage via `useTableSizes` (dimensions) et
 	 * `useTablePositions` (origine, quand elle a bougé depuis un handle
@@ -131,7 +134,8 @@ export function TableNode({
 	width,
 	height: heightProp
 }: NodeProps<TableNodeType>) {
-	const { collection, dimmed, focused, matched, onResizeEnd } = data;
+	const { collection, dimmed, focused, matched, hoverHighlight, onResizeEnd } =
+		data;
 	const level = useStore(levelSelector);
 	const inferred = collection.source === "inferred";
 	const color = colorFor(collection.name);
@@ -159,12 +163,14 @@ export function TableNode({
 		height: effectiveHeight,
 		borderRadius: 10,
 		background: "var(--sqlnest-surface)",
-		border: `2px solid ${matched ? "#ffc933" : highlighted ? "#0d99ff" : color.border}`,
+		border: `2px solid ${matched ? "#ffc933" : highlighted || hoverHighlight ? "#0d99ff" : color.border}`,
 		boxShadow: highlighted
 			? "0 0 0 3px rgba(13,153,255,0.35), 0 8px 24px rgba(0,0,0,0.45)"
-			: matched
-				? "0 0 0 3px rgba(255,201,51,0.4)"
-				: "0 1px 3px rgba(0,0,0,0.35)",
+			: hoverHighlight
+				? "0 0 0 2px rgba(13,153,255,0.25)"
+				: matched
+					? "0 0 0 3px rgba(255,201,51,0.4)"
+					: "0 1px 3px rgba(0,0,0,0.35)",
 		opacity: dimmed ? 0.28 : 1,
 		transition: "opacity 120ms, box-shadow 120ms",
 		overflow: "hidden",

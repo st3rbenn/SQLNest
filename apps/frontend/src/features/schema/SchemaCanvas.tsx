@@ -394,6 +394,11 @@ function CanvasInner({
 		edgeAnchors
 	});
 
+	// Nom de la table survolée dans le SchemaTree (side panel). Décide de
+	// `data.hoverHighlight` sur les nodes React Flow — glow bleu subtil sur
+	// la table matching, pour aider à la repérer sans cliquer.
+	const [hoveredTableName, setHoveredTableName] = useState<string | null>(null);
+
 	// Nœuds table affichés : positions vivantes (drag) + drapeaux focus + masqués.
 	// Injecte aussi le callback `onResizeEnd` — TableNode s'en sert pour le
 	// NodeResizer 4 côtés. Absent = pas de handles (utile aux tests / rendus
@@ -411,6 +416,7 @@ function CanvasInner({
 							dimmed: neighbors !== null && !inFocus,
 							focused: n.id === focusId,
 							matched: false,
+							hoverHighlight: n.id === hoveredTableName,
 							onResizeEnd: (s: {
 								width: number;
 								height: number;
@@ -420,7 +426,7 @@ function CanvasInner({
 						}
 					};
 				}),
-		[nodes, neighbors, focusId, hiddenIds, handleTableResize]
+		[nodes, neighbors, focusId, hiddenIds, handleTableResize, hoveredTableName]
 	);
 
 	// (`nodesRef` exposé par `useCanvasNodes` — voir plus haut, consommé par
@@ -639,7 +645,9 @@ function CanvasInner({
 			layoutConfirmOpen,
 			setLayoutConfirmOpen,
 			selectedTables,
-			clearSelection
+			clearSelection,
+			hoveredTableName,
+			setHoveredTableName
 		}),
 		[
 			search,
@@ -653,7 +661,8 @@ function CanvasInner({
 			layoutConfirmOpen,
 			setLayoutConfirmOpen,
 			selectedTables,
-			clearSelection
+			clearSelection,
+			hoveredTableName
 		]
 	);
 	const actionsCtxValue = useMemo(
