@@ -57,18 +57,18 @@ const containerStyle: CSSProperties = {
 const triggerStyle: CSSProperties = {
 	display: "inline-flex",
 	alignItems: "center",
-	gap: 6,
-	padding: "5px 8px 5px 12px",
+	gap: 5,
+	padding: "3px 6px 3px 9px",
 	background: "var(--sqlnest-surface)",
 	color: "var(--sqlnest-text-primary)",
 	border: "1px solid var(--sqlnest-border)",
-	borderRadius: 6,
-	fontSize: 12,
+	borderRadius: 5,
+	fontSize: 11,
 	fontWeight: 500,
 	cursor: "pointer",
 	boxSizing: "border-box",
 	whiteSpace: "nowrap",
-	minHeight: 30
+	minHeight: 26
 };
 
 const triggerLabelStyle: CSSProperties = {
@@ -106,10 +106,10 @@ export function GalleryToolbar({
 						padding: 3
 					},
 					item: {
-						fontSize: 12,
+						fontSize: 11,
 						color: "var(--sqlnest-text-primary)",
-						padding: "5px 8px",
-						borderRadius: 5,
+						padding: "4px 7px",
+						borderRadius: 4,
 						minHeight: 0
 					}
 				}}
@@ -124,7 +124,7 @@ export function GalleryToolbar({
 						<span style={triggerLabelStyle}>Trier :</span>
 						<span>{activeLabel}</span>
 						<IconChevronDown
-							size={13}
+							size={11}
 							stroke={2}
 							aria-hidden
 							style={{ opacity: 0.6 }}
@@ -142,7 +142,7 @@ export function GalleryToolbar({
 								rightSection={
 									isActive ? (
 										<IconCheck
-											size={12}
+											size={11}
 											stroke={2.5}
 											color="var(--sqlnest-accent)"
 										/>
@@ -170,18 +170,18 @@ export function GalleryToolbar({
 				<ToolbarButton
 					label="Vue grille"
 					active={view === "grid"}
-					size={30}
+					size={26}
 					onClick={() => onViewChange("grid")}
 				>
-					<IconLayoutGrid size={15} stroke={2} />
+					<IconLayoutGrid size={13} stroke={2} />
 				</ToolbarButton>
 				<ToolbarButton
 					label="Vue liste"
 					active={view === "list"}
-					size={30}
+					size={26}
 					onClick={() => onViewChange("list")}
 				>
-					<IconList size={15} stroke={2} />
+					<IconList size={13} stroke={2} />
 				</ToolbarButton>
 			</div>
 		</div>
