@@ -53,7 +53,7 @@ export function UserMenu() {
 	// sans surface dédiée.
 	if (location.pathname === "/") return null;
 	if (
-		/^\/team\/[0-9a-f]{6}(\/(recents|drafts|pair))?\/?$/.test(
+		/^\/team\/[0-9a-f]{6}(\/(recents|canvas|drafts|pair))?\/?$/.test(
 			location.pathname
 		)
 	) {

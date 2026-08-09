@@ -119,7 +119,7 @@ export function DbCard({ connection, isPending, onClick }: Props) {
 }
 
 function EngineIcon({ engine }: { readonly engine: string }): React.ReactNode {
-	// Même couleur que les icônes sidebar (Recents/Drafts) — neutre, ne
+	// Même couleur que les icônes sidebar (Recents/Canvas) — neutre, ne
 	// tire pas l'attention comme le bleu accent qui suggérait qu'on peut
 	// interagir avec.
 	return (

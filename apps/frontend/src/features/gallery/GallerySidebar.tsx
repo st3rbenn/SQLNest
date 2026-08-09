@@ -5,10 +5,12 @@ import { TeamSelector } from "../teams/TeamSelector";
 import { useCurrentTeam } from "../teams/useCurrentTeam";
 
 /**
- * Sidebar partagée entre la gallery (`/team/:slug`, `/team/:slug/recents`)
- * et la page de pairing (`/team/:slug/pair`). 2 blocs :
+ * Sidebar partagée entre la gallery (`/team/:slug/recents`,
+ * `/team/:slug/canvas`) et la page de pairing (`/team/:slug/pair`).
+ * 2 blocs :
  *   1. Perso — UserBadge + nav cross-team (Recents)
- *   2. Team  — TeamSelector + nav team-scoped (Drafts)
+ *   2. Team  — TeamSelector + nav team-scoped (Canvas, Saved Queries,
+ *              Tests)
  * Le CTA « Nouveau canvas » vit dans le PageHead à droite (pas ici).
  */
 
@@ -21,7 +23,7 @@ const sidebarStyle: CSSProperties = {
 	flexShrink: 0
 };
 
-export type SidebarActiveItem = "recents" | "drafts";
+export type SidebarActiveItem = "recents" | "canvas";
 
 export function GallerySidebar({
 	teamSlug,
@@ -71,18 +73,29 @@ export function GallerySidebar({
 					<div style={{ height: 32 }} />
 				)}
 			</div>
-			<div style={{ padding: "2px 12px" }}>
+			<div style={{ padding: "2px 12px", display: "flex", flexDirection: "column", gap: 2 }}>
 				{teamSlug ? (
 					<NavItem
-						label="Drafts"
-						icon={<DraftIcon />}
-						active={activeItem === "drafts"}
-						to="/team/$teamSlug/drafts"
+						label="Canvas"
+						icon={<CanvasIcon />}
+						active={activeItem === "canvas"}
+						to="/team/$teamSlug/canvas"
 						params={{ teamSlug }}
 					/>
 				) : (
-					<NavItem label="Drafts" icon={<DraftIcon />} active={false} />
+					<NavItem label="Canvas" icon={<CanvasIcon />} active={false} />
 				)}
+
+				{/* Placeholders V2+ — non cliquables, tooltip explicite.
+				    Objectif : signaler la roadmap sans faire d'ombre à ce
+				    qui existe déjà. */}
+				<NavItem
+					label="Saved Queries"
+					icon={<BookmarkIcon />}
+					active={false}
+					soon
+				/>
+				<NavItem label="Tests" icon={<TestIcon />} active={false} soon />
 			</div>
 
 			<div style={{ flex: 1 }} />
@@ -95,7 +108,8 @@ function NavItem({
 	icon,
 	active,
 	to,
-	params
+	params,
+	soon = false
 }: {
 	readonly label: string;
 	readonly icon: React.ReactNode;
@@ -103,8 +117,9 @@ function NavItem({
 	readonly to?:
 		| "/team/$teamSlug"
 		| "/team/$teamSlug/recents"
-		| "/team/$teamSlug/drafts";
+		| "/team/$teamSlug/canvas";
 	readonly params?: { readonly teamSlug: string };
+	readonly soon?: boolean;
 }): React.ReactNode {
 	const className = active
 		? "sqlnest-sidebar-item sqlnest-sidebar-item--active"
@@ -114,12 +129,13 @@ function NavItem({
 		alignItems: "center",
 		gap: 10,
 		padding: "6px 8px",
-		color: "var(--sqlnest-text-title)",
+		color: soon ? "var(--sqlnest-text-tertiary)" : "var(--sqlnest-text-title)",
 		borderRadius: 6,
 		fontSize: 12,
 		fontWeight: 500,
-		cursor: to ? "pointer" : "default",
-		textDecoration: "none"
+		cursor: soon ? "not-allowed" : to ? "pointer" : "default",
+		textDecoration: "none",
+		opacity: soon ? 0.6 : 1
 	};
 	const inner = (
 		<>
@@ -136,9 +152,25 @@ function NavItem({
 				{icon}
 			</span>
 			<span style={{ flex: 1 }}>{label}</span>
+			{soon ? (
+				<span
+					style={{
+						fontSize: 9,
+						fontWeight: 600,
+						letterSpacing: 0.4,
+						textTransform: "uppercase",
+						color: "var(--sqlnest-text-tertiary)",
+						border: "1px solid var(--sqlnest-border-subtle)",
+						padding: "1px 5px",
+						borderRadius: 3
+					}}
+				>
+					Soon
+				</span>
+			) : null}
 		</>
 	);
-	if (to && params) {
+	if (to && params && !soon) {
 		return (
 			<Link to={to} params={params} className={className} style={style}>
 				{inner}
@@ -146,7 +178,11 @@ function NavItem({
 		);
 	}
 	return (
-		<div className={className} style={style}>
+		<div
+			className={className}
+			style={style}
+			title={soon ? "Bientôt disponible" : undefined}
+		>
 			{inner}
 		</div>
 	);
@@ -172,7 +208,7 @@ function ClockIcon(): React.ReactNode {
 	);
 }
 
-function DraftIcon(): React.ReactNode {
+function CanvasIcon(): React.ReactNode {
 	return (
 		<svg
 			width={14}
@@ -185,9 +221,49 @@ function DraftIcon(): React.ReactNode {
 			strokeLinejoin="round"
 			aria-hidden="true"
 		>
-			<title>Drafts</title>
-			<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
-			<path d="M14 3v5h5" />
+			<title>Canvas</title>
+			<rect x={3} y={3} width={18} height={18} rx={2} />
+			<path d="M3 9h18" />
+			<path d="M9 21V9" />
+		</svg>
+	);
+}
+
+function BookmarkIcon(): React.ReactNode {
+	return (
+		<svg
+			width={14}
+			height={14}
+			viewBox="0 0 24 24"
+			fill="none"
+			stroke="var(--sqlnest-text-cream)"
+			strokeWidth={2}
+			strokeLinecap="round"
+			strokeLinejoin="round"
+			aria-hidden="true"
+		>
+			<title>Saved Queries</title>
+			<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+		</svg>
+	);
+}
+
+function TestIcon(): React.ReactNode {
+	return (
+		<svg
+			width={14}
+			height={14}
+			viewBox="0 0 24 24"
+			fill="none"
+			stroke="var(--sqlnest-text-cream)"
+			strokeWidth={2}
+			strokeLinecap="round"
+			strokeLinejoin="round"
+			aria-hidden="true"
+		>
+			<title>Tests</title>
+			<path d="M9 3v6l-5 9a2 2 0 0 0 2 3h12a2 2 0 0 0 2-3l-5-9V3" />
+			<path d="M8 3h8" />
 		</svg>
 	);
 }

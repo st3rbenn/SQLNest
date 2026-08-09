@@ -1,13 +1,16 @@
 /**
- * Route `/team/:teamSlug/drafts` — liste triée alphabétiquement des
- * canvas de la team. Séparée de `/team/:teamSlug` (qui redirige vers
- * `/recents` — voir `.$teamSlug.index.tsx`) pour que la nav sidebar
- * "Drafts" ait une URL propre à pointer.
+ * Route legacy `/team/:teamSlug/drafts` — renommée en `/canvas`.
+ * On garde ici un redirect pour ne pas casser les bookmarks / URLs
+ * partagées historiques.
  */
 
-import { createFileRoute } from "@tanstack/react-router";
-import { GalleryPage } from "../features/gallery/GalleryPage";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/_authenticated/team/$teamSlug/drafts")({
-	component: () => <GalleryPage view="drafts" />
+	beforeLoad: ({ params }) => {
+		throw redirect({
+			to: "/team/$teamSlug/canvas",
+			params: { teamSlug: params.teamSlug }
+		});
+	}
 });

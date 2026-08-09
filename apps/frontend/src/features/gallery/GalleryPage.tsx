@@ -1,3 +1,4 @@
+import { useLocalStorage } from "@mantine/hooks";
 import { Link } from "@tanstack/react-router";
 import type { CSSProperties } from "react";
 import {
@@ -7,6 +8,12 @@ import {
 import { useRecentConnectionIds } from "../db-connections/useRecentConnections";
 import { useCurrentTeam } from "../teams/useCurrentTeam";
 import { DbCard } from "./DbCard";
+import { DbRow } from "./DbRow";
+import {
+	type CanvasSortKey,
+	type CanvasViewMode,
+	GalleryToolbar
+} from "./GalleryToolbar";
 import { GallerySidebar } from "./GallerySidebar";
 import { NewCanvasCta, PageHead } from "./PageHead";
 import { useNavigateToCanvas } from "./useNavigateToCanvas";
@@ -50,7 +57,7 @@ const mainContentStyle: CSSProperties = {
 	padding: "24px 32px 32px",
 	display: "flex",
 	flexDirection: "column",
-	gap: 32
+	gap: 20
 };
 
 const gridStyle: CSSProperties = {
@@ -59,8 +66,26 @@ const gridStyle: CSSProperties = {
 	gap: 20
 };
 
+const listStyle: CSSProperties = {
+	display: "flex",
+	flexDirection: "column",
+	gap: 6
+};
+
+const listHeaderStyle: CSSProperties = {
+	display: "grid",
+	gridTemplateColumns: "1fr 120px 160px 90px",
+	gap: 16,
+	padding: "0 14px",
+	fontSize: 10,
+	fontWeight: 600,
+	letterSpacing: 0.6,
+	textTransform: "uppercase",
+	color: "var(--sqlnest-text-tertiary)"
+};
+
 /**
- * Styles LOCAUX à la gallery : hover des cards + shimmer skeleton.
+ * Styles LOCAUX à la gallery : hover des cards + rows + shimmer.
  *
  * Les classes `sqlnest-sidebar-item` / `sqlnest-menu-item` (et leurs
  * variants `--active`) sont hoistées dans `packages/design-system/src/
@@ -76,30 +101,81 @@ const CARD_HOVER_CSS = `
 .sqlnest-db-card--pending {
 	border-color: var(--sqlnest-accent-muted) !important;
 }
+.sqlnest-db-row:hover {
+	border-color: var(--sqlnest-accent-muted) !important;
+}
 @keyframes sqlnest-skeleton-shimmer {
 	0% { background-position: 200% 0; }
 	100% { background-position: -200% 0; }
 }
 `;
 
-/** Vue de la gallery — pilote le titre PageHead ET l'item actif dans
- *  la sidebar. En V1 les 2 vues affichent la même liste (canvas de la
- *  team courante), seul l'affichage change. En V2 « recents » agrégera
- *  cross-team. */
-export type GalleryView = "drafts" | "recents";
+/** Vue de la gallery — pilote le titre PageHead, l'item actif dans la
+ *  sidebar, et les contrôles affichés (tri + toggle grid/list réservés
+ *  à Canvas ; Recents garde son bucket MRU sans contrôles). */
+export type GalleryView = "canvas" | "recents";
 
 const VIEW_TITLES: Record<GalleryView, string> = {
-	drafts: "Drafts",
+	canvas: "Canvas",
 	recents: "Recents"
 };
 
-export function GalleryPage({ view = "drafts" }: { readonly view?: GalleryView }) {
+const SORT_STORAGE_KEY = "sqlnest.gallery.sort";
+const VIEW_STORAGE_KEY = "sqlnest.gallery.view";
+
+function sortConnections(
+	items: readonly DbConnection[],
+	sort: CanvasSortKey
+): DbConnection[] {
+	const copy = [...items];
+	switch (sort) {
+		case "name-asc":
+			return copy.sort((a, b) =>
+				a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+			);
+		case "name-desc":
+			return copy.sort((a, b) =>
+				b.name.localeCompare(a.name, undefined, { sensitivity: "base" })
+			);
+		case "paired-desc":
+			return copy.sort(
+				(a, b) => Date.parse(b.activeSince) - Date.parse(a.activeSince)
+			);
+		case "last-used-desc":
+			return copy.sort((a, b) => {
+				const av = a.lastSeenAt ? Date.parse(a.lastSeenAt) : 0;
+				const bv = b.lastSeenAt ? Date.parse(b.lastSeenAt) : 0;
+				return bv - av;
+			});
+		case "created-desc":
+			return copy.sort(
+				(a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)
+			);
+	}
+}
+
+export function GalleryPage({
+	view = "recents"
+}: { readonly view?: GalleryView }) {
 	const team = useCurrentTeam();
 	const teamSlug = team?.slug ?? null;
 	const { data: connections, isLoading, error } = useDbConnections(teamSlug);
 	const recentIds = useRecentConnectionIds();
 	const { pendingId, handleClick } = useNavigateToCanvas();
 	const title = VIEW_TITLES[view];
+
+	// Préférences user (sort + view mode) persistées device-scoped.
+	// Défauts : nom A→Z + grille pour matcher le comportement pré-toolbar.
+	const [sort, setSort] = useLocalStorage<CanvasSortKey>({
+		key: SORT_STORAGE_KEY,
+		defaultValue: "name-asc",
+		getInitialValueInEffect: false
+	});
+	const [viewMode, setViewMode] = useLocalStorage<CanvasViewMode>({
+		key: VIEW_STORAGE_KEY,
+		defaultValue: "grid",
+		getInitialValueInEffect: false
+	});
 
 	if (error) {
 		return (
@@ -154,8 +230,8 @@ export function GalleryPage({ view = "drafts" }: { readonly view?: GalleryView }
 	}
 
 	// View "recents" : bucket MRU localStorage d'abord, puis le reste
-	// (ordre backend = activeSince DESC).
-	// View "drafts"  : liste unique triée alphabétiquement par nom.
+	// (ordre backend = activeSince DESC). Pas de tri custom.
+	// View "canvas"  : liste unique triée selon `sort` (dropdown toolbar).
 	const byId = new Map(connections.map((c) => [c.id, c] as const));
 	let recent: DbConnection[];
 	let others: DbConnection[];
@@ -167,10 +243,11 @@ export function GalleryPage({ view = "drafts" }: { readonly view?: GalleryView }
 		others = connections.filter((c) => !recentIdSet.has(c.id));
 	} else {
 		recent = [];
-		others = [...connections].sort((a, b) =>
-			a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
-		);
+		others = sortConnections(connections, sort);
 	}
+
+	const showToolbar = view === "canvas";
+	const isListView = view === "canvas" && viewMode === "list";
 
 	return (
 		<div style={pageStyle}>
@@ -193,27 +270,52 @@ export function GalleryPage({ view = "drafts" }: { readonly view?: GalleryView }
 						transition: "filter 180ms ease"
 					}}
 				>
-					{/* Ordre : récents (MRU localStorage) d'abord, puis les
-					    autres. La CTA « Nouveau canvas » vit dans le PageHead
-					    à droite (plus dans la grid — évite le doublon). */}
-					<div style={gridStyle}>
-						{recent.map((c) => (
-							<DbCard
-								key={c.id}
-								connection={c}
-								onClick={handleClick}
-								isPending={pendingId === c.id}
-							/>
-						))}
-						{others.map((c) => (
-							<DbCard
-								key={c.id}
-								connection={c}
-								onClick={handleClick}
-								isPending={pendingId === c.id}
-							/>
-						))}
-					</div>
+					{showToolbar ? (
+						<GalleryToolbar
+							sort={sort}
+							view={viewMode}
+							onSortChange={setSort}
+							onViewChange={setViewMode}
+						/>
+					) : null}
+
+					{isListView ? (
+						<div style={listStyle}>
+							<div style={listHeaderStyle}>
+								<span>Nom</span>
+								<span>Moteur</span>
+								<span>Dernière activité</span>
+								<span>Statut</span>
+							</div>
+							{others.map((c) => (
+								<DbRow
+									key={c.id}
+									connection={c}
+									onClick={handleClick}
+									isPending={pendingId === c.id}
+								/>
+							))}
+						</div>
+					) : (
+						<div style={gridStyle}>
+							{recent.map((c) => (
+								<DbCard
+									key={c.id}
+									connection={c}
+									onClick={handleClick}
+									isPending={pendingId === c.id}
+								/>
+							))}
+							{others.map((c) => (
+								<DbCard
+									key={c.id}
+									connection={c}
+									onClick={handleClick}
+									isPending={pendingId === c.id}
+								/>
+							))}
+						</div>
+					)}
 				</div>
 			</main>
 		</div>
@@ -324,4 +426,3 @@ function EmptyHero({
 		</div>
 	);
 }
-
