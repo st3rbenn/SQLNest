@@ -2,10 +2,8 @@ import { useHotkeys } from "@mantine/hooks";
 import { useQuery } from "@tanstack/react-query";
 import {
 	Background,
-	Controls,
 	type Edge,
 	MarkerType,
-	MiniMap,
 	Panel,
 	ReactFlow,
 	ReactFlowProvider,
@@ -815,36 +813,6 @@ function CanvasInner({
 				 * `gap` conservé à 20 px : trop fin devient trop sale au zoom
 				 * large, trop large casse la sensation de « papier millimétré ». */}
 				<Background color="var(--sqlnest-canvas-dot)" gap={20} />
-				{/* Contrôles RF (+/−, fit) et minimap remontés au-dessus de la
-				 * console SNQL — sans ça ils passent derrière quand elle est
-				 * ouverte. Bottom = hauteur console + gap standard. `left` suit
-				 * `leftPadding` pour rester à côté du drawer (comme la console). */}
-				<Controls
-					showInteractive={false}
-					style={{
-						bottom: consoleHeight + CONSOLE_GAP + 4,
-						left: leftPadding
-					}}
-				/>
-				<MiniMap
-					pannable
-					zoomable
-					nodeColor={(n) => {
-						if (n.type === "frame") return "transparent";
-						return (n.data as TableNodeType["data"]).collection.source ===
-							"inferred"
-							? INFERRED
-							: DECLARED;
-					}}
-					nodeStrokeWidth={0}
-					// Bg + maskColor gérés par `canvas-overrides.css` (règles
-					// `.react-flow__minimap*`) pour rester cohérent avec le reste des
-					// surfaces dark. Seul le `bottom` est calculé dynamiquement ici
-					// (dépend de la console SNQL).
-					style={{
-						bottom: consoleHeight + CONSOLE_GAP + 4
-					}}
-				/>
 				{focusId ? (
 					<Panel position="bottom-center">
 						<button
