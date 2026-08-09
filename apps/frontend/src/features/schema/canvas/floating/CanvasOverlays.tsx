@@ -37,9 +37,10 @@ export function CanvasOverlays() {
 						position: "absolute",
 						left: "50%",
 						transform: "translateX(-50%)",
-						// Aligné vertical avec le HUD zoom+avatar top-right
-						// (React Flow Panel top: 10 par défaut + padding chip).
-						top: 10,
+						// Aligné vertical avec le HUD top-right et le toggle
+						// sidebar (centre ~49px depuis viewport top). Chip
+						// height ~36 → top:30 pour center à 48.
+						top: 30,
 						zIndex: 6
 					}}
 				>

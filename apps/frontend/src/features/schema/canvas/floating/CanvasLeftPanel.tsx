@@ -49,8 +49,11 @@ export function CanvasLeftPanel() {
 						: "Afficher le drawer gauche"
 				}
 				style={{
+					// Aligné vertical avec le HUD top-right et le SelectionChip
+					// (centre ~49px depuis le viewport top — HUD height 44 +
+					// Panel offset). Height du toggle btn = 34, donc top:32.
 					position: "absolute",
-					top: 12,
+					top: 32,
 					left: leftDrawerVisible ? leftDrawerWidth - 18 : 8,
 					zIndex: 5,
 					background: "var(--sqlnest-surface)",

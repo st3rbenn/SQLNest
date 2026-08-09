@@ -814,7 +814,7 @@ function CanvasInner({
 				 * `gap` conservé à 20 px : trop fin devient trop sale au zoom
 				 * large, trop large casse la sensation de « papier millimétré ». */}
 				<Background color="var(--sqlnest-canvas-dot)" gap={20} />
-				<Panel position="top-right">
+				<Panel position="top-right" style={{ top: 12, right: 12 }}>
 					<CanvasTopRightHUD />
 				</Panel>
 				{focusId ? (
