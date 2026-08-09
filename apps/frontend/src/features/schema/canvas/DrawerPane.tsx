@@ -95,6 +95,9 @@ interface DrawerPaneProps {
 	readonly onClearFocus: () => void;
 	readonly onClearFocusFrame: () => void;
 	readonly onFocusTable: (name: string) => void;
+	/** Bar rendu en top du drawer (au-dessus du header search/back).
+	 *  Typiquement le `CanvasFilesHUD` embedded. */
+	readonly topBar?: React.ReactNode;
 	/** Rename/delete d'un frame depuis FrameDetails. Passés depuis SchemaCanvas
 	 * pour partager le même handler que le badge du frame (inclut la
 	 * notification + le checkpoint d'historique). */
@@ -123,7 +126,8 @@ export function DrawerPane({
 	onClearFocusFrame,
 	onFocusTable,
 	onFrameRename,
-	onFrameDelete
+	onFrameDelete,
+	topBar
 }: DrawerPaneProps) {
 	const isDetailsView = focusId !== null || focusFrameKey !== null;
 
@@ -141,31 +145,36 @@ export function DrawerPane({
 			<SidebarDrawer
 				variant="docked"
 				width={width}
-				{...(isDetailsView ? {} : { title: dbName })}
 				header={
-					isDetailsView ? (
-						<UnstyledButton
-							onClick={onClearFocus}
-							style={{
-								display: "inline-flex",
-								alignItems: "center",
-								gap: 4,
-								fontSize: 12.5,
-								color: "var(--sqlnest-text-secondary)",
-								fontWeight: 500
-							}}
-							aria-label="Retour au schéma"
-						>
-							<IconChevronLeft size={14} stroke={2} />
-							<span>{dbName}</span>
-						</UnstyledButton>
-					) : (
-						<SearchInput
-							value={search}
-							onChange={(e) => onSearchChange(e.currentTarget.value)}
-							placeholder={`Rechercher parmi ${schema.collections.length} tables…`}
-						/>
-					)
+					<>
+						{topBar}
+						{isDetailsView ? (
+							<UnstyledButton
+								onClick={onClearFocus}
+								style={{
+									display: "inline-flex",
+									alignItems: "center",
+									gap: 4,
+									marginTop: topBar ? 8 : 0,
+									fontSize: 12.5,
+									color: "var(--sqlnest-text-secondary)",
+									fontWeight: 500
+								}}
+								aria-label="Retour au schéma"
+							>
+								<IconChevronLeft size={14} stroke={2} />
+								<span>{dbName}</span>
+							</UnstyledButton>
+						) : (
+							<div style={{ marginTop: topBar ? 8 : 0 }}>
+								<SearchInput
+									value={search}
+									onChange={(e) => onSearchChange(e.currentTarget.value)}
+									placeholder={`Rechercher parmi ${schema.collections.length} tables…`}
+								/>
+							</div>
+						)}
+					</>
 				}
 				style={{ height: "100%" }}
 			>

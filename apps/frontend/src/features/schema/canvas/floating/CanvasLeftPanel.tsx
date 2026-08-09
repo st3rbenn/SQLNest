@@ -1,8 +1,3 @@
-import { ActionIcon } from "@mantine/core";
-import {
-	IconLayoutSidebarLeftCollapse,
-	IconLayoutSidebarLeftExpand
-} from "@tabler/icons-react";
 import {
 	useCanvasActionsCtx,
 	useCanvasData,
@@ -13,10 +8,9 @@ import { DrawerPane } from "../DrawerPane";
 import { CanvasFilesHUD } from "./CanvasFilesHUD";
 
 /**
- * Colonne gauche du canvas : toggle + `DrawerPane` docké (ouvert) ou
- * `CanvasFilesHUD` flottant top-left (fermé).
- *
- * Consomme les 4 contexts — 0 prop parent.
+ * Colonne gauche du canvas : `DrawerPane` docké (ouvert) ou
+ * `CanvasFilesHUD` flottant top-left (fermé). Le toggle du drawer est
+ * intégré au HUD (à droite du nom de la DB) dans les 2 états.
  */
 export function CanvasLeftPanel() {
 	const { schema, dbName, framesApi } = useCanvasData();
@@ -37,57 +31,42 @@ export function CanvasLeftPanel() {
 		setSearch
 	} = useCanvasUI();
 	const { handleFrameRename, handleFrameDelete } = useCanvasActionsCtx();
-	return (
-		<>
-			<ActionIcon
-				variant="subtle"
-				size="lg"
-				radius="md"
-				className="sqlnest-menu-item"
-				onClick={() => setLeftDrawerVisible((x) => !x)}
-				aria-label={
-					leftDrawerVisible
-						? "Masquer le drawer gauche"
-						: "Afficher le drawer gauche"
+	const toggleDrawer = () => setLeftDrawerVisible((x) => !x);
+	if (leftDrawerVisible) {
+		return (
+			<DrawerPane
+				schema={schema}
+				dbName={dbName}
+				width={leftDrawerWidth}
+				handleProps={drawerHandleProps}
+				search={search}
+				onSearchChange={setSearch}
+				framesApi={framesApi}
+				focusId={focusId}
+				focusFrameKey={focusFrameKey}
+				focusedFrame={focusedFrame}
+				onClearFocus={clearFocus}
+				onClearFocusFrame={() => setFocusFrameKey(null)}
+				onFocusTable={focusAndZoom}
+				onFrameRename={handleFrameRename}
+				onFrameDelete={handleFrameDelete}
+				topBar={
+					<CanvasFilesHUD
+						dbName={dbName}
+						drawerVisible={true}
+						onToggleDrawer={toggleDrawer}
+						variant="embedded"
+					/>
 				}
-				style={{
-					position: "absolute",
-					top: 12,
-					left: leftDrawerVisible ? leftDrawerWidth - 44 : 8,
-					zIndex: 5,
-					background: "transparent",
-					color: "var(--sqlnest-text-secondary)",
-					border: "none"
-				}}
-			>
-				{leftDrawerVisible ? (
-					<IconLayoutSidebarLeftCollapse size={16} />
-				) : (
-					<IconLayoutSidebarLeftExpand size={16} />
-				)}
-			</ActionIcon>
-
-			{leftDrawerVisible ? (
-				<DrawerPane
-					schema={schema}
-					dbName={dbName}
-					width={leftDrawerWidth}
-					handleProps={drawerHandleProps}
-					search={search}
-					onSearchChange={setSearch}
-					framesApi={framesApi}
-					focusId={focusId}
-					focusFrameKey={focusFrameKey}
-					focusedFrame={focusedFrame}
-					onClearFocus={clearFocus}
-					onClearFocusFrame={() => setFocusFrameKey(null)}
-					onFocusTable={focusAndZoom}
-					onFrameRename={handleFrameRename}
-					onFrameDelete={handleFrameDelete}
-				/>
-			) : (
-				<CanvasFilesHUD dbName={dbName} />
-			)}
-		</>
+			/>
+		);
+	}
+	return (
+		<CanvasFilesHUD
+			dbName={dbName}
+			drawerVisible={false}
+			onToggleDrawer={toggleDrawer}
+			variant="floating"
+		/>
 	);
 }
