@@ -60,6 +60,11 @@
 	 * (fond), moins que -danger (icon/text). */
 	--sqlnest-danger-border: rgba(239, 68, 68, 0.4);
 
+	/* Shadow uniforme pour les containers flottants — HUD zoom+avatar,
+	 * SelectionChip, CanvasLeftPanel, SidebarDrawer. Blur/opacity
+	 * subtils pour ne pas alourdir visuellement sur bg dark. */
+	--sqlnest-shadow-floating: 0 1px 4px rgba(0, 0, 0, 0.22);
+
 	/* Succès — connexion live, notif positive. */
 	--sqlnest-success: #10b981;
 	--sqlnest-success-soft: rgba(16, 185, 129, 0.15);

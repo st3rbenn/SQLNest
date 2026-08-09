@@ -40,15 +40,16 @@ export function SelectionChip({
 	return (
 		<Paper
 			radius="xl"
-			shadow="lg"
+			shadow="none"
 			style={{
-				// Surface Figma (au lieu de slate-9 quasi-noir) — le chip garde
-				// une teinte reconnaissable par rapport au canvas #1E1E1E via
-				// la bordure + son ombre diffusée.
+				// Surface Figma (au lieu de slate-9 quasi-noir). Shadow via
+				// token DS uniforme (`--sqlnest-shadow-floating`) — matche
+				// HUD zoom+avatar, CanvasLeftPanel, SidebarDrawer.
 				background: "var(--sqlnest-surface)",
 				border: "1px solid var(--sqlnest-border)",
 				color: "var(--sqlnest-text-primary)",
 				padding: "8px 14px",
+				boxShadow: "var(--sqlnest-shadow-floating)",
 			}}
 		>
 			<Group gap={12} wrap="nowrap">

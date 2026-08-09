@@ -28,7 +28,7 @@ const containerStyle: CSSProperties = {
 	background: "var(--sqlnest-elevated)",
 	border: "1px solid var(--sqlnest-border-subtle)",
 	borderRadius: 10,
-	boxShadow: "0 1px 4px rgba(0, 0, 0, 0.22)"
+	boxShadow: "var(--sqlnest-shadow-floating)"
 };
 
 const zoomTriggerStyle: CSSProperties = {

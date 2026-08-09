@@ -28,10 +28,11 @@ const DOCKED_STYLE: CSSProperties = {
 	borderTopLeftRadius: 0,
 	borderBottomLeftRadius: 0,
 	borderLeft: "none",
-	// Ombre noire diffuse — Mantine par défaut est faible sur bg dark
-	// (rgba(15,23,42,…) devient invisible sur #1E1E1E). On force du noir,
-	// mais restons subtil (blur/opacity contenus).
-	boxShadow: "2px 0 8px rgba(0,0,0,0.22)",
+	// Shadow uniforme via token DS (`--sqlnest-shadow-floating`) —
+	// même blur/opacité que les autres containers flottants (HUD,
+	// CanvasLeftPanel, SelectionChip). Sidebar tire son shadow vers
+	// la droite (offset X positif) plutôt que vers le bas.
+	boxShadow: "var(--sqlnest-shadow-floating)",
 };
 
 export function SidebarDrawer({

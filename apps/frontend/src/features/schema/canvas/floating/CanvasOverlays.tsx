@@ -37,7 +37,9 @@ export function CanvasOverlays() {
 						position: "absolute",
 						left: "50%",
 						transform: "translateX(-50%)",
-						top: 60,
+						// Aligné vertical avec le HUD zoom+avatar top-right
+						// (React Flow Panel top: 10 par défaut + padding chip).
+						top: 10,
 						zIndex: 6
 					}}
 				>
