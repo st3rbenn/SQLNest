@@ -94,17 +94,16 @@ const headerRow: CSSProperties = {
 	alignItems: "center",
 	justifyContent: "space-between",
 	width: "100%",
-	padding: "7px 10px 7px 8px",
+	padding: "4px 10px 4px 8px",
 	background: "transparent",
 	cursor: "pointer",
 	userSelect: "none",
-	fontSize: 12.5,
+	fontSize: 11.5,
 	color: "var(--sqlnest-text-primary)",
-	fontWeight: 700,
+	fontWeight: 600,
 	border: "none",
 	textAlign: "left",
-	fontFamily: "inherit",
-	letterSpacing: 0.2
+	fontFamily: "inherit"
 };
 
 export function SchemaTree({
@@ -153,7 +152,7 @@ export function SchemaTree({
 
 	return (
 		<Box>
-			<Text px="sm" pt={6} pb={6} size="xs" c="dimmed">
+			<Text px="sm" pt={4} pb={4} size="xs" c="dimmed">
 				{query === ""
 					? `${schema.collections.length} tables · ${schema.relations.length} relations`
 					: `${totalMatch} résultat(s)`}
@@ -232,6 +231,7 @@ export function SchemaTree({
 										onClick={() => onSelect(t)}
 										title={t}
 										paddingLeft={32}
+										size="sm"
 									/>
 								))
 							: null}
