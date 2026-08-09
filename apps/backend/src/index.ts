@@ -34,6 +34,10 @@ import { app } from "./app";
 const isProduction = process.env.NODE_ENV === "production";
 
 const fastify = Fastify({
+	// Derrière un reverse proxy (Caddy en prod) : lire X-Forwarded-For pour
+	// que request.ip soit réel — sinon @fastify/rate-limit bucket sur l'IP du
+	// proxy et un abus vide le budget global.
+	trustProxy: true,
 	logger: {
 		level: isProduction ? "info" : "debug",
 		redact: {
@@ -119,9 +123,11 @@ fastify.setSerializerCompiler(serializerCompiler);
 
 fastify.register(app);
 
+const port = Number.parseInt(process.env.PORT ?? "4000", 10);
+
 const start = async () => {
 	try {
-		await fastify.listen({ host: "0.0.0.0", port: 4000 });
+		await fastify.listen({ host: "0.0.0.0", port });
 	} catch (err: unknown) {
 		fastify.log.error(err);
 		process.exit(1);

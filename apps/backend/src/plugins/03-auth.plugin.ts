@@ -342,9 +342,7 @@ export default fp(
 
 		const SENSITIVE_POSTS = [
 			"/api/auth/sign-in/email",
-			"/api/auth/sign-up/email",
-			"/api/auth/request-password-reset",
-			"/api/auth/reset-password"
+			"/api/auth/sign-up/email"
 		];
 		for (const path of SENSITIVE_POSTS) {
 			fastify.route({
@@ -352,6 +350,30 @@ export default fp(
 				url: path,
 				config: { rateLimit: AUTH_STRICT_LIMIT },
 				handler: forwardToBetterAuth
+			});
+		}
+
+		// ─── Email flows désactivés en V1 ──────────────────────────────────
+		// Pas de transport mail câblé (voir `sendResetPassword` /
+		// `sendVerificationEmail` absents du config Better Auth ci-dessus).
+		// On répond 404 explicite plutôt que de laisser Better Auth générer
+		// silencieusement un token qui n'arrivera jamais chez l'utilisateur —
+		// silent-ignore = piège UX.
+		const DISABLED_EMAIL_POSTS = [
+			"/api/auth/forget-password",
+			"/api/auth/request-password-reset",
+			"/api/auth/reset-password",
+			"/api/auth/send-verification-email",
+			"/api/auth/verify-email"
+		];
+		for (const path of DISABLED_EMAIL_POSTS) {
+			fastify.route({
+				method: "POST",
+				url: path,
+				handler: async (_request, reply) =>
+					reply
+						.code(404)
+						.send({ error: "email_flows_disabled" })
 			});
 		}
 
