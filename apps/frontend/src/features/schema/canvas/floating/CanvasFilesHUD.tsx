@@ -48,7 +48,7 @@ const baseBtnStyle: CSSProperties = {
 	display: "inline-flex",
 	alignItems: "center",
 	color: "var(--sqlnest-text-primary)",
-	fontSize: 13,
+	fontSize: 14,
 	fontWeight: 500
 };
 
@@ -201,7 +201,7 @@ function FilesMenu({
 						color: "var(--sqlnest-text-secondary)"
 					}}
 				>
-					<IconChevronDown size={16} stroke={2} aria-hidden />
+					<IconChevronDown size={18} stroke={2} aria-hidden />
 				</UnstyledButton>
 			</Menu.Target>
 			<Menu.Dropdown>
