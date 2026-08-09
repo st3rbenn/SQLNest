@@ -110,6 +110,12 @@ interface TunnelState {
 	handshakeSent: boolean;
 	cliPubkey: Uint8Array | null;
 	cliSessionNonce: Uint8Array | null;
+	/** id du socket CLI qui a répondu au dernier handshake. Sur reconnect
+	 *  (Ctrl-C puis `sqlnest connect` de nouveau, ou auto-resume), le
+	 *  registry attache un nouveau socket avec un id différent — le state
+	 *  précédent (handshakeSent = true) est stale et il faut refaire un
+	 *  handshake sinon le CLI rejette la 1re frame. */
+	cliSocketId: string | null;
 	pending: Map<
 		string,
 		{
@@ -138,6 +144,7 @@ export function createBackendProxy(
 			handshakeSent: false,
 			cliPubkey: null,
 			cliSessionNonce: null,
+			cliSocketId: null,
 			pending: new Map(),
 			unsubscribe: () => {
 				// Placeholder — overwritten juste après.
@@ -262,6 +269,19 @@ export function createBackendProxy(
 			const slot = opts.registry.getSlot(tunnelId);
 			if (!slot || !slot.cli) throw new NoTunnelError(tunnelId);
 			const state = ensureState(tunnelId);
+			// Si le socket CLI a changé (reconnect via auto-resume ou fresh
+			// pair), le peer côté CLI a une map `peers` vide — il faut
+			// refaire un handshake sinon la 1re frame req est rejetée. On
+			// reset aussi le nonce + counter pour éviter tout replay avec
+			// l'ancienne session.
+			if (state.cliSocketId !== slot.cli.id) {
+				state.handshakeSent = false;
+				state.cliPubkey = null;
+				state.cliSessionNonce = null;
+				state.ourSessionNonce = generateSessionNonce();
+				state.emitter = createEmitterCounter();
+				state.cliSocketId = slot.cli.id;
+			}
 			if (!state.handshakeSent) sendHandshake(state);
 
 			const correlationId = newCorrelationId();
