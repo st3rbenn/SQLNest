@@ -17,12 +17,14 @@
  *   sqlnest --version
  *
  * ─── Env vars ─────────────────────────────────────────────────────────
+ *   SQLNEST_API_URL       (défaut: https://dev.sqlnest.io — override
+ *                          strictement usage dev interne équipe)
+ *   SQLNEST_FRONTEND_URL  (défaut: https://dev.sqlnest.io — idem)
  *   SQLNEST_CONFIG_DIR    (défaut: ~/.sqlnest — utile pour tests)
  *
- * L'URL du backend / frontend est HARDCODÉE (SQLNEST_API_URL,
- * SQLNEST_FRONTEND_URL) — la CLI publiée est verrouillée sur
- * https://dev.sqlnest.io. Contributeurs : voir README.md § Contributing
- * pour patcher les constantes en dev local.
+ * Les env vars API/FRONTEND servent au dev local uniquement (backend
+ * localhost:4000, frontend localhost:3000). Non documentées côté user
+ * final — pas de risque de MITM tant que ça reste équipe.
  *
  * ─── Exit codes ───────────────────────────────────────────────────────
  *   0 : succès
@@ -52,11 +54,11 @@ import {
 } from "./local-connections";
 import { defaultPrompter, type Prompter } from "./prompts";
 
-// URLs verrouillées à l'API SQLNest hébergée. Pas d'override env par
-// design : la CLI publiée reste liée à dev.sqlnest.io (prod actuelle —
-// sqlnest.io sera la prod définitive plus tard).
-const API_URL = "https://dev.sqlnest.io";
-const FRONTEND_URL = "https://dev.sqlnest.io";
+// Défauts prod — la CLI publiée pointe sur dev.sqlnest.io.
+// Override via env pour le dev local équipe (SQLNEST_API_URL,
+// SQLNEST_FRONTEND_URL). Voir docstring haut de fichier.
+const DEFAULT_API_URL = "https://dev.sqlnest.io";
+const DEFAULT_FRONTEND_URL = "https://dev.sqlnest.io";
 const CLI_VERSION = "0.0.1"; // TODO Bloc 10 : lire depuis package.json au build.
 
 export interface CliIO {
@@ -147,8 +149,9 @@ async function runConnect(args: string[], ctx: RunContext): Promise<number> {
 		return 2;
 	}
 
-	const baseUrl = API_URL;
-	const frontendUrl = FRONTEND_URL;
+	const env = ctx.env ?? {};
+	const baseUrl = env.SQLNEST_API_URL ?? DEFAULT_API_URL;
+	const frontendUrl = env.SQLNEST_FRONTEND_URL ?? DEFAULT_FRONTEND_URL;
 
 	// ─── Résolution de la DSN locale à servir (C.13) ─────────────────
 	// Un même install CLI (une seule keypair) peut manager plusieurs DSN

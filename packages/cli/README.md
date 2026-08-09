@@ -89,12 +89,23 @@ SQLNEST_CONFIG_DIR=/tmp/sqlnest-test sqlnest connect
 
 ## Contributing
 
-Le paquet publié pointe **en dur** sur `https://dev.sqlnest.io` — aucune variable d'environnement ne peut le rediriger. Pour développer contre un backend local :
+Le paquet publié pointe par défaut sur `https://dev.sqlnest.io`. Pour dev local (équipe interne uniquement — pas documenté côté user final) :
 
-1. Clone le monorepo.
-2. Édite `packages/cli/src/cli.ts` — constantes `API_URL` et `FRONTEND_URL` (ex : `http://localhost:4000` / `http://localhost:3000`).
-3. `pnpm --filter @sqlnest/cli build` puis `node packages/cli/dist/sqlnest.mjs ...`
-4. **Ne pas commiter** le patch — il est purement local.
+```bash
+export SQLNEST_API_URL=http://localhost:4000
+export SQLNEST_FRONTEND_URL=http://localhost:3000
+sqlnest connect
+```
+
+Ou en one-shot :
+
+```bash
+SQLNEST_API_URL=http://localhost:4000 \
+SQLNEST_FRONTEND_URL=http://localhost:3000 \
+  pnpm --filter @sqlnest/cli exec tsx src/bin.ts connect
+```
+
+Les env vars sont volontairement omises de la doc publique pour garder le comportement `npx @sqlnest/cli` verrouillé sur la prod hébergée.
 
 ## License
 
