@@ -165,6 +165,7 @@ function ZoomControl(): React.ReactNode {
 			<Menu.Target>
 				<UnstyledButton
 					aria-label={`Zoom ${percent}% — cliquer pour changer`}
+					className="sqlnest-menu-item"
 					style={zoomTriggerStyle}
 				>
 					<span>{percent}%</span>
