@@ -19,6 +19,7 @@ import { useResizableDrawer } from "./canvas/DrawerPane";
 import { CanvasBottomBar } from "./canvas/floating/CanvasBottomBar";
 import { CanvasLeftPanel } from "./canvas/floating/CanvasLeftPanel";
 import { CanvasOverlays } from "./canvas/floating/CanvasOverlays";
+import { CanvasTopRightHUD } from "./canvas/floating/CanvasTopRightHUD";
 import { useCanvasActions } from "./canvas/useCanvasActions";
 import { useCanvasCommands } from "./canvas/useCanvasCommands";
 import { useCanvasEdges } from "./canvas/useCanvasEdges";
@@ -813,6 +814,9 @@ function CanvasInner({
 				 * `gap` conservé à 20 px : trop fin devient trop sale au zoom
 				 * large, trop large casse la sensation de « papier millimétré ». */}
 				<Background color="var(--sqlnest-canvas-dot)" gap={20} />
+				<Panel position="top-right">
+					<CanvasTopRightHUD />
+				</Panel>
 				{focusId ? (
 					<Panel position="bottom-center">
 						<button
