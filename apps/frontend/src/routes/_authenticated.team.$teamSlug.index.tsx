@@ -1,11 +1,16 @@
 /**
- * Route `/team/:teamSlug` — gallery de la team courante (C.21.5).
- * Réutilise `GalleryPage` qui lit le slug via `useCurrentTeamSlug`.
+ * Route `/team/:teamSlug` — redirige vers `/recents` (home canonique).
+ * Catch les bookmarks / URLs partagées historiques qui pointaient sur
+ * `/team/:slug` directement.
  */
 
-import { createFileRoute } from "@tanstack/react-router";
-import { GalleryPage } from "../features/gallery/GalleryPage";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/_authenticated/team/$teamSlug/")({
-	component: GalleryPage
+	beforeLoad: ({ params }) => {
+		throw redirect({
+			to: "/team/$teamSlug/recents",
+			params: { teamSlug: params.teamSlug }
+		});
+	}
 });

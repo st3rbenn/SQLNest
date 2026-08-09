@@ -153,13 +153,24 @@ export function GalleryPage({ view = "drafts" }: { readonly view?: GalleryView }
 		);
 	}
 
-	// Bucket 1 : récentes (localStorage MRU, filtrées sur les existantes)
+	// View "recents" : bucket MRU localStorage d'abord, puis le reste
+	// (ordre backend = activeSince DESC).
+	// View "drafts"  : liste unique triée alphabétiquement par nom.
 	const byId = new Map(connections.map((c) => [c.id, c] as const));
-	const recent = recentIds
-		.map((id) => byId.get(id))
-		.filter((c): c is DbConnection => c !== undefined);
-	const recentIdSet = new Set(recent.map((c) => c.id));
-	const others = connections.filter((c) => !recentIdSet.has(c.id));
+	let recent: DbConnection[];
+	let others: DbConnection[];
+	if (view === "recents") {
+		recent = recentIds
+			.map((id) => byId.get(id))
+			.filter((c): c is DbConnection => c !== undefined);
+		const recentIdSet = new Set(recent.map((c) => c.id));
+		others = connections.filter((c) => !recentIdSet.has(c.id));
+	} else {
+		recent = [];
+		others = [...connections].sort((a, b) =>
+			a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+		);
+	}
 
 	return (
 		<div style={pageStyle}>

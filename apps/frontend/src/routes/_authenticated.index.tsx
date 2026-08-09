@@ -25,8 +25,10 @@ export const Route = createFileRoute("/_authenticated/")({
 		const team = await context.queryClient.ensureQueryData(
 			defaultTeamQueryOptions
 		);
+		// Home = Recents (défaut UX 2026-08-09). L'URL canonique après
+		// signup / login pointe direct sur /recents plutôt que /drafts.
 		throw redirect({
-			to: "/team/$teamSlug",
+			to: "/team/$teamSlug/recents",
 			params: { teamSlug: team.slug }
 		});
 	}
