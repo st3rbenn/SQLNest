@@ -117,7 +117,7 @@ export function CanvasFilesHUD({
 					padding: "6px 8px",
 					borderRadius: 6,
 					marginLeft: "auto",
-					color: "var(--sqlnest-text-secondary)"
+					color: "var(--sqlnest-text-primary)"
 				}}
 			>
 				{drawerVisible ? (
@@ -144,7 +144,7 @@ function OpenPanelButton({
 			aria-label={`Ouvrir le schéma de ${dbName}`}
 			style={{
 				...baseBtnStyle,
-				gap: 8,
+				gap: 12,
 				padding: "11px 14px",
 				borderRadius: "0 10px 10px 0",
 				maxWidth: 260
@@ -159,12 +159,7 @@ function OpenPanelButton({
 			>
 				{dbName}
 			</span>
-			<IconLayoutSidebarLeftExpand
-				size={16}
-				stroke={2}
-				aria-hidden
-				style={{ color: "var(--sqlnest-text-secondary)" }}
-			/>
+			<IconLayoutSidebarLeftExpand size={16} stroke={2} aria-hidden />
 		</UnstyledButton>
 	);
 }
@@ -198,7 +193,7 @@ function FilesMenu({
 						justifyContent: "center",
 						padding,
 						borderRadius: radius,
-						color: "var(--sqlnest-text-secondary)"
+						color: "var(--sqlnest-text-primary)"
 					}}
 				>
 					<IconChevronDown size={18} stroke={2} aria-hidden />
