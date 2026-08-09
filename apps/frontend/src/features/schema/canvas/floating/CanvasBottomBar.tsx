@@ -1,38 +1,25 @@
-import { CanvasConsole } from "../../CanvasConsole";
 import { CanvasToolbar } from "../../CanvasToolbar";
 import { AutoLayoutModal } from "../AutoLayoutModal";
-import {
-	useCanvasActionsCtx,
-	useCanvasData,
-	useCanvasUI
-} from "../CanvasContext";
+import { useCanvasActionsCtx, useCanvasUI } from "../CanvasContext";
 
 /**
- * Barre du bas : toolbar canvas (Select/Frame + Auto-layout button) + modal
- * de confirmation Auto-layout + console SNQL escamotable.
+ * Barre du bas : toolbar canvas (Select/Frame + Auto-layout button) +
+ * modal de confirmation Auto-layout.
  *
- * Consomme directement les 3 contexts nécessaires — aucun prop parent.
- * Ajouter un élément bas (barre de statut, autre bouton) = édit ici, sans
- * toucher SchemaCanvas.
+ * La console SNQL est retirée du canvas — un nouveau design d'intégration
+ * arrive (issue tracked hors canvas). Le composant `CanvasConsole` reste
+ * dans `features/schema/CanvasConsole.tsx` pour être ré-utilisé quand le
+ * nouveau flow sera prêt.
  */
 export function CanvasBottomBar() {
-	const { schema } = useCanvasData();
-	const {
-		activeTool,
-		setActiveTool,
-		consoleHeight,
-		setConsoleHeight,
-		consoleGap,
-		leftPadding,
-		layoutConfirmOpen,
-		setLayoutConfirmOpen
-	} = useCanvasUI();
+	const { activeTool, setActiveTool, layoutConfirmOpen, setLayoutConfirmOpen } =
+		useCanvasUI();
 	const { relayoutAll } = useCanvasActionsCtx();
 	return (
 		<>
 			<CanvasToolbar
 				onAutoLayout={() => setLayoutConfirmOpen(true)}
-				bottomOffset={consoleHeight + consoleGap}
+				bottomOffset={0}
 				activeTool={activeTool}
 				onSelectTool={setActiveTool}
 			/>
@@ -40,12 +27,6 @@ export function CanvasBottomBar() {
 				opened={layoutConfirmOpen}
 				onClose={() => setLayoutConfirmOpen(false)}
 				onConfirm={relayoutAll}
-			/>
-			<CanvasConsole
-				engine={schema.engine as "postgres" | "mongodb"}
-				leftOffset={leftPadding}
-				onHeightChange={setConsoleHeight}
-				schema={schema}
 			/>
 		</>
 	);

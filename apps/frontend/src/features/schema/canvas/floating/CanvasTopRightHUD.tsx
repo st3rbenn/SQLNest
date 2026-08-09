@@ -111,6 +111,7 @@ function UserAvatarMenu(): React.ReactNode {
 			withArrow={false}
 			offset={8}
 			radius={8}
+			transitionProps={{ duration: 0 }}
 			styles={menuStyles}
 			classNames={menuClassNames}
 		>
@@ -157,6 +158,7 @@ function ZoomControl(): React.ReactNode {
 			withArrow={false}
 			offset={8}
 			radius={8}
+			transitionProps={{ duration: 0 }}
 			styles={menuStyles}
 			classNames={menuClassNames}
 		>
