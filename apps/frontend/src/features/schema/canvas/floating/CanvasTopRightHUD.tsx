@@ -1,6 +1,5 @@
-import { ActionIcon, Avatar, Menu, UnstyledButton } from "@mantine/core";
-import { IconArrowLeft, IconChevronDown } from "@tabler/icons-react";
-import { Link } from "@tanstack/react-router";
+import { Avatar, Menu, UnstyledButton } from "@mantine/core";
+import { IconChevronDown } from "@tabler/icons-react";
 import { useReactFlow, useViewport } from "@xyflow/react";
 import type { CSSProperties } from "react";
 import { useCurrentUser } from "../../../auth/sessionQuery";
@@ -97,6 +96,8 @@ export function CanvasTopRightHUD(): React.ReactNode {
 	);
 }
 
+/** Avatar display-only — le dropdown historique (« Retour aux canvas »)
+ *  a été retiré, à remplacer par un menu compte plus complet. */
 function UserAvatarMenu(): React.ReactNode {
 	const { data: session } = useCurrentUser();
 	if (!session?.user) return null;
@@ -104,46 +105,24 @@ function UserAvatarMenu(): React.ReactNode {
 	const displayName = user.name?.trim() || user.email;
 	const initial = displayName.charAt(0).toUpperCase();
 	return (
-		<Menu
-			shadow="md"
-			width={168}
-			position="bottom-end"
-			withArrow={false}
-			offset={8}
-			radius={8}
-			transitionProps={{ duration: 0 }}
-			styles={menuStyles}
-			classNames={menuClassNames}
+		<span
+			aria-label={displayName}
+			style={{
+				display: "inline-flex",
+				alignItems: "center",
+				justifyContent: "center"
+			}}
 		>
-			<Menu.Target>
-				<ActionIcon
-					variant="subtle"
-					size={28}
-					radius="xl"
-					className="sqlnest-menu-item"
-					aria-label={`Menu de ${displayName}`}
-				>
-					<Avatar
-						src={safeAvatarSrc(user.image)}
-						alt={displayName}
-						radius="xl"
-						size={24}
-						color="blue"
-					>
-						{initial}
-					</Avatar>
-				</ActionIcon>
-			</Menu.Target>
-			<Menu.Dropdown>
-				<Menu.Item
-					component={Link}
-					to="/"
-					leftSection={<IconArrowLeft size={13} stroke={2} />}
-				>
-					Retour aux canvas
-				</Menu.Item>
-			</Menu.Dropdown>
-		</Menu>
+			<Avatar
+				src={safeAvatarSrc(user.image)}
+				alt={displayName}
+				radius="xl"
+				size={24}
+				color="blue"
+			>
+				{initial}
+			</Avatar>
+		</span>
 	);
 }
 
