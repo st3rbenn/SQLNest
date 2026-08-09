@@ -52,7 +52,11 @@ export function UserMenu() {
 	// Reste visible sur : `/team/:slug/canvas/:id/query` et autres pages
 	// sans surface dédiée.
 	if (location.pathname === "/") return null;
-	if (/^\/team\/[0-9a-f]{6}(\/(recents|pair))?\/?$/.test(location.pathname)) {
+	if (
+		/^\/team\/[0-9a-f]{6}(\/(recents|drafts|pair))?\/?$/.test(
+			location.pathname
+		)
+	) {
 		return null;
 	}
 	if (
