@@ -77,7 +77,7 @@ export function GallerySidebar({
 						label="Drafts"
 						icon={<DraftIcon />}
 						active={activeItem === "drafts"}
-						to="/team/$teamSlug"
+						to="/team/$teamSlug/drafts"
 						params={{ teamSlug }}
 					/>
 				) : (
@@ -100,7 +100,10 @@ function NavItem({
 	readonly label: string;
 	readonly icon: React.ReactNode;
 	readonly active: boolean;
-	readonly to?: "/team/$teamSlug" | "/team/$teamSlug/recents";
+	readonly to?:
+		| "/team/$teamSlug"
+		| "/team/$teamSlug/recents"
+		| "/team/$teamSlug/drafts";
 	readonly params?: { readonly teamSlug: string };
 }): React.ReactNode {
 	const className = active

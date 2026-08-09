@@ -21,3 +21,4 @@ dist
 
 # mac files
 .DS_Store
+.envrc

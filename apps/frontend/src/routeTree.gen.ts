@@ -23,6 +23,7 @@ import { Route as AuthenticatedTeamTeamSlugIndexRouteImport } from './routes/_au
 import { Route as AuthenticatedCanvasConnIdIndexRouteImport } from './routes/_authenticated.canvas.$connId.index'
 import { Route as AuthenticatedTeamTeamSlugRecentsRouteImport } from './routes/_authenticated.team.$teamSlug.recents'
 import { Route as AuthenticatedTeamTeamSlugPairRouteImport } from './routes/_authenticated.team.$teamSlug.pair'
+import { Route as AuthenticatedTeamTeamSlugDraftsRouteImport } from './routes/_authenticated.team.$teamSlug.drafts'
 import { Route as AuthenticatedCanvasConnIdQueryRouteImport } from './routes/_authenticated.canvas.$connId.query'
 import { Route as AuthenticatedTeamTeamSlugCanvasConnIdIndexRouteImport } from './routes/_authenticated.team.$teamSlug.canvas.$connId.index'
 import { Route as AuthenticatedTeamTeamSlugCanvasConnIdQueryRouteImport } from './routes/_authenticated.team.$teamSlug.canvas.$connId.query'
@@ -100,6 +101,12 @@ const AuthenticatedTeamTeamSlugPairRoute =
     path: '/pair',
     getParentRoute: () => AuthenticatedTeamTeamSlugRoute,
   } as any)
+const AuthenticatedTeamTeamSlugDraftsRoute =
+  AuthenticatedTeamTeamSlugDraftsRouteImport.update({
+    id: '/drafts',
+    path: '/drafts',
+    getParentRoute: () => AuthenticatedTeamTeamSlugRoute,
+  } as any)
 const AuthenticatedCanvasConnIdQueryRoute =
   AuthenticatedCanvasConnIdQueryRouteImport.update({
     id: '/canvas/$connId/query',
@@ -129,6 +136,7 @@ export interface FileRoutesByFullPath {
   '/': typeof AuthenticatedIndexRoute
   '/team/$teamSlug': typeof AuthenticatedTeamTeamSlugRouteWithChildren
   '/canvas/$connId/query': typeof AuthenticatedCanvasConnIdQueryRoute
+  '/team/$teamSlug/drafts': typeof AuthenticatedTeamTeamSlugDraftsRoute
   '/team/$teamSlug/pair': typeof AuthenticatedTeamTeamSlugPairRoute
   '/team/$teamSlug/recents': typeof AuthenticatedTeamTeamSlugRecentsRoute
   '/canvas/$connId': typeof AuthenticatedCanvasConnIdIndexRoute
@@ -145,6 +153,7 @@ export interface FileRoutesByTo {
   '/pair': typeof AuthenticatedPairRoute
   '/': typeof AuthenticatedIndexRoute
   '/canvas/$connId/query': typeof AuthenticatedCanvasConnIdQueryRoute
+  '/team/$teamSlug/drafts': typeof AuthenticatedTeamTeamSlugDraftsRoute
   '/team/$teamSlug/pair': typeof AuthenticatedTeamTeamSlugPairRoute
   '/team/$teamSlug/recents': typeof AuthenticatedTeamTeamSlugRecentsRoute
   '/canvas/$connId': typeof AuthenticatedCanvasConnIdIndexRoute
@@ -165,6 +174,7 @@ export interface FileRoutesById {
   '/_authenticated/': typeof AuthenticatedIndexRoute
   '/_authenticated/team/$teamSlug': typeof AuthenticatedTeamTeamSlugRouteWithChildren
   '/_authenticated/canvas/$connId/query': typeof AuthenticatedCanvasConnIdQueryRoute
+  '/_authenticated/team/$teamSlug/drafts': typeof AuthenticatedTeamTeamSlugDraftsRoute
   '/_authenticated/team/$teamSlug/pair': typeof AuthenticatedTeamTeamSlugPairRoute
   '/_authenticated/team/$teamSlug/recents': typeof AuthenticatedTeamTeamSlugRecentsRoute
   '/_authenticated/canvas/$connId/': typeof AuthenticatedCanvasConnIdIndexRoute
@@ -184,6 +194,7 @@ export interface FileRouteTypes {
     | '/'
     | '/team/$teamSlug'
     | '/canvas/$connId/query'
+    | '/team/$teamSlug/drafts'
     | '/team/$teamSlug/pair'
     | '/team/$teamSlug/recents'
     | '/canvas/$connId'
@@ -200,6 +211,7 @@ export interface FileRouteTypes {
     | '/pair'
     | '/'
     | '/canvas/$connId/query'
+    | '/team/$teamSlug/drafts'
     | '/team/$teamSlug/pair'
     | '/team/$teamSlug/recents'
     | '/canvas/$connId'
@@ -219,6 +231,7 @@ export interface FileRouteTypes {
     | '/_authenticated/'
     | '/_authenticated/team/$teamSlug'
     | '/_authenticated/canvas/$connId/query'
+    | '/_authenticated/team/$teamSlug/drafts'
     | '/_authenticated/team/$teamSlug/pair'
     | '/_authenticated/team/$teamSlug/recents'
     | '/_authenticated/canvas/$connId/'
@@ -332,6 +345,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedTeamTeamSlugPairRouteImport
       parentRoute: typeof AuthenticatedTeamTeamSlugRoute
     }
+    '/_authenticated/team/$teamSlug/drafts': {
+      id: '/_authenticated/team/$teamSlug/drafts'
+      path: '/drafts'
+      fullPath: '/team/$teamSlug/drafts'
+      preLoaderRoute: typeof AuthenticatedTeamTeamSlugDraftsRouteImport
+      parentRoute: typeof AuthenticatedTeamTeamSlugRoute
+    }
     '/_authenticated/canvas/$connId/query': {
       id: '/_authenticated/canvas/$connId/query'
       path: '/canvas/$connId/query'
@@ -375,6 +395,7 @@ const AuthRouteChildren: AuthRouteChildren = {
 const AuthRouteWithChildren = AuthRoute._addFileChildren(AuthRouteChildren)
 
 interface AuthenticatedTeamTeamSlugRouteChildren {
+  AuthenticatedTeamTeamSlugDraftsRoute: typeof AuthenticatedTeamTeamSlugDraftsRoute
   AuthenticatedTeamTeamSlugPairRoute: typeof AuthenticatedTeamTeamSlugPairRoute
   AuthenticatedTeamTeamSlugRecentsRoute: typeof AuthenticatedTeamTeamSlugRecentsRoute
   AuthenticatedTeamTeamSlugIndexRoute: typeof AuthenticatedTeamTeamSlugIndexRoute
@@ -384,6 +405,7 @@ interface AuthenticatedTeamTeamSlugRouteChildren {
 
 const AuthenticatedTeamTeamSlugRouteChildren: AuthenticatedTeamTeamSlugRouteChildren =
   {
+    AuthenticatedTeamTeamSlugDraftsRoute: AuthenticatedTeamTeamSlugDraftsRoute,
     AuthenticatedTeamTeamSlugPairRoute: AuthenticatedTeamTeamSlugPairRoute,
     AuthenticatedTeamTeamSlugRecentsRoute:
       AuthenticatedTeamTeamSlugRecentsRoute,
