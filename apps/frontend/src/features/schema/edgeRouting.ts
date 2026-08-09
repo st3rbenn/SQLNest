@@ -21,8 +21,8 @@ export interface Rect {
  * - Sinon : axe vertical. Target en-dessous → source `bottom` / target
  *   `top`. Sinon inversé.
  *
- * Les égalités strictes vont sur l'horizontal (arbitraire, cohérent avec
- * les schémas ER classiques dessinés en colonnes).
+ * Les égalités strictes vont sur l'horizontal (choix arbitraire pour
+ * lever l'ambiguïté).
  */
 export function bestHandles(
 	source: Rect,

@@ -33,9 +33,8 @@ const wrapperStyle: CSSProperties = {
 };
 
 /**
- * Menu utilisateur (avatar top-right). Trigger = avatar circulaire ; le
- * dropdown suit le style dark Figma (bg surface, hover subtle, séparateurs
- * légers).
+ * Menu utilisateur (avatar top-right). Trigger = avatar circulaire ;
+ * dropdown sur `--sqlnest-surface` avec hover subtle.
  *
  * Contenu : "Retour aux canvas" (Link → `/`, sert de sortie depuis le
  * canvas courant). Email et déconnexion volontairement absents — pas de

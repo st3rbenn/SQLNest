@@ -278,7 +278,7 @@ export function useCanvasFrames(
 				x: node.position.x + w / 2,
 				y: node.position.y + h / 2
 			};
-			// Membership au drag (comme Figma) :
+			// Membership au drag :
 			// - drop dans un frame ≠ actuel → add (drag-in ou switch)
 			// - drop en dehors de tout frame → remove (drag-out)
 			// - drop dans le frame actuel → no-op (repositionnement interne)

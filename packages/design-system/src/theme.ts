@@ -1,14 +1,12 @@
 import { createTheme, type MantineColorsTuple } from "@mantine/core";
 
 /**
- * Palette dark-first alignée sur les tokens Figma (voir `tokens.css`).
+ * Palette dark-first alignée sur les tokens (voir `tokens.css`).
  *
- * Les slate/brand sont générés autour de la surface `#2C2C2C` — Mantine
+ * Slate/brand sont générés autour de la surface `#2C2C2C`. Mantine
  * consomme ces tuples pour tous ses composants (Text `c="dimmed"`, Paper,
- * Menu, Tooltip, …). L'index 6 est le shade « primary » utilisé par défaut,
- * l'index 4 le shade dark équivalent (Mantine bascule automatiquement selon
- * `colorScheme`). On aligne les deux (nous n'avons qu'un thème dark) pour
- * garder un rendu cohérent quel que soit le shade demandé.
+ * Menu, Tooltip, …). On force le même index pour light et dark parce
+ * que nous n'exposons qu'un mode — voir `primaryShade` plus bas.
  */
 const slate: MantineColorsTuple = [
 	"#ffffff", // 0 — text-primary
@@ -24,8 +22,8 @@ const slate: MantineColorsTuple = [
 ];
 
 /**
- * Brand = accent Figma `#0D99FF`. On construit les shades autour pour que
- * Mantine puisse dériver les hover / press states.
+ * Brand = `#0D99FF`. Shades construits autour pour que Mantine puisse
+ * dériver les hover / press states.
  */
 const brand: MantineColorsTuple = [
 	"#e6f5ff",
@@ -33,7 +31,7 @@ const brand: MantineColorsTuple = [
 	"#99d5ff",
 	"#66c0ff",
 	"#3aabff", // hover
-	"#0d99ff", // 5 — accent Figma
+	"#0d99ff", // 5 — accent
 	"#0b85e0",
 	"#0971bf",
 	"#075c9f",
@@ -41,7 +39,7 @@ const brand: MantineColorsTuple = [
 ];
 
 /**
- * Amber = warning Figma `#FFC933`. Utilisé pour les PK badges + les tags
+ * Amber = `#FFC933`. Utilisé pour les PK badges + les tags
  * « bientôt disponible » côté notifications.
  */
 const amber: MantineColorsTuple = [
@@ -50,7 +48,7 @@ const amber: MantineColorsTuple = [
 	"#ffe485",
 	"#ffd85c",
 	"#ffce42",
-	"#ffc933", // 5 — warning Figma
+	"#ffc933", // 5 — warning
 	"#d9aa2b",
 	"#b38c23",
 	"#8c6e1b",
@@ -98,10 +96,10 @@ export const FRAME_HUES = {
 export type FrameHueKey = keyof typeof FRAME_HUES;
 
 /**
- * Thème Mantine — dark-only. `primaryShade` figé à 5 (l'accent Figma) pour
- * light et dark : nous n'exposons pas de toggle, mais Mantine peut demander
- * le shade en interne (SegmentedControl, focus rings…). Aligner évite les
- * variations dépendantes du mode calculé.
+ * Thème Mantine — dark-only. `primaryShade` figé à 5 pour light et dark :
+ * nous n'exposons pas de toggle, mais Mantine peut demander le shade en
+ * interne (SegmentedControl, focus rings…). Aligner évite les variations
+ * dépendantes du mode calculé.
  */
 export const theme = createTheme({
 	primaryColor: "brand",

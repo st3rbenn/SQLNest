@@ -19,9 +19,8 @@ const SearchIcon = () => (
 
 /**
  * Champ de recherche minimaliste — TextInput Mantine + loupe à gauche.
- * Overrides `styles` pour aligner sur la palette Figma : input sur surface
- * plus sombre que le drawer (border-subtle → surface-hover contraste léger
- * mais visible), border --sqlnest-border, focus ring accent Figma.
+ * `styles` alignés sur les tokens DS : input sur surface plus sombre
+ * que le drawer parent (contraste léger mais visible).
  */
 export function SearchInput(props: SearchInputProps) {
 	return (

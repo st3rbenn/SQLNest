@@ -203,10 +203,11 @@ export const sessionKv = pgTable(
 );
 
 // ─── team ────────────────────────────────────────────────────────────────
-// Workspace de type Figma/Linear. Chaque user a AU MOINS une team «
-// Personal » auto-créée à la signup (owner unique = user), servant de
-// bucket par défaut pour ses `db_connection` + `canvas_state`. Les URLs
-// frontend deviennent team-scoped : `/team/:slug/*`.
+// Workspace (bucket d'isolation entre users). Chaque user a AU MOINS
+// une team « Personal » auto-créée à la signup (owner unique = user),
+// servant de bucket par défaut pour ses `db_connection` +
+// `canvas_state`. Les URLs frontend deviennent team-scoped :
+// `/team/:slug/*`.
 //
 // V1 : 1 team = 1 owner. Pas d'invitations, pas de rôles. La table
 // `team_membership` viendra plus tard (V2) — l'ownership porté par

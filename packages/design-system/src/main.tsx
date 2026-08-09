@@ -1,8 +1,8 @@
 import "@mantine/core/styles.css";
 import "@mantine/notifications/styles.css";
 import "@mantine/spotlight/styles.css";
-// Nos tokens Figma — importés APRÈS Mantine pour que `:root` gagne la
-// cascade contre les valeurs par défaut de Mantine si elles se chevauchent.
+// Nos tokens — importés APRÈS Mantine pour que `:root` gagne la cascade
+// contre les valeurs par défaut de Mantine si elles se chevauchent.
 import "./tokens.css";
 
 import { MantineProvider } from "@mantine/core";

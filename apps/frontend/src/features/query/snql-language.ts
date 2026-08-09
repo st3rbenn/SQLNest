@@ -175,10 +175,10 @@ function classifyWord(word: string): string {
 
 /**
  * Palette de coloration syntaxique dark-first.
- * - keyword (verbes SNQL, connecteurs) : accent Figma — mise en avant du
+ * - keyword (verbes SNQL, connecteurs) : accent — mise en avant du
  *   squelette de la requête.
- * - string : vert clair (readable sur #2C2C2C).
- * - number : jaune warning Figma — chiffres sortent visuellement du texte.
+ * - string : vert clair (lisible sur #2C2C2C).
+ * - number : jaune warning — chiffres sortent visuellement du texte.
  * - atom (true/false/null) : mauve pastel.
  * - operator (`|`) + comment : text-tertiary — décor, pas de bruit.
  * - variableName (identifiants) : text-primary — c'est le corps de la requête.

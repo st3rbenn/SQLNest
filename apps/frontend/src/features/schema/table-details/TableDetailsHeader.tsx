@@ -98,9 +98,9 @@ export function TableDetailsHeader({
 			>
 				<Button
 					variant="filled"
-					// Sur dark, `color="dark"` (grays Mantine) rendait un bouton
-					// quasi-invisible sur la surface #2C2C2C. On passe sur l'accent
-					// bleu Figma — le CTA « get X » est l'action primaire de la
+					// `color="dark"` (grays Mantine) rendait un bouton
+					// quasi-invisible sur la surface #2C2C2C. On passe sur
+					// l'accent — le CTA « get X » est l'action primaire de la
 					// vue détails, elle mérite la couleur d'action.
 					color="brand"
 					radius="md"

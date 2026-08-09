@@ -120,6 +120,7 @@ function UserAvatarMenu(): React.ReactNode {
 					variant="subtle"
 					size={28}
 					radius="xl"
+					className="sqlnest-menu-item"
 					aria-label={`Menu de ${displayName}`}
 				>
 					<Avatar

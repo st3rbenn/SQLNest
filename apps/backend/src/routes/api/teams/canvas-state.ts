@@ -9,8 +9,7 @@
  * user a SON canvas pour une connection donnée. L'AUTORISATION passe
  * par team : on vérifie que la connection appartient à la team, puis on
  * lit/écrit le canvas de l'user. En V2 (plusieurs users dans une team),
- * chacun aura son propre canvas, aligné sur le comportement Figma
- * (positions perso par éditeur).
+ * chaque éditeur garde son propre layout (positions perso, non partagées).
  */
 
 import { sql } from "drizzle-orm";

@@ -20,7 +20,7 @@ interface SnqlEditorProps {
 }
 
 /**
- * Thème dark de l'éditeur SNQL — aligné sur les tokens Figma.
+ * Thème dark de l'éditeur SNQL — aligné sur les tokens DS.
  *
  * CodeMirror ne consomme pas nos CSS vars directement dans les valeurs
  * `EditorView.theme()` (StyleModule les traite comme des chaînes opaques),
@@ -50,9 +50,9 @@ const theme = EditorView.theme(
 			caretColor: "var(--sqlnest-accent)"
 		},
 		".cm-scroller": { lineHeight: "1.6" },
-		// Sélection texte : accent Figma translucide. `::selection` seul
-		// suffit ; les sélections multi-cursor de CM passent aussi par des
-		// spans `.cm-selectionBackground` qu'on colore identiquement pour
+		// Sélection texte : accent translucide. `::selection` seul suffit ;
+		// les sélections multi-cursor de CM passent aussi par des spans
+		// `.cm-selectionBackground` qu'on colore identiquement pour
 		// homogénéité.
 		"&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection":
 			{
@@ -62,7 +62,7 @@ const theme = EditorView.theme(
 		".cm-placeholder": {
 			color: "var(--sqlnest-text-tertiary)"
 		},
-		// Popup d'autocomplétion : surface Figma + border, shadow noire.
+		// Popup d'autocomplétion : surface DS + border, shadow noire.
 		".cm-tooltip-autocomplete": {
 			background: "var(--sqlnest-surface)",
 			border: "1px solid var(--sqlnest-border)",

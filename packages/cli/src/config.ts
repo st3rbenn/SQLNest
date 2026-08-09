@@ -24,9 +24,9 @@
  * plus permissif (ex. 0644) — historique classique de fuite de secrets
  * via `chmod 644 .env` ou backup partagé.
  *
- * On stocke le `session_token` en clair — cohérent avec les patterns
- * établis (`~/.ssh/id_ed25519`, `~/.aws/credentials`, `~/.docker/config.json`).
- * En v2 : intégration keychain OS.
+ * On stocke le `session_token` en clair (`~/.ssh/id_ed25519`,
+ * `~/.aws/credentials`, `~/.docker/config.json` font pareil). En v2 :
+ * intégration keychain OS.
  */
 
 import {

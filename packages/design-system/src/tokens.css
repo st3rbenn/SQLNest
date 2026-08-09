@@ -1,5 +1,5 @@
 /*
- * Tokens Figma — palette dark-first du canvas SQLNest.
+ * Tokens design-system — palette dark-first du canvas SQLNest.
  *
  * On les expose comme CSS variables globales pour deux raisons :
  *  - être consommables depuis les styles inline React (une seule source de
@@ -40,7 +40,7 @@
 	 * appeler l'accent bleu (nav neutre, séparateurs iconiques…). */
 	--sqlnest-text-cream: #ebe3d0;
 
-	/* Accent (liens, focus, selection, primary CTAs) — bleu Figma. */
+	/* Accent (liens, focus, selection, primary CTAs). */
 	--sqlnest-accent: #0d99ff;
 	--sqlnest-accent-hover: #3aabff;
 	--sqlnest-accent-soft: rgba(13, 153, 255, 0.15);
@@ -48,7 +48,7 @@
 	 * pas appeler l'accent vif principal. */
 	--sqlnest-accent-muted: #4a7ba8;
 
-	/* PK / warning — jaune Figma. */
+	/* PK / warning. */
 	--sqlnest-warning: #ffc933;
 	--sqlnest-warning-soft: rgba(255, 201, 51, 0.15);
 
@@ -60,9 +60,8 @@
 	 * (fond), moins que -danger (icon/text). */
 	--sqlnest-danger-border: rgba(239, 68, 68, 0.4);
 
-	/* Shadow uniforme pour les containers flottants — HUD zoom+avatar,
-	 * SelectionChip, CanvasLeftPanel, SidebarDrawer. Blur/opacity
-	 * subtils pour ne pas alourdir visuellement sur bg dark. */
+	/* Shadow uniforme pour les containers flottants. Blur/opacity
+	 * volontairement subtils. */
 	--sqlnest-shadow-floating: 0 1px 4px rgba(0, 0, 0, 0.22);
 
 	/* Succès — connexion live, notif positive. */

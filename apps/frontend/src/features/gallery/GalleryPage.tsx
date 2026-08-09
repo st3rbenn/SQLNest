@@ -12,10 +12,9 @@ import { NewCanvasCta, PageHead } from "./PageHead";
 import { useNavigateToCanvas } from "./useNavigateToCanvas";
 
 /**
- * Page d'accueil des DBs — inspirée de Figma "Recents". L'user atterrit
- * ici après login : sidebar minimale à gauche (Bases active, CTA pair CLI
- * en footer), main à droite avec 2 grids (Récentes / Toutes) + card
- * "Nouvelle base".
+ * Page d'accueil des DBs. L'user atterrit ici après login : sidebar
+ * minimale à gauche (Bases active, CTA pair CLI en footer), main à
+ * droite avec 2 grids (Récentes / Toutes) + card "Nouvelle base".
  *
  * Data :
  *   - `useDbConnections()` : liste complète des db_connection du user

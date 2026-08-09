@@ -65,10 +65,10 @@ export function FrameNode({
 	const [editing, setEditing] = useState(false);
 	const [draft, setDraft] = useState(frame.label);
 
-	// Zoom-invariance du badge — Figma-like : le badge doit garder une
-	// taille lisible EN PIXELS ÉCRAN quelle que soit la profondeur de zoom.
-	// `useStore` avec un sélecteur scalaire ne re-render que si la valeur
-	// change → ok. Cappé à [0.5, 2.5] pour éviter les extrêmes.
+	// Zoom-invariance du badge : il doit garder une taille lisible EN
+	// PIXELS ÉCRAN quelle que soit la profondeur de zoom. `useStore` avec
+	// un sélecteur scalaire ne re-render que si la valeur change → ok.
+	// Cappé à [0.5, 2.5] pour éviter les extrêmes.
 	const zoom = useStore((s) => s.transform[2]);
 	const badgeScale = Math.max(0.5, Math.min(2.5, 1 / zoom));
 
@@ -108,8 +108,8 @@ export function FrameNode({
 					width: 10,
 					height: 10,
 					borderRadius: 3,
-					// Match surface Figma — un blanc pur ferait « oeuf sur canvas noir »
-					// et brûlerait la teinte du frame.
+					// `--sqlnest-surface` — un blanc pur ferait « oeuf sur canvas
+					// noir » et brûlerait la teinte du frame.
 					background: "var(--sqlnest-surface)",
 					borderColor: `hsl(${frame.hue}, 55%, 55%)`,
 					borderWidth: 2
@@ -134,9 +134,9 @@ export function FrameNode({
 					height,
 					borderRadius: 14,
 					// Pastel translucide sombre-adapté : sur bg #1E1E1E, un tint
-					// L=90 (Figma light) ferait tache. On descend à L=45 (nuance
-					// moyenne de la hue) et on baisse l'alpha à 12 % — teinte
-					// discernable des tables du frame sans écraser leur shell.
+					// L=90 ferait tache. On descend à L=45 (nuance moyenne de
+					// la hue) et on baisse l'alpha à 12 % — teinte discernable
+					// des tables du frame sans écraser leur shell.
 					background: `hsla(${frame.hue}, 60%, 45%, 0.12)`,
 					position: "relative",
 					pointerEvents: "none"
@@ -153,7 +153,7 @@ export function FrameNode({
 						pointerEvents: "auto",
 						cursor: editing ? "text" : "grab",
 						// Ancre au coin haut-gauche du frame, puis compense le
-						// zoom RF — le badge garde sa taille écran (Figma-like).
+						// zoom RF — le badge garde sa taille écran constante.
 						transform: `scale(${badgeScale})`,
 						transformOrigin: "0 100%"
 					}}

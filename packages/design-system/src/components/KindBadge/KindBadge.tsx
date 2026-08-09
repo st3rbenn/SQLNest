@@ -14,10 +14,9 @@ const DEFAULT_LABELS: Record<KindBadgeKind, string> = {
 };
 
 /**
- * Palette dark-first — tokens Figma. Fond translucide (soft) pour poser le
- * badge sur n'importe quelle surface (`#2C2C2C` shell d'une table, header
- * teinté, …) sans faire tache. Couleur pleine pour le texte, qui garde le
- * message le plus visible.
+ * Fond translucide (soft) pour poser le badge sur n'importe quelle
+ * surface (shell de table, header teinté, …) sans faire tache. Couleur
+ * pleine sur le texte pour garder la lisibilité.
  */
 const PALETTE: Record<KindBadgeKind, { bg: string; color: string }> = {
 	declared: {

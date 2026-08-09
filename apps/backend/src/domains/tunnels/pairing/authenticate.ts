@@ -36,9 +36,9 @@ import { generateSessionToken, hashSha256Hex, verifyEd25519 } from "./crypto";
  * changer via le dashboard (Bloc 11) ou une future commande CLI. */
 const DEFAULT_ENGINE = "postgres";
 
-/** Durée de vie d'une session tunnel — 30 jours. Cohérent avec un
- * usage "installation permanente" du CLI (contrairement à une session
- * browser). Le CLI peut renouveler manuellement via `sqlnest reauth`. */
+/** Durée de vie d'une session tunnel — 30 jours (usage "installation
+ * permanente" du CLI, contrairement à une session browser). Le CLI peut
+ * renouveler manuellement via `sqlnest reauth`. */
 export const TUNNEL_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 export type AuthenticateFailureReason =

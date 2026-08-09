@@ -1,5 +1,5 @@
 /**
- * Sélecteur team pour la sidebar gallery (C.21.6, refactor Figma-like).
+ * Sélecteur team pour la sidebar gallery (C.21.6).
  *
  * Rendu compact : logo carré + nom + chevron + badge plan (V1 = "Free").
  * Clic → dropdown avec l'unique team surlignée + « Nouvelle team »

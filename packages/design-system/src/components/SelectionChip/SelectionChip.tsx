@@ -17,8 +17,8 @@ export type SelectionChipProps = {
 
 /**
  * Pill sombre bas-centre — compteur de sélection + actions rapides
- * (Frame, Masquer, …). Reprend le pattern mockup 1c. Réutilisable pour
- * toute sélection multi-items future (edges, cellules d'un ResultSet, …).
+ * (Frame, Masquer, …). Réutilisable pour toute sélection multi-items
+ * future (edges, cellules d'un ResultSet, …).
  */
 export function SelectionChip({
 	count,
@@ -42,9 +42,9 @@ export function SelectionChip({
 			radius="xl"
 			shadow="none"
 			style={{
-				// Surface Figma (au lieu de slate-9 quasi-noir). Shadow via
-				// token DS uniforme (`--sqlnest-shadow-floating`) — matche
-				// HUD zoom+avatar, CanvasLeftPanel, SidebarDrawer.
+				// `--sqlnest-surface` explicite (au lieu du slate-9 par
+				// défaut de Paper, quasi-noir) — mêmes tokens que les
+				// autres containers flottants.
 				background: "var(--sqlnest-surface)",
 				border: "1px solid var(--sqlnest-border)",
 				color: "var(--sqlnest-text-primary)",

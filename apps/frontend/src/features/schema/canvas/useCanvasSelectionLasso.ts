@@ -36,7 +36,7 @@ export interface UseCanvasSelectionLassoReturn {
  *   - Lasso < `MIN_FRAME_LASSO` (40 px) → no-op (évite les frames dégénérés
  *     d'un simple clic mal calibré).
  *   - Après création (ou échec silencieux), retour automatique à
- *     `activeTool = "select"` — le mode est one-shot, à la Figma.
+ *     `activeTool = "select"` — le mode est one-shot.
  */
 export function useCanvasSelectionLasso(
 	opts: UseCanvasSelectionLassoOptions

@@ -5,8 +5,8 @@
  * teintes proches (les préfixes contribuent le plus au hash), ce qui rend
  * visuellement lisibles les groupes comme `xref_p1…`.
  *
- * Version dark : le shell d'une table est `#2C2C2C` (surface Figma). On y
- * dépose :
+ * Version dark : le shell d'une table est `#2C2C2C` (`--sqlnest-surface`).
+ * On y dépose :
  *  - `border` : hue vive (S=55%, L=55%) pour rester lisible sur le shell
  *    sombre — sert aussi de pastille dans l'arbre + de bordure MiniMap.
  *  - `header` : tint SOMBRE de la même hue (S=45%, L=22%) posé sur le shell —

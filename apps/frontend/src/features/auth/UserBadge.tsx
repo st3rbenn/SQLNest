@@ -1,9 +1,6 @@
 /**
- * UserBadge — bloc user en top de la sidebar gallery (C.21 refactor).
- *
- * Miroir du menu Figma / Notion "workspace switcher > user" en top-left :
- * avatar rond + nom + chevron. Ouvre un dropdown compact avec les
- * actions du compte (settings, logout).
+ * UserBadge — bloc user en top de la sidebar gallery. Avatar rond + nom
+ * + chevron ; ouvre un dropdown compact (settings, logout).
  *
  * V1 propose uniquement « Se déconnecter » — les autres items existent
  * en placeholder (Paramètres, image profil) prêts pour V2.

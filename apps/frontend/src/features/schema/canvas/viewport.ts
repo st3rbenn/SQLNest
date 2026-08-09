@@ -24,7 +24,7 @@ export const OVERVIEW_FIT: {
 // Zoom minimal après un focus-table. On ne dézoome JAMAIS : si l'utilisateur
 // est déjà bien zoomé (> min), on garde son niveau, on ne fait que pan. S'il
 // vient d'une vue aérienne (< min), on zoome IN jusqu'à ce seuil lisible.
-// Modèle mental Figma : cliquer sur un élément = « aller le voir », pas « re-
+// Modèle mental : cliquer sur un élément = « aller le voir », pas « re-
 // cadrer arbitrairement ».
 export const FOCUS_ZOOM_MIN = 1;
 export const FOCUS_TWEEN_MS = 350;

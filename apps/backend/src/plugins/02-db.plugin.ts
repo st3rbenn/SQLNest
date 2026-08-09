@@ -17,9 +17,9 @@ import fp from "fastify-plugin";
  * SIGTERM propre.
  *
  * Note : on lit `process.env.DATABASE_URL` directement (pas `fastify.config`)
- * — cohérent avec le reste du monorepo (drizzle.config.ts, plugin openapi,
- * etc.). La validation est déjà faite par `env.schema.ts` (@fastify/env) et
- * par le loadEnv de `index.ts`.
+ * — même approche que `drizzle.config.ts` et le plugin openapi, qui
+ * s'exécutent hors du cycle Fastify. La validation est déjà faite par
+ * `env.schema.ts` (@fastify/env) et par le loadEnv de `index.ts`.
  */
 export default fp(
 	async (fastify) => {

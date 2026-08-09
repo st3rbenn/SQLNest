@@ -34,9 +34,8 @@ export function CanvasBreadcrumb({
 }: CanvasBreadcrumbProps) {
 	const Icon = engine === "mongodb" ? IconLeaf : IconDatabase;
 	const engineLabel = engine === "mongodb" ? "MongoDB" : "Postgres";
-	// Sur dark, l'accent Figma sert de couleur d'engine « live » — mint pour
-	// MongoDB reste une couleur de code (mongo = green). Fallback aligné sur
-	// la palette actuelle.
+	// Couleur d'engine : accent bleu pour Postgres, mint pour MongoDB
+	// (mongo = green dans l'imaginaire du produit).
 	const engineColor =
 		engine === "mongodb"
 			? "var(--sqlnest-success, #10b981)"

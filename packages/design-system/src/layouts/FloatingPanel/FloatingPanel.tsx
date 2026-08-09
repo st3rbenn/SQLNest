@@ -64,9 +64,9 @@ export function FloatingPanel({
 		...positionStyles(position, offset),
 		...(style as CSSProperties | undefined),
 	};
-	// Bg par défaut = surface Figma. Le caller peut passer `bg="transparent"`
-	// (cas CanvasToolbar qui délègue le fond au Toolbar interne) — dans ce
-	// cas on respecte sa valeur.
+	// Bg par défaut = surface DS. Le caller peut passer `bg="transparent"`
+	// (cas CanvasToolbar qui délègue le fond au Toolbar interne) — dans
+	// ce cas on respecte sa valeur.
 	return (
 		<Paper
 			radius="lg"

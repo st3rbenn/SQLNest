@@ -1,5 +1,5 @@
 /*
- * Overrides RF pour un feel Figma :
+ * Overrides RF :
  * - masque le bounding-box qui entoure une multi-sélection de nœuds
  *   (`.react-flow__nodesselection`). L'utilisateur veut voir uniquement
  *   le highlight PAR nœud, pas le rectangle qui les regroupe.
@@ -12,9 +12,9 @@
 }
 
 /*
- * Sélection au lasso — RF dessine un rectangle bleu par défaut, on aligne
- * l'accent au bleu Figma (--sqlnest-accent). Fond très translucide pour ne
- * pas masquer les tables sous le rectangle en cours de dessin.
+ * Sélection au lasso — RF dessine un rectangle bleu par défaut, on
+ * réutilise `--sqlnest-accent`. Fond très translucide pour ne pas
+ * masquer les tables sous le rectangle en cours de dessin.
  */
 .react-flow__selection {
 	background: rgba(13, 153, 255, 0.08) !important;
@@ -29,8 +29,8 @@
  */
 
 /*
- * MiniMap — bg surface Figma + masque nodes en accent bleu (couleur pilotée
- * par la prop `nodeColor` côté React). Bordure discrète.
+ * MiniMap — bg `--sqlnest-surface`, masque nodes en accent (couleur
+ * pilotée par la prop `nodeColor` côté React).
  */
 .react-flow__minimap {
 	background: var(--sqlnest-surface) !important;
@@ -43,7 +43,7 @@
 }
 
 /*
- * Controls (+/−, fit) — surface Figma. Les boutons individuels reprennent
+ * Controls (+/−, fit) — surface DS. Les boutons individuels reprennent
  * la teinte via les overrides ci-dessous.
  */
 .react-flow__controls {
@@ -112,8 +112,8 @@
 }
 .canvas-tool-frame .react-flow__selection {
 	/* Filet bleu accent pour appuyer la sémantique « frame draw » — on
-	 * réutilise l'accent Figma déjà utilisé pour la sélection normale mais
-	 * on pousse l'opacité et le trait pour distinguer visuellement. */
+	 * réutilise `--sqlnest-accent` déjà utilisé pour la sélection normale
+	 * mais on pousse l'opacité et le trait pour distinguer visuellement. */
 	background: var(--sqlnest-accent-soft) !important;
 	border: 2px dashed var(--sqlnest-accent) !important;
 }

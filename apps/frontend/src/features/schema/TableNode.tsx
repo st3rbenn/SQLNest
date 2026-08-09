@@ -149,10 +149,10 @@ export function TableNode({
 	// donnaient des styles mixtes selon comment la table était mise en avant.
 	const highlighted = focused || selected;
 
-	// Enveloppe commune : shell surface Figma, border colorée par hue
-	// (accent bleu / warning jaune override en focus / match), shadow noir
-	// diffuse, gestion `dimmed`. LOD variants remplissent l'enveloppe à la
-	// taille RÉELLE — sinon les handles (aux bords du wrapper RF) ne
+	// Enveloppe commune : shell `--sqlnest-surface`, border colorée par
+	// hue (accent bleu / warning jaune override en focus / match), shadow
+	// diffuse, gestion `dimmed`. LOD variants remplissent l'enveloppe à
+	// la taille RÉELLE — sinon les handles (aux bords du wrapper RF) ne
 	// s'alignent plus avec le visuel à faible zoom.
 	const shellStyle: CSSProperties = {
 		width: effectiveWidth,

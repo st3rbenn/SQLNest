@@ -49,8 +49,8 @@ import { useFrames } from "./useFrames";
 import { useTablePositions } from "./useTablePositions";
 import { useTableSizes } from "./useTableSizes";
 
-// Couleurs des edges — accent bleu Figma pour les FK déclarées, jaune
-// warning pour les FK inférées (jamais confirmées par la DB). Toutes deux
+// Couleurs des edges — accent bleu pour les FK déclarées, jaune warning
+// pour les FK inférées (jamais confirmées par la DB). Toutes deux
 // choisies pour rester lisibles sur `#1E1E1E`.
 const DECLARED = "#0d99ff";
 const INFERRED = "#ffc933";
@@ -527,10 +527,10 @@ function CanvasInner({
 		history: historyProxy
 	});
 
-	// Shortcuts toolbar canvas — mêmes sémantiques que Figma/Sketch.
-	// `useHotkeys` skip auto sur INPUT/TEXTAREA/SELECT + contentEditable
-	// (préserve l'undo/rename inline), et gère les modifier keys sans
-	// qu'on ait besoin de check `metaKey/ctrlKey/altKey` à la main.
+	// Shortcuts toolbar canvas. `useHotkeys` skip auto sur
+	// INPUT/TEXTAREA/SELECT + contentEditable (préserve l'undo/rename
+	// inline), et gère les modifier keys sans qu'on ait besoin de check
+	// `metaKey/ctrlKey/altKey` à la main.
 	useHotkeys([
 		[
 			"Escape",
@@ -726,7 +726,7 @@ function CanvasInner({
 				onNodesChange={handleNodesChange}
 				nodeTypes={nodeTypes}
 				edgeTypes={edgeTypes}
-				// Comportements souris à la Figma :
+				// Comportements souris :
 				// - wheel/trackpad → pan (Cmd/Ctrl+wheel garde le zoom natif RF)
 				// - clic gauche + drag sur le vide → lasso (sélection partielle :
 				//   sélectionne dès qu'un nœud touche le rectangle, pas besoin
@@ -744,7 +744,7 @@ function CanvasInner({
 				// Multi-select via click : accepte Shift OU le modifier natif de
 				// l'OS (Cmd sur Mac, Ctrl sur Win/Linux). RF prend un array de
 				// key codes — n'importe lequel matche. Ça couvre :
-				//  - Shift+click (intuitif, cross-platform, comme Figma/Notion)
+				//  - Shift+click (intuitif, cross-platform)
 				//  - Cmd+click (attendu sur Mac — convention Finder / natif)
 				//  - Ctrl+click (attendu sur Win/Linux — convention Explorer)
 				multiSelectionKeyCode={["Shift", "Meta", "Control"]}
@@ -755,7 +755,7 @@ function CanvasInner({
 				// ET on clear un focus éventuel (sinon la table précédemment focus
 				// garde son ring bleu foncé pendant que les autres ont juste le
 				// contour selected bleu clair → styles mixtes visibles).
-				// Double-clic = recadre sur la table (comme Figma).
+				// Double-clic = recadre sur la table.
 				// Clic sur un frame → ouvre FrameDetails (liste des tables du frame)
 				// dans le même drawer, avec back button vers l'arborescence.
 				onNodeClick={(event, node) => {
