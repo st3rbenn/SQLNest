@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# CLI SQLNest en mode dev (source via tsx, NODE_ENV=development).
+# Résout la racine du repo depuis l'emplacement du script → utilisable
+# depuis n'importe quel sous-dossier.
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
+
+# NODE_ENV=development force la branche localhost dans cli.ts :
+#   process.env.NODE_ENV === "development" ? "http://localhost:4000" : "https://dev.sqlnest.io"
+# En dev-from-source (tsx), aucune substitution build-time — la ternary
+# est évaluée au runtime.
+exec env NODE_ENV=development pnpm --silent --filter @sqlnest/cli exec tsx src/bin.ts "$@"
