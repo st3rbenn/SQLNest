@@ -21,8 +21,9 @@
 		"README.md"
 	],
 	"scripts": {
-		"build": "esbuild src/bin.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/sqlnest.mjs --banner:js='#!/usr/bin/env node' --external:@noble/curves --external:@noble/hashes --external:@noble/ciphers --external:msgpackr --external:smol-toml --external:ws --external:postgres --external:mongodb --external:pg --external:@inquirer/* --external:mute-stream --external:cli-width --external:@sindresorhus/is --external:signal-exit --external:yoctocolors-cjs",
+		"build": "esbuild src/bin.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/sqlnest.mjs --banner:js='#!/usr/bin/env node' --external:@noble/curves --external:@noble/hashes --external:@noble/ciphers --external:msgpackr --external:smol-toml --external:ws --external:mongodb --external:pg --external:@inquirer/* --external:mute-stream --external:cli-width --external:@sindresorhus/is --external:signal-exit --external:yoctocolors-cjs",
 		"postbuild": "chmod +x dist/sqlnest.mjs",
+		"prepublishOnly": "pnpm build",
 		"test": "vitest run",
 		"test:watch": "vitest",
 		"type-check": "tsc --project tsconfig.json",
@@ -33,20 +34,28 @@
 		"@noble/ciphers": "^2.0.5",
 		"@noble/curves": "^2.3.0",
 		"@noble/hashes": "^2.3.0",
-		"@sqlnest/engine": "workspace:*",
-		"@sqlnest/snql": "workspace:*",
-		"@sqlnest/tunnel-protocol": "workspace:*",
+		"mongodb": "^6.10.0",
 		"msgpackr": "^1.11.2",
+		"pg": "^8.13.1",
 		"smol-toml": "^1.7.1",
 		"ws": "^8.21.2"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "catalog:",
+		"@sqlnest/engine": "workspace:*",
+		"@sqlnest/snql": "workspace:*",
+		"@sqlnest/tunnel-protocol": "workspace:*",
 		"@types/node": "^24.6.0",
 		"@types/ws": "^8.5.13",
 		"esbuild": "^0.28.1",
 		"typescript": "catalog:",
 		"vitest": "catalog:"
+	},
+	"publishConfig": {
+		"access": "public"
+	},
+	"engines": {
+		"node": ">=22"
 	},
 	"keywords": [
 		"sqlnest",

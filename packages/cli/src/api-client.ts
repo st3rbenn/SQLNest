@@ -6,7 +6,7 @@
  * ─── Design ───────────────────────────────────────────────────────────
  * `createApiClient(baseUrl)` retourne un objet avec 4 méthodes typées.
  * Le `baseUrl` est injecté pour permettre le test (mock server local)
- * et la configuration de prod via env var (`SQLNEST_API_URL`).
+ * et la configuration de prod (URL hardcodée dans cli.ts).
  *
  * Les types de request/response sont dupliqués ici plutôt que réimportés
  * du backend — le CLI est publié séparément sur npm, il ne peut pas

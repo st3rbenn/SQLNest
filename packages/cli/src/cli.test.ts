@@ -108,10 +108,6 @@ describe("runCli — connect (device flow)", () => {
 		const code = await runCli(["connect"], {
 			stdout: io.stdout,
 			stderr: io.stderr,
-			env: {
-				SQLNEST_API_URL: "http://localhost:4000",
-				SQLNEST_FRONTEND_URL: "http://localhost:3000"
-			},
 			// biome-ignore lint/suspicious/noExplicitAny: mock d'injection
 			connectFn: connectFn as any,
 			// Le CLI passe en `serveTunnel` (blocking) après un pairing
@@ -123,8 +119,8 @@ describe("runCli — connect (device flow)", () => {
 		expect(code).toBe(0);
 		expect(connectFn).toHaveBeenCalledTimes(1);
 		const opts = connectFn.mock.calls[0]?.[0];
-		expect(opts.baseUrl).toBe("http://localhost:4000");
-		expect(opts.frontendUrl).toBe("http://localhost:3000");
+		expect(opts.baseUrl).toBe("https://dev.sqlnest.io");
+		expect(opts.frontendUrl).toBe("https://dev.sqlnest.io");
 		expect(opts.openBrowserOnDisplay).toBe(true);
 		expect(io.out.some((l) => l.includes("alice-mac"))).toBe(true);
 	});
