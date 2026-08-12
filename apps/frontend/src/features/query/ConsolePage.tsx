@@ -39,6 +39,21 @@ import { openConsoleInPopout, useIsPopout } from "./usePopoutWindow";
 import { useConsoleTabs } from "./useConsoleTabs";
 import { type SerializedSpan, SnqlRuntimeError, useRunQuery } from "./useRunQuery";
 
+/**
+ * Type guard défensif : la source pgError peut avoir été sérialisée par
+ * msgpackr ou Zod et remonter un span mal formé (`null`, tuple d'arité
+ * différente, valeurs non numériques). Filtre au point de consommation
+ * plutôt que d'assumer la shape.
+ */
+function isSerializedSpan(value: unknown): value is SerializedSpan {
+	return (
+		Array.isArray(value) &&
+		value.length === 2 &&
+		typeof value[0] === "number" &&
+		typeof value[1] === "number"
+	);
+}
+
 const SPLIT_STORAGE_KEY = "sqlnest.console.editorHeight";
 const SPLIT_MIN_TOP = 120;
 const SPLIT_MIN_BOTTOM = 200;
@@ -161,19 +176,52 @@ export function ConsolePage({
 	//  - Phase 3c : `rowSpans` sur violation unique/FK (SQLSTATE 23xxx).
 	const errorSpans = useMemo<readonly SerializedSpan[]>(() => {
 		const err = runQuery.error;
-		if (!(err instanceof SnqlRuntimeError) || err.pgError === undefined) return [];
+		if (!(err instanceof SnqlRuntimeError) || err.pgError == null) return [];
 		const pg = err.pgError;
 		const collected: SerializedSpan[] = [];
-		if (pg.paramSpans !== undefined) {
-			for (const s of pg.paramSpans) if (s !== undefined) collected.push(s);
+		// Filtre défensif — msgpackr / Zod optional peuvent remonter `null` en
+		// place d'un span absent ; on ne veut ni null ni tuple mal formé.
+
+		// (a) Uniquement les $N réellement mentionnés dans le message (pas TOUS
+		// les params bindés — un `column does not exist` ne concerne pas les
+		// littéraux WHERE/LIMIT). Le message peut référencer $2 sans $1 → on
+		// dédup + suit l'ordre d'apparition.
+		if (typeof pg.message === "string" && Array.isArray(pg.paramSpans)) {
+			const seenIdx = new Set<number>();
+			for (const match of pg.message.matchAll(/\$(\d+)/g)) {
+				const idx = Number.parseInt(match[1] ?? "", 10);
+				if (!Number.isFinite(idx) || idx <= 0 || seenIdx.has(idx)) continue;
+				seenIdx.add(idx);
+				const span = pg.paramSpans[idx - 1];
+				if (isSerializedSpan(span)) collected.push(span);
+			}
 		}
-		if (pg.column !== undefined) {
-			const spans = pg.identSpans?.[pg.column];
-			if (spans !== undefined) collected.push(...spans);
+
+		// (b) Idents quotés dans le message (`column "foo" does not exist`,
+		// `relation "bar" does not exist`, `operator does not exist: text = int`)
+		// → résolution via identSpans + éventuellement pgError.column/table si
+		// pg l'a rempli en plus.
+		if (pg.identSpans != null && typeof pg.identSpans === "object") {
+			const identNames = new Set<string>();
+			if (typeof pg.message === "string") {
+				for (const match of pg.message.matchAll(/"([^"]+)"/g)) {
+					if (match[1] !== undefined) identNames.add(match[1]);
+				}
+			}
+			if (typeof pg.column === "string") identNames.add(pg.column);
+			if (typeof pg.table === "string") identNames.add(pg.table);
+			for (const name of identNames) {
+				const spans = (pg.identSpans as Record<string, unknown>)[name];
+				if (!Array.isArray(spans)) continue;
+				for (const s of spans) if (isSerializedSpan(s)) collected.push(s);
+			}
 		}
-		if (pg.code?.startsWith("23") === true && pg.rowSpans !== undefined) {
-			for (const s of pg.rowSpans) if (s !== undefined) collected.push(s);
+
+		// (c) Rows d'un batch INSERT sur violation contrainte (SQLSTATE 23xxx).
+		if (pg.code?.startsWith("23") === true && Array.isArray(pg.rowSpans)) {
+			for (const s of pg.rowSpans) if (isSerializedSpan(s)) collected.push(s);
 		}
+
 		return collected;
 	}, [runQuery.error]);
 

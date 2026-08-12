@@ -34,7 +34,17 @@ const errorField = StateField.define<DecorationSet>({
 			if (effect.is(setErrorSpans)) {
 				const builder = new RangeSetBuilder<Decoration>();
 				const docLen = tr.state.doc.length;
+				// Défensif : chaque span DOIT être un tuple [number, number] non-null
+				// avant destructuring. Un span mal formé remonté via le wire est
+				// filtré ici pour ne pas crasher `[start, len] = null`.
 				const sorted = [...effect.value]
+					.filter(
+						(v): v is SerializedSpan =>
+							Array.isArray(v) &&
+							v.length === 2 &&
+							typeof v[0] === "number" &&
+							typeof v[1] === "number"
+					)
 					.filter(([start, len]) => start >= 0 && len > 0 && start + len <= docLen)
 					.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
 				const mark = Decoration.mark({ class: "sqlnest-error-mark" });

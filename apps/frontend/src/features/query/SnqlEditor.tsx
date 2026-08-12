@@ -232,11 +232,20 @@ export const SnqlEditor = forwardRef<SnqlEditorHandle, SnqlEditorProps>(
 
 		// Stabilise la liste — évite les dispatch superflus si le parent passe une
 		// ref différente à chaque rendu. Comparaison profonde peu coûteuse (petites
-		// listes de spans, ≤ 5 typiquement).
+		// listes de spans, ≤ 5 typiquement). Défensif : ignore les entrées mal
+		// formées (tuple d'arité != 2, valeurs non numériques) plutôt que de
+		// crasher au destructuring — la source pgError peut remonter du null.
 		const spansKey = useMemo(
 			() =>
 				(errorSpans ?? [])
-					.map(([s, l]) => `${s}:${l}`)
+					.filter(
+						(v): v is SerializedSpan =>
+							Array.isArray(v) &&
+							v.length === 2 &&
+							typeof v[0] === "number" &&
+							typeof v[1] === "number"
+					)
+					.map((s) => `${s[0]}:${s[1]}`)
 					.join(","),
 			[errorSpans]
 		);

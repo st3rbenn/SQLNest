@@ -357,7 +357,15 @@ function extractParamRefs(pgError: PgErrorInfo): readonly ParamRef[] {
 		if (!Number.isFinite(idx) || idx <= 0) continue;
 		if (seen.has(idx)) continue;
 		const value = pgError.params?.[idx - 1];
-		const span = pgError.paramSpans?.[idx - 1];
+		const rawSpan = pgError.paramSpans?.[idx - 1];
+		// Défensif : le span peut arriver null/mal-formé via msgpackr → skip.
+		const span =
+			Array.isArray(rawSpan) &&
+			rawSpan.length === 2 &&
+			typeof rawSpan[0] === "number" &&
+			typeof rawSpan[1] === "number"
+				? (rawSpan as SerializedSpan)
+				: undefined;
 		seen.set(
 			idx,
 			span !== undefined ? { index: idx, value, span } : { index: idx, value }
@@ -377,8 +385,17 @@ function renderIdentChip(
 	identSpans: PgErrorInfo["identSpans"],
 	onFocusSpan?: (span: SerializedSpan) => void
 ): React.ReactNode {
-	const spans = identSpans?.[name];
-	const firstSpan = spans?.[0];
+	const rawSpans = identSpans?.[name];
+	const spans = Array.isArray(rawSpans)
+		? rawSpans.filter(
+				(v): v is SerializedSpan =>
+					Array.isArray(v) &&
+					v.length === 2 &&
+					typeof v[0] === "number" &&
+					typeof v[1] === "number"
+			)
+		: [];
+	const firstSpan = spans[0];
 	const clickable = firstSpan !== undefined && onFocusSpan !== undefined;
 	if (!clickable) {
 		return (
@@ -388,7 +405,7 @@ function renderIdentChip(
 			</span>
 		);
 	}
-	const total = spans?.length ?? 0;
+	const total = spans.length;
 	return (
 		<button
 			type="button"

@@ -465,7 +465,7 @@ function renderArithOperand(expr: PlanExpr, params: ParamList): string {
 		expr.value !== null &&
 		isSqlDecimal(expr.value)
 	) {
-		return `${params.add(expr.value)}::numeric`;
+		return `${params.add(expr.value, expr.span)}::numeric`;
 	}
 	return renderExpr(expr, params);
 }

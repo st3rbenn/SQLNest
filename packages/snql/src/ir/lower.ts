@@ -624,7 +624,8 @@ function lowerExpr(expr: Expr): PlanExpr {
 				kind: "arith",
 				op: expr.operator,
 				left: lowerExpr(expr.left),
-				right: lowerExpr(expr.right)
+				right: lowerExpr(expr.right),
+				span: expr.span
 			};
 		case "call":
 			return lowerCall(expr);
@@ -681,7 +682,8 @@ function lowerCall(expr: Expr & { type: "call" }): PlanExpr {
 	return {
 		kind: "call",
 		name: expr.name,
-		args: expr.args.map(lowerExpr)
+		args: expr.args.map(lowerExpr),
+		span: expr.span
 	};
 }
 
