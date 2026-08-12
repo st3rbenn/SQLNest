@@ -72,7 +72,7 @@ export async function runQuery(
 			);
 		}
 		const native = withIdentSpans(
-			mapper.mapMutation(lowerMutation(statement)),
+			mapper.mapMutation(lowerMutation(statement, schema)),
 			identSpans
 		);
 		return { ...(await connection.execute(native)), written: true };

@@ -16,8 +16,16 @@
 
 import { describe, expect, it } from "vitest";
 import type { SchemaModel } from "../schema/model";
-import { compile } from "../index";
+import { compile, lowerMutation, parse, tokenize } from "../index";
+import type { Statement } from "../parser/ast";
 import { SnqlError } from "../diagnostics";
+
+/** compile() est read-only ; pour tester lowerMutation on parse+lower direct. */
+function lowerMut(source: string, schema?: SchemaModel): void {
+	const stmt: Statement = parse(tokenize(source));
+	if (stmt.operation === "select") throw new Error("attendu une mutation");
+	lowerMutation(stmt, schema);
+}
 
 /** Deux collections simples : `users` (colonnes name, email, address jsonb)
  *  et `orders` (id, user_id, total). Aucune relation déclarée. */
@@ -185,5 +193,136 @@ describe("checkAliasDefined — sans schéma (permissif)", () => {
 		expect(() =>
 			compile("find users pick address.city as city", { engine: "postgres" })
 		).not.toThrow();
+	});
+});
+
+/** Schéma partiel : collection cible sans fields (Mongo pré-sampling). */
+const SCHEMA_EMPTY_FIELDS: SchemaModel = {
+	engine: "mongodb",
+	collections: [{ name: "users", source: "inferred", fields: [] }],
+	relations: []
+};
+
+/** Schéma qui ne connaît PAS la collection cible. */
+const SCHEMA_MISSING_COLLECTION: SchemaModel = {
+	engine: "postgres",
+	collections: [
+		{
+			name: "other_table",
+			source: "declared",
+			primaryKey: ["id"],
+			fields: [
+				{ name: "id", type: "bigint", nullable: false, source: "declared" }
+			]
+		}
+	],
+	relations: []
+};
+
+describe("checkAliasDefined — schéma partiel = permissif (fix verify #1)", () => {
+	it("collection présente mais fields=[] (Mongo pré-sampling) — JSON access accepté", () => {
+		expect(() =>
+			compile("find users pick profile.avatar as avatar", {
+				engine: "mongodb",
+				schema: SCHEMA_EMPTY_FIELDS
+			})
+		).not.toThrow();
+	});
+
+	it("source absente du schéma — JSON access accepté (pas de suggestion mensongère)", () => {
+		expect(() =>
+			compile('find users where address.city = "Paris"', {
+				engine: "postgres",
+				schema: SCHEMA_MISSING_COLLECTION
+			})
+		).not.toThrow();
+	});
+});
+
+describe("lowerMutation — checkAliasDefined branché sur update/remove (fix verify #2)", () => {
+	it("rejette 'update users where u.id = 1 set ...' avec schéma (u fantôme)", () => {
+		expect(() =>
+			lowerMut('update users where u.id = 1 set name = "foo"', SCHEMA)
+		).toThrow(SnqlError);
+	});
+
+	it("rejette 'remove from users where x.email = ...' avec schéma", () => {
+		expect(() =>
+			lowerMut('remove from users where x.email = "a@b"', SCHEMA)
+		).toThrow(SnqlError);
+	});
+
+	it("rejette une valeur SET avec préfixe fantôme (p.old_price)", () => {
+		expect(() =>
+			lowerMut("update users where id = 1 set name = p.old_price", SCHEMA)
+		).toThrow(SnqlError);
+	});
+
+	it("accepte JSON access dans un update WHERE (address.city = 'Paris')", () => {
+		expect(() =>
+			lowerMut('update users where address.city = "Paris" set name = "x"', SCHEMA)
+		).not.toThrow();
+	});
+
+	it("message d'erreur mutations précise 'pas d'alias' — indication contextuelle", () => {
+		try {
+			lowerMut('update users where u.id = 1 set name = "foo"', SCHEMA);
+			expect.fail("aurait dû throw");
+		} catch (e) {
+			expect(e).toBeInstanceOf(SnqlError);
+			const msg = (e as SnqlError).message;
+			expect(msg).toMatch(/mutations ne portent pas d'alias/i);
+			expect((e as SnqlError).code).toBe("lower_unknown_alias");
+		}
+	});
+
+	it("sans schéma → permissif comme pour les reads (compat rétro)", () => {
+		expect(() =>
+			lowerMut('update users where u.id = 1 set name = "foo"')
+		).not.toThrow();
+	});
+});
+
+describe("with foreignField — check symétrique (fix verify #3)", () => {
+	it("rejette un foreignField avec alias fantôme", () => {
+		expect(() =>
+			compile(
+				"find users as u with orders as o on u.id = xyz.user_id",
+				{ engine: "postgres", schema: SCHEMA }
+			)
+		).toThrow(/lower_unknown_alias|xyz/);
+	});
+
+	it("accepte le foreignField préfixé par l'alias joint 'o'", () => {
+		expect(() =>
+			compile(
+				"find users as u with orders as o on u.id = o.user_id",
+				{ engine: "postgres", schema: SCHEMA }
+			)
+		).not.toThrow();
+	});
+
+	it("accepte le foreignField préfixé par le nom de la collection jointe (sans as)", () => {
+		// `with orders on ...` — pas d'alias, joinAlias = "orders".
+		expect(() =>
+			compile(
+				"find users as u with orders on u.id = orders.user_id",
+				{ engine: "postgres", schema: SCHEMA }
+			)
+		).not.toThrow();
+	});
+
+	it("message mentionne l'alias joint attendu comme correction", () => {
+		try {
+			compile(
+				"find users as u with orders as o on u.id = xyz.user_id",
+				{ engine: "postgres", schema: SCHEMA }
+			);
+			expect.fail("aurait dû throw");
+		} catch (e) {
+			const msg = (e as SnqlError).message;
+			expect(msg).toMatch(/'o'/);
+			expect(msg).toMatch(/foreignField/);
+		}
 	});
 });

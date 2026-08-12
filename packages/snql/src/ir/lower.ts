@@ -67,15 +67,9 @@ export function lower(query: Query, schema?: SchemaModel): LogicalPlan {
 	// Sans schéma on ne peut pas distinguer `alias.field` (préfixe d'alias
 	// jamais déclaré) d'un `col.subfield` (accès JSON à un champ imbriqué
 	// d'une colonne document) — les deux ont la même shape `path.length ≥ 2`.
-	// Le check n'a donc de sens qu'avec un schéma qui liste les colonnes.
-	const sourceColumns =
-		schema !== undefined
-			? new Set(
-					schema.collections
-						.find((c) => c.name === query.source.collection)
-						?.fields.map((f) => f.name) ?? []
-				)
-			: null;
+	// Idem si la source n'est pas dans le schéma OU si ses `fields` sont
+	// vides (Mongo pré-sampling, stale post-DDL) — permissif via `null`.
+	const sourceColumns = resolveSourceColumns(schema, query.source.collection);
 	for (const stage of query.stages) {
 		checkColumnsAvailable(stage, available);
 		if (stage.type !== "with") {
@@ -189,15 +183,30 @@ function checkAliasDefined(
 				}
 			}
 			break;
-		case "with":
-			// `with x on a.b = c.d` : `a.b` doit référencer l'alias source (a
-			// == source.alias) — on l'accepte tel quel. `c.d` référence la
-			// collection jointe (pas encore vue). On ne teste ici que les
-			// localField, car foreignField est nettoyé côté `lowerStage`.
+		case "with": {
+			// `with X as y on a.b = c.d` :
+			// - `localField` (LHS) réfère à la SOURCE — mêmes règles que where/sort.
+			// - `foreignField` (RHS) réfère à la COLLECTION JOINTE dont l'alias
+			//   est `stage.alias ?? stage.collection`. Seul ce nom est légal en
+			//   préfixe — tout autre head est un alias inventé qui fuirait au
+			//   codegen (`renderLeftJoin` / `renderEmbedSubquery`) avec
+			//   `"y"."xyz"."field"` que pg rejette obscurément.
 			if (stage.localField.length >= 2) {
 				referenced.push({ path: stage.localField, span: stage.span });
 			}
+			if (stage.foreignField.length >= 2) {
+				const joinAlias = stage.alias ?? stage.collection;
+				const head = stage.foreignField[0] ?? "";
+				if (head !== joinAlias) {
+					throw new SnqlError(
+						`'${head}' n'est pas l'alias de la collection jointe ('${joinAlias}') dans le foreignField '${stage.foreignField.join(".")}' — retire le préfixe : '${stage.foreignField.slice(1).join(".")}', ou écris '${joinAlias}.${stage.foreignField.slice(1).join(".")}'.`,
+						"lower_unknown_alias",
+						stage.span
+					);
+				}
+			}
 			break;
+		}
 		case "limit":
 			return;
 	}
@@ -276,15 +285,42 @@ function collectExprFieldsWithSpans(
 	}
 }
 
-/** Abaisse une mutation (insert / update / delete) en [[MutationPlan]]. */
+/**
+ * Abaisse une mutation (insert / update / delete) en [[MutationPlan]].
+ *
+ * Le `schema` optionnel branche `checkAliasDefined` sur les mutations aussi —
+ * les mutations n'ont pas de notion d'alias source, donc TOUT `path.length ≥ 2`
+ * dans un predicate WHERE ou une valeur SET dont le head n'est pas une colonne
+ * document de la collection est un alias inventé qui produirait un
+ * `missing FROM-clause entry for table "x"` opaque au runtime. Symétrique du
+ * garde côté lecture.
+ */
 export function lowerMutation(
-	statement: InsertStatement | UpdateStatement | DeleteStatement
+	statement: InsertStatement | UpdateStatement | DeleteStatement,
+	schema?: SchemaModel
 ): MutationPlan {
 	if (statement.operation === "insert") {
 		return lowerInsert(statement);
 	}
+	const sourceColumns = resolveSourceColumns(schema, statement.collection);
 	if (statement.operation === "update") {
 		assertUniqueAssignments(statement.assignments);
+		if (sourceColumns !== null) {
+			for (const a of statement.assignments) {
+				checkExprPathsAgainstColumns(
+					a.value,
+					sourceColumns,
+					statement.collection
+				);
+			}
+			if (statement.predicate !== undefined) {
+				checkExprPathsAgainstColumns(
+					statement.predicate,
+					sourceColumns,
+					statement.collection
+				);
+			}
+		}
 		const assignments = statement.assignments.map((assignment) => ({
 			column: assignment.column,
 			value: lowerExpr(assignment.value)
@@ -302,6 +338,13 @@ export function lowerMutation(
 				}
 			: { op: "update", collection: statement.collection, assignments };
 	}
+	if (sourceColumns !== null && statement.predicate !== undefined) {
+		checkExprPathsAgainstColumns(
+			statement.predicate,
+			sourceColumns,
+			statement.collection
+		);
+	}
 	const predicate =
 		statement.predicate !== undefined ? lowerExpr(statement.predicate) : undefined;
 	if (predicate !== undefined) assertNoCallInWrite(predicate);
@@ -312,6 +355,54 @@ export function lowerMutation(
 				predicate
 			}
 		: { op: "delete", collection: statement.collection };
+}
+
+/**
+ * Construit `sourceColumns` depuis le schéma — retourne `null` (permissif)
+ * quand la source n'est pas dans le schéma ou n'a pas de fields listés.
+ * Partagé entre [[lower]] (reads) et [[lowerMutation]] (writes).
+ */
+function resolveSourceColumns(
+	schema: SchemaModel | undefined,
+	collection: string
+): ReadonlySet<string> | null {
+	if (schema === undefined) return null;
+	const src = schema.collections.find((c) => c.name === collection);
+	if (src === undefined || src.fields.length === 0) return null;
+	return new Set(src.fields.map((f) => f.name));
+}
+
+/**
+ * Variante mutation-friendly de [[checkAliasDefined]] : les mutations n'ont
+ * pas d'alias déclaré, donc tout `path.length ≥ 2` dont le head n'est pas
+ * une colonne document est un alias fantôme. Descend récursivement dans
+ * les sous-expressions (arith, call, compare, and/or/not/in).
+ */
+function checkExprPathsAgainstColumns(
+	expr: Expr,
+	sourceColumns: ReadonlySet<string>,
+	collection: string
+): void {
+	const referenced: {
+		readonly path: readonly string[];
+		readonly span: import("../lexer/token").Span;
+	}[] = [];
+	collectExprFieldsWithSpans(expr, referenced);
+	for (const { path, span } of referenced) {
+		if (path.length < 2) continue;
+		const head = path[0] ?? "";
+		if (sourceColumns.has(head)) continue;
+		const rest = path.slice(1).join(".");
+		const suggestion =
+			head === collection
+				? `retire le préfixe : '${rest}' (les mutations ne portent pas d'alias)`
+				: `retire le préfixe '${head}' : '${rest}' (les mutations ne portent pas d'alias — écris le champ nu de '${collection}')`;
+		throw new SnqlError(
+			`'${head}' n'est pas une colonne de '${collection}' dans '${path.join(".")}' — ${suggestion}.`,
+			"lower_unknown_alias",
+			span
+		);
+	}
 }
 
 /**
