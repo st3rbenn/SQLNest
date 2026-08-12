@@ -55,10 +55,34 @@ export function lower(query: Query, schema?: SchemaModel): LogicalPlan {
 	// Alias des joins déjà rencontrés en mode `embed` — leurs champs sont
 	// enveloppés dans un array JSON, `alias.field` n'est pas résolvable.
 	const embedAliases = new Set<string>();
+	// Alias déclarés valides pour préfixer un `path` (`x.field`). Contient
+	// l'alias de la source (si présent) + tous les alias `with` vus jusqu'ici.
+	// Sert à rejeter en amont un `alias.field` avec un alias jamais déclaré —
+	// sinon on laisserait pg cracher un `missing FROM-clause entry for table
+	// "x"` obscur qui référence un alias que l'utilisateur ne comprend pas.
+	const knownAliases = new Set<string>();
+	if (query.source.alias !== undefined) {
+		knownAliases.add(query.source.alias);
+	}
+	// Sans schéma on ne peut pas distinguer `alias.field` (préfixe d'alias
+	// jamais déclaré) d'un `col.subfield` (accès JSON à un champ imbriqué
+	// d'une colonne document) — les deux ont la même shape `path.length ≥ 2`.
+	// Le check n'a donc de sens qu'avec un schéma qui liste les colonnes.
+	const sourceColumns =
+		schema !== undefined
+			? new Set(
+					schema.collections
+						.find((c) => c.name === query.source.collection)
+						?.fields.map((f) => f.name) ?? []
+				)
+			: null;
 	for (const stage of query.stages) {
 		checkColumnsAvailable(stage, available);
 		if (stage.type !== "with") {
 			checkNoEmbedAliasDeref(stage, embedAliases);
+		}
+		if (sourceColumns !== null) {
+			checkAliasDefined(stage, knownAliases, sourceColumns, query.source);
 		}
 		plan = lowerStage(plan, stage, query.source.collection, query.source.alias, schema);
 		if (stage.type === "pick") {
@@ -73,6 +97,8 @@ export function lower(query: Query, schema?: SchemaModel): LogicalPlan {
 			if (plan.op === "join" && plan.kind === "embed") {
 				embedAliases.add(stage.alias ?? stage.collection);
 			}
+			// L'alias `with` devient valide pour tout stage suivant.
+			knownAliases.add(stage.alias ?? stage.collection);
 		}
 	}
 	return plan;
@@ -112,6 +138,141 @@ function checkNoEmbedAliasDeref(
 				"lower_embed_alias_deref"
 			);
 		}
+	}
+}
+
+/**
+ * Rejette un `path[0]` qui n'est ni l'alias source ni un alias `with` déjà vu.
+ *
+ * Sans cette garde, `find rna where r.upi = "x"` (sans `as r`) laisse le
+ * codegen émettre `WHERE "r"."upi" = $1` que pg rejette avec
+ * `missing FROM-clause entry for table "r"` — message obscur qui référence
+ * un alias que l'utilisateur ne comprend pas (il pense avoir écrit une
+ * colonne, pas une table).
+ *
+ * La règle est stricte : le nom de la collection elle-même (`users.email`
+ * quand la source est `find users` sans alias) n'est PAS accepté — force
+ * l'utilisateur à déclarer `as` explicitement ou à écrire le champ nu.
+ * Cohérent avec la philosophie SNQL (pas de shortcut ambigu).
+ *
+ * Message dynamique : nomme l'alias fautif + suggère la correction avec le
+ * bon nom (déclarer `as`, utiliser le champ nu, ou pointer vers un alias
+ * with existant si le user a fait une typo légère).
+ */
+function checkAliasDefined(
+	stage: Stage,
+	knownAliases: ReadonlySet<string>,
+	sourceColumns: ReadonlySet<string>,
+	source: { readonly collection: string; readonly alias?: string }
+): void {
+	const referenced: {
+		readonly path: readonly string[];
+		readonly span: import("../lexer/token").Span;
+	}[] = [];
+	switch (stage.type) {
+		case "where":
+			collectExprFieldsWithSpans(stage.predicate, referenced);
+			break;
+		case "sort":
+			for (const key of stage.keys) {
+				referenced.push({ path: key.path, span: key.span });
+			}
+			break;
+		case "pick":
+			for (const field of stage.fields) {
+				// Un `pick` peut porter une expression (arith, call) sans path direct —
+				// on descend dans son expr pour collecter les field refs internes.
+				if (field.expr !== undefined) {
+					collectExprFieldsWithSpans(field.expr, referenced);
+				} else if (field.path.length > 0) {
+					referenced.push({ path: field.path, span: field.span });
+				}
+			}
+			break;
+		case "with":
+			// `with x on a.b = c.d` : `a.b` doit référencer l'alias source (a
+			// == source.alias) — on l'accepte tel quel. `c.d` référence la
+			// collection jointe (pas encore vue). On ne teste ici que les
+			// localField, car foreignField est nettoyé côté `lowerStage`.
+			if (stage.localField.length >= 2) {
+				referenced.push({ path: stage.localField, span: stage.span });
+			}
+			break;
+		case "limit":
+			return;
+	}
+	for (const { path, span } of referenced) {
+		if (path.length < 2) continue;
+		const head = path[0] ?? "";
+		// L'ident de tête est valide s'il est un alias déclaré OU une colonne
+		// document de la source (accès JSON `col.subfield`) — les deux sont
+		// des utilisations légitimes de la syntaxe pointée.
+		if (knownAliases.has(head) || sourceColumns.has(head)) continue;
+		const rest = path.slice(1).join(".");
+		const suggestions: string[] = [];
+		if (head === source.collection) {
+			// Cas classique : `find users where users.email = ...` (SNQL ne
+			// permet pas le nom de la collection comme préfixe implicite —
+			// force la déclaration explicite ou le champ nu).
+			suggestions.push(
+				`déclare un alias explicite : 'find ${source.collection} as ${source.collection}'`
+			);
+			suggestions.push(`ou retire le préfixe : '${rest}'`);
+		} else {
+			suggestions.push(
+				source.alias !== undefined
+					? `l'alias source est '${source.alias}' — as-tu voulu écrire '${source.alias}.${rest}' ?`
+					: `déclare l'alias source : 'find ${source.collection} as ${head}'`
+			);
+			suggestions.push(`ou retire le préfixe : '${rest}'`);
+			if (knownAliases.size > 0) {
+				const others = [...knownAliases].map((a) => `'${a}'`).join(", ");
+				suggestions.push(`alias déjà déclarés : ${others}`);
+			}
+		}
+		throw new SnqlError(
+			`'${head}' n'est ni un alias déclaré ni une colonne de '${source.collection}' dans '${path.join(".")}' — ${suggestions.join(" ; ")}.`,
+			"lower_unknown_alias",
+			span
+		);
+	}
+}
+
+/**
+ * Variante de [[collectExprFields]] qui capture aussi le span AST de chaque
+ * référence — utilisée par [[checkAliasDefined]] pour porter le span source
+ * SNQL dans le [[SnqlError]] (résolu côté frontend en squigglies + jump-to
+ * dans l'éditeur, cf. Phase 3).
+ */
+function collectExprFieldsWithSpans(
+	expr: Expr,
+	out: {
+		readonly path: readonly string[];
+		readonly span: import("../lexer/token").Span;
+	}[]
+): void {
+	switch (expr.type) {
+		case "field":
+			out.push({ path: expr.path, span: expr.span });
+			return;
+		case "literal":
+			return;
+		case "call":
+			for (const arg of expr.args) collectExprFieldsWithSpans(arg, out);
+			return;
+		case "arith":
+		case "compare":
+		case "logical":
+			collectExprFieldsWithSpans(expr.left, out);
+			collectExprFieldsWithSpans(expr.right, out);
+			return;
+		case "not":
+			collectExprFieldsWithSpans(expr.operand, out);
+			return;
+		case "in":
+			collectExprFieldsWithSpans(expr.target, out);
+			for (const value of expr.values) collectExprFieldsWithSpans(value, out);
+			return;
 	}
 }
 
