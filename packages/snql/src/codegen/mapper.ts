@@ -3,12 +3,42 @@ import type { LogicalPlan, MutationPlan } from "../ir/plan";
 /** Une étape de pipeline d'agrégation MongoDB (ex. `{ $match: … }`). */
 export type MongoStage = Record<string, unknown>;
 
+/**
+ * Span source SNQL sérialisé en compact `[start, length]` — les positions
+ * `line`/`column` sont dérivables côté frontend depuis la source SNQL que
+ * l'utilisateur a en main. Économie ~67% vs le triplet `{offset,line,column}`.
+ */
+export type SerializedSpan = readonly [start: number, length: number];
+
 /** Requête SQL : texte + paramètres bindés ($1, $2…). */
 export interface SqlQuery {
 	readonly engine: string;
 	readonly kind: "sql";
 	readonly text: string;
 	readonly params: readonly unknown[];
+	/**
+	 * Aligné positionnellement sur `params[i]`. `undefined` en position `i`
+	 * signifie qu'aucun span source SNQL n'a pu être rattaché au bind (ex.
+	 * un `LIMIT`/`OFFSET` porté par un `number` nu dans le plan, sans span).
+	 *
+	 * Objectif : résoudre un `could not determine data type of parameter $N`
+	 * remonté par Postgres jusqu'au littéral source SNQL exact, pour souligner
+	 * dans l'éditeur au bon token — pas au byte-offset du SQL généré.
+	 */
+	readonly paramSpans?: readonly (SerializedSpan | undefined)[];
+	/**
+	 * Aligné sur les rows d'un INSERT (Phase 3c). Permet de cibler la row
+	 * source d'un `add [{...}, {...}]` fautif sur violation unique/FK. Absent
+	 * pour les SELECT/UPDATE/DELETE (pas de notion de row source).
+	 */
+	readonly rowSpans?: readonly (SerializedSpan | undefined)[];
+	/**
+	 * Map des spans par nom d'ident (Phase 3b-lite). Peuplé par le caller
+	 * avant `connection.execute` — permet de résoudre les pg-errors qui
+	 * réfèrent un ident par nom (`column "X" does not exist`) vers ses
+	 * occurrences source SNQL sans refactor du codegen.
+	 */
+	readonly identSpans?: Readonly<Record<string, readonly SerializedSpan[]>>;
 }
 
 /** Requête MongoDB : collection + pipeline d'agrégation (valeurs inline, BSON — pas d'injection). */

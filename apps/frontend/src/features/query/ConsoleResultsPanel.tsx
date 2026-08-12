@@ -24,10 +24,11 @@ import {
 } from "@tabler/icons-react";
 import type { CSSProperties } from "react";
 import { useMemo, useState } from "react";
+import { ErrorBlock } from "./ErrorBlock";
 import { ResultsGraphPlaceholder } from "./ResultsGraphPlaceholder";
 import { ResultsJsonView } from "./ResultsJsonView";
 import { ResultsTable } from "./ResultsTable";
-import type { QueryResult } from "./useRunQuery";
+import type { QueryResult, SerializedSpan } from "./useRunQuery";
 
 export type ResultsViewMode = "table" | "json" | "graph";
 
@@ -126,12 +127,15 @@ export function ConsoleResultsPanel({
 	result,
 	error,
 	isPending,
-	timingMs
+	timingMs,
+	onFocusSpan
 }: {
 	readonly result: QueryResult | undefined;
 	readonly error: Error | null;
 	readonly isPending: boolean;
 	readonly timingMs: number | undefined;
+	/** Câble optionnel vers l'éditeur (Phase 3a — jump-to-span depuis ErrorBlock). */
+	readonly onFocusSpan?: (span: SerializedSpan) => void;
 }): React.ReactNode {
 	const [viewMode, setViewMode] = useLocalStorage<ResultsViewMode>({
 		key: VIEW_STORAGE_KEY,
@@ -210,15 +214,13 @@ export function ConsoleResultsPanel({
 						<span>{formatTiming(timingMs)}</span>
 					</>
 				) : null}
-				{error ? (
-					<>
-						<span>·</span>
-						<span style={{ color: "var(--sqlnest-danger)" }}>
-							{error.message}
-						</span>
-					</>
-				) : null}
 			</div>
+
+			{/* Rendu riche des erreurs Postgres (Phase 3a) — chips $N cliquables,
+			    SQLSTATE/colonne/contrainte, jump vers le span source SNQL. Le message
+			    string simple était affiché ici en ligne dans le status row ; on le
+			    déplace dans son propre panneau pour donner l'espace au détail. */}
+			{error ? <ErrorBlock error={error} onFocusSpan={onFocusSpan} /> : null}
 
 			<div style={toolbarRowStyle}>
 				<div style={toolbarSearchStyle}>

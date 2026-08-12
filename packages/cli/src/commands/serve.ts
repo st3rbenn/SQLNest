@@ -16,7 +16,7 @@
 import type { RemoteOp, RemoteResult } from "../ws-client";
 import { createTunnelWsClient } from "../ws-client";
 import { loadOrInitConfig } from "./connect";
-import { runQuery } from "@sqlnest/engine";
+import { EngineExecutionError, runQuery } from "@sqlnest/engine";
 import type { SchemaModel } from "@sqlnest/snql";
 import { openConnectionForTunnel } from "../engine";
 
@@ -95,13 +95,20 @@ export async function serveTunnel(opts: ServeTunnelOptions): Promise<number> {
 				return result;
 			} catch (err) {
 				const message = err instanceof Error ? err.message : String(err);
+				// Détail structuré Postgres (Phase 3a) — remonté au frontend pour
+				// permettre `$N → span source SNQL`. Absent quand la cause n'est
+				// pas une erreur pg (connect timeout, config, etc.).
+				const pgError =
+					err instanceof EngineExecutionError ? err.pgError : undefined;
 				opts.onEvent?.({
 					kind: "op-completed",
 					op: op.op,
 					ok: false,
 					error: message
 				});
-				return { ok: false, error: message };
+				return pgError !== undefined
+					? { ok: false, error: message, pgError }
+					: { ok: false, error: message };
 			}
 		},
 		onError: (err) => {

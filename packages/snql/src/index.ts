@@ -89,6 +89,7 @@ export type {
 	MongoStage,
 	MongoWriteQuery,
 	NativeQuery,
+	SerializedSpan,
 	SqlQuery
 } from "./codegen/mapper";
 export { SnqlError } from "./diagnostics";
@@ -115,6 +116,10 @@ export type {
 } from "./language/complete";
 export { completeSnql } from "./language/complete";
 export { formatSnql } from "./language/format";
+export {
+	collectIdentSpans,
+	type IdentSpans
+} from "./language/ident-spans";
 export type { OperationKind } from "./lexer/dictionary";
 // Token Dictionary : source de vérité du vocabulaire de surface, exposée pour
 // l'outillage éditeur (coloration/complétion) — pas de redéfinition côté front.

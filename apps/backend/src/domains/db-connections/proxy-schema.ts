@@ -19,7 +19,47 @@ export const ProxyQueryBody = z.object({
 z.globalRegistry.add(ProxyQueryBody, { id: "DbConnectionsProxyQueryBody" });
 export type ProxyQueryBodyT = z.infer<typeof ProxyQueryBody>;
 
-export const ProxyErrorResponse = z.object({ message: z.string() });
+/**
+ * Span source SNQL sérialisé compact `[start, length]` — dupliqué ici pour ne
+ * pas ajouter `@sqlnest/snql` en dep du backend (aligné sur `SerializedSpan`
+ * dans `packages/snql/src/codegen/mapper.ts`).
+ */
+export const SerializedSpanSchema = z.tuple([
+	z.number().int().nonnegative(),
+	z.number().int().nonnegative()
+]);
+
+/**
+ * Détail structuré d'une erreur Postgres remontée par le CLI (Phase 3a).
+ * Aligné sur `PgErrorInfo` dans `packages/engine/src/errors.ts`. Les champs
+ * sont **tous optionnels** — le CLI n'envoie que ceux disponibles sur l'objet
+ * `pg.DatabaseError` reçu. `params`/`paramSpans` sont alignés positionnellement
+ * avec les `$1..$N` du SQL généré (résolution `$N → span` côté frontend).
+ */
+export const PgErrorInfoSchema = z.object({
+	message: z.string(),
+	code: z.string().optional(),
+	position: z.number().int().positive().optional(),
+	detail: z.string().optional(),
+	hint: z.string().optional(),
+	column: z.string().optional(),
+	table: z.string().optional(),
+	constraint: z.string().optional(),
+	params: z.array(z.unknown()).optional(),
+	paramSpans: z.array(SerializedSpanSchema.optional()).optional(),
+	rowSpans: z.array(SerializedSpanSchema.optional()).optional(),
+	/**
+	 * Phase 3b-lite : spans par nom d'ident. Résout `column "X" does not exist`
+	 * → `identSpans["X"]` = toutes les positions source SNQL de l'ident.
+	 */
+	identSpans: z.record(z.string(), z.array(SerializedSpanSchema)).optional()
+});
+export type PgErrorInfoT = z.infer<typeof PgErrorInfoSchema>;
+
+export const ProxyErrorResponse = z.object({
+	message: z.string(),
+	pgError: PgErrorInfoSchema.optional()
+});
 z.globalRegistry.add(ProxyErrorResponse, {
 	id: "DbConnectionsProxyErrorResponse"
 });

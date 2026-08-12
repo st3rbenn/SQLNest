@@ -1,12 +1,15 @@
 import type {
+	NativeQuery,
 	ResultColumn,
 	ResultSet,
 	Row,
 	SchemaModel,
+	SerializedSpan,
 	Statement
 } from "@sqlnest/snql";
 import {
 	capabilitiesFor,
+	collectIdentSpans,
 	compensate,
 	getMapper,
 	inferResultColumns,
@@ -57,6 +60,10 @@ export async function runQuery(
 	}
 
 	const statement: Statement = parse(tokenize(source));
+	// Phase 3b-lite : collecte les spans par nom d'ident (col/table/alias) au
+	// niveau AST. Attaché à la requête native pour que l'adapter le remonte
+	// dans le pgError → résolution `column "X" does not exist` → span source.
+	const identSpans = collectIdentSpans(statement);
 
 	if (statement.operation !== "select") {
 		if (!capabilities.supports.has("mutate")) {
@@ -64,14 +71,17 @@ export async function runQuery(
 				`Le moteur '${engine}' ne supporte pas l'écriture (capacité 'mutate')`
 			);
 		}
-		const native = mapper.mapMutation(lowerMutation(statement));
+		const native = withIdentSpans(
+			mapper.mapMutation(lowerMutation(statement)),
+			identSpans
+		);
 		return { ...(await connection.execute(native)), written: true };
 	}
 
 	// Le schéma pilote l'inférence de multiplicité des joins `with` (many-to-one
 	// → LEFT JOIN, one-to-many → embed array). Sans schéma, fallback embed.
 	const physical = plan(lower(statement, schema), capabilities);
-	const native = mapper.map(physical.pushdown);
+	const native = withIdentSpans(mapper.map(physical.pushdown), identSpans);
 
 	const pushed = await connection.execute(native);
 	// Enrichit les colonnes avec `type` + `nullable` dérivés du SchemaModel
@@ -101,6 +111,20 @@ export async function runQuery(
 		rowCount: rows.length,
 		written: false
 	};
+}
+
+/**
+ * Injecte `identSpans` sur la requête native pour les kinds qui l'exposent
+ * (aujourd'hui : `sql` seulement). No-op pour les autres — Mongo n'a pas
+ * de notion de "column not exist" avec ident quoté à surligner.
+ */
+function withIdentSpans(
+	query: NativeQuery,
+	identSpans: Readonly<Record<string, readonly SerializedSpan[]>>
+): NativeQuery {
+	if (query.kind !== "sql") return query;
+	if (Object.keys(identSpans).length === 0) return query;
+	return { ...query, identSpans };
 }
 
 /**
