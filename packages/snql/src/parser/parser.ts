@@ -428,19 +428,34 @@ function parsePick(cursor: TokenCursor): Stage {
 }
 
 function parseFieldSelection(cursor: TokenCursor): FieldSelection {
-	const { path, span } = parseFieldPath(cursor);
-	let endSpan = span;
+	// `pick` accepte deux formes :
+	//  - un chemin de champ simple : `name`, `u.email`  (compat historique)
+	//  - une expression calculée : `price * qty`, `upper(name)`  (T1 arith, T2 call)
+	// On parse toujours une expression puis on décide : si c'est juste un `field`
+	// (chemin), on garde la forme historique ; sinon on exige un alias.
+	const expr = parseExpression(cursor);
+	let endSpan = expr.span;
 	let alias: string | undefined;
-	if (cursor.peek().kind === "keyword" && cursor.peek().value === "as") {
+	if (peekKeyword(cursor, "as")) {
 		cursor.next();
 		const aliasTok = cursor.expect("ident", "un alias après 'as'");
 		alias = aliasTok.value;
 		endSpan = aliasTok.span;
 	}
-	const full = { start: span.start, end: endSpan.end };
-	return alias !== undefined
-		? { path, alias, span: full }
-		: { path, span: full };
+	const full = { start: expr.span.start, end: endSpan.end };
+	if (expr.type === "field") {
+		return alias !== undefined
+			? { path: expr.path, alias, span: full }
+			: { path: expr.path, span: full };
+	}
+	if (alias === undefined) {
+		throw new SnqlError(
+			"Une expression dans `pick` exige un alias : `<expr> as <nom>`",
+			"parse_pick_expr_alias",
+			full
+		);
+	}
+	return { path: [], expr, alias, span: full };
 }
 
 function parseSort(cursor: TokenCursor): Stage {

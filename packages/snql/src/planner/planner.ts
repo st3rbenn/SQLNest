@@ -72,6 +72,11 @@ export function plan(
 		);
 	}
 
+	// Vérifie que toutes les fonctions du plan sont supportées par l'engine.
+	// Le lower a déjà validé l'existence dans le registre ; ici on filtre par
+	// engine spécifique (une fonction PG-only n'a pas de renderer Mongo, etc).
+	assertFunctionsSupported(logical, capabilities);
+
 	// Index du 1er opérateur non poussable (= début de la compensation).
 	let cut = ops.length;
 	for (let i = 0; i < ops.length; i += 1) {
@@ -112,6 +117,80 @@ export function plan(
 		compensation,
 		fullyPushed: compensation.length === 0
 	};
+}
+
+/**
+ * Vérifie que toutes les fonctions référencées dans le plan sont supportées par
+ * l'engine cible (via `capabilities.functions`). Lève `planner_unsupported_function`
+ * avec le nom offender, sans compensation possible pour T2 sprint 1 (les
+ * fonctions sont scalaires — les émuler côté runtime doublerait le codegen).
+ */
+function assertFunctionsSupported(plan: LogicalPlan, capabilities: Capabilities): void {
+	const unsupported = new Set<string>();
+	visitPlanCalls(plan, (name) => {
+		if (!capabilities.functions.has(name)) {
+			unsupported.add(name);
+		}
+	});
+	if (unsupported.size > 0) {
+		const list = [...unsupported].map((n) => `'${n}'`).join(", ");
+		throw new SnqlError(
+			`Fonction${unsupported.size > 1 ? "s" : ""} ${list} non support${unsupported.size > 1 ? "ées" : "ée"} par le moteur '${capabilities.engine}'`,
+			"planner_unsupported_function"
+		);
+	}
+}
+
+/** Walker qui invoque `visit(name)` pour chaque call rencontré dans le plan. */
+function visitPlanCalls(plan: LogicalPlan, visit: (name: string) => void): void {
+	switch (plan.op) {
+		case "scan":
+			return;
+		case "filter":
+			visitExprCalls(plan.predicate, visit);
+			visitPlanCalls(plan.input, visit);
+			return;
+		case "project":
+			for (const field of plan.fields) {
+				if (field.expr !== undefined) visitExprCalls(field.expr, visit);
+			}
+			visitPlanCalls(plan.input, visit);
+			return;
+		case "sort":
+		case "limit":
+			visitPlanCalls(plan.input, visit);
+			return;
+		case "join":
+			visitPlanCalls(plan.input, visit);
+			return;
+	}
+}
+
+function visitExprCalls(expr: PlanExpr, visit: (name: string) => void): void {
+	switch (expr.kind) {
+		case "literal":
+		case "field":
+			return;
+		case "call":
+			visit(expr.name);
+			for (const arg of expr.args) visitExprCalls(arg, visit);
+			return;
+		case "arith":
+		case "compare":
+		case "and":
+		case "or":
+			visitExprCalls(expr.left, visit);
+			visitExprCalls(expr.right, visit);
+			return;
+		case "not":
+		case "isNull":
+			visitExprCalls(expr.operand, visit);
+			return;
+		case "in":
+			visitExprCalls(expr.target, visit);
+			for (const v of expr.values) visitExprCalls(v, visit);
+			return;
+	}
 }
 
 function toCompensationOp(op: LogicalPlan): CompensationOp {

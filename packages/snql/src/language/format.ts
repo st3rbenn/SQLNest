@@ -20,6 +20,12 @@ const STAGE_KEYWORDS: ReadonlySet<string> = new Set([
 
 const STAGE_INDENT = "  ";
 const AND_INDENT = "   ";
+// Indent des items d'un `pick`/`sort`/`set` multi-ligne. 4 spaces = 2× stage,
+// style block SQL classique — prévisible quelle que soit la longueur du 1er item.
+const ITEM_INDENT = "    ";
+// Un pick/sort/set devient multi-ligne à partir de N items (compter les virgules
+// TOP-LEVEL — celles imbriquées dans un call ou un [] ne comptent pas).
+const MULTILINE_MIN_ITEMS = 3;
 
 /** Formate une source SNQL avec sauts de ligne canoniques (par étape). */
 export function formatSnql(source: string): string {
@@ -34,31 +40,116 @@ export function formatSnql(source: string): string {
 		return "";
 	}
 	const chainingAnds = markChainingAnds(toks);
+	const { splitCommas, multilineStages } = markMultiline(toks);
 	const parts: string[] = [];
+	// Set après avoir émis un `\n<indent>` (soit newline de stage/and/comma-split,
+	// soit newline d'item après un keyword stage multi-ligne). Bypasse la logique
+	// needsSpaceBefore une fois : on ne veut pas d'espace en plus après un indent.
+	let pendingItemNewline = false;
+	let suppressNextSpace = false;
 
 	for (let i = 0; i < toks.length; i += 1) {
 		const tok = toks[i] as Token;
 		const isStage = tok.kind === "keyword" && STAGE_KEYWORDS.has(tok.value);
 		const isChainAnd =
 			tok.kind === "keyword" && tok.value === "and" && chainingAnds.has(i);
+		const splitIndent = splitCommas.get(i);
 
 		if (isStage && parts.length > 0) {
 			parts.push(`\n${STAGE_INDENT}${tok.value}`);
+			pendingItemNewline = multilineStages.has(i);
 			continue;
 		}
 		if (isChainAnd) {
 			parts.push(`\n${AND_INDENT}and`);
 			continue;
 		}
+		if (splitIndent !== undefined) {
+			// Virgule top-level d'un pick/sort/set multi-item : la virgule reste
+			// collée à l'item précédent, puis newline + indent block.
+			parts.push(`,\n${splitIndent}`);
+			suppressNextSpace = true;
+			continue;
+		}
 		if (parts.length > 0) {
-			const prev = toks[i - 1] as Token;
-			if (needsSpaceBefore(prev, tok)) {
-				parts.push(" ");
+			if (pendingItemNewline) {
+				parts.push(`\n${ITEM_INDENT}`);
+				pendingItemNewline = false;
+				suppressNextSpace = true;
+			}
+			if (suppressNextSpace) {
+				suppressNextSpace = false;
+			} else {
+				const prev = toks[i - 1] as Token;
+				if (needsSpaceBefore(prev, tok)) {
+					parts.push(" ");
+				}
 			}
 		}
 		parts.push(renderToken(tok));
 	}
 	return parts.join("");
+}
+
+/**
+ * Repère les stages `pick` / `sort` / `set` qui doivent passer en multi-ligne
+ * (compter les virgules TOP-LEVEL de ce stage — celles imbriquées dans un call
+ * `f(a, b)` ou une liste `in [a, b]` restent inline).
+ *
+ * Retourne :
+ *  - `splitCommas` : Map `index de virgule → indent block` pour chaque virgule
+ *    à convertir en newline+indent
+ *  - `multilineStages` : Set des index des keywords stage (pick/sort/set) dont
+ *    le premier item doit aussi passer à la ligne (style block cohérent).
+ */
+function markMultiline(toks: readonly Token[]): {
+	splitCommas: ReadonlyMap<number, string>;
+	multilineStages: ReadonlySet<number>;
+} {
+	const splitCommas = new Map<number, string>();
+	const multilineStages = new Set<number>();
+	let i = 0;
+	while (i < toks.length) {
+		const tok = toks[i] as Token;
+		if (
+			tok.kind !== "keyword" ||
+			(tok.value !== "pick" && tok.value !== "sort" && tok.value !== "set")
+		) {
+			i += 1;
+			continue;
+		}
+		// Scanner les virgules top-level de ce stage jusqu'au prochain stage ou eof.
+		const topLevelCommas: number[] = [];
+		let depth = 0;
+		let j = i + 1;
+		while (j < toks.length) {
+			const t = toks[j] as Token;
+			if (
+				t.kind === "keyword" &&
+				STAGE_KEYWORDS.has(t.value) &&
+				depth === 0
+			) {
+				break;
+			}
+			if (t.kind === "lparen" || t.kind === "lbracket" || t.kind === "lbrace") {
+				depth += 1;
+			} else if (t.kind === "rparen" || t.kind === "rbracket" || t.kind === "rbrace") {
+				depth -= 1;
+			} else if (t.kind === "comma" && depth === 0) {
+				topLevelCommas.push(j);
+			}
+			j += 1;
+		}
+		// Nombre d'items = commas + 1. Split seulement si assez d'items.
+		if (topLevelCommas.length + 1 >= MULTILINE_MIN_ITEMS) {
+			multilineStages.add(i);
+			for (const commaIdx of topLevelCommas) {
+				splitCommas.set(commaIdx, ITEM_INDENT);
+			}
+		}
+		i = j;
+	}
+	return { splitCommas, multilineStages };
 }
 
 /**
@@ -104,6 +195,11 @@ function needsSpaceBefore(prev: Token, curr: Token): boolean {
 		curr.kind === "rbracket" ||
 		curr.kind === "rbrace"
 	) {
+		return false;
+	}
+	// Appel de fonction : `upper(` ou `now(` — pas d'espace entre le nom de la
+	// fonction et sa parenthèse ouvrante. Un chemin `x.y(` reste callé aussi.
+	if (curr.kind === "lparen" && prev.kind === "ident") {
 		return false;
 	}
 	if (

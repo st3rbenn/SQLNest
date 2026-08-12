@@ -1,4 +1,5 @@
 import { SnqlError } from "../diagnostics";
+import { SNQL_FUNCTIONS } from "../functions";
 import type {
 	CompareOp,
 	LogicalPlan,
@@ -221,7 +222,7 @@ function absorb(sel: Select, op: LogicalPlan): void {
 
 function renderSelect(sel: Select, params: ParamList): string {
 	const parts: string[] = [
-		`SELECT ${renderSelectList(sel)}`,
+		`SELECT ${renderSelectList(sel, params)}`,
 		`FROM ${sel.from}`
 	];
 
@@ -251,10 +252,10 @@ function renderSelect(sel: Select, params: ParamList): string {
 	return parts.join(" ");
 }
 
-function renderSelectList(sel: Select): string {
+function renderSelectList(sel: Select, params: ParamList): string {
 	if (sel.project) {
 		return sel.project
-			.map((field) => renderProjectField(field, sel))
+			.map((field) => renderProjectField(field, sel, params))
 			.join(", ");
 	}
 	if (sel.joins.length > 0) {
@@ -274,14 +275,18 @@ function renderSelectList(sel: Select): string {
  * (un seul champ = un objet). Sinon, un chemin qualifié `alias.field` traverse
  * naturellement le LEFT JOIN et devient une ref SQL directe.
  */
-function renderProjectField(field: PlanProjectField, sel: Select): string {
+function renderProjectField(
+	field: PlanProjectField,
+	sel: Select,
+	params: ParamList
+): string {
 	if (field.path.length === 1) {
 		const join = sel.joins.find((candidate) => candidate.as === field.path[0]);
 		if (join !== undefined) {
 			return `${renderJoinAliasSource(join, sel.base)} AS ${quoteIdent(field.alias ?? join.as)}`;
 		}
 	}
-	return renderProjection(field);
+	return renderProjection(field, params);
 }
 
 /**
@@ -332,7 +337,10 @@ class ParamList {
 
 	add(value: SqlValue): string {
 		// Un décimal exact est bindé comme texte : Postgres le caste vers le type
-		// de la colonne (NUMERIC…) sans perte, contrairement à un double JS.
+		// de la colonne (NUMERIC/text/jsonb…) via l'inférence par colonne cible
+		// pour les INSERT/UPDATE/comparaisons. Le cast `::numeric` n'est appliqué
+		// que dans un contexte arithmétique — cf. `renderArithOperand` — sinon
+		// il casse les colonnes non-numeric (`WHERE varchar_col = 1.5` → 42883).
 		this.values.push(isSqlDecimal(value) ? value.raw : value);
 		return `$${this.values.length}`;
 	}
@@ -377,10 +385,57 @@ function renderExpr(expr: PlanExpr, params: ParamList): string {
 			const list = expr.values.map((v) => renderExpr(v, params)).join(", ");
 			return `${target} IN (${list})`;
 		}
+		case "arith":
+			// Parens défensives systématiques : le codegen ne dépend pas de la
+			// précédence native PG, chaque sous-expr est isolée. Les opérandes
+			// sont rendus via `renderArithOperand` qui annote un littéral décimal
+			// avec `::numeric` — sinon PG essaie de caster "0.1" en int quand
+			// l'autre côté est int (`int_col * 0.1` → 22P02).
+			return `(${renderArithOperand(expr.left, params)} ${expr.op} ${renderArithOperand(expr.right, params)})`;
+		case "call": {
+			// Délégation au registre : le renderer PG de la fonction assemble le SQL
+			// à partir des args (déjà rendus via ctx.renderExpr). Le planner a déjà
+			// vérifié que la fonction existe pour PG — l'assert defense-in-depth
+			// couvre uniquement un bug de synchronisation registre ↔ capabilities.
+			const entry = SNQL_FUNCTIONS.get(expr.name);
+			if (entry?.engines.postgres === undefined) {
+				throw new SnqlError(
+					`Fonction '${expr.name}' : renderer Postgres absent du registre`,
+					"codegen_missing_function_mapping"
+				);
+			}
+			return entry.engines.postgres(expr.args, {
+				renderExpr: (arg) => renderExpr(arg as PlanExpr, params),
+				addParam: (v) => params.add(v as SqlValue)
+			}) as string;
+		}
 	}
 }
 
-function renderProjection(field: PlanProjectField): string {
+/**
+ * Opérande arithmétique : annote un littéral décimal avec `::numeric` pour que
+ * PG type le param correctement dans un contexte où l'autre côté est int.
+ * Toutes les autres formes (field, call, arith imbriqué, literal non-decimal)
+ * passent par `renderExpr` standard — leur type est inféré via colonne / retour
+ * de fonction / cast d'un opérande voisin.
+ */
+function renderArithOperand(expr: PlanExpr, params: ParamList): string {
+	if (
+		expr.kind === "literal" &&
+		expr.value !== null &&
+		isSqlDecimal(expr.value)
+	) {
+		return `${params.add(expr.value)}::numeric`;
+	}
+	return renderExpr(expr, params);
+}
+
+function renderProjection(field: PlanProjectField, params: ParamList): string {
+	// Une expression projetée rend son SQL calculé et exige toujours un alias
+	// (contrat lower_pick_expr_alias). Un chemin simple garde le comportement historique.
+	if (field.expr !== undefined) {
+		return `${renderExpr(field.expr, params)} AS ${quoteIdent(field.alias as string)}`;
+	}
 	const path = renderPath(field.path);
 	return field.alias !== undefined
 		? `${path} AS ${quoteIdent(field.alias)}`

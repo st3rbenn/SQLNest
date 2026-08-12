@@ -1,4 +1,5 @@
 import { SnqlError } from "../diagnostics";
+import { checkArity, SNQL_FUNCTIONS } from "../functions";
 import type {
 	CompareOperator,
 	DeleteStatement,
@@ -11,11 +12,7 @@ import type {
 	Stage,
 	UpdateStatement
 } from "../parser/ast";
-import type {
-	Relation,
-	RelationKind,
-	SchemaModel
-} from "../schema/model";
+import type { Relation, RelationKind, SchemaModel } from "../schema/model";
 import type {
 	CompareOp,
 	LogicalPlan,
@@ -131,22 +128,64 @@ export function lowerMutation(
 			column: assignment.column,
 			value: lowerExpr(assignment.value)
 		}));
-		return statement.predicate !== undefined
+		for (const a of assignments) assertNoCallInWrite(a.value);
+		const predicate =
+			statement.predicate !== undefined ? lowerExpr(statement.predicate) : undefined;
+		if (predicate !== undefined) assertNoCallInWrite(predicate);
+		return predicate !== undefined
 			? {
 					op: "update",
 					collection: statement.collection,
 					assignments,
-					predicate: lowerExpr(statement.predicate)
+					predicate
 				}
 			: { op: "update", collection: statement.collection, assignments };
 	}
-	return statement.predicate !== undefined
+	const predicate =
+		statement.predicate !== undefined ? lowerExpr(statement.predicate) : undefined;
+	if (predicate !== undefined) assertNoCallInWrite(predicate);
+	return predicate !== undefined
 		? {
 				op: "delete",
 				collection: statement.collection,
-				predicate: lowerExpr(statement.predicate)
+				predicate
 			}
 		: { op: "delete", collection: statement.collection };
+}
+
+/**
+ * T2 sprint 1 : les fonctions n'ont pas encore de `nullBehavior` déclaré, ce
+ * qui rendrait leur sémantique 3VL prévisible en négation Mongo (parité avec
+ * la garde champ↔champ existante). En attendant, on refuse tout `call` en
+ * contexte write (predicate d'update/delete + valeurs de set) — non-breaking
+ * quand on musclera avec `nullBehavior` plus tard.
+ */
+function assertNoCallInWrite(expr: PlanExpr): void {
+	switch (expr.kind) {
+		case "call":
+			throw new SnqlError(
+				`Fonction '${expr.name}' non autorisée dans un contexte d'écriture (update/remove) tant que sa sémantique NULL n'est pas déclarée`,
+				"lower_call_null_write"
+			);
+		case "literal":
+		case "field":
+			return;
+		case "arith":
+		case "compare":
+		case "and":
+		case "or":
+			assertNoCallInWrite(expr.left);
+			assertNoCallInWrite(expr.right);
+			return;
+		case "not":
+		case "isNull":
+			assertNoCallInWrite(expr.operand);
+			return;
+		case "in":
+			assertNoCallInWrite(expr.target);
+			for (const v of expr.values) assertNoCallInWrite(v);
+			return;
+	}
 }
 
 /**
@@ -265,7 +304,11 @@ function checkColumnsAvailable(
 			break;
 		case "pick":
 			for (const field of stage.fields) {
-				referenced.push(field.path);
+				if (field.expr !== undefined) {
+					collectExprFields(field.expr, referenced);
+				} else {
+					referenced.push(field.path);
+				}
 			}
 			break;
 		case "with":
@@ -292,6 +335,10 @@ function collectExprFields(expr: Expr, out: (readonly string[])[]): void {
 			return;
 		case "literal":
 			return;
+		case "call":
+			for (const arg of expr.args) collectExprFields(arg, out);
+			return;
+		case "arith":
 		case "compare":
 		case "logical":
 			collectExprFields(expr.left, out);
@@ -459,6 +506,16 @@ function fieldsEqual(a: readonly string[], b: readonly string[]): boolean {
 }
 
 function lowerField(field: FieldSelection): PlanProjectField {
+	if (field.expr !== undefined) {
+		// Contrat vérifié au parser mais on double-check ici (l'IR est le contrat).
+		if (field.alias === undefined) {
+			throw new SnqlError(
+				"Une expression projetée exige un alias",
+				"lower_pick_expr_alias"
+			);
+		}
+		return { path: [], expr: lowerExpr(field.expr), alias: field.alias };
+	}
 	return field.alias !== undefined
 		? { path: field.path, alias: field.alias }
 		: { path: field.path };
@@ -528,7 +585,70 @@ function lowerExpr(expr: Expr): PlanExpr {
 				target: lowerExpr(expr.target),
 				values: expr.values.map(lowerExpr)
 			};
+		case "arith":
+			return {
+				kind: "arith",
+				op: expr.operator,
+				left: lowerExpr(expr.left),
+				right: lowerExpr(expr.right)
+			};
+		case "call":
+			return lowerCall(expr);
 	}
+}
+
+/**
+ * Résout un appel de fonction contre le registre : fonction connue, arité
+ * conforme, kind non-`reserved`. Types opt-in : si `entry.args` est déclaré et
+ * que l'arg correspondant est statiquement typable (littéral), on vérifie.
+ */
+function lowerCall(expr: Expr & { type: "call" }): PlanExpr {
+	const entry = SNQL_FUNCTIONS.get(expr.name);
+	if (entry === undefined) {
+		throw new SnqlError(
+			`Fonction '${expr.name}' inconnue`,
+			"lower_unknown_function",
+			expr.span
+		);
+	}
+	if (entry.kind === "reserved") {
+		throw new SnqlError(
+			`Fonction '${expr.name}' réservée pour un sprint futur — pas encore implémentée`,
+			"lower_call_reserved",
+			expr.span
+		);
+	}
+	const arityMsg = checkArity(expr.name, entry.arity, expr.args.length);
+	if (arityMsg !== null) {
+		throw new SnqlError(arityMsg, "lower_call_arity", expr.span);
+	}
+	// Type check opt-in — on ne vérifie que ce qu'on peut statiquement (littéraux).
+	if (entry.args !== undefined) {
+		for (let i = 0; i < expr.args.length && i < entry.args.length; i += 1) {
+			const declared = entry.args[i];
+			if (declared === undefined || declared === "any") continue;
+			const arg = expr.args[i];
+			if (arg?.type === "literal") {
+				const litKind = arg.value.kind;
+				const mismatch =
+					(declared === "string" && litKind !== "string") ||
+					(declared === "number" && litKind !== "number") ||
+					(declared === "bool" && litKind !== "boolean");
+				if (mismatch) {
+					throw new SnqlError(
+						`Fonction '${expr.name}' arg ${i + 1} attend ${declared}, reçu ${litKind}`,
+						"lower_call_type",
+						arg.span
+					);
+				}
+			}
+		}
+	}
+	return {
+		kind: "call",
+		name: expr.name,
+		args: expr.args.map(lowerExpr)
+	};
 }
 
 /** Opérateur symétrique après échange des opérandes (a < b ⇔ b > a). */

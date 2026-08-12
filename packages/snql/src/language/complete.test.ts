@@ -213,6 +213,39 @@ describe("completeSnql — jointures (relation-aware)", () => {
 		]);
 	});
 
+	it("propose `one`/`many` en tête après `with`, avant les collections", () => {
+		const opts = at("get orders with ").options;
+		expect(opts.slice(0, 2).map((o) => o.label)).toEqual(["one", "many"]);
+		expect(opts[0]?.type).toBe("keyword");
+		expect(opts[0]?.detail).toContain("LEFT JOIN");
+		expect(opts[1]?.detail).toContain("embed");
+		// Les collections restent proposées derrière (schema-aware).
+		expect(opts.map((o) => o.label)).toContain("users");
+	});
+
+	it("propose les collections après `with one` (multiplicité forcée)", () => {
+		const opts = at("get orders with one ").options;
+		expect(opts.map((o) => o.label)).toContain("users");
+		expect(opts.map((o) => o.label)).not.toContain("one");
+	});
+
+	it("propose les collections après `with many`", () => {
+		expect(labels("get orders with many ")).toContain("users");
+	});
+
+	it("propose `one`/`many` après un `and` de chaînage de join", () => {
+		const opts = at(
+			"get orders with users on user_id = id and "
+		).options;
+		expect(opts.slice(0, 2).map((o) => o.label)).toEqual(["one", "many"]);
+	});
+
+	it("`one` hors position `with` ne propose rien (usage errant)", () => {
+		// Ici `one` est classifié keyword par le lexer mais il n'est pas après
+		// `with` — la complétion ne doit PAS proposer de collections.
+		expect(labels("get users where age = one ")).toEqual([]);
+	});
+
 	it("inclut l'alias de jointure dans un pick", () => {
 		const opts = at(
 			"get orders with users as u on user_id = id pick status, "

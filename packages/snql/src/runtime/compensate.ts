@@ -108,8 +108,44 @@ function evalValue(expr: PlanExpr, row: Row): unknown {
 	if (expr.kind === "field") {
 		return getPath(row, expr.path);
 	}
+	if (expr.kind === "arith") {
+		return evalArith(expr.op, evalValue(expr.left, row), evalValue(expr.right, row));
+	}
+	if (expr.kind === "call") {
+		// Pas d'exécution de fonctions côté runtime KV : le planner filtre déjà
+		// via Capabilities.functions (Set vide pour KV) et lève
+		// planner_unsupported_function avant d'atteindre la compensation. Un
+		// arrivée ici = bug de synchronisation.
+		throw new Error(
+			`Runtime KV : fonction '${expr.name}' non exécutable (planner should have rejected)`
+		);
+	}
 	// Expression booléenne utilisée comme valeur.
 	return evalBool(expr, row);
+}
+
+/**
+ * Arithmétique 3VL : NULL/undefined propage à null (parité SQL). Division/modulo
+ * par zéro → null (préserve la sémantique tolérante côté PG qui utilise NULL
+ * plutôt qu'une erreur — la division par 0 SQL brute lève, mais notre runtime
+ * KV s'aligne sur le comportement le moins destructif).
+ */
+function evalArith(op: "+" | "-" | "*" | "/" | "%", left: unknown, right: unknown): unknown {
+	if (left === null || left === undefined || right === null || right === undefined) {
+		return null;
+	}
+	const l = Number(left);
+	const r = Number(right);
+	if (!Number.isFinite(l) || !Number.isFinite(r)) {
+		return null;
+	}
+	switch (op) {
+		case "+": return l + r;
+		case "-": return l - r;
+		case "*": return l * r;
+		case "/": return r === 0 ? null : l / r;
+		case "%": return r === 0 ? null : l % r;
+	}
 }
 
 function evalBool(expr: PlanExpr, row: Row): boolean | null {
@@ -140,6 +176,8 @@ function evalBool(expr: PlanExpr, row: Row): boolean | null {
 		}
 		case "literal":
 		case "field":
+		case "arith":
+		case "call":
 			return coerceBool(evalValue(expr, row));
 	}
 }
@@ -223,7 +261,9 @@ function projectRow(row: Row, fields: readonly PlanProjectField[]): Row {
 	const out: Row = {};
 	for (const field of fields) {
 		const key = field.alias ?? field.path[field.path.length - 1] ?? "";
-		out[key] = getPath(row, field.path);
+		out[key] = field.expr !== undefined
+			? evalValue(field.expr, row)
+			: getPath(row, field.path);
 	}
 	return out;
 }

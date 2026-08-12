@@ -1,6 +1,6 @@
 import { SnqlError } from "../diagnostics";
-import type { Span, Token } from "../lexer/token";
-import type { CompareOperator, Expr } from "./ast";
+import type { Span, Token, TokenKind } from "../lexer/token";
+import type { ArithOperator, CompareOperator, Expr } from "./ast";
 import type { TokenCursor } from "./cursor";
 
 const COMPARE_OPS: ReadonlySet<string> = new Set([
@@ -11,6 +11,14 @@ const COMPARE_OPS: ReadonlySet<string> = new Set([
 	"<=",
 	">="
 ]);
+
+const ARITH_OP: Readonly<Record<string, ArithOperator>> = {
+	plus: "+",
+	minus: "-",
+	star: "*",
+	slash: "/",
+	percent: "%"
+};
 
 /** Parse une expression complète (précédence gérée par un Pratt parser). */
 export function parseExpression(cursor: TokenCursor): Expr {
@@ -62,6 +70,17 @@ function parseExpr(cursor: TokenCursor, minBindingPower: number): Expr {
 				target: left,
 				values,
 				span: joinSpan(left.span, endSpan)
+			};
+		} else if (isArithToken(tok)) {
+			// Arithmétique binaire : `+ - * / %`. Left-associatif via `bp + 1`.
+			cursor.next();
+			const right = parseExpr(cursor, bp + 1);
+			left = {
+				type: "arith",
+				operator: ARITH_OP[tok.kind] as ArithOperator,
+				left,
+				right,
+				span: joinSpan(left.span, right.span)
 			};
 		} else {
 			// Comparaison (op) ou `like` (keyword).
@@ -145,6 +164,12 @@ function parsePrefix(cursor: TokenCursor): Expr {
 	}
 	if (tok.kind === "ident") {
 		const { path, span } = parseFieldPath(cursor);
+		// Postfix `(` sur un ident nu = appel de fonction. Requiert un chemin de
+		// longueur 1 : `x.y(...)` n'est pas un call (pas de méthode SNQL) — reste
+		// donc un field. Les parens sont obligatoires ; 0 arg = `now()`.
+		if (path.length === 1 && cursor.peek().kind === "lparen") {
+			return parseCall(cursor, path[0] as string, span);
+		}
 		return { type: "field", path, span };
 	}
 
@@ -153,6 +178,30 @@ function parsePrefix(cursor: TokenCursor): Expr {
 		"parse_expr_expected",
 		tok.span
 	);
+}
+
+/**
+ * Parse le corps d'un appel de fonction : `(` [expr (`,` expr)*] `)`. Le nom a
+ * déjà été consommé par parsePrefix ; on est positionné sur la `(`. Case-
+ * normalise le nom en lowercase pour aligner avec le lookup registre.
+ */
+function parseCall(cursor: TokenCursor, rawName: string, nameSpan: Span): Expr {
+	cursor.next(); // consomme la '('
+	const args: Expr[] = [];
+	if (cursor.peek().kind !== "rparen") {
+		args.push(parseExpr(cursor, 0));
+		while (cursor.peek().kind === "comma") {
+			cursor.next();
+			args.push(parseExpr(cursor, 0));
+		}
+	}
+	const close = cursor.expect("rparen", "')' pour fermer l'appel de fonction");
+	return {
+		type: "call",
+		name: rawName.toLowerCase(),
+		args,
+		span: joinSpan(nameSpan, close.span)
+	};
 }
 
 function parseInList(cursor: TokenCursor): { values: Expr[]; endSpan: Span } {
@@ -184,7 +233,26 @@ function infixBindingPower(tok: Token): number | null {
 	if (tok.kind === "op" && COMPARE_OPS.has(tok.value)) {
 		return 4;
 	}
+	// Arithmétique : `+ -` bp 5, `* / %` bp 6 — au-dessus des comparaisons pour
+	// que `age * 2 > 30` groupe naturellement en `(age * 2) > 30`.
+	if (tok.kind === "plus" || tok.kind === "minus") {
+		return 5;
+	}
+	if (tok.kind === "star" || tok.kind === "slash" || tok.kind === "percent") {
+		return 6;
+	}
 	return null;
+}
+
+function isArithToken(tok: Token): boolean {
+	const kind: TokenKind = tok.kind;
+	return (
+		kind === "plus" ||
+		kind === "minus" ||
+		kind === "star" ||
+		kind === "slash" ||
+		kind === "percent"
+	);
 }
 
 /** Applique un signe '-' : `-x`→`-x`, `--x`→`x` (double négation). */

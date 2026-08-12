@@ -5,6 +5,9 @@ export type { OperationKind };
 
 export type CompareOperator = "=" | "!=" | "<" | ">" | "<=" | ">=" | "like";
 
+/** Opérateurs arithmétiques binaires (Slice T1 — extension du Pratt parser). */
+export type ArithOperator = "+" | "-" | "*" | "/" | "%";
+
 export type LiteralValue =
 	// Le littéral numérique garde son texte brut (`raw`) pour ne pas perdre en
 	// précision avant le codegen (cf. entiers > 2^53).
@@ -45,10 +48,36 @@ export type Expr =
 			readonly target: Expr;
 			readonly values: readonly Expr[];
 			readonly span: Span;
+	  }
+	// Arithmétique scalaire binaire. Précédence Pratt : `+/-` bp 5, `*//%` bp 6
+	// (au-dessus de `compare/in/like`=4 pour que `where age * 2 > 30` groupe bien).
+	| {
+			readonly type: "arith";
+			readonly operator: ArithOperator;
+			readonly left: Expr;
+			readonly right: Expr;
+			readonly span: Span;
+	  }
+	// Appel de fonction — `upper(name)`, `now()`, `coalesce(a, b, c)`. Le nom est
+	// case-normalisé (lowercase) dès la construction. Résolu au lower via le
+	// registre de fonctions ; arité + typage vérifiés là.
+	| {
+			readonly type: "call";
+			readonly name: string;
+			readonly args: readonly Expr[];
+			readonly span: Span;
 	  };
 
+/**
+ * Élément d'un `pick`. Soit un chemin de champ simple (`u.name`, `id`), soit une
+ * expression calculée (`price * qty`, `upper(name)`). Une expression exige un
+ * `alias` — il n'y a pas de nom naturel à déduire du calcul.
+ */
 export interface FieldSelection {
+	/** Chemin, vide si `expr` est présent. */
 	readonly path: readonly string[];
+	/** Expression calculée — prioritaire sur `path`. Requiert un `alias`. */
+	readonly expr?: Expr;
 	readonly alias?: string;
 	readonly span: Span;
 }

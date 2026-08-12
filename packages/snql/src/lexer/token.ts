@@ -24,6 +24,9 @@ export type TokenKind =
 	| "dot" // .
 	| "plus" // +
 	| "minus" // -
+	| "star" // *
+	| "slash" // /
+	| "percent" // %
 	| "lparen" // (
 	| "rparen" // )
 	| "lbracket" // [

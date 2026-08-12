@@ -107,7 +107,9 @@ describe("mutations → Postgres", () => {
 		expect(text).toBe(
 			'INSERT INTO "accounts" ("balance") VALUES ($1) RETURNING *'
 		);
-		// Le texte brut exact est bindé — Postgres caste vers NUMERIC sans perte.
+		// Le texte brut exact est bindé — Postgres caste vers le type de colonne
+		// (NUMERIC, text, jsonb…) via l'inférence par colonne cible. Pas de
+		// `::numeric` global qui casserait un INSERT dans une colonne text.
 		expect(params).toEqual(["1.123456789012345678"]);
 	});
 });

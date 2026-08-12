@@ -45,6 +45,9 @@ export function isSqlDecimal(value: unknown): value is SqlDecimal {
 
 export type CompareOp = "eq" | "ne" | "lt" | "gt" | "le" | "ge" | "like";
 
+/** Op arithmétique canonique côté IR — mêmes symboles qu'à la surface. */
+export type ArithOp = "+" | "-" | "*" | "/" | "%";
+
 export type PlanExpr =
 	| { readonly kind: "literal"; readonly value: SqlValue }
 	| { readonly kind: "field"; readonly path: readonly string[] }
@@ -67,10 +70,31 @@ export type PlanExpr =
 			readonly kind: "in";
 			readonly target: PlanExpr;
 			readonly values: readonly PlanExpr[];
+	  }
+	// Arithmétique scalaire binaire — codegen émet des parens défensives autour
+	// pour ne pas dépendre de la précédence native du moteur.
+	| {
+			readonly kind: "arith";
+			readonly op: ArithOp;
+			readonly left: PlanExpr;
+			readonly right: PlanExpr;
+	  }
+	// Appel de fonction validé — nom canonique (lowercased), args lowered.
+	// Le codegen délègue au renderer du registre pour l'engine cible.
+	| {
+			readonly kind: "call";
+			readonly name: string;
+			readonly args: readonly PlanExpr[];
 	  };
 
+/**
+ * Champ projeté au niveau IR. Symétrique de [[FieldSelection]] côté surface :
+ * `expr` prioritaire sur `path`, alias obligatoire dès qu'une expression est
+ * en jeu (contrat vérifié au lower).
+ */
 export interface PlanProjectField {
 	readonly path: readonly string[];
+	readonly expr?: PlanExpr;
 	readonly alias?: string;
 }
 

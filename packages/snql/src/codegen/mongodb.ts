@@ -1,4 +1,5 @@
 import { SnqlError } from "../diagnostics";
+import { SNQL_FUNCTIONS } from "../functions";
 import type {
 	CompareOp,
 	LogicalPlan,
@@ -184,6 +185,15 @@ function renderProject(
 	const out: Record<string, unknown> = {};
 	let picksId = false;
 	for (const field of fields) {
+		if (field.expr !== undefined) {
+			// Expression projetée : Mongo l'évalue dans un $project (agrégation
+			// expression). L'alias est le nom de sortie ; sa valeur est l'expression.
+			out[field.alias as string] = toExprOperand(field.expr, alias);
+			if (field.alias === "_id") {
+				picksId = true;
+			}
+			continue;
+		}
 		const key =
 			field.alias !== undefined ? field.alias : mongoField(field.path, alias);
 		out[key] =
@@ -274,6 +284,8 @@ function renderMatch(
 			return renderCompare(expr.op, expr.left, expr.right, alias, mode);
 		case "literal":
 		case "field":
+		case "arith":
+		case "call":
 			throw new SnqlError(
 				"Prédicat non supporté par le codegen Mongo (attendu une comparaison)",
 				"codegen_mongo_predicate"
@@ -331,6 +343,8 @@ function negateMatch(
 			return negateCompare(expr.op, expr.left, expr.right, alias);
 		case "literal":
 		case "field":
+		case "arith":
+		case "call":
 			throw new SnqlError(
 				"Négation d'un prédicat non supporté par le codegen Mongo",
 				"codegen_mongo_predicate"
@@ -506,11 +520,41 @@ function toExprOperand(expr: PlanExpr, alias: string | undefined): unknown {
 			? { $literal: value }
 			: value;
 	}
+	if (expr.kind === "arith") {
+		return {
+			[ARITH_TO_MONGO[expr.op]]: [
+				toExprOperand(expr.left, alias),
+				toExprOperand(expr.right, alias)
+			]
+		};
+	}
+	if (expr.kind === "call") {
+		// Délégation au registre : le renderer Mongo assemble le BSON à partir
+		// des args (déjà convertis via toExprOperand récursif).
+		const entry = SNQL_FUNCTIONS.get(expr.name);
+		if (entry?.engines.mongodb === undefined) {
+			throw new SnqlError(
+				`Fonction '${expr.name}' : renderer MongoDB absent du registre`,
+				"codegen_missing_function_mapping"
+			);
+		}
+		return entry.engines.mongodb(expr.args, {
+			renderExpr: (arg) => toExprOperand(arg as PlanExpr, alias)
+		});
+	}
 	throw new SnqlError(
 		"Opérande non supporté dans une comparaison $expr Mongo",
 		"codegen_mongo_expr"
 	);
 }
+
+const ARITH_TO_MONGO: Readonly<Record<"+" | "-" | "*" | "/" | "%", string>> = {
+	"+": "$add",
+	"-": "$subtract",
+	"*": "$multiply",
+	"/": "$divide",
+	"%": "$mod"
+};
 
 function literalValue(expr: PlanExpr): unknown {
 	if (expr.kind !== "literal") {

@@ -57,9 +57,14 @@ export function snqlCompletionSource(
 		if (options.length === 0) {
 			return null;
 		}
-		const cmOptions: Completion[] = options.map((o) => ({
+		// `boost` : sans ça, CodeMirror re-trie par pertinence/label alpha et noie
+		// notre ordre pédagogique (les mots-clés `one`/`many` en tête après `with`,
+		// les collections liées avant les autres). On boost décroissant selon
+		// l'index source (99 → 0, tronqué à 100) pour préserver l'ordre.
+		const cmOptions: Completion[] = options.map((o, i) => ({
 			label: o.label,
 			type: CM_TYPE[o.type],
+			boost: Math.max(0, 99 - i),
 			...(o.detail !== undefined ? { detail: o.detail } : {}),
 			// `apply` porte la clause `on` pré-remplie des jointures liées.
 			...(o.apply !== undefined ? { apply: o.apply } : {})

@@ -125,12 +125,15 @@ describe("snqlCompletionSource — champs après `where`", () => {
 });
 
 describe("snqlCompletionSource — cibles de jointure après `with`", () => {
-	it("propose la collection liée en tête, annotée `relation`", () => {
+	it("propose `one`/`many` en tête, puis la collection liée annotée `relation`", () => {
 		const res = complete("get orders with ");
-		const first = res?.options[0];
-		expect(first?.label).toBe("users");
-		expect(first?.type).toBe("function"); // relation → CM `function`
-		expect(first?.detail).toBe("via user_id = id");
+		// `one` et `many` en premier (multiplicité explicite, hint pédagogique).
+		expect(res?.options[0]?.label).toBe("one");
+		expect(res?.options[1]?.label).toBe("many");
+		// Puis la collection liée.
+		const users = res?.options.find((o) => o.label === "users");
+		expect(users?.type).toBe("function"); // relation → CM `function`
+		expect(users?.detail).toBe("via user_id = id");
 	});
 
 	it("pré-remplit la clause `on` via `apply` pour une relation à champ unique", () => {

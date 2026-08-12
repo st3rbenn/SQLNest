@@ -24,6 +24,7 @@ import {
 } from "@tabler/icons-react";
 import type { CSSProperties } from "react";
 import { useMemo, useState } from "react";
+import { ErrorBlock } from "./ErrorBlock";
 import { ResultsGraphPlaceholder } from "./ResultsGraphPlaceholder";
 import { ResultsJsonView } from "./ResultsJsonView";
 import { ResultsTable } from "./ResultsTable";
@@ -210,17 +211,13 @@ export function ConsoleResultsPanel({
 						<span>{formatTiming(timingMs)}</span>
 					</>
 				) : null}
-				{error ? (
-					<>
-						<span>·</span>
-						<span style={{ color: "var(--sqlnest-danger)" }}>
-							{error.message}
-						</span>
-					</>
-				) : null}
 			</div>
 
-			<div style={toolbarRowStyle}>
+			{error ? <ErrorBlock error={error} /> : null}
+
+			{error ? null : (
+				<>
+					<div style={toolbarRowStyle}>
 				<div style={toolbarSearchStyle}>
 					<SearchInput
 						value={filter}
@@ -323,6 +320,8 @@ export function ConsoleResultsPanel({
 					</div>
 				</div>
 			) : null}
+				</>
+			)}
 		</div>
 	);
 }

@@ -131,8 +131,18 @@ function contextOptions(
 	if (last.kind === "keyword") {
 		// `and` a deux rôles : chaînage entre joins (`with A on … and B on …`) ou
 		// opérateur booléen dans un prédicat. On propose les collections jointes
-		// uniquement quand on est encore en clause `with`.
+		// (avec l'escape hatch `one`/`many` en tête) uniquement quand on est
+		// encore en clause `with`.
 		if (last.value === "and" && isChainingJoin(toks)) {
+			return withCollectionSuggestions(schema, scope);
+		}
+		// `one` / `many` : escape hatch de multiplicité de `with`. On ne propose
+		// les collections QUE si le mot suit vraiment un `with` (ou un `and` de
+		// chaînage) — sinon c'est un usage errant qui ne pilote pas le contexte.
+		if (
+			(last.value === "one" || last.value === "many") &&
+			isMultiplicityAfterWith(toks)
+		) {
 			return joinTargets(schema, scope);
 		}
 		return keywordContext(last.value, schema, scope);
@@ -194,6 +204,57 @@ function remainingStages(
 }
 
 /**
+ * Après `with ` ou après un `and` de chaînage de join, on propose l'escape hatch
+ * de multiplicité en tête (`one`, `many`) suivi des collections liées. Ordre :
+ * les mots-clés d'abord (courts, ils débloquent l'inférence forcée), puis les
+ * cibles de jointure schema-aware.
+ */
+function withCollectionSuggestions(
+	schema: SchemaModel,
+	scope: Scope
+): readonly SnqlCompletion[] {
+	return [
+		multiplicityKeyword("one"),
+		multiplicityKeyword("many"),
+		...joinTargets(schema, scope)
+	];
+}
+
+function multiplicityKeyword(value: "one" | "many"): SnqlCompletion {
+	return {
+		label: value,
+		type: "keyword",
+		detail:
+			value === "one"
+				? "force LEFT JOIN (row unique)"
+				: "force embed array (many rows)"
+	};
+}
+
+/**
+ * Vrai si le `one`/`many` en fin de flux suit directement un `with` ou un `and`
+ * de chaînage — c'est le seul contexte où l'escape hatch de multiplicité est
+ * valide. Un `one`/`many` ailleurs (mot-clé mais hors syntaxe) ne doit pas
+ * proposer de collections, sinon la complétion devient surprenante.
+ */
+function isMultiplicityAfterWith(toks: readonly Token[]): boolean {
+	const prev = toks[toks.length - 2];
+	if (prev === undefined || prev.kind !== "keyword") {
+		return false;
+	}
+	if (prev.value === "with") {
+		return true;
+	}
+	// `and` — n'est un chaînage que si le contexte `with` est actif avec un `on
+	// … = …` complet AVANT le `and`. On réutilise `isChainingJoin` en enlevant
+	// notre `one`/`many` du flux pour reconstruire "..., and" et le tester.
+	if (prev.value === "and") {
+		return isChainingJoin(toks.slice(0, -1));
+	}
+	return false;
+}
+
+/**
  * Vrai si le `and` en fin de flux est un chaînage de joins (`with … on … = … and`),
  * plutôt qu'un opérateur booléen dans un prédicat. On regarde le dernier stage
  * ouvert : s'il s'agit d'un `with` et qu'une valeur foreign a été fournie, c'est
@@ -245,7 +306,7 @@ function keywordContext(
 		case "into":
 			return collections(schema);
 		case "with":
-			return joinTargets(schema, scope);
+			return withCollectionSuggestions(schema, scope);
 		case "where":
 		case "and":
 		case "or":

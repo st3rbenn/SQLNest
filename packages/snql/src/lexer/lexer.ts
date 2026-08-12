@@ -20,6 +20,9 @@ const SINGLE: Readonly<Record<string, TokenKind>> = {
 	":": "colon",
 	"+": "plus",
 	"-": "minus",
+	"*": "star",
+	"/": "slash",
+	"%": "percent",
 	"=": "op"
 };
 

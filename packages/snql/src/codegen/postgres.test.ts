@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { compile } from "../index";
+import {
+	compile,
+	getMapper,
+	lowerMutation,
+	parse,
+	tokenize
+} from "../index";
 
 function sql(source: string): { text: string; params: readonly unknown[] } {
 	const { native } = compile(source, { engine: "postgres" });
@@ -118,6 +124,8 @@ describe("codegen postgres — littéraux numériques (bugs D, E)", () => {
 	});
 	it("préserve un décimal exact en prédicat (texte brut, pas un double)", () => {
 		const { text, params } = sql("get t where balance = 19.999999999999999");
+		// Pas de cast `::numeric` ici : dans un compare le param unknown est inféré
+		// depuis le type de colonne (numeric OU text — les 2 marchent).
 		expect(text).toBe(`SELECT * FROM "t" WHERE "balance" = $1`);
 		expect(params).toEqual(["19.999999999999999"]);
 	});
@@ -159,5 +167,112 @@ describe("codegen postgres — ordre canonique refuse les inversions", () => {
 
 	it("sort répété refusé par la grammaire", () => {
 		expect(() => sql("get users sort a sort b")).toThrow(/hors ordre/i);
+	});
+});
+
+describe("codegen postgres — décimaux et cast contextuel", () => {
+	it("décimal dans arith → cast `::numeric` local (typer face à un int)", () => {
+		// `int_col * 0.1` sans cast → PG essaie de caster "0.1" en int → 22P02.
+		expect(sql("get t pick len * 0.1 as x").text).toBe(
+			`SELECT ("len" * $1::numeric) AS "x" FROM "t"`
+		);
+	});
+
+	it("décimal dans INSERT vers colonne text → pas de cast (assign via colonne)", () => {
+		// Régression trouvée par l'adversarial : `::numeric` global cassait
+		// l'INSERT dans une colonne text (PG 42804 : no assignment cast).
+		const stmt = parse(tokenize("add {name: 1.5} into t"));
+		if (stmt.operation !== "insert") throw new Error("attendu insert");
+		const nat = getMapper("postgres").mapMutation(lowerMutation(stmt));
+		if (nat.kind !== "sql") throw new Error("attendu sql");
+		expect(nat.text).toBe(
+			`INSERT INTO "t" ("name") VALUES ($1) RETURNING *`
+		);
+		expect(nat.params).toEqual(["1.5"]);
+	});
+
+	it("décimal dans UPDATE vers colonne jsonb → pas de cast", () => {
+		const stmt = parse(tokenize("update accounts where id = 1 set meta = 1.5"));
+		if (stmt.operation !== "update") throw new Error("attendu update");
+		const nat = getMapper("postgres").mapMutation(lowerMutation(stmt));
+		if (nat.kind !== "sql") throw new Error("attendu sql");
+		expect(nat.text).toBe(
+			`UPDATE "accounts" SET "meta" = $1 WHERE "id" = $2 RETURNING *`
+		);
+	});
+
+	it("décimal dans WHERE compare varchar → pas de cast (assign via colonne)", () => {
+		// `where varchar_col = 1.5` doit rester `= $1` — sinon PG rejette
+		// `character varying = numeric` (opérateur inexistant).
+		expect(sql("get products where sku = 1.5").text).toBe(
+			`SELECT * FROM "products" WHERE "sku" = $1`
+		);
+	});
+
+	it("décimal dans LIKE → pas de cast", () => {
+		// `LIKE $1::numeric` déclencherait 42883 côté PG. On laisse `$1` unknown.
+		expect(sql("get t where name like 1.5").text).toBe(
+			`SELECT * FROM "t" WHERE "name" LIKE $1`
+		);
+	});
+});
+
+describe("codegen postgres — arithmétique scalaire (T1)", () => {
+	it("+ et * dans WHERE avec parens défensives", () => {
+		const { text, params } = sql("get users where age * 2 > 30");
+		expect(text).toBe(
+			`SELECT * FROM "users" WHERE ("age" * $1) > $2`
+		);
+		expect(params).toEqual([2, 30]);
+	});
+
+	it("précédence : * lie plus fort que + (bp 6 > 5)", () => {
+		const { text } = sql("get t where a + b * c > 0");
+		expect(text).toBe(
+			`SELECT * FROM "t" WHERE ("a" + ("b" * "c")) > $1`
+		);
+	});
+
+	it("expression calculée dans pick avec alias", () => {
+		const { text } = sql("get items pick price * qty as total");
+		expect(text).toBe(
+			`SELECT ("price" * "qty") AS "total" FROM "items"`
+		);
+	});
+
+	it("expression pick sans alias → erreur du parseur", () => {
+		expect(() => sql("get items pick price * qty")).toThrow(
+			/exige un alias/i
+		);
+	});
+
+	it("- dans set (update via mutation path)", () => {
+		// `compile()` est read-only ; les mutations passent par parse+lowerMutation+mapMutation.
+		const stmt = parse(tokenize("update stock where id = 1 set qty = qty - 1"));
+		if (stmt.operation !== "update") throw new Error("attendu update");
+		const nat = getMapper("postgres").mapMutation(lowerMutation(stmt));
+		if (nat.kind !== "sql") throw new Error("attendu sql");
+		expect(nat.text).toBe(
+			`UPDATE "stock" SET "qty" = ("qty" - $1) WHERE "id" = $2 RETURNING *`
+		);
+		expect(nat.params).toEqual([1, 1]);
+	});
+
+	it("modulo dans WHERE", () => {
+		const { text } = sql("get t where balance % 2 = 0");
+		expect(text).toBe(
+			`SELECT * FROM "t" WHERE ("balance" % $1) = $2`
+		);
+	});
+
+	it("expressions combinées : where + pick + limit", () => {
+		// Note : `sort` en T1 reste sur chemin simple ; sort par expression est
+		// prévu en T2 (dépend du call node pour être cohérent).
+		const { text } = sql(
+			"get orders where price + tax > 100 sort id desc pick id, price * qty as total limit 10"
+		);
+		expect(text).toBe(
+			`SELECT "id", ("price" * "qty") AS "total" FROM "orders" WHERE ("price" + "tax") > $1 ORDER BY "id" DESC LIMIT $2`
+		);
 	});
 });
