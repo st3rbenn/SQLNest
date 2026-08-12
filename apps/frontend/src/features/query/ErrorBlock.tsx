@@ -179,6 +179,21 @@ export function ErrorBlock({ error, onFocusSpan }: ErrorBlockProps): React.React
 		[pgError]
 	);
 
+	// Un ident référencé dans le message (`column "foo" does not exist`,
+	// `relation "bar" does not exist`, `operator does not exist: "text" = "int"`)
+	// est considéré résolu si `identSpans[name]` porte au moins un span valide.
+	// Sert à décider si on affiche le fallback `pos <N>` (byte offset dans le
+	// SQL généré, opaque à l'utilisateur qui ne le voit jamais).
+	const hasResolvedIdent = useMemo(
+		() =>
+			pgError !== undefined &&
+			(identMatchesInSpans(pgError.message, pgError.identSpans) ||
+				identNameHasSpan(pgError.column, pgError.identSpans) ||
+				identNameHasSpan(pgError.table, pgError.identSpans)),
+		[pgError]
+	);
+	const hasResolvedContext = paramRefs.length > 0 || hasResolvedIdent;
+
 	const copy = async (): Promise<void> => {
 		try {
 			await navigator.clipboard.writeText(error.message);
@@ -264,7 +279,7 @@ export function ErrorBlock({ error, onFocusSpan }: ErrorBlockProps): React.React
 			(pgError.column !== undefined ||
 				pgError.table !== undefined ||
 				pgError.constraint !== undefined ||
-				pgError.position !== undefined) ? (
+				(pgError.position !== undefined && !hasResolvedContext)) ? (
 				<div style={chipRowStyle}>
 					{pgError.column !== undefined
 						? renderIdentChip("col", pgError.column, pgError.identSpans, onFocusSpan)
@@ -278,8 +293,15 @@ export function ErrorBlock({ error, onFocusSpan }: ErrorBlockProps): React.React
 							<span style={chipValueStyle}>{pgError.constraint}</span>
 						</span>
 					) : null}
-					{pgError.position !== undefined ? (
-						<span style={chipBaseStyle}>
+					{/* `pos N` = byte offset dans le SQL généré, 1-indexé. Opaque à
+					    l'utilisateur qui ne voit jamais le SQL — on ne l'affiche que
+					    quand rien d'autre n'a pu être résolu (fallback debug). Un
+					    vrai source-map SQL→SNQL le rendrait cliquable — différé. */}
+					{pgError.position !== undefined && !hasResolvedContext ? (
+						<span
+							style={chipBaseStyle}
+							title="Offset dans le SQL généré (usage debug — pas de mapping vers le SNQL disponible)"
+						>
 							<span style={chipLabelStyle}>pos</span>
 							<span style={chipValueStyle}>{pgError.position}</span>
 						</span>
@@ -372,6 +394,45 @@ function extractParamRefs(pgError: PgErrorInfo): readonly ParamRef[] {
 		);
 	}
 	return Array.from(seen.values()).sort((a, b) => a.index - b.index);
+}
+
+/**
+ * Vérifie qu'un nom d'ident a au moins un span valide dans `identSpans`.
+ * Rejette un `spans` non-array, un tuple mal formé, ou une entrée manquante.
+ * Utilisé pour décider si le fallback `pos <N>` doit s'afficher.
+ */
+function identNameHasSpan(
+	name: string | undefined,
+	identSpans: PgErrorInfo["identSpans"]
+): boolean {
+	if (typeof name !== "string" || identSpans == null) return false;
+	const spans = (identSpans as Record<string, unknown>)[name];
+	if (!Array.isArray(spans)) return false;
+	return spans.some(
+		(v) =>
+			Array.isArray(v) &&
+			v.length === 2 &&
+			typeof v[0] === "number" &&
+			typeof v[1] === "number"
+	);
+}
+
+/**
+ * Vrai s'il existe au moins un ident quoté dans le message pg
+ * (`column "foo" does not exist`, `relation "bar" does not exist`, etc.)
+ * qui a une entrée dans identSpans. Rapide : arrête au premier match.
+ */
+function identMatchesInSpans(
+	message: string | undefined,
+	identSpans: PgErrorInfo["identSpans"]
+): boolean {
+	if (typeof message !== "string" || identSpans == null) return false;
+	for (const match of message.matchAll(/"([^"]+)"/g)) {
+		if (match[1] !== undefined && identNameHasSpan(match[1], identSpans)) {
+			return true;
+		}
+	}
+	return false;
 }
 
 /**
