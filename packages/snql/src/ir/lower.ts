@@ -192,6 +192,12 @@ function assertNoCallInWrite(expr: PlanExpr): void {
  * Abaisse un `insert`. Toutes les lignes doivent partager le MÊME jeu de colonnes
  * (un INSERT multi-lignes a une liste de colonnes unique). Les valeurs doivent
  * être des littéraux. Colonnes absentes d'un document = document hétérogène → erreur.
+ *
+ * Produit également des arrays parallèles `rowSpans` / `cellSpans` (Phase 3c) —
+ * pour un `add [{...}, {...}]`, chaque row du plan garde la trace de son span
+ * source et chaque cellule de son span (à la fois utilisés par le codegen pour
+ * paramétrer avec span, et remontés dans le pgError pour cibler une row
+ * fautive sur unique/FK violation).
  */
 function lowerInsert(statement: InsertStatement): MutationPlan {
 	const firstRow = statement.rows[0];
@@ -207,6 +213,8 @@ function lowerInsert(statement: InsertStatement): MutationPlan {
 		);
 	}
 
+	const rowSpans: (import("../lexer/token").Span | undefined)[] = [];
+	const cellSpans: (readonly (import("../lexer/token").Span | undefined)[])[] = [];
 	const rows = statement.rows.map((row) => {
 		const byColumn = new Map<string, Expr>();
 		for (const field of row.fields) {
@@ -224,7 +232,8 @@ function lowerInsert(statement: InsertStatement): MutationPlan {
 				"lower_insert_heterogeneous"
 			);
 		}
-		return columns.map((column) => {
+		const rowCellSpans: (import("../lexer/token").Span | undefined)[] = [];
+		const values = columns.map((column) => {
 			const value = byColumn.get(column);
 			if (value === undefined) {
 				throw new SnqlError(
@@ -232,11 +241,24 @@ function lowerInsert(statement: InsertStatement): MutationPlan {
 					"lower_insert_heterogeneous"
 				);
 			}
+			// Le span est celui du littéral value — c'est ce qui devient un $N côté
+			// codegen SQL, donc c'est ce qui doit remonter dans paramSpans.
+			rowCellSpans.push(value.span);
 			return literalOf(value, column);
 		});
+		rowSpans.push(row.span);
+		cellSpans.push(rowCellSpans);
+		return values;
 	});
 
-	return { op: "insert", collection: statement.collection, columns, rows };
+	return {
+		op: "insert",
+		collection: statement.collection,
+		columns,
+		rows,
+		rowSpans,
+		cellSpans
+	};
 }
 
 /** Une valeur d'insertion doit être un littéral (nombre, chaîne, booléen, null). */
@@ -554,36 +576,48 @@ const COMPARE_MAP: Readonly<Record<CompareOperator, CompareOp>> = {
 };
 
 function lowerExpr(expr: Expr): PlanExpr {
+	// Le span AST est propagé sur chaque node plan → Phase 3a-b (traçabilité
+	// erreurs Postgres → source SNQL). Pour `compare`/`logical`/`not`/`in`,
+	// on garde le span du node AST source ; `lowerCompare` peut le remplacer
+	// par le span joint quand il canonicalise (isNull, flip d'opérandes).
 	switch (expr.type) {
 		case "literal":
-			return { kind: "literal", value: literalToValue(expr.value) };
+			return {
+				kind: "literal",
+				value: literalToValue(expr.value),
+				span: expr.span
+			};
 		case "field":
-			return { kind: "field", path: expr.path };
+			return { kind: "field", path: expr.path, span: expr.span };
 		case "compare":
 			return lowerCompare(
 				expr.operator,
 				lowerExpr(expr.left),
-				lowerExpr(expr.right)
+				lowerExpr(expr.right),
+				expr.span
 			);
 		case "logical":
 			return expr.operator === "and"
 				? {
 						kind: "and",
 						left: lowerExpr(expr.left),
-						right: lowerExpr(expr.right)
+						right: lowerExpr(expr.right),
+						span: expr.span
 					}
 				: {
 						kind: "or",
 						left: lowerExpr(expr.left),
-						right: lowerExpr(expr.right)
+						right: lowerExpr(expr.right),
+						span: expr.span
 					};
 		case "not":
-			return { kind: "not", operand: lowerExpr(expr.operand) };
+			return { kind: "not", operand: lowerExpr(expr.operand), span: expr.span };
 		case "in":
 			return {
 				kind: "in",
 				target: lowerExpr(expr.target),
-				values: expr.values.map(lowerExpr)
+				values: expr.values.map(lowerExpr),
+				span: expr.span
 			};
 		case "arith":
 			return {
@@ -668,11 +702,15 @@ const FLIP_OP: Readonly<Record<CompareOp, CompareOp>> = {
  * 2. `littéral OP champ` → `champ OP' littéral` (opérande champ à gauche). Sans ça, un moteur
  *    document (Mongo) traduit `age < 30` et `30 > age` en formes différentes, avec des sémantiques
  *    divergentes sur les champs absents. Le fallback champ↔champ ($expr) reste, lui, inchangé.
+ *
+ * Le `span` est celui du node `compare` AST source — il englobe l'expression
+ * complète canonicalisée (utile pour souligner `x = null` en une seule marque).
  */
 function lowerCompare(
 	operator: CompareOperator,
 	left: PlanExpr,
-	right: PlanExpr
+	right: PlanExpr,
+	span: import("../lexer/token").Span
 ): PlanExpr {
 	const op = COMPARE_MAP[operator];
 	if (op === "eq" || op === "ne") {
@@ -680,14 +718,14 @@ function lowerCompare(
 		const rightNull = isNullLiteral(right);
 		if (leftNull || rightNull) {
 			const operand = leftNull ? right : left;
-			return { kind: "isNull", negated: op === "ne", operand };
+			return { kind: "isNull", negated: op === "ne", operand, span };
 		}
 	}
 	// `like` n'est pas commutatif : jamais d'échange.
 	if (op !== "like" && left.kind !== "field" && right.kind === "field") {
-		return { kind: "compare", op: FLIP_OP[op], left: right, right: left };
+		return { kind: "compare", op: FLIP_OP[op], left: right, right: left, span };
 	}
-	return { kind: "compare", op, left, right };
+	return { kind: "compare", op, left, right, span };
 }
 
 function isNullLiteral(expr: PlanExpr): boolean {

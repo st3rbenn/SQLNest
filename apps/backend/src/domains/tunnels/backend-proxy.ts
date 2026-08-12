@@ -74,12 +74,25 @@ export class TunnelTimeoutError extends Error {
 		this.name = "TunnelTimeoutError";
 	}
 }
+/**
+ * Détail structuré d'une erreur Postgres remontée par le CLI (Phase 3a).
+ * Shape libre côté transport (msgpackr) ; validation à la frontière HTTP via
+ * le schéma Zod `PgErrorInfoSchema` dans `domains/db-connections/proxy-schema.ts`.
+ */
+export type PgErrorPayload = Record<string, unknown>;
+
 export class TunnelCliError extends Error {
 	readonly cliMessage: string;
-	constructor(cliMessage: string) {
+	/** Détail Postgres — présent quand la cause est une erreur `pg` côté CLI.
+	 *  Absent pour toute autre erreur CLI (connect refused, config, etc.). */
+	readonly pgError?: PgErrorPayload;
+	constructor(cliMessage: string, pgError?: PgErrorPayload) {
 		super(`CLI returned error: ${cliMessage}`);
 		this.name = "TunnelCliError";
 		this.cliMessage = cliMessage;
+		if (pgError !== undefined) {
+			this.pgError = pgError;
+		}
 	}
 }
 
@@ -202,10 +215,10 @@ export function createBackendProxy(
 				payload != null && typeof payload === "object" && "error" in payload
 					? String((payload as { error?: unknown }).error)
 					: "unknown CLI error";
-			pending.reject(new TunnelCliError(msg));
+			pending.reject(new TunnelCliError(msg, extractPgError(payload)));
 			return;
 		}
-		// `res` : payload = RemoteResult (`{ok:true, data}` OU `{ok:false, error}`).
+		// `res` : payload = RemoteResult (`{ok:true, data}` OU `{ok:false, error, pgError?}`).
 		if (
 			payload != null &&
 			typeof payload === "object" &&
@@ -214,7 +227,10 @@ export function createBackendProxy(
 			"error" in payload
 		) {
 			pending.reject(
-				new TunnelCliError(String((payload as { error?: unknown }).error))
+				new TunnelCliError(
+					String((payload as { error?: unknown }).error),
+					extractPgError(payload)
+				)
 			);
 			return;
 		}
@@ -318,6 +334,19 @@ export function createBackendProxy(
 }
 
 // ─── Utilitaires ──────────────────────────────────────────────────────
+
+/**
+ * Extrait un `pgError` du payload wire (Phase 3a). Le CLI ajoute cet objet à
+ * côté de `error: string` sur `{ok:false}` quand la cause est une erreur `pg`.
+ * On garde la shape en `Record<string, unknown>` — la validation stricte est
+ * faite plus loin par le schéma Zod à la frontière HTTP.
+ */
+function extractPgError(payload: unknown): PgErrorPayload | undefined {
+	if (payload == null || typeof payload !== "object") return undefined;
+	const pgError = (payload as { pgError?: unknown }).pgError;
+	if (pgError == null || typeof pgError !== "object") return undefined;
+	return pgError as PgErrorPayload;
+}
 
 function toU8(raw: Uint8Array | Buffer): Uint8Array {
 	if (raw instanceof Uint8Array && !Buffer.isBuffer(raw)) return raw;

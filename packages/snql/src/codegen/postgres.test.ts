@@ -6,10 +6,26 @@ import {
 	parse,
 	tokenize
 } from "../index";
+import type { SerializedSpan } from "./mapper";
 
 function sql(source: string): { text: string; params: readonly unknown[] } {
 	const { native } = compile(source, { engine: "postgres" });
 	return { text: native.text, params: native.params };
+}
+
+/** Récupère `paramSpans` avec les autres champs — utilisé par les tests 3a. */
+function sqlWithSpans(source: string): {
+	text: string;
+	params: readonly unknown[];
+	paramSpans: readonly (SerializedSpan | undefined)[];
+} {
+	const { native } = compile(source, { engine: "postgres" });
+	if (native.kind !== "sql") throw new Error("attendu du SQL");
+	return {
+		text: native.text,
+		params: native.params,
+		paramSpans: native.paramSpans ?? []
+	};
 }
 
 describe("codegen postgres — clauses de base", () => {
@@ -141,6 +157,62 @@ describe("codegen postgres — liste IN vide (bug B)", () => {
 		expect(sql("get users where not role in []").text).toBe(
 			`SELECT * FROM "users" WHERE (NOT FALSE)`
 		);
+	});
+});
+
+describe("codegen postgres — paramSpans (Phase 3a, traçabilité $N → source)", () => {
+	it("chaque littéral WHERE reçoit un span [start, length] pointant sur son token", () => {
+		const source = `get users where age > 30 and name = "bob"`;
+		const { params, paramSpans } = sqlWithSpans(source);
+		expect(params).toEqual([30, "bob"]);
+		// Vérifie que les spans pointent bien sur les valeurs source (source-truth,
+		// pas d'offsets magiques à maintenir à la main).
+		const [s1, s2] = paramSpans as [SerializedSpan, SerializedSpan];
+		expect(source.slice(s1[0], s1[0] + s1[1])).toBe("30");
+		expect(source.slice(s2[0], s2[0] + s2[1])).toBe(`"bob"`);
+	});
+
+	it("LIMIT/OFFSET (nombres nus, sans span dans le plan) → undefined en 3a", () => {
+		const source = `get users where age > 18 limit 10 offset 20`;
+		const { params, paramSpans } = sqlWithSpans(source);
+		expect(params).toEqual([18, 10, 20]);
+		// Seul le littéral WHERE porte un span ; limit/offset produisent undefined
+		// jusqu'à 3b (span sur les stages sort/limit du plan).
+		expect(paramSpans.length).toBe(3);
+		expect(paramSpans[1]).toBeUndefined();
+		expect(paramSpans[2]).toBeUndefined();
+		const s0 = paramSpans[0] as SerializedSpan;
+		expect(source.slice(s0[0], s0[0] + s0[1])).toBe("18");
+	});
+
+	it("liste IN — chaque valeur reçoit son span propre", () => {
+		//                                    0         1         2
+		//                                    01234567890123456789012345678901234
+		const source = `get users where role in ["admin", "mod"]`;
+		const { params, paramSpans } = sqlWithSpans(source);
+		expect(params).toEqual(["admin", "mod"]);
+		const [s1, s2] = paramSpans as [SerializedSpan, SerializedSpan];
+		expect(source.slice(s1[0], s1[0] + s1[1])).toBe(`"admin"`);
+		expect(source.slice(s2[0], s2[0] + s2[1])).toBe(`"mod"`);
+	});
+
+	it("null → jamais paramétré, jamais dans paramSpans (canonicalisé en IS NULL)", () => {
+		const { text, params, paramSpans } = sqlWithSpans(
+			`get users where display_name = null`
+		);
+		expect(text).toBe(`SELECT * FROM "users" WHERE "display_name" IS NULL`);
+		expect(params).toEqual([]);
+		expect(paramSpans).toEqual([]);
+	});
+
+	it("SqlDecimal exact — span présent et pointe sur le raw source", () => {
+		//                                       0         1         2         3
+		//                                       012345678901234567890123456789012345
+		const source = `get accounts where balance > 1.123456789012345678`;
+		const { params, paramSpans } = sqlWithSpans(source);
+		expect(params).toEqual(["1.123456789012345678"]);
+		const [s] = paramSpans as [SerializedSpan];
+		expect(source.slice(s[0], s[0] + s[1])).toBe("1.123456789012345678");
 	});
 });
 

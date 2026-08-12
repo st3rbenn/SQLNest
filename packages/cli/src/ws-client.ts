@@ -46,6 +46,7 @@ import {
 	signFrame,
 	verifyFrame
 } from "@sqlnest/tunnel-protocol";
+import type { PgErrorInfo } from "@sqlnest/engine";
 import { pack, unpack } from "msgpackr";
 import NodeWebSocket from "ws";
 
@@ -55,10 +56,21 @@ export type RemoteOp =
 	| { readonly op: "introspect" }
 	| { readonly op: "runSnql"; readonly src: string };
 
-/** Résultat retourné par `runOp` — sérialisé dans le payload de `res`. */
+/**
+ * Résultat retourné par `runOp` — sérialisé dans le payload de `res`.
+ *
+ * `pgError` (optionnel, Phase 3a) porte le détail structuré d'une erreur
+ * Postgres : SQLSTATE, position, hint, colonne + les params bindés et leurs
+ * spans SNQL source pour permettre au frontend de résoudre `$N` → token
+ * source à souligner. Absent si la cause n'est pas une erreur `pg`.
+ */
 export type RemoteResult =
 	| { readonly ok: true; readonly data: unknown }
-	| { readonly ok: false; readonly error: string };
+	| {
+			readonly ok: false;
+			readonly error: string;
+			readonly pgError?: PgErrorInfo;
+	  };
 
 /** Interface générique d'un socket WS — permet mock en test. */
 export interface WsSocket {

@@ -14,6 +14,7 @@ import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import z from "zod/v4";
 import { assertConnectionInTeam } from "../../../domains/db-connections/get-in-team";
 import {
+	PgErrorInfoSchema,
 	ProxyErrorResponse,
 	ProxyQueryBody,
 	ProxyQueryResponse
@@ -82,6 +83,18 @@ function mapErrorToReply(
 		});
 	}
 	if (err instanceof TunnelCliError) {
+		// Erreur `pg` structurée (Phase 3a) — route en 400 (payload user-recoverable :
+		// SQL invalide, contrainte violée, type inconnu…). Le frontend a besoin de
+		// `pgError` pour rendre son ErrorBlock (chip `$N`, jump-to-span). Validation
+		// Zod stricte à la frontière — un pgError malformé est droppé silencieusement
+		// pour ne jamais empêcher le message string d'atteindre l'utilisateur.
+		if (err.pgError !== undefined) {
+			const parsed = PgErrorInfoSchema.safeParse(err.pgError);
+			return reply.code(400).send({
+				message: err.cliMessage,
+				...(parsed.success ? { pgError: parsed.data } : {})
+			});
+		}
 		return reply
 			.code(502)
 			.send({ message: `Erreur côté CLI: ${err.cliMessage}` });

@@ -112,6 +112,44 @@ describe("mutations → Postgres", () => {
 		// `::numeric` global qui casserait un INSERT dans une colonne text.
 		expect(params).toEqual(["1.123456789012345678"]);
 	});
+
+	// Phase 3c : row-level provenance pour batch INSERT.
+	it("batch INSERT — rowSpans et paramSpans pointent sur chaque row/cellule source", () => {
+		const source = "add [{a: 1, b: 2}, {a: 3, b: 4}] into t";
+		const statement = parse(tokenize(source));
+		if (statement.operation === "select") throw new Error("mutation attendue");
+		const native = getMapper("postgres").mapMutation(lowerMutation(statement));
+		if (native.kind !== "sql") throw new Error("sql attendu");
+		expect(native.params).toEqual([1, 2, 3, 4]);
+		expect(native.paramSpans?.length).toBe(4);
+		// Chaque paramSpan pointe sur son littéral source dans le SNQL.
+		for (let i = 0; i < 4; i += 1) {
+			const s = native.paramSpans?.[i];
+			expect(s).toBeDefined();
+			if (s === undefined) continue;
+			expect(source.slice(s[0], s[0] + s[1])).toBe(String([1, 2, 3, 4][i]));
+		}
+		// rowSpans : deux entrées, une par row du batch. Chaque row pointe sur
+		// l'objet source complet `{...}`.
+		expect(native.rowSpans?.length).toBe(2);
+		const [r0, r1] = native.rowSpans as [
+			readonly [number, number],
+			readonly [number, number]
+		];
+		expect(source.slice(r0[0], r0[0] + r0[1])).toBe("{a: 1, b: 2}");
+		expect(source.slice(r1[0], r1[0] + r1[1])).toBe("{a: 3, b: 4}");
+	});
+
+	it("insert single-row — rowSpans à un élément, pointe sur `{…}`", () => {
+		const source = 'add {email: "a@b.c"} into users';
+		const statement = parse(tokenize(source));
+		if (statement.operation === "select") throw new Error("mutation attendue");
+		const native = getMapper("postgres").mapMutation(lowerMutation(statement));
+		if (native.kind !== "sql") throw new Error("sql attendu");
+		expect(native.rowSpans?.length).toBe(1);
+		const [r] = native.rowSpans as [readonly [number, number]];
+		expect(source.slice(r[0], r[0] + r[1])).toBe('{email: "a@b.c"}');
+	});
 });
 
 describe("mutations — règles de correction", () => {

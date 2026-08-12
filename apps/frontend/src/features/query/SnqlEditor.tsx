@@ -5,7 +5,7 @@ import {
 	historyKeymap,
 	indentWithTab
 } from "@codemirror/commands";
-import { EditorState } from "@codemirror/state";
+import { EditorSelection, EditorState } from "@codemirror/state";
 import {
 	placeholder as cmPlaceholder,
 	EditorView,
@@ -15,8 +15,16 @@ import {
 	lineNumbers
 } from "@codemirror/view";
 import type { SchemaModel } from "@sqlnest/snql";
-import { useEffect, useRef } from "react";
+import {
+	forwardRef,
+	useEffect,
+	useImperativeHandle,
+	useMemo,
+	useRef
+} from "react";
+import { errorMarkers, setErrorSpans } from "./errorMarkers";
 import { snqlCompletion, snqlHighlighting } from "./snql-language";
+import type { SerializedSpan } from "./useRunQuery";
 
 interface SnqlEditorProps {
 	readonly value: string;
@@ -25,6 +33,25 @@ interface SnqlEditorProps {
 	/** SchemaModel courant → candidats de complétion (absent = base non introspectée). */
 	readonly schema: SchemaModel | undefined;
 	readonly placeholder?: string;
+	/**
+	 * Spans source SNQL à souligner en rouge (Phase 3a — erreurs Postgres
+	 * résolues via `PgErrorInfo.paramSpans`). Une nouvelle liste remplace
+	 * toutes les décorations existantes. `[]` clear.
+	 */
+	readonly errorSpans?: readonly SerializedSpan[];
+}
+
+/**
+ * Contrôleur impératif exposé via `ref` — permet à l'ErrorBlock de commander
+ * un focus + scroll sur un span source SNQL précis (clic sur un chip `$N`).
+ */
+export interface SnqlEditorHandle {
+	/**
+	 * Sélectionne le span dans l'éditeur, scrolle pour le rendre visible et
+	 * met le focus. No-op si l'éditeur n'est pas monté ou si le span est
+	 * hors des bornes du document.
+	 */
+	focusSpan(span: SerializedSpan): void;
 }
 
 /**
@@ -106,6 +133,13 @@ const theme = EditorView.theme(
 		},
 		".cm-activeLine": {
 			background: "transparent"
+		},
+		// Squigglies rouges sous les tokens source des erreurs Postgres (Phase 3a).
+		// text-decoration wavy + underline-color : rendu natif partout, pas d'SVG.
+		".sqlnest-error-mark": {
+			textDecoration: "underline wavy var(--sqlnest-danger)",
+			textDecorationThickness: "1px",
+			textUnderlineOffset: "3px"
 		}
 	},
 	{ dark: true }
@@ -119,84 +153,127 @@ const theme = EditorView.theme(
  * via des refs pour rester à jour sans reconstruire l'éditeur (changement de
  * moteur/schéma). La prop `value` est synchronisée dans un sens (parent → éditeur)
  * uniquement quand elle diverge du document, pour éviter les boucles.
+ *
+ * `errorSpans` (Phase 3a) : liste de spans source à souligner en squiggle rouge —
+ * dispatché en `StateEffect` sans reconstruire l'éditeur. Le `ref` expose
+ * `focusSpan(span)` pour scroller / sélectionner un span depuis l'ErrorBlock.
  */
-export function SnqlEditor({
-	value,
-	onChange,
-	onRun,
-	schema,
-	placeholder
-}: SnqlEditorProps) {
-	const host = useRef<HTMLDivElement>(null);
-	const view = useRef<EditorView | null>(null);
-	const onChangeRef = useRef(onChange);
-	const onRunRef = useRef(onRun);
-	const schemaRef = useRef<SchemaModel | undefined>(schema);
+export const SnqlEditor = forwardRef<SnqlEditorHandle, SnqlEditorProps>(
+	function SnqlEditor(
+		{ value, onChange, onRun, schema, placeholder, errorSpans },
+		ref
+	) {
+		const host = useRef<HTMLDivElement>(null);
+		const view = useRef<EditorView | null>(null);
+		const onChangeRef = useRef(onChange);
+		const onRunRef = useRef(onRun);
+		const schemaRef = useRef<SchemaModel | undefined>(schema);
 
-	// Garde les callbacks/schema à jour pour les extensions (créées une seule fois).
-	onChangeRef.current = onChange;
-	onRunRef.current = onRun;
-	schemaRef.current = schema;
+		// Garde les callbacks/schema à jour pour les extensions (créées une seule fois).
+		onChangeRef.current = onChange;
+		onRunRef.current = onRun;
+		schemaRef.current = schema;
 
-	// biome-ignore lint/correctness/useExhaustiveDependencies: l'éditeur est monté une fois ; les valeurs vivantes passent par des refs.
-	useEffect(() => {
-		if (host.current === null) {
-			return;
-		}
-		const state = EditorState.create({
-			doc: value,
-			extensions: [
-				history(),
-				lineNumbers(),
-				highlightActiveLine(),
-				highlightActiveLineGutter(),
-				keymap.of([
-					{
-						key: "Mod-Enter",
-						run: () => {
-							onRunRef.current();
-							return true;
+		// biome-ignore lint/correctness/useExhaustiveDependencies: l'éditeur est monté une fois ; les valeurs vivantes passent par des refs.
+		useEffect(() => {
+			if (host.current === null) {
+				return;
+			}
+			const state = EditorState.create({
+				doc: value,
+				extensions: [
+					history(),
+					lineNumbers(),
+					highlightActiveLine(),
+					highlightActiveLineGutter(),
+					keymap.of([
+						{
+							key: "Mod-Enter",
+							run: () => {
+								onRunRef.current();
+								return true;
+							}
+						},
+						indentWithTab,
+						...completionKeymap,
+						...defaultKeymap,
+						...historyKeymap
+					]),
+					snqlHighlighting(),
+					snqlCompletion(() => schemaRef.current),
+					errorMarkers(),
+					EditorView.lineWrapping,
+					EditorView.updateListener.of((update) => {
+						if (update.docChanged) {
+							onChangeRef.current(update.state.doc.toString());
 						}
-					},
-					indentWithTab,
-					...completionKeymap,
-					...defaultKeymap,
-					...historyKeymap
-				]),
-				snqlHighlighting(),
-				snqlCompletion(() => schemaRef.current),
-				EditorView.lineWrapping,
-				EditorView.updateListener.of((update) => {
-					if (update.docChanged) {
-						onChangeRef.current(update.state.doc.toString());
-					}
-				}),
-				...(placeholder !== undefined ? [cmPlaceholder(placeholder)] : []),
-				theme
-			]
-		});
-		const editor = new EditorView({ state, parent: host.current });
-		view.current = editor;
-		return () => {
-			editor.destroy();
-			view.current = null;
-		};
-	}, []);
-
-	// Synchronise value → éditeur (ex. bascule d'exemple), sans boucle.
-	useEffect(() => {
-		const editor = view.current;
-		if (editor !== null && value !== editor.state.doc.toString()) {
-			editor.dispatch({
-				changes: { from: 0, to: editor.state.doc.length, insert: value }
+					}),
+					...(placeholder !== undefined ? [cmPlaceholder(placeholder)] : []),
+					theme
+				]
 			});
-		}
-	}, [value]);
+			const editor = new EditorView({ state, parent: host.current });
+			view.current = editor;
+			return () => {
+				editor.destroy();
+				view.current = null;
+			};
+		}, []);
 
-	return (
-		<div
-			ref={host}
-			style={{ height: "100%", display: "flex", flexDirection: "column" }}
-		/>
-	);
-}
+		// Synchronise value → éditeur (ex. bascule d'exemple), sans boucle.
+		useEffect(() => {
+			const editor = view.current;
+			if (editor !== null && value !== editor.state.doc.toString()) {
+				editor.dispatch({
+					changes: { from: 0, to: editor.state.doc.length, insert: value }
+				});
+			}
+		}, [value]);
+
+		// Stabilise la liste — évite les dispatch superflus si le parent passe une
+		// ref différente à chaque rendu. Comparaison profonde peu coûteuse (petites
+		// listes de spans, ≤ 5 typiquement).
+		const spansKey = useMemo(
+			() =>
+				(errorSpans ?? [])
+					.map(([s, l]) => `${s}:${l}`)
+					.join(","),
+			[errorSpans]
+		);
+
+		// Sync `errorSpans` → décorations CM (Phase 3a). Dispatch un StateEffect
+		// que le `errorField` interprète pour remplacer le DecorationSet.
+		useEffect(() => {
+			const editor = view.current;
+			if (editor === null) return;
+			editor.dispatch({ effects: setErrorSpans.of(errorSpans ?? []) });
+		}, [spansKey, errorSpans]);
+
+		useImperativeHandle(
+			ref,
+			() => ({
+				focusSpan(span) {
+					const editor = view.current;
+					if (editor === null) return;
+					const docLen = editor.state.doc.length;
+					const [start, length] = span;
+					if (start < 0 || length <= 0 || start + length > docLen) return;
+					editor.dispatch({
+						selection: EditorSelection.range(start, start + length),
+						scrollIntoView: true
+					});
+					editor.focus();
+				}
+			}),
+			[]
+		);
+
+		return (
+			<div
+				ref={host}
+				style={{ height: "100%", display: "flex", flexDirection: "column" }}
+			/>
+		);
+	}
+);
+

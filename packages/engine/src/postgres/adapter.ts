@@ -1,4 +1,10 @@
-import type { NativeQuery, ResultSet, Row, SchemaModel } from "@sqlnest/snql";
+import type {
+	NativeQuery,
+	ResultSet,
+	Row,
+	SchemaModel,
+	SerializedSpan
+} from "@sqlnest/snql";
 import { POSTGRES_CAPABILITIES } from "@sqlnest/snql";
 import type { Pool as PgPool, PoolClient, PoolConfig } from "pg";
 import pg from "pg";
@@ -14,7 +20,8 @@ import {
 	ConnectionClosedError,
 	EngineConfigError,
 	EngineConnectionError,
-	EngineExecutionError
+	EngineExecutionError,
+	type PgErrorInfo
 } from "../errors";
 import { introspectPostgres } from "./introspect";
 
@@ -48,6 +55,69 @@ function describePgExecutionError(cause: unknown): string {
 		parts.push(`hint: ${props.hint}`);
 	}
 	return parts.join(" — ");
+}
+
+/**
+ * Extrait le détail structuré d'une erreur `pg` (Phase 3a). Le driver expose
+ * les champs comme des chaînes optionnelles sur l'objet `DatabaseError` — on
+ * les copie sélectivement et on attache `params` + `paramSpans` de la query
+ * compilée pour permettre la résolution `$N → span` côté frontend.
+ *
+ * Retourne `undefined` si la cause n'est pas une erreur `pg` (adapter mis-
+ * configuré, cause générique) — le caller retombera sur le message string.
+ */
+function extractPgErrorInfo(
+	cause: unknown,
+	query: NativeQuery
+): PgErrorInfo | undefined {
+	if (!(cause instanceof Error)) return undefined;
+	const props = cause as {
+		message?: unknown;
+		code?: unknown;
+		position?: unknown;
+		detail?: unknown;
+		hint?: unknown;
+		column?: unknown;
+		table?: unknown;
+		constraint?: unknown;
+	};
+	if (typeof props.message !== "string") return undefined;
+	const info: {
+		message: string;
+		code?: string;
+		position?: number;
+		detail?: string;
+		hint?: string;
+		column?: string;
+		table?: string;
+		constraint?: string;
+		params?: readonly unknown[];
+		paramSpans?: readonly (SerializedSpan | undefined)[];
+		rowSpans?: readonly (SerializedSpan | undefined)[];
+		identSpans?: Readonly<Record<string, readonly SerializedSpan[]>>;
+	} = { message: props.message };
+	if (typeof props.code === "string" && props.code.length > 0) info.code = props.code;
+	// `pg` expose `position` en string (1-indexé, byte offset dans le SQL envoyé) —
+	// on parse en number pour le sourceMap 3b.
+	if (typeof props.position === "string") {
+		const n = Number(props.position);
+		if (Number.isFinite(n) && n > 0) info.position = n;
+	} else if (typeof props.position === "number" && props.position > 0) {
+		info.position = props.position;
+	}
+	if (typeof props.detail === "string" && props.detail.length > 0) info.detail = props.detail;
+	if (typeof props.hint === "string" && props.hint.length > 0) info.hint = props.hint;
+	if (typeof props.column === "string" && props.column.length > 0) info.column = props.column;
+	if (typeof props.table === "string" && props.table.length > 0) info.table = props.table;
+	if (typeof props.constraint === "string" && props.constraint.length > 0)
+		info.constraint = props.constraint;
+	if (query.kind === "sql") {
+		info.params = query.params;
+		if (query.paramSpans !== undefined) info.paramSpans = query.paramSpans;
+		if (query.rowSpans !== undefined) info.rowSpans = query.rowSpans;
+		if (query.identSpans !== undefined) info.identSpans = query.identSpans;
+	}
+	return info;
 }
 
 function createPool(config: PostgresConnectionConfig): PgPool {
@@ -159,8 +229,10 @@ class PostgresConnection implements Connection {
 				rowCount: result.rowCount ?? result.rows.length
 			};
 		} catch (cause) {
+			const pgError = extractPgErrorInfo(cause, query);
 			throw new EngineExecutionError(describePgExecutionError(cause), {
-				cause
+				cause,
+				...(pgError !== undefined ? { pgError } : {})
 			});
 		} finally {
 			client.release();

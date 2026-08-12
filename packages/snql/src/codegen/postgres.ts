@@ -10,7 +10,8 @@ import type {
 	SqlValue
 } from "../ir/plan";
 import { isSqlDecimal, linearize } from "../ir/plan";
-import type { Mapper, NativeQuery } from "./mapper";
+import type { Span } from "../lexer/token";
+import type { Mapper, NativeQuery, SerializedSpan } from "./mapper";
 
 /**
  * Mapper Postgres — pur, génère SQL + paramètres bindés ($1, $2…).
@@ -29,12 +30,35 @@ export const postgresMapper: Mapper = {
 	map(plan: LogicalPlan): NativeQuery {
 		const params = new ParamList();
 		const text = renderPlan(plan, params);
-		return { engine: "postgres", kind: "sql", text, params: params.all() };
+		return {
+			engine: "postgres",
+			kind: "sql",
+			text,
+			params: params.all(),
+			paramSpans: params.allSpans()
+		};
 	},
 	mapMutation(plan: MutationPlan): NativeQuery {
 		const params = new ParamList();
 		const text = renderMutation(plan, params);
-		return { engine: "postgres", kind: "sql", text, params: params.all() };
+		// Phase 3c : les rowSpans des INSERT sont exposés sur la SqlQuery pour que
+		// le pgError puisse cibler une row source précise sur unique/FK violation.
+		const rowSpans =
+			plan.op === "insert" && plan.rowSpans !== undefined
+				? plan.rowSpans.map((span) =>
+						span !== undefined
+							? ([span.start.offset, span.end.offset - span.start.offset] as SerializedSpan)
+							: undefined
+					)
+				: undefined;
+		return {
+			engine: "postgres",
+			kind: "sql",
+			text,
+			params: params.all(),
+			paramSpans: params.allSpans(),
+			...(rowSpans !== undefined ? { rowSpans } : {})
+		};
 	}
 };
 
@@ -46,10 +70,16 @@ function renderMutation(plan: MutationPlan, params: ParamList): string {
 	switch (plan.op) {
 		case "insert": {
 			const cols = plan.columns.map(quoteIdent).join(", ");
+			// Phase 3c : threader cellSpans[rowIdx][colIdx] au ParamList pour que
+			// chaque `$N` bindé porte le span de son littéral source.
 			const rows = plan.rows
 				.map(
-					(row) =>
-						`(${row.map((value) => renderValue(value, params)).join(", ")})`
+					(row, rowIdx) =>
+						`(${row
+							.map((value, colIdx) =>
+								renderValue(value, params, plan.cellSpans?.[rowIdx]?.[colIdx])
+							)
+							.join(", ")})`
 				)
 				.join(", ");
 			return `INSERT INTO ${quoteIdent(plan.collection)} (${cols}) VALUES ${rows} RETURNING *`;
@@ -79,8 +109,8 @@ function renderWhere(
 }
 
 /** Valeur littérale d'un INSERT : NULL en clair, le reste paramétré. */
-function renderValue(value: SqlValue, params: ParamList): string {
-	return value === null ? "NULL" : params.add(value);
+function renderValue(value: SqlValue, params: ParamList, span?: Span): string {
+	return value === null ? "NULL" : params.add(value, span);
 }
 
 // Phases = ordre d'évaluation logique d'un SELECT. Une étape ne peut rejoindre le
@@ -334,19 +364,29 @@ function qualify(ref: string, path: readonly string[]): string {
 
 class ParamList {
 	private readonly values: unknown[] = [];
+	private readonly spans: (SerializedSpan | undefined)[] = [];
 
-	add(value: SqlValue): string {
+	add(value: SqlValue, span?: Span): string {
 		// Un décimal exact est bindé comme texte : Postgres le caste vers le type
 		// de la colonne (NUMERIC/text/jsonb…) via l'inférence par colonne cible
 		// pour les INSERT/UPDATE/comparaisons. Le cast `::numeric` n'est appliqué
 		// que dans un contexte arithmétique — cf. `renderArithOperand` — sinon
 		// il casse les colonnes non-numeric (`WHERE varchar_col = 1.5` → 42883).
 		this.values.push(isSqlDecimal(value) ? value.raw : value);
+		this.spans.push(
+			span !== undefined
+				? [span.start.offset, span.end.offset - span.start.offset]
+				: undefined
+		);
 		return `$${this.values.length}`;
 	}
 
 	all(): readonly unknown[] {
 		return this.values;
+	}
+
+	allSpans(): readonly (SerializedSpan | undefined)[] {
+		return this.spans;
 	}
 }
 
@@ -363,7 +403,7 @@ const COMPARE_SQL: Readonly<Record<CompareOp, string>> = {
 function renderExpr(expr: PlanExpr, params: ParamList): string {
 	switch (expr.kind) {
 		case "literal":
-			return expr.value === null ? "NULL" : params.add(expr.value);
+			return expr.value === null ? "NULL" : params.add(expr.value, expr.span);
 		case "field":
 			return renderPath(expr.path);
 		case "compare":

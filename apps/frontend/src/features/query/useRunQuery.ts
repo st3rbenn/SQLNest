@@ -34,6 +34,54 @@ export interface QueryResult {
 	readonly written: boolean;
 }
 
+/**
+ * Span source SNQL sérialisé `[start, length]` — aligné sur `SerializedSpan`
+ * dans `packages/snql/src/codegen/mapper.ts`. Dupliqué ici pour ne pas
+ * dépendre de `@sqlnest/snql` côté frontend (types uniquement).
+ */
+export type SerializedSpan = readonly [start: number, length: number];
+
+/**
+ * Détail structuré d'une erreur Postgres — aligné sur `PgErrorInfo` dans
+ * `packages/engine/src/errors.ts` et sur le schéma Zod `PgErrorInfoSchema`
+ * du backend. `params` + `paramSpans` sont alignés positionnellement sur
+ * les `$1..$N` du SQL généré : `paramSpans[i]` (si présent) pointe sur le
+ * token SNQL source de `params[i]`.
+ */
+export interface PgErrorInfo {
+	readonly message: string;
+	readonly code?: string;
+	readonly position?: number;
+	readonly detail?: string;
+	readonly hint?: string;
+	readonly column?: string;
+	readonly table?: string;
+	readonly constraint?: string;
+	readonly params?: readonly unknown[];
+	readonly paramSpans?: readonly (SerializedSpan | undefined)[];
+	/** Phase 3c : spans des rows d'un INSERT batch — cible la row fautive. */
+	readonly rowSpans?: readonly (SerializedSpan | undefined)[];
+	/**
+	 * Phase 3b-lite : spans par nom d'ident (col/table/alias). Résout
+	 * `column "X" does not exist` → toutes les positions de X dans la source.
+	 */
+	readonly identSpans?: Readonly<Record<string, readonly SerializedSpan[]>>;
+}
+
+/**
+ * Erreur runtime remontée par le hook `useRunQuery` — enrichit `Error` avec
+ * l'éventuel `pgError` structuré (Phase 3a). Sans `pgError` : erreur transport
+ * ou HTTP non-`pg` (503 pas de tunnel, 500 interne, etc.).
+ */
+export class SnqlRuntimeError extends Error {
+	readonly pgError?: PgErrorInfo;
+	constructor(message: string, pgError?: PgErrorInfo) {
+		super(message);
+		this.name = "SnqlRuntimeError";
+		if (pgError !== undefined) this.pgError = pgError;
+	}
+}
+
 export interface RunQueryInput {
 	readonly connectionId: string;
 	readonly source: string;
@@ -54,9 +102,13 @@ async function runQueryRequest(input: RunQueryInput): Promise<QueryResult> {
 	});
 	const data = (await res.json().catch(() => ({}))) as QueryResult & {
 		message?: string;
+		pgError?: PgErrorInfo;
 	};
 	if (!res.ok) {
-		throw new Error(data.message ?? `Erreur HTTP ${res.status}`);
+		throw new SnqlRuntimeError(
+			data.message ?? `Erreur HTTP ${res.status}`,
+			data.pgError
+		);
 	}
 	return data;
 }

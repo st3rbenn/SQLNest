@@ -34,10 +34,10 @@ import { useConsolePersistence } from "../schema/console/useConsolePersistence";
 import { useSchema } from "../schema/useSchema";
 import { ConsoleHeader } from "./ConsoleHeader";
 import { ConsoleResultsPanel } from "./ConsoleResultsPanel";
-import { SnqlEditor } from "./SnqlEditor";
+import { SnqlEditor, type SnqlEditorHandle } from "./SnqlEditor";
 import { openConsoleInPopout, useIsPopout } from "./usePopoutWindow";
 import { useConsoleTabs } from "./useConsoleTabs";
-import { useRunQuery } from "./useRunQuery";
+import { type SerializedSpan, SnqlRuntimeError, useRunQuery } from "./useRunQuery";
 
 const SPLIT_STORAGE_KEY = "sqlnest.console.editorHeight";
 const SPLIT_MIN_TOP = 120;
@@ -151,6 +151,35 @@ export function ConsolePage({
 
 	const [lastRunAt, setLastRunAt] = useState<number | undefined>(undefined);
 	const [timingMs, setTimingMs] = useState<number | undefined>(undefined);
+	const editorRef = useRef<SnqlEditorHandle>(null);
+
+	// Extrait tous les spans source SNQL du pgError courant → alimente les
+	// squigglies dans l'éditeur. Trois sources :
+	//  - Phase 3a : `paramSpans[N-1]` pour chaque `$N` référencé dans le message.
+	//  - Phase 3b-lite : `identSpans[column]` (toutes les occurrences) quand
+	//    l'erreur pointe une colonne inexistante.
+	//  - Phase 3c : `rowSpans` sur violation unique/FK (SQLSTATE 23xxx).
+	const errorSpans = useMemo<readonly SerializedSpan[]>(() => {
+		const err = runQuery.error;
+		if (!(err instanceof SnqlRuntimeError) || err.pgError === undefined) return [];
+		const pg = err.pgError;
+		const collected: SerializedSpan[] = [];
+		if (pg.paramSpans !== undefined) {
+			for (const s of pg.paramSpans) if (s !== undefined) collected.push(s);
+		}
+		if (pg.column !== undefined) {
+			const spans = pg.identSpans?.[pg.column];
+			if (spans !== undefined) collected.push(...spans);
+		}
+		if (pg.code?.startsWith("23") === true && pg.rowSpans !== undefined) {
+			for (const s of pg.rowSpans) if (s !== undefined) collected.push(s);
+		}
+		return collected;
+	}, [runQuery.error]);
+
+	const onFocusSpan = useCallback((span: SerializedSpan) => {
+		editorRef.current?.focusSpan(span);
+	}, []);
 
 	// Le panel results n'apparaît qu'après la première interaction avec la
 	// query (pending, résultat ou erreur). Avant : l'éditeur prend tout
@@ -301,11 +330,13 @@ export function ConsolePage({
 				>
 					<div style={editorFillStyle}>
 						<SnqlEditor
+							ref={editorRef}
 							value={activeSource}
 							onChange={(v) => tabs.updateSource(activeTabId, v)}
 							onRun={execute}
 							schema={schemaQuery.data ?? null}
 							placeholder="get <table> pick <fields>"
+							errorSpans={errorSpans}
 						/>
 					</div>
 				</div>
@@ -328,6 +359,7 @@ export function ConsolePage({
 							error={runQuery.error}
 							isPending={runQuery.isPending}
 							timingMs={lastRunAt !== undefined ? timingMs : undefined}
+							onFocusSpan={onFocusSpan}
 						/>
 					</>
 				) : null}

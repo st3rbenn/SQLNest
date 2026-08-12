@@ -4,6 +4,8 @@
  * `02 - Architecture/The Hard Version — Algèbre Polyglotte`).
  */
 
+import type { Span } from "../lexer/token";
+
 export type Capability =
 	| "scan"
 	| "filter"
@@ -48,7 +50,17 @@ export type CompareOp = "eq" | "ne" | "lt" | "gt" | "le" | "ge" | "like";
 /** Op arithmétique canonique côté IR — mêmes symboles qu'à la surface. */
 export type ArithOp = "+" | "-" | "*" | "/" | "%";
 
-export type PlanExpr =
+/**
+ * Span source SNQL optionnel porté par chaque node du plan. Utilisé pour
+ * remonter un `$N` d'erreur Postgres (ou un `LINE N position M` — Phase 3b)
+ * jusqu'au token source SNQL exact — l'utilisateur voit son propre code
+ * souligné, pas un byte-offset du SQL généré qu'il n'écrit jamais.
+ *
+ * Optionnel pour ne pas casser les consommateurs qui produisent un
+ * plan sans traçabilité (constructions synthétiques, tests). Peuplé par
+ * le lowering AST → plan quand un span AST source existe.
+ */
+export type PlanExpr = (
 	| { readonly kind: "literal"; readonly value: SqlValue }
 	| { readonly kind: "field"; readonly path: readonly string[] }
 	| {
@@ -85,7 +97,8 @@ export type PlanExpr =
 			readonly kind: "call";
 			readonly name: string;
 			readonly args: readonly PlanExpr[];
-	  };
+	  }
+) & { readonly span?: Span };
 
 /**
  * Champ projeté au niveau IR. Symétrique de [[FieldSelection]] côté surface :
@@ -168,6 +181,13 @@ export type MutationPlan =
 			readonly columns: readonly string[];
 			// Une ligne = un tuple de valeurs aligné sur `columns`.
 			readonly rows: readonly (readonly SqlValue[])[];
+			/**
+			 * Spans source SNQL, arrays parallèles à `rows` (Phase 3c — traçabilité
+			 * pour batch INSERT). Optionnels ; peuvent être présents en partie (ex.
+			 * une row synthétique sans span). Résout unique/FK violation → row source.
+			 */
+			readonly rowSpans?: readonly (Span | undefined)[];
+			readonly cellSpans?: readonly (readonly (Span | undefined)[])[];
 	  }
 	| {
 			readonly op: "update";

@@ -51,6 +51,7 @@ export {
 	type EngineErrorCode,
 	EngineExecutionError,
 	EngineIntrospectionError,
+	type PgErrorInfo,
 	UnknownEngineError
 } from "./errors";
 export { mongoAdapter } from "./mongo/adapter";

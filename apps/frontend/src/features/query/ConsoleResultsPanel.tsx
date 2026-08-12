@@ -28,7 +28,7 @@ import { ErrorBlock } from "./ErrorBlock";
 import { ResultsGraphPlaceholder } from "./ResultsGraphPlaceholder";
 import { ResultsJsonView } from "./ResultsJsonView";
 import { ResultsTable } from "./ResultsTable";
-import type { QueryResult } from "./useRunQuery";
+import type { QueryResult, SerializedSpan } from "./useRunQuery";
 
 export type ResultsViewMode = "table" | "json" | "graph";
 
@@ -127,12 +127,15 @@ export function ConsoleResultsPanel({
 	result,
 	error,
 	isPending,
-	timingMs
+	timingMs,
+	onFocusSpan
 }: {
 	readonly result: QueryResult | undefined;
 	readonly error: Error | null;
 	readonly isPending: boolean;
 	readonly timingMs: number | undefined;
+	/** Câble optionnel vers l'éditeur (Phase 3a — jump-to-span depuis ErrorBlock). */
+	readonly onFocusSpan?: (span: SerializedSpan) => void;
 }): React.ReactNode {
 	const [viewMode, setViewMode] = useLocalStorage<ResultsViewMode>({
 		key: VIEW_STORAGE_KEY,
@@ -213,7 +216,12 @@ export function ConsoleResultsPanel({
 				) : null}
 			</div>
 
-			{error ? <ErrorBlock error={error} /> : null}
+			{/* Bloc erreur riche (Phase 3a) : chips $N cliquables résolus via
+			    `pgError.paramSpans`, col/table cliquables via `identSpans`, jump
+			    vers le span source SNQL dans l'éditeur (`onFocusSpan`). Quand une
+			    erreur est présente on masque toolbar+results en dessous (pas de
+			    faux « 0 lignes » sur écran d'erreur). */}
+			{error ? <ErrorBlock error={error} onFocusSpan={onFocusSpan} /> : null}
 
 			{error ? null : (
 				<>
