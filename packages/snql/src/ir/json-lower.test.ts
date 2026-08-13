@@ -137,7 +137,7 @@ describe("bool_bare_predicate cross-engine", () => {
 
 describe("reserved lexemes JSON sprint 4", () => {
 	const reserved = [
-		"json_contains",
+		// json_contains DÉBLOQUÉ sprint object-literals (PG only) — retiré des reserved.
 		"json_set",
 		"json_delete",
 		"json_merge",

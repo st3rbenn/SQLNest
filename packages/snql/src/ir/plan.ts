@@ -110,7 +110,28 @@ export type PlanExpr = (
 			readonly target: CastTarget;
 			readonly operand: PlanExpr;
 	  }
+	// Object literal (`{n: 42, k: r.name}`). Retour statique `json`. Codegen PG
+	// : `jsonb_build_object($1, $2::TYPE, ...)` avec keys+values bindées.
+	// Codegen Mongo : BSON natif via `toExprOperand` récursif. Pas de keyQuoted
+	// en IR (info surface pour formatter uniquement).
+	| {
+			readonly kind: "object";
+			readonly entries: readonly PlanObjectEntry[];
+	  }
+	// Array literal (`[10, 20, 30]`). Retour statique `json`. Codegen PG :
+	// `jsonb_build_array($1::TYPE, ...)`. Codegen Mongo : BSON array natif.
+	// Utilisable dans une value d'insert via widening PlanRowValue.
+	| {
+			readonly kind: "array";
+			readonly items: readonly PlanExpr[];
+	  }
 ) & { readonly span?: Span };
+
+/** Entry d'un `PlanExpr.object` — key canonique + value lowered. */
+export interface PlanObjectEntry {
+	readonly key: string;
+	readonly value: PlanExpr;
+}
 
 /**
  * Champ projeté au niveau IR. Symétrique de [[FieldSelection]] côté surface :
@@ -182,6 +203,20 @@ export interface PlanColumnValue {
 }
 
 /**
+ * Cellule d'une row d'insert. **Discriminant** pour widening :
+ *  - `scalar` : valeur SqlValue (comportement historique — literal simple).
+ *  - `jsonLiteral` : object/array literal composite → PlanExpr rendu au
+ *    codegen (`jsonb_build_object` / BSON récursif). Débloque `add {meta:
+ *    {tier: "gold"}} into t` sans passer par le workaround `raw` déguisé.
+ *
+ * SqlValue reste inchangé pour éviter l'invasion transversale (join keys,
+ * compareValues KV, isSqlDecimal — tous scalaires).
+ */
+export type PlanRowValue =
+	| { readonly kind: "scalar"; readonly value: SqlValue }
+	| { readonly kind: "jsonLiteral"; readonly expr: PlanExpr };
+
+/**
  * Plan de **mutation** (écriture). Contrairement au [[LogicalPlan]] de lecture,
  * ce n'est pas une chaîne d'opérateurs linéaire : chaque mutation porte sa cible,
  * son prédicat, ses valeurs. Exige la capacité `mutate`.
@@ -191,8 +226,9 @@ export type MutationPlan =
 			readonly op: "insert";
 			readonly collection: string;
 			readonly columns: readonly string[];
-			// Une ligne = un tuple de valeurs aligné sur `columns`.
-			readonly rows: readonly (readonly SqlValue[])[];
+			// Une ligne = un tuple de valeurs aligné sur `columns`. Sprint object-literals :
+			// widened en PlanRowValue (scalar | jsonLiteral) pour accepter les composites.
+			readonly rows: readonly (readonly PlanRowValue[])[];
 			/**
 			 * Spans source SNQL, arrays parallèles à `rows` (Phase 3c — traçabilité
 			 * pour batch INSERT). Optionnels ; peuvent être présents en partie (ex.

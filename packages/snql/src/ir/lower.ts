@@ -21,6 +21,7 @@ import type {
 	MutationPlan,
 	PlanExpr,
 	PlanProjectField,
+	PlanRowValue,
 	PlanSortKey,
 	SqlValue
 } from "./plan";
@@ -287,6 +288,13 @@ function collectExprFieldsWithSpans(
 		case "cast":
 			collectExprFieldsWithSpans(expr.operand, out);
 			return;
+		case "object":
+			for (const entry of expr.entries)
+				collectExprFieldsWithSpans(entry.value, out);
+			return;
+		case "array":
+			for (const item of expr.items) collectExprFieldsWithSpans(item, out);
+			return;
 	}
 }
 
@@ -456,6 +464,14 @@ function assertNoCallInWrite(expr: PlanExpr): void {
 			// La récursion attrape un `call` sous-jacent (ex: cast(upper(x) as text)).
 			assertNoCallInWrite(expr.operand);
 			return;
+		case "object":
+			// Object literal passe (structure statique) — récurse sur chaque value
+			// pour attraper un call non-safe imbriqué.
+			for (const entry of expr.entries) assertNoCallInWrite(entry.value);
+			return;
+		case "array":
+			for (const item of expr.items) assertNoCallInWrite(item);
+			return;
 	}
 }
 
@@ -532,15 +548,26 @@ function lowerInsert(statement: InsertStatement): MutationPlan {
 	};
 }
 
-/** Une valeur d'insertion doit être un littéral (nombre, chaîne, booléen, null). */
-function literalOf(value: Expr, column: string): SqlValue {
-	if (value.type !== "literal") {
-		throw new SnqlError(
-			`La valeur de '${column}' doit être un littéral (nombre, chaîne, booléen, null)`,
-			"lower_insert_non_literal"
-		);
+/**
+ * Une valeur d'insertion accepte : un littéral scalaire, OU un object/array
+ * literal (composite JSON). Le widening `PlanRowValue` sépare les 2 cas pour
+ * dispatcher au codegen (`params.add(scalar)` vs `renderExpr(jsonLiteral)`).
+ * Les autres kinds (field, arith, call, cast) restent refusés — un insert
+ * n'est pas un select.
+ */
+function literalOf(value: Expr, column: string): PlanRowValue {
+	if (value.type === "literal") {
+		return { kind: "scalar", value: literalToValue(value.value) };
 	}
-	return literalToValue(value.value);
+	if (value.type === "object" || value.type === "array") {
+		// Composite JSON literal — lower récursivement pour produire PlanExpr,
+		// que le codegen rendra via jsonb_build_object / BSON natif.
+		return { kind: "jsonLiteral", expr: lowerExpr(value) };
+	}
+	throw new SnqlError(
+		`La valeur de '${column}' doit être un littéral scalaire ou un object/array literal`,
+		"lower_insert_non_literal"
+	);
 }
 
 /**
@@ -648,6 +675,12 @@ function collectExprFields(expr: Expr, out: (readonly string[])[]): void {
 			return;
 		case "cast":
 			collectExprFields(expr.operand, out);
+			return;
+		case "object":
+			for (const entry of expr.entries) collectExprFields(entry.value, out);
+			return;
+		case "array":
+			for (const item of expr.items) collectExprFields(item, out);
 			return;
 	}
 }
@@ -926,6 +959,21 @@ function lowerExpr(expr: Expr): PlanExpr {
 				span: operand.span ?? expr.span
 			};
 		}
+		case "object":
+			return {
+				kind: "object",
+				entries: expr.entries.map((e) => ({
+					key: e.key,
+					value: lowerExpr(e.value)
+				})),
+				span: expr.span
+			};
+		case "array":
+			return {
+				kind: "array",
+				items: expr.items.map(lowerExpr),
+				span: expr.span
+			};
 	}
 }
 

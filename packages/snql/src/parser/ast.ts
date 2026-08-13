@@ -100,7 +100,42 @@ export type Expr =
 			readonly target: CastTarget;
 			readonly targetSpan: Span;
 			readonly span: Span;
+	  }
+	// Object literal en position d'expression : `{n: "hello", s: 42, arr: [1, 2]}`.
+	// Retour statique type `json`. Composition naturelle avec json_get_text /
+	// json_contains / cast interdit (planner refus). Débloque le workaround
+	// `cast("{\\"n\\":1}" as json)` (raw JSON déguisé, violait "raw JAMAIS fallback").
+	| {
+			readonly type: "object";
+			readonly entries: readonly ObjectEntry[];
+			readonly span: Span;
+	  }
+	// Array literal en position d'expression : `[10, 20, 30]` ou `[r.id, r.name]`.
+	// Retour statique `json`. Réutilisable dans une value d'insert (widening
+	// PlanRowValue). Expr.in reste dédié pour `where x in [...]` (garde le
+	// fast-path indexable dot-notation Mongo).
+	| {
+			readonly type: "array";
+			readonly items: readonly Expr[];
+			readonly span: Span;
 	  };
+
+/**
+ * Une entrée d'object literal — `key: value` avec key en ident (bare) ou
+ * string (quoted). `keyQuoted` permet le round-trip fidèle au formatter.
+ * Réutilisable comme shape unifié pour parseInsertField (voir wrapper dans
+ * parser.ts qui produit InsertField {column, value, span} depuis ObjectEntry).
+ */
+export interface ObjectEntry {
+	readonly key: string;
+	readonly keyQuoted: boolean;
+	readonly value: Expr;
+	readonly keySpan: Span;
+	readonly span: Span;
+}
+
+/** Profondeur max d'imbrication object/array — protection stack overflow parser. */
+export const MAX_LITERAL_DEPTH = 64;
 
 /**
  * Élément d'un `pick`. Soit un chemin de champ simple (`u.name`, `id`), soit une

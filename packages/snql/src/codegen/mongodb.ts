@@ -87,7 +87,17 @@ function renderDocuments(
 		plan.columns.forEach((column, index) => {
 			// `row[index]` est garanti présent par le contrôle d'arité ci-dessus ;
 			// `?? null` satisfait noUncheckedIndexedAccess sans masquer d'erreur.
-			doc[column] = bsonStoreValue(row[index] ?? null);
+			const cell = row[index];
+			if (cell === undefined) {
+				doc[column] = null;
+				return;
+			}
+			// Sprint object-literals : dispatch scalar (bsonStoreValue historique)
+			// vs jsonLiteral (composite → BSON récursif via toExprOperand).
+			doc[column] =
+				cell.kind === "scalar"
+					? bsonStoreValue(cell.value)
+					: toExprOperand(cell.expr, undefined);
 		});
 		return doc;
 	});
@@ -318,6 +328,15 @@ function renderMatch(
 				"Prédicat non supporté par le codegen Mongo (attendu une comparaison)",
 				"codegen_mongo_predicate"
 			);
+		case "object":
+		case "array":
+			// Un object/array literal seul n'est pas booléen — le lower
+			// (assertNoBareCallPredicate) devrait avoir rejeté avant.
+			throw new SnqlError(
+				`Un ${expr.kind} literal n'est pas un prédicat — compare-le avec une valeur (ex: json_contains)`,
+				"codegen_mongo_predicate",
+				expr.span
+			);
 	}
 }
 
@@ -387,6 +406,13 @@ function negateMatch(
 			throw new SnqlError(
 				"Négation d'un prédicat non supporté par le codegen Mongo",
 				"codegen_mongo_predicate"
+			);
+		case "object":
+		case "array":
+			throw new SnqlError(
+				`Négation d'un ${expr.kind} literal non supportée (pas un prédicat)`,
+				"codegen_mongo_predicate",
+				expr.span
 			);
 	}
 }
@@ -658,6 +684,20 @@ function toExprOperand(expr: PlanExpr, alias: string | undefined): unknown {
 				to: MONGO_CAST_TYPE[expr.target as Exclude<CastTarget, "json">]
 			}
 		};
+	}
+	if (expr.kind === "object") {
+		// BSON natif — chaque value passe par toExprOperand récursif qui applique
+		// $literal wrap sur strings $-préfixées (infra sprint 1). Les guards Mongo
+		// (dollar/dot keys) sont refusés au planner AVANT d'arriver ici.
+		const out: Record<string, unknown> = {};
+		for (const entry of expr.entries) {
+			out[entry.key] = toExprOperand(entry.value, alias);
+		}
+		return out;
+	}
+	if (expr.kind === "array") {
+		// BSON array natif — chaque item passe par toExprOperand récursif.
+		return expr.items.map((item) => toExprOperand(item, alias));
 	}
 	throw new SnqlError(
 		"Opérande non supporté dans une comparaison $expr Mongo",

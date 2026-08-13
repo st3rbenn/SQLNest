@@ -128,6 +128,19 @@ function evalValue(expr: PlanExpr, row: Row): unknown {
 		}
 		return castValue(expr.target, inner);
 	}
+	// Sprint object-literals : évaluation récursive AVANT le fallback evalBool
+	// pour éviter une récursion infinie (evalBool → evalValue → evalBool sur un
+	// object).
+	if (expr.kind === "object") {
+		const out: Record<string, unknown> = {};
+		for (const entry of expr.entries) {
+			out[entry.key] = evalValue(entry.value, row);
+		}
+		return out;
+	}
+	if (expr.kind === "array") {
+		return expr.items.map((item) => evalValue(item, row));
+	}
 	// Expression booléenne utilisée comme valeur.
 	return evalBool(expr, row);
 }
@@ -234,6 +247,8 @@ function evalBool(expr: PlanExpr, row: Row): boolean | null {
 		case "arith":
 		case "call":
 		case "cast":
+		case "object":
+		case "array":
 			return coerceBool(evalValue(expr, row));
 	}
 }
@@ -428,9 +443,51 @@ function compareValues(a: unknown, b: unknown): number {
 	if (typeof a === "boolean" && typeof b === "boolean") {
 		return a === b ? 0 : a ? 1 : -1;
 	}
+	// Sprint object-literals : deep equal ordre-insensitive pour object/array
+	// literals cross-engine (canoniquement PG jsonb réordonne, Mongo compare
+	// strict — SNQL harmonise sur ordre-insensitive pour éviter le bug
+	// silencieux catastrophique `remove where meta = {n:1}` qui supprime tout
+	// via `String(obj) === '[object Object]'` du fallback).
+	if (isPlainObject(a) && isPlainObject(b)) {
+		return deepEqualObjects(a, b) ? 0 : 1;
+	}
+	if (Array.isArray(a) && Array.isArray(b)) {
+		return deepEqualArrays(a, b) ? 0 : 1;
+	}
 	const sa = String(a);
 	const sb = String(b);
 	return sa < sb ? -1 : sa > sb ? 1 : 0;
+}
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+	return (
+		typeof v === "object" &&
+		v !== null &&
+		!Array.isArray(v) &&
+		Object.getPrototypeOf(v) === Object.prototype
+	);
+}
+
+function deepEqualObjects(
+	a: Record<string, unknown>,
+	b: Record<string, unknown>
+): boolean {
+	const aKeys = Object.keys(a);
+	const bKeys = Object.keys(b);
+	if (aKeys.length !== bKeys.length) return false;
+	for (const key of aKeys) {
+		if (!Object.hasOwn(b, key)) return false;
+		if (compareValues(a[key], b[key]) !== 0) return false;
+	}
+	return true;
+}
+
+function deepEqualArrays(a: readonly unknown[], b: readonly unknown[]): boolean {
+	if (a.length !== b.length) return false;
+	for (let i = 0; i < a.length; i += 1) {
+		if (compareValues(a[i], b[i]) !== 0) return false;
+	}
+	return true;
 }
 
 const LIKE_SPECIAL = /[.*+?^${}()|[\]\\]/;

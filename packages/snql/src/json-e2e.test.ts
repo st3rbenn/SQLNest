@@ -127,7 +127,7 @@ describe("sprint 4 parity — negation collapse via hoist mirror", () => {
 });
 
 describe("sprint 4 parity — reserved cross-engine (même erreur)", () => {
-	const reserved = ["json_contains", "json_set", "json_path", "json_array_length"];
+	const reserved = ["json_set", "json_path", "json_array_length"];
 	for (const name of reserved) {
 		it(`${name} → lower_call_reserved cross-engine`, () => {
 			for (const engine of ["postgres", "mongodb"] as const) {

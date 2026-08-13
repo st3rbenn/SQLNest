@@ -51,6 +51,7 @@ import {
 	pgDatePart,
 	pgDateTrunc,
 	pgFloor,
+	pgJsonContains,
 	pgJsonGet,
 	pgJsonGetText,
 	pgJsonHasKey,
@@ -301,13 +302,21 @@ const BUILTINS: readonly FunctionEntry[] = [
 		engines: { postgres: pgJsonTypeof, mongodb: mongoJsonTypeof }
 	},
 
-	// ─── sprint 4 : reserved (sprint 5+) ──────────────────────────────────
+	// ─── sprint object-literals : json_contains débloqué PG only ──────────
 	{
 		name: "json_contains",
-		kind: "reserved",
-		arity: { min: 0, max: null },
-		engines: {}
+		kind: "scalar",
+		arity: { min: 2, max: 2 },
+		// args non typés : subdoc peut être object/array literal, doc column jsonb.
+		writeNullBehavior: "propagate",
+		// Pas de mongoMatchHoist : Mongo n'a pas d'opérateur @> natif, l'émulation
+		// via $expr $mergeObjects est coûteuse et incomplète (subset arrays).
+		// Reporté sprint 6+ ; côté Mongo, forEngine renvoie no renderer →
+		// planner_unsupported_function avec message actionnable.
+		engines: { postgres: pgJsonContains }
 	},
+
+	// ─── sprint 4 : reserved (sprint 5+) ──────────────────────────────────
 	{
 		name: "json_set",
 		kind: "reserved",

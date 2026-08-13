@@ -325,3 +325,15 @@ export const pgJsonTypeof: EngineRenderer = (args, ctx) => {
 	const doc = ctx.renderExpr(args[0]) as string;
 	return `jsonb_typeof(${doc})`;
 };
+
+/**
+ * `json_contains(doc, subdoc)` → `((doc)::jsonb @> (subdoc)::jsonb)`.
+ * Débloqué sprint object-literals : le subdoc peut désormais être un object
+ * literal SNQL natif (`{archived: true}`) au lieu du workaround
+ * `cast("{...}" as json)` (raw JSON déguisé). Mongo reste `reserved` sprint 6.
+ */
+export const pgJsonContains: EngineRenderer = (args, ctx) => {
+	const doc = ctx.renderExpr(args[0]) as string;
+	const subdoc = ctx.renderExpr(args[1]) as string;
+	return `((${doc})::jsonb @> (${subdoc})::jsonb)`;
+};

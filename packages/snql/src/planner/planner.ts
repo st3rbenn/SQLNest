@@ -203,6 +203,12 @@ function visitExprCalls(expr: PlanExpr, visit: (name: string) => void): void {
 			// être visité (ex: cast(pg_only_fn(x) as text) sur mongo → détecte pg_only_fn).
 			visitExprCalls(expr.operand, visit);
 			return;
+		case "object":
+			for (const entry of expr.entries) visitExprCalls(entry.value, visit);
+			return;
+		case "array":
+			for (const item of expr.items) visitExprCalls(item, visit);
+			return;
 	}
 }
 
@@ -289,6 +295,12 @@ function visitExprCasts(
 			visitExprCasts(expr.target, visit);
 			for (const v of expr.values) visitExprCasts(v, visit);
 			return;
+		case "object":
+			for (const entry of expr.entries) visitExprCasts(entry.value, visit);
+			return;
+		case "array":
+			for (const item of expr.items) visitExprCasts(item, visit);
+			return;
 	}
 }
 
@@ -356,13 +368,73 @@ function toCompensationOp(op: LogicalPlan): CompensationOp {
  * SQL invalides (42883) car PG n'a pas de cast direct jsonb→primitive ni
  * d'opérateur jsonb=text. Redirection actionnable vers `json_get_text`.
  * Mongo n'a pas ce problème (dot notation / $expr sont naturellement typés).
+ *
+ * Sprint object-literals ajoute 3 guards :
+ *  - `cast({...} as json)` : redondant, l'object literal est déjà de type json
+ *  - `cast({...} as text)` : sérialisation non supportée v1 (json_stringify sprint 6+)
+ *  - `cast({...} as int|float|bool|date|timestamp)` : impossible, utilise json_get_*
+ *  - Refus `where col = {...}` sur Mongo (divergence order-sensitivity)
+ *  - Refus `arith` sur object/array literal (opération non définie)
  */
 function assertJsonPredicatesPg(
 	plan: LogicalPlan,
 	capabilities: Capabilities
 ): void {
-	if (capabilities.engine !== "postgres") return;
 	visitPlanExprs(plan, (expr) => {
+		// Sprint object-literals — guards cast literal (cross-engine)
+		if (expr.kind === "cast") {
+			const operandKind = expr.operand.kind;
+			if (operandKind === "object" || operandKind === "array") {
+				if (expr.target === "json") {
+					throw new SnqlError(
+						`Un ${operandKind} literal est déjà de type json — retire cast()`,
+						"plan_cast_literal_redundant",
+						expr.span
+					);
+				}
+				if (expr.target === "text") {
+					throw new SnqlError(
+						`Sérialisation d'un ${operandKind} literal en text non supportée v1 — attends json_stringify() (sprint 6+)`,
+						"plan_cast_literal_to_text",
+						expr.span
+					);
+				}
+				throw new SnqlError(
+					`Un ${operandKind} literal ne peut pas être cast en ${expr.target} — utilise json_get_*() pour extraire un scalaire`,
+					"plan_cast_literal_to_scalar",
+					expr.span
+				);
+			}
+		}
+		// Sprint object-literals — arith avec object/array literal
+		if (
+			expr.kind === "arith" &&
+			(expr.left.kind === "object" ||
+				expr.left.kind === "array" ||
+				expr.right.kind === "object" ||
+				expr.right.kind === "array")
+		) {
+			throw new SnqlError(
+				"Opération arithmétique avec un object/array literal non définie — utilise json_merge (sprint 6+)",
+				"lower_arith_object_literal",
+				expr.span
+			);
+		}
+		// Sprint object-literals — Mongo refuse where col = {...} (divergence)
+		if (
+			capabilities.engine === "mongodb" &&
+			expr.kind === "compare" &&
+			(expr.op === "eq" || expr.op === "ne") &&
+			(expr.right.kind === "object" || expr.right.kind === "array")
+		) {
+			throw new SnqlError(
+				`Comparaison directe avec un ${expr.right.kind} literal non supportée sur Mongo (divergence order-sensitivity) — utilise json_contains (sprint 6)`,
+				"plan_mongo_compare_object_literal_unsupported",
+				expr.right.span
+			);
+		}
+		// Sprint 4 guards existants — PG only
+		if (capabilities.engine !== "postgres") return;
 		// Cas 1 : cast(json_get(...) as <primitive>) → planner_cast_from_jsonb_unsupported
 		if (
 			expr.kind === "cast" &&
@@ -445,6 +517,12 @@ function visitExprsIn(expr: PlanExpr, visit: (e: PlanExpr) => void): void {
 		case "in":
 			visitExprsIn(expr.target, visit);
 			for (const v of expr.values) visitExprsIn(v, visit);
+			return;
+		case "object":
+			for (const entry of expr.entries) visitExprsIn(entry.value, visit);
+			return;
+		case "array":
+			for (const item of expr.items) visitExprsIn(item, visit);
 			return;
 	}
 }

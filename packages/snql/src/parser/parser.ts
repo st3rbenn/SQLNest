@@ -17,7 +17,7 @@ import type {
 	UpdateStatement
 } from "./ast";
 import { TokenCursor } from "./cursor";
-import { parseExpression, parseFieldPath } from "./expression";
+import { parseExpression, parseFieldPath, parseKeyValueEntry } from "./expression";
 
 /** Mots-clés de stage d'un select, dans l'ordre canonique imposé. */
 const SELECT_STAGE_ORDER = ["with", "where", "sort", "pick", "limit"] as const;
@@ -113,11 +113,37 @@ function parseInsert(cursor: TokenCursor, verbTok: Token): InsertStatement {
 function parseDocument(cursor: TokenCursor): InsertRow {
 	const open = cursor.expect("lbrace", "'{' pour ouvrir un document");
 	const fields: InsertField[] = [];
+	const seenKeys = new Set<string>();
 	if (cursor.peek().kind !== "rbrace") {
-		fields.push(parseInsertField(cursor));
-		while (cursor.peek().kind === "comma") {
-			cursor.next();
-			fields.push(parseInsertField(cursor));
+		for (;;) {
+			// Réutilise le helper commun avec object literal — même shape parser
+			// (key:value + keywords en bare key + span propagé). On mappe ObjectEntry
+			// → InsertField {column, value, span} pour préserver le contrat legacy.
+			const entry = parseKeyValueEntry(cursor, 0);
+			if (seenKeys.has(entry.key)) {
+				throw new SnqlError(
+					`Clé dupliquée '${entry.key}' dans le document`,
+					"parse_object_literal_duplicate_key",
+					entry.keySpan
+				);
+			}
+			seenKeys.add(entry.key);
+			fields.push({
+				column: entry.key,
+				value: entry.value,
+				span: entry.span
+			});
+			const next = cursor.peek();
+			if (next.kind === "comma") {
+				cursor.next();
+				continue;
+			}
+			if (next.kind === "rbrace") break;
+			throw new SnqlError(
+				"',' ou '}' attendu",
+				"parse_object_literal_close_expected",
+				next.span
+			);
 		}
 	}
 	const close = cursor.expect("rbrace", "'}' pour fermer le document");
@@ -130,33 +156,6 @@ function parseDocument(cursor: TokenCursor): InsertRow {
 		);
 	}
 	return { fields, span };
-}
-
-function parseInsertField(cursor: TokenCursor): InsertField {
-	const key = cursor.peek();
-	if (key.kind !== "ident" && key.kind !== "string") {
-		throw new SnqlError(
-			"Clé de document attendue (identifiant ou chaîne)",
-			"parse_insert_key",
-			key.span
-		);
-	}
-	cursor.next();
-	const colon = cursor.peek();
-	if (colon.kind !== "colon") {
-		throw new SnqlError(
-			"':' attendu après la clé du document",
-			"parse_insert_colon",
-			colon.span
-		);
-	}
-	cursor.next();
-	const value = parseExpression(cursor);
-	return {
-		column: key.value,
-		value,
-		span: { start: key.span.start, end: value.span.end }
-	};
 }
 
 function parseSelect(cursor: TokenCursor, verbTok: Token): Query {

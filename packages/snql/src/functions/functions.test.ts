@@ -52,10 +52,11 @@ describe("call node — registry + arity", () => {
 		);
 	});
 
-	it("forEngine expose les fonctions supportées par engine (25 mappées + 9 reserved sans engine)", () => {
-		// 8 sprint 1 + 13 sprint 3 + 4 sprint 4 mappées = 25 ; 9 reserved
-		// (regex_replace + 8 sprint 4) n'ont pas de renderer → absents.
-		expect(SNQL_FUNCTIONS.forEngine("postgres").size).toBe(25);
+	it("forEngine expose les fonctions supportées par engine (26 PG / 25 Mongo — json_contains PG only sprint object-literals)", () => {
+		// 8 sprint 1 + 13 sprint 3 + 4 sprint 4 = 25 mappées cross-engine.
+		// Sprint object-literals débloque json_contains PG only (+1 PG) — Mongo
+		// reste reporté sprint 6 (émulation $mergeObjects/$eq complexe).
+		expect(SNQL_FUNCTIONS.forEngine("postgres").size).toBe(26);
 		expect(SNQL_FUNCTIONS.forEngine("mongodb").size).toBe(25);
 		expect(SNQL_FUNCTIONS.forEngine("kv").size).toBe(0);
 	});

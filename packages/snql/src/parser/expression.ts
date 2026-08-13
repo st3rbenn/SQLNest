@@ -1,7 +1,13 @@
 import { SnqlError } from "../diagnostics";
 import type { Span, Token, TokenKind } from "../lexer/token";
-import { CAST_TARGETS } from "./ast";
-import type { ArithOperator, CastTarget, CompareOperator, Expr } from "./ast";
+import { CAST_TARGETS, MAX_LITERAL_DEPTH } from "./ast";
+import type {
+	ArithOperator,
+	CastTarget,
+	CompareOperator,
+	Expr,
+	ObjectEntry
+} from "./ast";
 import type { TokenCursor } from "./cursor";
 
 const COMPARE_OPS: ReadonlySet<string> = new Set([
@@ -134,6 +140,15 @@ function parsePrefix(cursor: TokenCursor): Expr {
 		const inner = parseExpr(cursor, 0);
 		cursor.expect("rparen", "')'");
 		return inner;
+	}
+	// Object literal en position d'expression (sprint object-literals).
+	if (tok.kind === "lbrace") {
+		return parseObjectLiteral(cursor, 0);
+	}
+	// Array literal en position d'expression. `where x in [...]` reste géré par
+	// parseInList (Expr.in dédié pour le fast-path indexable Mongo).
+	if (tok.kind === "lbracket") {
+		return parseArrayLiteral(cursor, 0);
 	}
 	if (tok.kind === "number") {
 		cursor.next();
@@ -343,4 +358,145 @@ function describe(tok: Token): string {
 		return "la fin de l'entrée";
 	}
 	return `'${tok.value}'`;
+}
+
+/**
+ * Parse un object literal `{k: v, k: v, ...}` en position d'expression.
+ * Autorise vide `{}`. Refuse : dup keys, depth > MAX_LITERAL_DEPTH,
+ * clé non-ident/keyword/string. Réutilise `parseKeyValueEntry` — même
+ * helper que côté insert (via wrapper dans parser.ts) pour DRY.
+ */
+export function parseObjectLiteral(cursor: TokenCursor, depth: number): Expr {
+	if (depth >= MAX_LITERAL_DEPTH) {
+		throw new SnqlError(
+			`Profondeur d'imbrication object/array > ${MAX_LITERAL_DEPTH}`,
+			"parse_object_literal_depth_exceeded",
+			cursor.peek().span
+		);
+	}
+	const open = cursor.expect("lbrace", "'{' pour ouvrir un object literal");
+	const entries: ObjectEntry[] = [];
+	const seenKeys = new Set<string>();
+	if (cursor.peek().kind !== "rbrace") {
+		for (;;) {
+			const entry = parseKeyValueEntry(cursor, depth + 1);
+			if (seenKeys.has(entry.key)) {
+				throw new SnqlError(
+					`Clé dupliquée '${entry.key}' dans l'object literal`,
+					"parse_object_literal_duplicate_key",
+					entry.keySpan
+				);
+			}
+			seenKeys.add(entry.key);
+			entries.push(entry);
+			const next = cursor.peek();
+			if (next.kind === "comma") {
+				cursor.next();
+				continue;
+			}
+			if (next.kind === "rbrace") {
+				break;
+			}
+			throw new SnqlError(
+				`',' ou '}' attendu, trouvé ${describe(next)}`,
+				"parse_object_literal_close_expected",
+				next.span
+			);
+		}
+	}
+	const close = cursor.expect("rbrace", "'}' pour fermer l'object literal");
+	return { type: "object", entries, span: joinSpan(open.span, close.span) };
+}
+
+/**
+ * Parse `key: value` — key ∈ {ident, keyword, string}. Export commun pour
+ * parseInsertField (parser.ts wrapper produit InsertField {column, value}) et
+ * parseObjectLiteral (produit ObjectEntry {key, keyQuoted, value, keySpan}).
+ * Keywords acceptés en bare key (ex: `{from: 1, group: 2}`) — désambigüité
+ * par position lbrace..colon (aucune ambiguïté avec expression Pratt).
+ */
+export function parseKeyValueEntry(
+	cursor: TokenCursor,
+	depth: number
+): ObjectEntry {
+	const key = cursor.peek();
+	if (
+		key.kind !== "ident" &&
+		key.kind !== "keyword" &&
+		key.kind !== "string"
+	) {
+		throw new SnqlError(
+			`Clé attendue (identifiant, keyword ou string), trouvé ${describe(key)}`,
+			"parse_object_literal_key_expected",
+			key.span
+		);
+	}
+	cursor.next();
+	const colon = cursor.peek();
+	if (colon.kind !== "colon") {
+		throw new SnqlError(
+			`':' attendu après la clé '${key.value}'`,
+			"parse_object_literal_colon_expected",
+			colon.span
+		);
+	}
+	cursor.next();
+	// Une value peut être object/array nested — parseExpr → parsePrefix
+	// redispatch via lbrace/lbracket avec depth+1 (protection stack).
+	const value = parseValueWithDepth(cursor, depth);
+	return {
+		key: key.value,
+		keyQuoted: key.kind === "string",
+		value,
+		keySpan: key.span,
+		span: joinSpan(key.span, value.span)
+	};
+}
+
+/**
+ * Parse une expression, mais si c'est un object/array literal, force le
+ * `depth` transmis pour la protection contre stack overflow.
+ */
+function parseValueWithDepth(cursor: TokenCursor, depth: number): Expr {
+	const tok = cursor.peek();
+	if (tok.kind === "lbrace") return parseObjectLiteral(cursor, depth);
+	if (tok.kind === "lbracket") return parseArrayLiteral(cursor, depth);
+	return parseExpr(cursor, 0);
+}
+
+/**
+ * Parse un array literal `[v, v, ...]` en position d'expression. Autorise
+ * vide `[]`. Items peuvent être n'importe quelle expression (field, arith,
+ * call, object nested, array nested...).
+ */
+export function parseArrayLiteral(cursor: TokenCursor, depth: number): Expr {
+	if (depth >= MAX_LITERAL_DEPTH) {
+		throw new SnqlError(
+			`Profondeur d'imbrication object/array > ${MAX_LITERAL_DEPTH}`,
+			"parse_array_literal_depth_exceeded",
+			cursor.peek().span
+		);
+	}
+	const open = cursor.expect("lbracket", "'[' pour ouvrir un array literal");
+	const items: Expr[] = [];
+	if (cursor.peek().kind !== "rbracket") {
+		for (;;) {
+			items.push(parseValueWithDepth(cursor, depth + 1));
+			const next = cursor.peek();
+			if (next.kind === "comma") {
+				cursor.next();
+				continue;
+			}
+			if (next.kind === "rbracket") {
+				break;
+			}
+			throw new SnqlError(
+				`',' ou ']' attendu, trouvé ${describe(next)}`,
+				"parse_array_literal_close_expected",
+				next.span
+			);
+		}
+	}
+	const close = cursor.expect("rbracket", "']' pour fermer l'array literal");
+	return { type: "array", items, span: joinSpan(open.span, close.span) };
 }

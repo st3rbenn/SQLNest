@@ -94,6 +94,12 @@ export function collectIdentSpans(statement: Statement): IdentSpans {
 			case "cast":
 				walkExpr(expr.operand);
 				return;
+			case "object":
+				for (const entry of expr.entries) walkExpr(entry.value);
+				return;
+			case "array":
+				for (const item of expr.items) walkExpr(item);
+				return;
 		}
 	}
 

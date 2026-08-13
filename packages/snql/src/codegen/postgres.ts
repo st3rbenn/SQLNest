@@ -7,6 +7,7 @@ import type {
 	MutationPlan,
 	PlanExpr,
 	PlanProjectField,
+	PlanRowValue,
 	PlanSortKey,
 	SqlValue
 } from "../ir/plan";
@@ -110,8 +111,21 @@ function renderWhere(
 }
 
 /** Valeur littérale d'un INSERT : NULL en clair, le reste paramétré. */
-function renderValue(value: SqlValue, params: ParamList, span?: Span): string {
-	return value === null ? "NULL" : params.add(value, span);
+function renderValue(
+	value: PlanRowValue,
+	params: ParamList,
+	span?: Span
+): string {
+	// Sprint object-literals : dispatch scalar vs jsonLiteral. Scalar = params
+	// bindés simples (comportement historique). jsonLiteral = expression
+	// object/array lowered → renderExpr émet jsonb_build_object avec keys+values
+	// bindées (anti-injection). Le span extern des cellSpans reste valide pour
+	// les leaves scalar ; pour jsonLiteral, chaque leaf de l'expression porte
+	// son propre span via PlanExpr récursif.
+	if (value.kind === "scalar") {
+		return value.value === null ? "NULL" : params.add(value.value, span);
+	}
+	return renderExpr(value.expr, params);
 }
 
 // Phases = ordre d'évaluation logique d'un SELECT. Une étape ne peut rejoindre le
@@ -471,7 +485,52 @@ function renderExpr(expr: PlanExpr, params: ParamList): string {
 			// SQL standard : `CAST(x AS T)` — préféré à `x::T` pour la lisibilité
 			// (idiome portable, aligné avec la surface SNQL).
 			return `CAST(${renderExpr(expr.operand, params)} AS ${PG_CAST_TYPE[expr.target]})`;
+		case "object": {
+			// jsonb_build_object($1, $2::TYPE, $3, $4::TYPE, ...) — clés ET valeurs
+			// bindées (anti-injection sur clés user-controlled type `O'Brien`).
+			// Type PG natif per-scalar via `renderJsonValue` : sans annotation,
+			// `$N` unknown → text par défaut → `{n:42}` deviendrait `{"n":"42"}`
+			// dans le jsonb (bug destructeur silencieux).
+			if (expr.entries.length === 0) return "jsonb_build_object()";
+			const parts: string[] = [];
+			for (const entry of expr.entries) {
+				parts.push(params.add(entry.key));
+				parts.push(renderJsonValue(entry.value, params));
+			}
+			return `jsonb_build_object(${parts.join(", ")})`;
+		}
+		case "array": {
+			// jsonb_build_array($1::TYPE, ...) — même helper renderJsonValue.
+			// Type retour jsonb (cohérent avec Lentille B). Refus explicite du
+			// `ARRAY[...]::T[]` natif PG (type homogène incompatible json-first).
+			if (expr.items.length === 0) return "jsonb_build_array()";
+			const parts = expr.items.map((item) => renderJsonValue(item, params));
+			return `jsonb_build_array(${parts.join(", ")})`;
+		}
 	}
+}
+
+/**
+ * Rend une value pour un object/array literal PG. Annote les literals
+ * scalaires nus avec leur type PG canonique — sans quoi `$N` unknown est
+ * inféré text par défaut et un scalaire `42` devient string `"42"` dans le
+ * jsonb final (silent bug destructeur). Les non-literals passent par
+ * renderExpr standard (leur type est inféré via colonne / retour de fn).
+ */
+function renderJsonValue(expr: PlanExpr, params: ParamList): string {
+	if (expr.kind !== "literal") return renderExpr(expr, params);
+	const v = expr.value;
+	if (v === null) return "NULL";
+	if (isSqlDecimal(v)) return `${params.add(v, expr.span)}::numeric`;
+	if (typeof v === "boolean") return `${params.add(v, expr.span)}::boolean`;
+	if (typeof v === "bigint") return `${params.add(v, expr.span)}::bigint`;
+	if (typeof v === "number") {
+		return Number.isInteger(v)
+			? `${params.add(v, expr.span)}::bigint`
+			: `${params.add(v, expr.span)}::double precision`;
+	}
+	// string : cast ::text explicite (aligné pgConcat pattern anti-injection).
+	return `${params.add(v, expr.span)}::text`;
 }
 
 /**

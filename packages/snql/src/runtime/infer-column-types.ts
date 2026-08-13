@@ -202,6 +202,18 @@ function resolveProjectField(
 		};
 	}
 
+	// Sprint object-literals : `pick {n: r.name} as doc` ou `pick [...] as arr`
+	// → type 'json' statique. Retour non-null par construction (le literal est
+	// toujours défini, indépendamment des valeurs qu'il contient).
+	if (field.expr?.kind === "object" || field.expr?.kind === "array") {
+		return {
+			name: outputName,
+			type: "json",
+			nullable: false,
+			collection: ""
+		};
+	}
+
 	if (field.path.length === 0) {
 		return { name: outputName, ...UNKNOWN_FIELD, collection: "" };
 	}
