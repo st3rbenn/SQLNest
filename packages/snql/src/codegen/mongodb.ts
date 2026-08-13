@@ -1,6 +1,7 @@
 import { SnqlError } from "../diagnostics";
 import { SNQL_FUNCTIONS } from "../functions";
 import type {
+	CastTarget,
 	CompareOp,
 	LogicalPlan,
 	MutationPlan,
@@ -282,6 +283,20 @@ function renderMatch(
 		}
 		case "compare":
 			return renderCompare(expr.op, expr.left, expr.right, alias, mode);
+		case "cast": {
+			// Cast top-level dans un where n'est pas un prédicat — un dev doit
+			// comparer explicitement. Message adapté au target : bool → suggère
+			// `= true` ; autres → compare le résultat.
+			const hint =
+				expr.target === "bool"
+					? "écris `cast(x as bool) = true`"
+					: "compare le résultat avec une valeur";
+			throw new SnqlError(
+				`Un cast n'est pas un prédicat — ${hint}`,
+				"codegen_mongo_cast_predicate",
+				expr.span
+			);
+		}
 		case "literal":
 		case "field":
 		case "arith":
@@ -341,6 +356,17 @@ function negateMatch(
 		}
 		case "compare":
 			return negateCompare(expr.op, expr.left, expr.right, alias);
+		case "cast": {
+			const hint =
+				expr.target === "bool"
+					? "écris `cast(x as bool) = true`"
+					: "compare le résultat avec une valeur";
+			throw new SnqlError(
+				`Un cast n'est pas un prédicat — ${hint}`,
+				"codegen_mongo_cast_predicate",
+				expr.span
+			);
+		}
 		case "literal":
 		case "field":
 		case "arith":
@@ -416,6 +442,21 @@ function renderCompare(
 	alias: string | undefined,
 	mode: MatchMode
 ): Record<string, unknown> {
+	// Garde write : un cast dans un filtre de mutation Mongo passerait par
+	// `$expr` (via toExprOperand), or Mongo v5+ supporte `$expr` en update
+	// filter, mais un `$convert` sur un field absent throw ConversionFailure
+	// et une purge silencieuse de la mauvaise ligne est bien pire qu'une
+	// erreur. Message DÉDIÉ (pas de réutilisation champ↔champ trompeuse).
+	if (
+		mode === "write" &&
+		(left.kind === "cast" || right.kind === "cast")
+	) {
+		throw new SnqlError(
+			"cast dans un filtre de mutation Mongo non supporté v1 — matérialise la valeur convertie côté application, ou match sur la valeur brute",
+			"codegen_mongo_write_cast_predicate",
+			(left.kind === "cast" ? left.span : right.span)
+		);
+	}
 	if (op === "like") {
 		return renderLike(left, right, alias);
 	}
@@ -542,6 +583,29 @@ function toExprOperand(expr: PlanExpr, alias: string | undefined): unknown {
 			renderExpr: (arg) => toExprOperand(arg as PlanExpr, alias)
 		});
 	}
+	if (expr.kind === "cast") {
+		// Défense-en-profondeur : le planner devrait avoir rejeté `json` avant.
+		if (expr.target === "json") {
+			throw new SnqlError(
+				"cast(_ as json) non supporté sur mongodb — les documents Mongo sont déjà des BSON",
+				"codegen_mongo_cast_unsupported",
+				expr.span
+			);
+		}
+		const inner = toExprOperand(expr.operand, alias);
+		// Parité NULL avec PG : un field absent en `$convert` throw
+		// `ConversionFailure` côté Mongo, là où PG écrirait NULL. Wrap en
+		// `$ifNull` uniquement sur un operand de type field (pas besoin sinon —
+		// arith/call/literal produisent déjà une valeur définie ou null propagé).
+		const input =
+			expr.operand.kind === "field" ? { $ifNull: [inner, null] } : inner;
+		return {
+			$convert: {
+				input,
+				to: MONGO_CAST_TYPE[expr.target as Exclude<CastTarget, "json">]
+			}
+		};
+	}
 	throw new SnqlError(
 		"Opérande non supporté dans une comparaison $expr Mongo",
 		"codegen_mongo_expr"
@@ -554,6 +618,24 @@ const ARITH_TO_MONGO: Readonly<Record<"+" | "-" | "*" | "/" | "%", string>> = {
 	"*": "$multiply",
 	"/": "$divide",
 	"%": "$mod"
+};
+
+/**
+ * Mapping des targets canoniques SNQL vers les types BSON de `$convert.to`.
+ * `json` est absent : les documents Mongo sont déjà des BSON, le planner
+ * refuse `cast(_ as json)` via Capabilities.castTargets.
+ * `date` et `timestamp` collapsent tous deux vers BSON Date (Mongo n'a pas de
+ * type date-only distinct — divergence documentée).
+ */
+export const MONGO_CAST_TYPE: Readonly<
+	Record<Exclude<CastTarget, "json">, string>
+> = {
+	int: "long",
+	float: "double",
+	text: "string",
+	bool: "bool",
+	date: "date",
+	timestamp: "date"
 };
 
 function literalValue(expr: PlanExpr): unknown {

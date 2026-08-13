@@ -1,5 +1,6 @@
 import { SnqlError } from "../diagnostics";
 import type {
+	CastTarget,
 	CompareOp,
 	PlanExpr,
 	PlanProjectField,
@@ -120,8 +121,62 @@ function evalValue(expr: PlanExpr, row: Row): unknown {
 			`Runtime KV : fonction '${expr.name}' non exécutable (planner should have rejected)`
 		);
 	}
+	if (expr.kind === "cast") {
+		const inner = evalValue(expr.operand, row);
+		if (inner === null || inner === undefined) {
+			return null; // NULL propagate — parité 3VL SQL
+		}
+		return castValue(expr.target, inner);
+	}
 	// Expression booléenne utilisée comme valeur.
 	return evalBool(expr, row);
+}
+
+/**
+ * Coercion runtime pour cast(x as T). STRICTES : pas de coercion truthy JS pour
+ * bool (parité PG stricte — `'false'` ne devient JAMAIS `false` silencieusement,
+ * ce qui divergerait de PG et de Mongo `$convert to:'bool'` truthy). Les targets
+ * `date`/`timestamp`/`json` sont refusés — le planner Capabilities.castTargets
+ * KV les filtre déjà, arriver ici = bug de synchronisation.
+ */
+function castValue(target: CastTarget, x: unknown): unknown {
+	switch (target) {
+		case "int": {
+			const n = Number(x);
+			if (!Number.isFinite(n)) {
+				throw new SnqlError(
+					`cast(_ as int) : valeur non convertible '${String(x)}'`,
+					"runtime_cast_invalid"
+				);
+			}
+			return Math.trunc(n);
+		}
+		case "float": {
+			const n = Number(x);
+			if (!Number.isFinite(n)) {
+				throw new SnqlError(
+					`cast(_ as float) : valeur non convertible '${String(x)}'`,
+					"runtime_cast_invalid"
+				);
+			}
+			return n;
+		}
+		case "text":
+			return String(x);
+		case "bool":
+			if (typeof x === "boolean") return x;
+			throw new SnqlError(
+				`cast(_ as bool) : attendu boolean, reçu '${typeof x}' — pas de coercion truthy (parité PG stricte)`,
+				"runtime_cast_invalid"
+			);
+		case "date":
+		case "timestamp":
+		case "json":
+			throw new SnqlError(
+				`cast(_ as ${target}) non supporté au runtime KV — bug de synchronisation Capabilities`,
+				"runtime_cast_unsupported"
+			);
+	}
 }
 
 /**
@@ -178,6 +233,7 @@ function evalBool(expr: PlanExpr, row: Row): boolean | null {
 		case "field":
 		case "arith":
 		case "call":
+		case "cast":
 			return coerceBool(evalValue(expr, row));
 	}
 }

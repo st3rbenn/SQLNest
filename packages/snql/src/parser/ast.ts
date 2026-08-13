@@ -8,6 +8,30 @@ export type CompareOperator = "=" | "!=" | "<" | ">" | "<=" | ">=" | "like";
 /** Opérateurs arithmétiques binaires (Slice T1 — extension du Pratt parser). */
 export type ArithOperator = "+" | "-" | "*" | "/" | "%";
 
+/**
+ * Types canoniques SNQL pour `cast(x as T)` (T2 sprint 2). Surface fermée : la
+ * whitelist force une seule orthographe par type (pas d'alias SQL type
+ * `integer`/`string`/`varchar` — le parser oriente le dev vers ces 7).
+ */
+export type CastTarget =
+	| "int"
+	| "float"
+	| "text"
+	| "bool"
+	| "date"
+	| "timestamp"
+	| "json";
+
+export const CAST_TARGETS: ReadonlySet<CastTarget> = new Set<CastTarget>([
+	"int",
+	"float",
+	"text",
+	"bool",
+	"date",
+	"timestamp",
+	"json"
+]);
+
 export type LiteralValue =
 	// Le littéral numérique garde son texte brut (`raw`) pour ne pas perdre en
 	// précision avant le codegen (cf. entiers > 2^53).
@@ -65,6 +89,16 @@ export type Expr =
 			readonly type: "call";
 			readonly name: string;
 			readonly args: readonly Expr[];
+			readonly span: Span;
+	  }
+	// Cast explicite `cast(expr as T)` — T ∈ CAST_TARGETS. Surface distincte du
+	// call node (pas dans le registre) pour ne pas polluer l'assertion write et
+	// laisser passer les casts en set/update (déterministes, NULL propagate).
+	| {
+			readonly type: "cast";
+			readonly operand: Expr;
+			readonly target: CastTarget;
+			readonly targetSpan: Span;
 			readonly span: Span;
 	  };
 

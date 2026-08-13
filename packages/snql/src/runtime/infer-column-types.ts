@@ -22,11 +22,27 @@
  * quel plan valide.
  */
 
-import type { LogicalPlan, PlanProjectField } from "../ir/plan";
+import type { CastTarget, LogicalPlan, PlanProjectField } from "../ir/plan";
 import { linearize } from "../ir/plan";
 import type { CompensationOp, PhysicalPlan } from "../planner/planner";
 import type { Collection, Field, SchemaModel, SnqlType } from "../schema/model";
 import type { ResultColumn } from "./result";
+
+/**
+ * Mapping runtime des 7 targets canoniques SNQL vers le vocabulaire `SnqlType`
+ * de l'introspection. Choix pragmatique : on rapproche du plus proche existant
+ * plutôt que d'introduire un nouveau vocabulaire — les consommateurs
+ * (frontend badges) restent inchangés.
+ */
+const CAST_TO_SNQL_TYPE: Readonly<Record<CastTarget, SnqlType>> = {
+	int: "bigint",
+	float: "float",
+	text: "string",
+	bool: "bool",
+	date: "date",
+	timestamp: "date",
+	json: "json"
+};
 
 /** Colonne enrichie de sa collection d'origine (utile pour walker les ops). */
 interface WorkingCol {
@@ -172,6 +188,19 @@ function resolveProjectField(
 ): WorkingCol {
 	const outputName =
 		field.alias ?? field.path[field.path.length - 1] ?? "";
+
+	// `pick cast(x as T) as y` : le target du cast est un signal statique fort,
+	// on mappe vers SnqlType plutôt que de perdre l'info en 'unknown'. Un cast
+	// est non-null par contrat sauf si son operand est NULL — au niveau colonne,
+	// on marque nullable=true pour ne pas mentir (l'operand peut être NULL).
+	if (field.expr?.kind === "cast") {
+		return {
+			name: outputName,
+			type: CAST_TO_SNQL_TYPE[field.expr.target],
+			nullable: true,
+			collection: ""
+		};
+	}
 
 	if (field.path.length === 0) {
 		return { name: outputName, ...UNKNOWN_FIELD, collection: "" };

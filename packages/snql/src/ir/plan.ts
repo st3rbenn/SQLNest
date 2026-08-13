@@ -4,7 +4,10 @@
  * `02 - Architecture/The Hard Version — Algèbre Polyglotte`).
  */
 
+import { CAST_TARGETS, type CastTarget } from "../parser/ast";
 import type { Span } from "../lexer/token";
+
+export { CAST_TARGETS, type CastTarget };
 
 export type Capability =
 	| "scan"
@@ -97,6 +100,15 @@ export type PlanExpr = (
 			readonly kind: "call";
 			readonly name: string;
 			readonly args: readonly PlanExpr[];
+	  }
+	// Cast explicite. Distinct de `call` : pas dans le registre de fonctions, pas
+	// soumis à assertNoCallInWrite (déterministe + NULL propagate → autorisé en
+	// write). Le codegen mappe `target` vers le type engine via PG_CAST_TYPE /
+	// MONGO_CAST_TYPE. Span porté = span de l'operand (targeting PG 22P02).
+	| {
+			readonly kind: "cast";
+			readonly target: CastTarget;
+			readonly operand: PlanExpr;
 	  }
 ) & { readonly span?: Span };
 

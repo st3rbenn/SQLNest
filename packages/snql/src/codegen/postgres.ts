@@ -1,6 +1,7 @@
 import { SnqlError } from "../diagnostics";
 import { SNQL_FUNCTIONS } from "../functions";
 import type {
+	CastTarget,
 	CompareOp,
 	LogicalPlan,
 	MutationPlan,
@@ -400,6 +401,23 @@ const COMPARE_SQL: Readonly<Record<CompareOp, string>> = {
 	like: "LIKE"
 };
 
+/**
+ * Mapping des 7 targets canoniques SNQL vers les types Postgres. Choix figés :
+ *  - `int → bigint` (INT64, aligné SqlValue.bigint + PK bigint des schémas)
+ *  - `float → double precision` (IEEE 754 64-bit, aligné Mongo double)
+ *  - `timestamp → timestamptz` (instant UTC, roundtrip Mongo Date lossless)
+ *  - `json → jsonb` (indexable, canonicalisé, comparable)
+ */
+export const PG_CAST_TYPE: Readonly<Record<CastTarget, string>> = {
+	int: "bigint",
+	float: "double precision",
+	text: "text",
+	bool: "boolean",
+	date: "date",
+	timestamp: "timestamptz",
+	json: "jsonb"
+};
+
 function renderExpr(expr: PlanExpr, params: ParamList): string {
 	switch (expr.kind) {
 		case "literal":
@@ -449,6 +467,10 @@ function renderExpr(expr: PlanExpr, params: ParamList): string {
 				addParam: (v) => params.add(v as SqlValue)
 			}) as string;
 		}
+		case "cast":
+			// SQL standard : `CAST(x AS T)` — préféré à `x::T` pour la lisibilité
+			// (idiome portable, aligné avec la surface SNQL).
+			return `CAST(${renderExpr(expr.operand, params)} AS ${PG_CAST_TYPE[expr.target]})`;
 	}
 }
 

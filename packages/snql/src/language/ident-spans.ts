@@ -77,6 +77,7 @@ export function collectIdentSpans(statement: Statement): IdentSpans {
 				return;
 			case "compare":
 			case "logical":
+			case "arith":
 				walkExpr(expr.left);
 				walkExpr(expr.right);
 				return;
@@ -86,6 +87,12 @@ export function collectIdentSpans(statement: Statement): IdentSpans {
 			case "in":
 				walkExpr(expr.target);
 				for (const v of expr.values) walkExpr(v);
+				return;
+			case "call":
+				for (const arg of expr.args) walkExpr(arg);
+				return;
+			case "cast":
+				walkExpr(expr.operand);
 				return;
 		}
 	}
@@ -98,6 +105,7 @@ export function collectIdentSpans(statement: Statement): IdentSpans {
 			case "pick":
 				for (const field of stage.fields) {
 					pushPath(field.path, field.span);
+					if (field.expr !== undefined) walkExpr(field.expr);
 					if (field.alias !== undefined) push(field.alias, field.span);
 				}
 				return;

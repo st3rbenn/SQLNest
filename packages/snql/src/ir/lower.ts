@@ -1,6 +1,8 @@
 import { SnqlError } from "../diagnostics";
 import { checkArity, SNQL_FUNCTIONS } from "../functions";
+import { CAST_TARGETS } from "../parser/ast";
 import type {
+	CastTarget,
 	CompareOperator,
 	DeleteStatement,
 	Expr,
@@ -282,6 +284,9 @@ function collectExprFieldsWithSpans(
 			collectExprFieldsWithSpans(expr.target, out);
 			for (const value of expr.values) collectExprFieldsWithSpans(value, out);
 			return;
+		case "cast":
+			collectExprFieldsWithSpans(expr.operand, out);
+			return;
 	}
 }
 
@@ -436,6 +441,11 @@ function assertNoCallInWrite(expr: PlanExpr): void {
 		case "in":
 			assertNoCallInWrite(expr.target);
 			for (const v of expr.values) assertNoCallInWrite(v);
+			return;
+		case "cast":
+			// Cast lui-même passe : déterministe + NULL propagate → prévisible en write.
+			// La récursion attrape un `call` sous-jacent (ex: cast(upper(x) as text)).
+			assertNoCallInWrite(expr.operand);
 			return;
 	}
 }
@@ -626,6 +636,9 @@ function collectExprFields(expr: Expr, out: (readonly string[])[]): void {
 			for (const value of expr.values) {
 				collectExprFields(value, out);
 			}
+			return;
+		case "cast":
+			collectExprFields(expr.operand, out);
 			return;
 	}
 }
@@ -881,6 +894,27 @@ function lowerExpr(expr: Expr): PlanExpr {
 			};
 		case "call":
 			return lowerCall(expr);
+		case "cast": {
+			// Défense-en-profondeur : le parser filtre déjà via CAST_TARGETS, mais un
+			// PlanExpr construit à la main (tests, futur workflow) pourrait passer un
+			// target invalide.
+			if (!CAST_TARGETS.has(expr.target)) {
+				throw new SnqlError(
+					`Type de cast '${expr.target}' hors canoniques (int, float, text, bool, date, timestamp, json)`,
+					"lower_cast_unknown_target",
+					expr.targetSpan
+				);
+			}
+			const operand = lowerExpr(expr.operand);
+			// Span de l'operand pour cibler PG 22P02 (`invalid input syntax for … : "X"`)
+			// sur le fragment fautif — pas sur le mot-clé `cast`.
+			return {
+				kind: "cast",
+				target: expr.target as CastTarget,
+				operand,
+				span: operand.span ?? expr.span
+			};
+		}
 	}
 }
 

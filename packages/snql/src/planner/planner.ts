@@ -1,12 +1,15 @@
 import { SnqlError } from "../diagnostics";
 import type {
 	Capability,
+	CastTarget,
 	LogicalPlan,
+	MutationPlan,
 	PlanExpr,
 	PlanProjectField,
 	PlanSortKey
 } from "../ir/plan";
 import { linearize, requiredCapability } from "../ir/plan";
+import type { Span } from "../lexer/token";
 import type { Capabilities } from "./capabilities";
 
 /**
@@ -76,6 +79,8 @@ export function plan(
 	// Le lower a déjà validé l'existence dans le registre ; ici on filtre par
 	// engine spécifique (une fonction PG-only n'a pas de renderer Mongo, etc).
 	assertFunctionsSupported(logical, capabilities);
+	// Vérifie que tous les targets de cast sont supportés par l'engine.
+	assertCastTargetsSupported(logical, capabilities);
 
 	// Index du 1er opérateur non poussable (= début de la compensation).
 	let cut = ops.length;
@@ -190,7 +195,128 @@ function visitExprCalls(expr: PlanExpr, visit: (name: string) => void): void {
 			visitExprCalls(expr.target, visit);
 			for (const v of expr.values) visitExprCalls(v, visit);
 			return;
+		case "cast":
+			// Cast n'est pas une fonction du registre, mais un `call` sous cast doit
+			// être visité (ex: cast(pg_only_fn(x) as text) sur mongo → détecte pg_only_fn).
+			visitExprCalls(expr.operand, visit);
+			return;
 	}
+}
+
+/**
+ * Cast capability check — vérifie que chaque `cast(_ as T)` cible un T
+ * supporté par l'engine (`Capabilities.castTargets`). Lève
+ * `planner_cast_target_unsupported` avec un message dédié pour le cas notable
+ * `cast(_ as json)` sur MongoDB (les documents Mongo sont déjà des BSON).
+ */
+function assertCastTargetsSupported(
+	plan: LogicalPlan,
+	capabilities: Capabilities
+): void {
+	const unsupported = new Map<CastTarget, Span | undefined>();
+	visitPlanCasts(plan, (target, span) => {
+		if (!capabilities.castTargets.has(target) && !unsupported.has(target)) {
+			unsupported.set(target, span);
+		}
+	});
+	if (unsupported.size === 0) return;
+	const [target, span] = [...unsupported.entries()][0]!;
+	const message =
+		target === "json" && capabilities.engine === "mongodb"
+			? "cast(_ as json) non supporté sur mongodb — les documents Mongo sont déjà des BSON, aucun cast nécessaire"
+			: `cast(_ as ${target}) non supporté sur '${capabilities.engine}'`;
+	throw new SnqlError(message, "planner_cast_target_unsupported", span);
+}
+
+/** Walker qui invoque `visit(target)` pour chaque cast rencontré dans le plan. */
+function visitPlanCasts(
+	plan: LogicalPlan,
+	visit: (target: CastTarget, span: Span | undefined) => void
+): void {
+	switch (plan.op) {
+		case "scan":
+			return;
+		case "filter":
+			visitExprCasts(plan.predicate, visit);
+			visitPlanCasts(plan.input, visit);
+			return;
+		case "project":
+			for (const field of plan.fields) {
+				if (field.expr !== undefined) visitExprCasts(field.expr, visit);
+			}
+			visitPlanCasts(plan.input, visit);
+			return;
+		case "sort":
+		case "limit":
+			visitPlanCasts(plan.input, visit);
+			return;
+		case "join":
+			visitPlanCasts(plan.input, visit);
+			return;
+	}
+}
+
+function visitExprCasts(
+	expr: PlanExpr,
+	visit: (target: CastTarget, span: Span | undefined) => void
+): void {
+	switch (expr.kind) {
+		case "literal":
+		case "field":
+			return;
+		case "cast":
+			visit(expr.target, expr.span);
+			visitExprCasts(expr.operand, visit);
+			return;
+		case "call":
+			for (const arg of expr.args) visitExprCasts(arg, visit);
+			return;
+		case "arith":
+		case "compare":
+		case "and":
+		case "or":
+			visitExprCasts(expr.left, visit);
+			visitExprCasts(expr.right, visit);
+			return;
+		case "not":
+		case "isNull":
+			visitExprCasts(expr.operand, visit);
+			return;
+		case "in":
+			visitExprCasts(expr.target, visit);
+			for (const v of expr.values) visitExprCasts(v, visit);
+			return;
+	}
+}
+
+/**
+ * Cast capability check pour les mutations : les update/delete peuvent contenir
+ * des casts dans leur predicate ou dans les valeurs de `set` (autorisés par le
+ * lower). Symétrique de `assertCastTargetsSupported` pour lecture.
+ */
+export function assertMutationCastTargetsSupported(
+	plan: MutationPlan,
+	capabilities: Capabilities
+): void {
+	const unsupported = new Map<CastTarget, Span | undefined>();
+	const visitor = (target: CastTarget, span: Span | undefined): void => {
+		if (!capabilities.castTargets.has(target) && !unsupported.has(target)) {
+			unsupported.set(target, span);
+		}
+	};
+	if (plan.op === "update") {
+		for (const a of plan.assignments) visitExprCasts(a.value, visitor);
+		if (plan.predicate !== undefined) visitExprCasts(plan.predicate, visitor);
+	} else if (plan.op === "delete") {
+		if (plan.predicate !== undefined) visitExprCasts(plan.predicate, visitor);
+	}
+	if (unsupported.size === 0) return;
+	const [target, span] = [...unsupported.entries()][0]!;
+	const message =
+		target === "json" && capabilities.engine === "mongodb"
+			? "cast(_ as json) non supporté sur mongodb — les documents Mongo sont déjà des BSON, aucun cast nécessaire"
+			: `cast(_ as ${target}) non supporté sur '${capabilities.engine}'`;
+	throw new SnqlError(message, "planner_cast_target_unsupported", span);
 }
 
 function toCompensationOp(op: LogicalPlan): CompensationOp {

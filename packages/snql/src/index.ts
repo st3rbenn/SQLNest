@@ -130,6 +130,7 @@ export { tokenize } from "./lexer/lexer";
 export type { Position, Span, Token, TokenKind } from "./lexer/token";
 export type {
 	Assignment,
+	CastTarget,
 	CompareOperator,
 	DeleteStatement,
 	Expr,
@@ -145,6 +146,7 @@ export type {
 	Statement,
 	UpdateStatement
 } from "./parser/ast";
+export { CAST_TARGETS } from "./parser/ast";
 export { parse } from "./parser/parser";
 export type { Capabilities } from "./planner/capabilities";
 export {
@@ -159,7 +161,7 @@ export type {
 	PhysicalPlan,
 	PlanOptions
 } from "./planner/planner";
-export { plan } from "./planner/planner";
+export { assertMutationCastTargetsSupported, plan } from "./planner/planner";
 export type { JoinSources, Row } from "./runtime/compensate";
 export { compensate } from "./runtime/compensate";
 export { inferResultColumns } from "./runtime/infer-column-types";

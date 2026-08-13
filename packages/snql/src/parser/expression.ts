@@ -1,6 +1,7 @@
 import { SnqlError } from "../diagnostics";
 import type { Span, Token, TokenKind } from "../lexer/token";
-import type { ArithOperator, CompareOperator, Expr } from "./ast";
+import { CAST_TARGETS } from "./ast";
+import type { ArithOperator, CastTarget, CompareOperator, Expr } from "./ast";
 import type { TokenCursor } from "./cursor";
 
 const COMPARE_OPS: ReadonlySet<string> = new Set([
@@ -183,9 +184,15 @@ function parsePrefix(cursor: TokenCursor): Expr {
 /**
  * Parse le corps d'un appel de fonction : `(` [expr (`,` expr)*] `)`. Le nom a
  * déjà été consommé par parsePrefix ; on est positionné sur la `(`. Case-
- * normalise le nom en lowercase pour aligner avec le lookup registre.
+ * normalise le nom en lowercase pour aligner avec le lookup registre. Dispatch
+ * spécial `cast(...)` en tête : surface `cast(expr as T)` avec `as` interne
+ * (ne remonte jamais au Pratt).
  */
 function parseCall(cursor: TokenCursor, rawName: string, nameSpan: Span): Expr {
+	const name = rawName.toLowerCase();
+	if (name === "cast") {
+		return parseCastBody(cursor, nameSpan);
+	}
 	cursor.next(); // consomme la '('
 	const args: Expr[] = [];
 	if (cursor.peek().kind !== "rparen") {
@@ -198,8 +205,75 @@ function parseCall(cursor: TokenCursor, rawName: string, nameSpan: Span): Expr {
 	const close = cursor.expect("rparen", "')' pour fermer l'appel de fonction");
 	return {
 		type: "call",
-		name: rawName.toLowerCase(),
+		name,
 		args,
+		span: joinSpan(nameSpan, close.span)
+	};
+}
+
+/**
+ * Parse le corps de `cast(expr as T)` — appelé quand `parseCall` détecte le
+ * nom `cast` (case-insensitive). `cast` reste un identifiant valide hors de
+ * cette position, donc une colonne nommée `cast` continue de marcher — c'est
+ * seulement la construction `cast(` qui bascule ici.
+ */
+function parseCastBody(cursor: TokenCursor, nameSpan: Span): Expr {
+	cursor.next(); // consomme la '('
+	if (cursor.peek().kind === "rparen") {
+		throw new SnqlError(
+			"'cast' attend 'expr as type' — exemple: cast(x as int)",
+			"parse_cast_empty",
+			cursor.peek().span
+		);
+	}
+	const operand = parseExpr(cursor, 0);
+	const afterOperand = cursor.peek();
+	if (afterOperand.kind === "comma") {
+		throw new SnqlError(
+			"'cast' n'a qu'un opérande — utilise `as` : cast(price_str as float)",
+			"parse_cast_comma_before_as",
+			afterOperand.span
+		);
+	}
+	if (!(afterOperand.kind === "keyword" && afterOperand.value === "as")) {
+		throw new SnqlError(
+			"'cast' attend 'expr as type' — exemple: cast(x as int)",
+			"parse_cast_missing_as",
+			afterOperand.span
+		);
+	}
+	cursor.next(); // consomme 'as'
+	const targetTok = cursor.peek();
+	if (targetTok.kind !== "ident") {
+		throw new SnqlError(
+			"Type attendu après 'as' — canoniques: int, float, text, bool, date, timestamp, json",
+			"parse_cast_target_expected",
+			targetTok.span
+		);
+	}
+	cursor.next();
+	const targetName = targetTok.value.toLowerCase();
+	if (!CAST_TARGETS.has(targetName as CastTarget)) {
+		throw new SnqlError(
+			`Type '${targetTok.value}' inconnu — canoniques: int, float, text, bool, date, timestamp, json`,
+			"parse_cast_target_unknown",
+			targetTok.span
+		);
+	}
+	const afterTarget = cursor.peek();
+	if (afterTarget.kind === "comma") {
+		throw new SnqlError(
+			"'cast' n'accepte qu'un type après 'as' — pas d'arguments supplémentaires",
+			"parse_cast_extra_args",
+			afterTarget.span
+		);
+	}
+	const close = cursor.expect("rparen", "')' pour fermer 'cast'");
+	return {
+		type: "cast",
+		operand,
+		target: targetName as CastTarget,
+		targetSpan: targetTok.span,
 		span: joinSpan(nameSpan, close.span)
 	};
 }

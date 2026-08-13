@@ -8,6 +8,7 @@ import type {
 	Statement
 } from "@sqlnest/snql";
 import {
+	assertMutationCastTargetsSupported,
 	capabilitiesFor,
 	collectIdentSpans,
 	compensate,
@@ -71,10 +72,9 @@ export async function runQuery(
 				`Le moteur '${engine}' ne supporte pas l'écriture (capacité 'mutate')`
 			);
 		}
-		const native = withIdentSpans(
-			mapper.mapMutation(lowerMutation(statement, schema)),
-			identSpans
-		);
+		const mutation = lowerMutation(statement, schema);
+		assertMutationCastTargetsSupported(mutation, capabilities);
+		const native = withIdentSpans(mapper.mapMutation(mutation), identSpans);
 		return { ...(await connection.execute(native)), written: true };
 	}
 
