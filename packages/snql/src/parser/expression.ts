@@ -214,6 +214,16 @@ function parsePrefix(cursor: TokenCursor): Expr {
  * normalise le nom en lowercase pour aligner avec le lookup registre. Dispatch
  * spécial `cast(...)` en tête : surface `cast(expr as T)` avec `as` interne
  * (ne remonte jamais au Pratt).
+ *
+ * Sprint T2/6 : fast-paths agrégats scalaires.
+ *  - `count(*)` : star token scopé aux args de call. Refus structurel
+ *    sum(*)/avg(*) au parser (`parse_call_star_only_count`) — l'étoile reste
+ *    multiplication ailleurs (isArithToken).
+ *  - `count(unique x)` : soft-keyword `unique` (aligné `pick unique` sprint 10).
+ *    Discriminator : p0=ident('unique'), p1 démarre une expression → fast-path.
+ *    p1=rparen → `parse_call_unique_missing_arg` (piège UX vs field 'unique').
+ *    `distinct` en position modifier → `parse_call_distinct_use_unique` (hint
+ *    'utilise unique' — SNQL cohérence).
  */
 function parseCall(cursor: TokenCursor, rawName: string, nameSpan: Span): Expr {
 	const name = rawName.toLowerCase();
@@ -221,6 +231,100 @@ function parseCall(cursor: TokenCursor, rawName: string, nameSpan: Span): Expr {
 		return parseCastBody(cursor, nameSpan);
 	}
 	cursor.next(); // consomme la '('
+
+	const p0 = cursor.peek();
+
+	// Fast-path 1 : star (count(*)) — refus structurel sum(*)/avg(*)/etc.
+	if (p0.kind === "star") {
+		if (name !== "count") {
+			throw new SnqlError(
+				`'${name}(*)' — '*' est réservé à count(*)`,
+				"parse_call_star_only_count",
+				p0.span
+			);
+		}
+		cursor.next(); // consomme star
+		const after = cursor.peek();
+		if (after.kind === "comma") {
+			throw new SnqlError(
+				"count(*) — pas d'argument supplémentaire après '*'",
+				"parse_call_star_with_extra_args",
+				after.span
+			);
+		}
+		const close = cursor.expect("rparen", "')' pour fermer count(*)");
+		return {
+			type: "call",
+			name,
+			args: [],
+			star: true,
+			span: joinSpan(nameSpan, close.span)
+		};
+	}
+
+	// Fast-path 2 : soft-keyword modifier `unique` / `distinct` (hint).
+	if (p0.kind === "ident") {
+		const modLower = p0.value.toLowerCase();
+		if (modLower === "unique" || modLower === "distinct") {
+			const p1 = cursor.peek(1);
+			// p1 doit démarrer une expression (ident/literal/parens/unary/composite).
+			const isExprStart =
+				p1.kind === "ident" ||
+				p1.kind === "lparen" ||
+				p1.kind === "number" ||
+				p1.kind === "string" ||
+				p1.kind === "boolean" ||
+				p1.kind === "null" ||
+				p1.kind === "lbrace" ||
+				p1.kind === "lbracket" ||
+				p1.kind === "minus" ||
+				p1.kind === "plus";
+			if (isExprStart) {
+				if (modLower === "distinct") {
+					throw new SnqlError(
+						`SNQL utilise 'unique' au lieu de 'distinct' — écris '${name}(unique ...)'`,
+						"parse_call_distinct_use_unique",
+						p0.span
+					);
+				}
+				// modifier === 'unique' → fast-path.
+				cursor.next(); // consomme ident 'unique'
+				const arg = parseExpr(cursor, 0);
+				const after = cursor.peek();
+				if (after.kind === "comma") {
+					throw new SnqlError(
+						`'${name}(unique ...)' — arité mono-arg cross-engine (pas d'argument supplémentaire)`,
+						"parse_call_unique_extra_args",
+						after.span
+					);
+				}
+				const close = cursor.expect(
+					"rparen",
+					`')' pour fermer '${name}(unique ...)'`
+				);
+				return {
+					type: "call",
+					name,
+					args: [arg],
+					unique: true,
+					span: joinSpan(nameSpan, close.span)
+				};
+			}
+			if (p1.kind === "rparen") {
+				// `count(unique)` nu — piège UX (silent count sur champ 'unique').
+				// L'user avec un champ nommé 'unique' doit préfixer (`count(t.unique)`).
+				throw new SnqlError(
+					`'${name}(${modLower})' — expression manquante après '${modLower}' (attend '${name}(unique <expression>)')`,
+					"parse_call_unique_missing_arg",
+					p0.span
+				);
+			}
+			// Fallback : p1 est un token qui ne peut pas démarrer une expression —
+			// laisse parseExpr échouer avec son propre message générique.
+		}
+	}
+
+	// Path standard : args normaux (n-ary comma-separated).
 	const args: Expr[] = [];
 	if (cursor.peek().kind !== "rparen") {
 		args.push(parseExpr(cursor, 0));

@@ -4,7 +4,7 @@ import { checkArity, describeArity } from "./arity";
 import { SNQL_FUNCTIONS, createRegistry, type FunctionEntry } from "./index";
 
 describe("call node — registry + arity", () => {
-	it("SNQL_FUNCTIONS contient les 29 builtins (sprint 1 + 3 + 4 + T2/5) + 8 reserved", () => {
+	it("SNQL_FUNCTIONS contient les 34 builtins (sprint 1 + 3 + 4 + T2/5 + T2/6) + 7 reserved", () => {
 		expect(SNQL_FUNCTIONS.names()).toEqual(
 			new Set([
 				// sprint 1
@@ -46,6 +46,12 @@ describe("call node — registry + arity", () => {
 				"nullif",
 				"greatest",
 				"least",
+				// sprint T2/6 aggregates scalaires
+				"count",
+				"sum",
+				"avg",
+				"min",
+				"max",
 				// sprint 4 reserved
 				"json_set",
 				"json_delete",
@@ -58,15 +64,13 @@ describe("call node — registry + arity", () => {
 		);
 	});
 
-	it("forEngine expose les fonctions supportées par engine (30 PG / 29 Mongo / 4 KV — T2/5 conditional +4)", () => {
-		// 8 sprint 1 + 13 sprint 3 + 4 sprint 4 = 25 mappées cross-engine.
-		// Sprint object-literals débloque json_contains PG only (+1 PG) — Mongo
-		// reste reporté sprint 6 (émulation $mergeObjects/$eq complexe).
-		// Sprint T2/5 : +4 fns cross-engine (if/nullif/greatest/least) + entrée
-		// KV via engines.kv (introduction du dispatch registre côté runtime).
-		expect(SNQL_FUNCTIONS.forEngine("postgres").size).toBe(30);
-		expect(SNQL_FUNCTIONS.forEngine("mongodb").size).toBe(29);
-		expect(SNQL_FUNCTIONS.forEngine("kv").size).toBe(4);
+	it("forEngine expose les fonctions supportées par engine (35 PG / 34 Mongo / 10 KV — T2/6 aggregates +5)", () => {
+		// Sprint T2/6 : +5 aggregates (count/sum/avg/min/max) cross-engine
+		// PG+Mongo+KV. Côté KV, kvCoalesce ajouté (+1) pour débloquer
+		// scalar-around-agg. Total KV = 4 (T2/5) + 5 aggregates + 1 coalesce = 10.
+		expect(SNQL_FUNCTIONS.forEngine("postgres").size).toBe(35);
+		expect(SNQL_FUNCTIONS.forEngine("mongodb").size).toBe(34);
+		expect(SNQL_FUNCTIONS.forEngine("kv").size).toBe(10);
 	});
 
 	it("createRegistry(base, overrides) écrase par nom", () => {

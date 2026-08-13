@@ -85,10 +85,17 @@ export type Expr =
 	// Appel de fonction — `upper(name)`, `now()`, `coalesce(a, b, c)`. Le nom est
 	// case-normalisé (lowercase) dès la construction. Résolu au lower via le
 	// registre de fonctions ; arité + typage vérifiés là.
+	//
+	// Sprint T2/6 : deux flags optionnels pour les aggregates.
+	//  - `star` : `count(*)` — args=[] (invariant vérifié au parser + lower).
+	//  - `unique` : `count(unique x)` — args.length=1 (invariant vérifié au
+	//    parser + lower). Réservé aux aggregates ; les scalaires refusent.
 	| {
 			readonly type: "call";
 			readonly name: string;
 			readonly args: readonly Expr[];
+			readonly star?: true;
+			readonly unique?: true;
 			readonly span: Span;
 	  }
 	// Cast explicite `cast(expr as T)` — T ∈ CAST_TARGETS. Surface distincte du

@@ -374,3 +374,62 @@ export const pgLeast: EngineRenderer = (args, ctx) => {
 	const rendered = renderArgs(args, ctx);
 	return `LEAST(${rendered.join(", ")})`;
 };
+
+// ─── sprint T2/6 : aggregates scalaires ────────────────────────────────────
+
+/**
+ * `count(*)` → `COUNT(*)` (ctx.star=true).
+ * `count(unique x)` → `COUNT(DISTINCT <x>)` (ctx.unique=true).
+ * `count(x)` → `COUNT(<x>)` (NULL-ignore natif PG parité SNQL).
+ *
+ * Type retour = bigint natif PG. pg driver sérialise > 2^53 en string ;
+ * divergence documentée dans knownDivergences (choix v6 : accepter, KV
+ * retourne Number via rows.length pour parité < 2^53).
+ */
+export const pgCount: EngineRenderer = (args, ctx) => {
+	if (ctx.star === true) return "COUNT(*)";
+	const [a] = renderArgs(args, ctx);
+	if (ctx.unique === true) return `COUNT(DISTINCT ${a})`;
+	return `COUNT(${a})`;
+};
+
+/**
+ * `sum(x)` → `SUM(<x>)::double precision` — cast dans le renderer (précédent
+ * pgRound double-cast). Rationale : pg driver sérialise numeric/bigint > 2^53
+ * en string, cassant `typeof number` consumer JS. Cast `::double precision`
+ * préserve le contrat. Perte precision > 2^53 documentée (escape via
+ * `cast(sum(x) as decimal)` sprint 8+).
+ *
+ * Empty → NULL (natif PG SUM sur set vide). NULL args ignorés naturellement.
+ */
+export const pgSum: EngineRenderer = (args, ctx) => {
+	const [a] = renderArgs(args, ctx);
+	return `SUM(${a})::double precision`;
+};
+
+/**
+ * `avg(x)` → `AVG(<x>)::double precision` — même règle homogène que sum.
+ * PG AVG(int)/AVG(bigint) natif = numeric ; cast `::double precision` pour
+ * préserver typeof number consumer JS.
+ */
+export const pgAvg: EngineRenderer = (args, ctx) => {
+	const [a] = renderArgs(args, ctx);
+	return `AVG(${a})::double precision`;
+};
+
+/**
+ * `min(x)` → `MIN(<x>)` — passthrough type (int→int, timestamp→timestamp).
+ * NULL-ignore natif PG. Empty → NULL.
+ */
+export const pgMin: EngineRenderer = (args, ctx) => {
+	const [a] = renderArgs(args, ctx);
+	return `MIN(${a})`;
+};
+
+/**
+ * `max(x)` → `MAX(<x>)` — miroir min.
+ */
+export const pgMax: EngineRenderer = (args, ctx) => {
+	const [a] = renderArgs(args, ctx);
+	return `MAX(${a})`;
+};

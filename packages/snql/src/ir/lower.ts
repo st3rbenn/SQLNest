@@ -346,10 +346,26 @@ export function lowerMutation(
 			column: assignment.column,
 			value: lowerExpr(assignment.value)
 		}));
-		for (const a of assignments) assertNoCallInWrite(a.value);
+		// Sprint T2/6 : aggregate dans set — refus AVANT assertNoCallInWrite
+		// (ordre CRITIQUE : message précis, pas générique lower_call_null_write).
+		for (const a of assignments) {
+			refuseAggregateInPosition(
+				a.value,
+				"lower_agg_in_set",
+				`'set ${a.column} = <aggregate>' non supporté — l'aggregate n'a pas de sens en écriture (une seule row cible)`
+			);
+			assertNoCallInWrite(a.value);
+		}
 		const predicate =
 			statement.predicate !== undefined ? lowerExpr(statement.predicate) : undefined;
-		if (predicate !== undefined) assertNoCallInWrite(predicate);
+		if (predicate !== undefined) {
+			refuseAggregateInPosition(
+				predicate,
+				"lower_agg_in_where",
+				"Aggregate dans 'where' d'update non supporté — 'having' arrive sprint 7"
+			);
+			assertNoCallInWrite(predicate);
+		}
 		return predicate !== undefined
 			? {
 					op: "update",
@@ -369,7 +385,15 @@ export function lowerMutation(
 	if (statement.predicate !== undefined) assertNoBareCallPredicate(statement.predicate);
 	const predicate =
 		statement.predicate !== undefined ? lowerExpr(statement.predicate) : undefined;
-	if (predicate !== undefined) assertNoCallInWrite(predicate);
+	if (predicate !== undefined) {
+		// Sprint T2/6 : aggregate dans predicate de delete — refus AVANT write.
+		refuseAggregateInPosition(
+			predicate,
+			"lower_agg_in_delete_predicate",
+			"Aggregate dans 'where' de delete non supporté — 'having' arrive sprint 7"
+		);
+		assertNoCallInWrite(predicate);
+	}
 	return predicate !== undefined
 		? {
 				op: "delete",
@@ -425,6 +449,346 @@ function checkExprPathsAgainstColumns(
 			span
 		);
 	}
+}
+
+/**
+ * Sprint T2/6 : walker AST — true ssi l'expression contient au moins un call
+ * dont le kind du registre est `aggregate`. Utilisé pour détecter en amont
+ * qu'un pick doit basculer en op='aggregate' (avant lowerField).
+ */
+function containsAggregateAst(expr: Expr): boolean {
+	if (expr.type === "call") {
+		const entry = SNQL_FUNCTIONS.get(expr.name);
+		if (entry?.kind === "aggregate") return true;
+		for (const arg of expr.args) if (containsAggregateAst(arg)) return true;
+		return false;
+	}
+	switch (expr.type) {
+		case "literal":
+		case "field":
+			return false;
+		case "compare":
+		case "logical":
+		case "arith":
+			return containsAggregateAst(expr.left) || containsAggregateAst(expr.right);
+		case "not":
+			return containsAggregateAst(expr.operand);
+		case "in":
+			return (
+				containsAggregateAst(expr.target) ||
+				expr.values.some(containsAggregateAst)
+			);
+		case "cast":
+			return containsAggregateAst(expr.operand);
+		case "object":
+			return expr.entries.some((e) => containsAggregateAst(e.value));
+		case "array":
+			return expr.items.some(containsAggregateAst);
+		case "case":
+			return (
+				expr.branches.some(
+					(b) => containsAggregateAst(b.cond) || containsAggregateAst(b.value)
+				) || containsAggregateAst(expr.elseValue)
+			);
+	}
+}
+
+/**
+ * Sprint T2/6 : span du premier aggregate AST rencontré (helper d'erreur).
+ */
+function firstAggregateSpanAst(
+	expr: Expr
+): import("../lexer/token").Span | undefined {
+	if (expr.type === "call") {
+		const entry = SNQL_FUNCTIONS.get(expr.name);
+		if (entry?.kind === "aggregate") return expr.span;
+		for (const arg of expr.args) {
+			const s = firstAggregateSpanAst(arg);
+			if (s !== undefined) return s;
+		}
+		return undefined;
+	}
+	switch (expr.type) {
+		case "literal":
+		case "field":
+			return undefined;
+		case "compare":
+		case "logical":
+		case "arith":
+			return firstAggregateSpanAst(expr.left) ?? firstAggregateSpanAst(expr.right);
+		case "not":
+			return firstAggregateSpanAst(expr.operand);
+		case "in": {
+			const t = firstAggregateSpanAst(expr.target);
+			if (t !== undefined) return t;
+			for (const v of expr.values) {
+				const s = firstAggregateSpanAst(v);
+				if (s !== undefined) return s;
+			}
+			return undefined;
+		}
+		case "cast":
+			return firstAggregateSpanAst(expr.operand);
+		case "object":
+			for (const e of expr.entries) {
+				const s = firstAggregateSpanAst(e.value);
+				if (s !== undefined) return s;
+			}
+			return undefined;
+		case "array":
+			for (const i of expr.items) {
+				const s = firstAggregateSpanAst(i);
+				if (s !== undefined) return s;
+			}
+			return undefined;
+		case "case": {
+			for (const b of expr.branches) {
+				const s =
+					firstAggregateSpanAst(b.cond) ?? firstAggregateSpanAst(b.value);
+				if (s !== undefined) return s;
+			}
+			return firstAggregateSpanAst(expr.elseValue);
+		}
+	}
+}
+
+/**
+ * Sprint T2/6 : valide un field expr d'un pick op='aggregate'. Applique
+ * les 8 refus positions internes + bare-field-hors-agg. Descente contextuelle :
+ *  - Dans les args d'un aggregate direct : agg nested REFUS, fields bare OK.
+ *  - Dans un scalar wrapper (coalesce/greatest/least/cast/arith/compare) :
+ *    agg comme arg direct OK, fields bare REFUS (sprint 7 group by débloquera).
+ *  - Dans if/case cond OU branch : agg REFUS (patterns SQL canoniques
+ *    sum(if(cond,x,0))). Fields bare toujours REFUS hors agg direct.
+ *  - Object/array literal : agg REFUS (scalar wrappers only).
+ */
+function validateAggregatePickFieldAst(expr: Expr): void {
+	validateInAggWrapperAst(expr, false);
+}
+
+function validateInAggWrapperAst(expr: Expr, insideAgg: boolean): void {
+	if (expr.type === "call") {
+		const entry = SNQL_FUNCTIONS.get(expr.name);
+		if (entry?.kind === "aggregate") {
+			// Aggregate détecté. Refus si déjà dans un agg (nested).
+			if (insideAgg) {
+				throw new SnqlError(
+					`Aggregate imbriqué '${expr.name}(...)' — window functions arrivent sprint 8+`,
+					"lower_agg_nested",
+					expr.span
+				);
+			}
+			// Descendre dans les args de l'agg — fields bare OK dedans (agg les consomme).
+			for (const arg of expr.args) validateInAggWrapperAst(arg, true);
+			return;
+		}
+		// Scalar call. Le nom détermine la sémantique wrapper.
+		if (expr.name === "if" && expr.args.length === 3) {
+			// cond scalar per-row, branches refusent agg (pattern sum(if) impose)
+			const condSpan = firstAggregateSpanAst(expr.args[0]!);
+			if (condSpan !== undefined) {
+				throw new SnqlError(
+					"'if(cond, …, …)' : la cond doit être scalaire per-row, pas un aggregate global",
+					"lower_agg_in_if_cond",
+					condSpan
+				);
+			}
+			validateInAggWrapperAst(expr.args[0]!, insideAgg);
+			for (const branchIdx of [1, 2]) {
+				const branch = expr.args[branchIdx]!;
+				const branchAggSpan = firstAggregateSpanAst(branch);
+				if (branchAggSpan !== undefined) {
+					throw new SnqlError(
+						`Aggregate dans une branche de 'if' — utilise le pattern canonique 'sum(if(cond, x, 0))' (déplace le if DANS l'agg)`,
+						"lower_agg_in_if_branch",
+						branchAggSpan
+					);
+				}
+				validateInAggWrapperAst(branch, insideAgg);
+			}
+			return;
+		}
+		// Autres scalar wrappers (coalesce/greatest/least/…) : agg autorisé
+		// comme arg direct, descente normale pour le reste.
+		for (const arg of expr.args) validateInAggWrapperAst(arg, insideAgg);
+		return;
+	}
+	switch (expr.type) {
+		case "literal":
+			return;
+		case "field": {
+			// Fields bare hors d'un arg d'agg → refus (pas de group by sprint 6).
+			if (!insideAgg) {
+				const pathStr = expr.path.join(".");
+				throw new SnqlError(
+					`Champ '${pathStr}' hors argument d'un aggregate — sprint 7 (group by) débloquera ; d'ici là, wrappe en min(${pathStr}) ou déplace-le dans un arg d'agg`,
+					"lower_bare_field_in_agg_scalar_wrapper",
+					expr.span
+				);
+			}
+			return;
+		}
+		case "compare":
+		case "logical":
+		case "arith":
+			validateInAggWrapperAst(expr.left, insideAgg);
+			validateInAggWrapperAst(expr.right, insideAgg);
+			return;
+		case "not":
+			validateInAggWrapperAst(expr.operand, insideAgg);
+			return;
+		case "in":
+			validateInAggWrapperAst(expr.target, insideAgg);
+			for (const v of expr.values) validateInAggWrapperAst(v, insideAgg);
+			return;
+		case "cast":
+			// cast(count(*) as float) accepté — cast fait partie du scalar wrapper.
+			validateInAggWrapperAst(expr.operand, insideAgg);
+			return;
+		case "object": {
+			// Object literal dans un pick agg field → refus si contient agg.
+			for (const e of expr.entries) {
+				const aggSpan = firstAggregateSpanAst(e.value);
+				if (aggSpan !== undefined) {
+					throw new SnqlError(
+						"Aggregate dans un object literal — object de scalaires uniquement (agg direct au top-level du pick)",
+						"lower_agg_in_object_literal",
+						aggSpan
+					);
+				}
+				validateInAggWrapperAst(e.value, insideAgg);
+			}
+			return;
+		}
+		case "array": {
+			for (const item of expr.items) {
+				const aggSpan = firstAggregateSpanAst(item);
+				if (aggSpan !== undefined) {
+					throw new SnqlError(
+						"Aggregate dans un array literal — array de scalaires uniquement (agg direct au top-level du pick)",
+						"lower_agg_in_array_literal",
+						aggSpan
+					);
+				}
+				validateInAggWrapperAst(item, insideAgg);
+			}
+			return;
+		}
+		case "case": {
+			for (const b of expr.branches) {
+				const condSpan = firstAggregateSpanAst(b.cond);
+				if (condSpan !== undefined) {
+					throw new SnqlError(
+						"'case { cond -> … }' : la cond doit être scalaire per-row, pas un aggregate global",
+						"lower_agg_in_case_cond",
+						condSpan
+					);
+				}
+				validateInAggWrapperAst(b.cond, insideAgg);
+				const branchSpan = firstAggregateSpanAst(b.value);
+				if (branchSpan !== undefined) {
+					throw new SnqlError(
+						"Aggregate dans une branche de 'case' — utilise le pattern canonique 'sum(if(cond, x, 0))' (déplace le if DANS l'agg)",
+						"lower_agg_in_case_branch",
+						branchSpan
+					);
+				}
+				validateInAggWrapperAst(b.value, insideAgg);
+			}
+			const elseSpan = firstAggregateSpanAst(expr.elseValue);
+			if (elseSpan !== undefined) {
+				throw new SnqlError(
+					"Aggregate dans la branche 'else' de 'case' — utilise le pattern canonique 'sum(if(cond, x, 0))'",
+					"lower_agg_in_case_branch",
+					elseSpan
+				);
+			}
+			validateInAggWrapperAst(expr.elseValue, insideAgg);
+			return;
+		}
+	}
+}
+
+/**
+ * Sprint T2/6 : retourne le span du premier `call` d'un aggregate rencontré,
+ * ou undefined si le PlanExpr n'en contient aucun. Utilisé par les guards
+ * `lower_agg_in_*` pour émettre un message actionnable pointant sur l'agg
+ * fautif (pas sur le stage entier).
+ */
+export function firstAggregateSpan(
+	expr: PlanExpr
+): import("../lexer/token").Span | undefined {
+	if (expr.kind === "call") {
+		const entry = SNQL_FUNCTIONS.get(expr.name);
+		if (entry?.kind === "aggregate") return expr.span;
+		for (const arg of expr.args) {
+			const s = firstAggregateSpan(arg);
+			if (s !== undefined) return s;
+		}
+		return undefined;
+	}
+	switch (expr.kind) {
+		case "literal":
+		case "field":
+			return undefined;
+		case "compare":
+		case "and":
+		case "or":
+		case "arith":
+			return firstAggregateSpan(expr.left) ?? firstAggregateSpan(expr.right);
+		case "not":
+		case "isNull":
+			return firstAggregateSpan(expr.operand);
+		case "in": {
+			const t = firstAggregateSpan(expr.target);
+			if (t !== undefined) return t;
+			for (const v of expr.values) {
+				const s = firstAggregateSpan(v);
+				if (s !== undefined) return s;
+			}
+			return undefined;
+		}
+		case "cast":
+			return firstAggregateSpan(expr.operand);
+		case "object":
+			for (const e of expr.entries) {
+				const s = firstAggregateSpan(e.value);
+				if (s !== undefined) return s;
+			}
+			return undefined;
+		case "array":
+			for (const i of expr.items) {
+				const s = firstAggregateSpan(i);
+				if (s !== undefined) return s;
+			}
+			return undefined;
+		case "case": {
+			for (const b of expr.branches) {
+				const s = firstAggregateSpan(b.cond) ?? firstAggregateSpan(b.value);
+				if (s !== undefined) return s;
+			}
+			return firstAggregateSpan(expr.elseValue);
+		}
+	}
+}
+
+/**
+ * Refuse un aggregate dans une position non-projection. Émet le code d'erreur
+ * spécifique à la position (where/set/delete/…) avec un hint actionnable
+ * pointant vers group by (sprint 7) ou le pattern SQL canonique.
+ *
+ * Ordre CRITIQUE dans un contexte write : appeler AVANT `assertNoCallInWrite`
+ * — sinon un `set y = count(*)` remonte le générique `lower_call_null_write`
+ * au lieu du précis `lower_agg_in_set` (piège UX documenté).
+ */
+function refuseAggregateInPosition(
+	expr: PlanExpr,
+	code: string,
+	message: string
+): void {
+	const span = firstAggregateSpan(expr);
+	if (span === undefined) return;
+	throw new SnqlError(message, code, span);
 }
 
 /**
@@ -729,11 +1093,42 @@ function lowerStage(
 	switch (stage.type) {
 		case "where": {
 			assertNoBareCallPredicate(stage.predicate);
-			return { op: "filter", input, predicate: lowerExpr(stage.predicate) };
+			const predicate = lowerExpr(stage.predicate);
+			// Sprint T2/6 : aggregate refusé dans where — reporté à having sprint 7.
+			refuseAggregateInPosition(
+				predicate,
+				"lower_agg_in_where",
+				"Aggregate dans 'where' non supporté — 'having' arrive sprint 7 (filtre post-agg)"
+			);
+			return { op: "filter", input, predicate };
 		}
 		case "pick": {
 			const fields = stage.fields.map(lowerField);
 			assertUniqueProjectionKeys(fields);
+			// Sprint T2/6 : bascule op='aggregate' si au moins un field contient
+			// un call kind='aggregate'. Valide alors chaque field (position stricte
+			// + refus bare-field hors agg — sprint 7 apportera group by).
+			const hasAggregate = stage.fields.some(
+				(f) => f.expr !== undefined && containsAggregateAst(f.expr)
+			);
+			if (hasAggregate) {
+				for (const f of stage.fields) {
+					if (f.expr !== undefined) {
+						validateAggregatePickFieldAst(f.expr);
+					} else if (f.path.length > 0) {
+						// Field bare (path) dans un pick contenant agg = mix
+						// field/agg sans group by → refus sprint 6 (sprint 7 avec
+						// group by débloquera).
+						const pathStr = f.path.join(".");
+						throw new SnqlError(
+							`Champ '${pathStr}' hors argument d'un aggregate — sprint 7 (group by) débloquera ; d'ici là, wrappe en min(${pathStr}) ou retire du pick`,
+							"planner_agg_bare_field_needs_group",
+							f.span
+						);
+					}
+				}
+				return { op: "aggregate", input, fields };
+			}
 			return { op: "project", input, fields };
 		}
 		case "sort":
@@ -1194,6 +1589,53 @@ function lowerCall(expr: Expr & { type: "call" }): PlanExpr {
 				: `Fonction '${expr.name}' réservée pour un sprint futur — pas encore implémentée`;
 		throw new SnqlError(message, "lower_call_reserved", expr.span);
 	}
+	// Sprint T2/6 : guards call-level pour star / unique / aggregates.
+	// Defense-in-depth : le parser fast-path garantit déjà les invariants
+	// structurels ; ces checks capturent un PlanExpr construit programmatiquement
+	// (tests, futur workflow) qui bypasserait le parser.
+	if (expr.star === true && expr.name !== "count") {
+		throw new SnqlError(
+			`'${expr.name}(*)' — '*' est réservé à count(*)`,
+			"lower_call_star_only_count",
+			expr.span
+		);
+	}
+	if (expr.unique === true) {
+		if (entry.kind !== "aggregate") {
+			throw new SnqlError(
+				`'${expr.name}(unique ...)' — le modifier 'unique' est réservé aux aggregates (count/sum/avg/min/max)`,
+				"lower_call_unique_aggregate_only",
+				expr.span
+			);
+		}
+		if (expr.args.length !== 1) {
+			throw new SnqlError(
+				`'${expr.name}(unique ...)' attend exactement 1 argument, reçu ${expr.args.length} (arité mono-arg cross-engine)`,
+				"lower_call_unique_arity",
+				expr.span
+			);
+		}
+		if (expr.name === "min" || expr.name === "max") {
+			throw new SnqlError(
+				`'${expr.name}(unique ...)' refusé — 'unique' n'a pas d'effet sur ${expr.name} (retire 'unique')`,
+				"lower_call_unique_no_op_min_max",
+				expr.span
+			);
+		}
+	}
+	// count() nu (sans star, 0 args) — piège UX : arity accepte 0-1 pour count
+	// afin de laisser passer count(*), mais count() seul n'a pas de sémantique.
+	if (
+		expr.name === "count" &&
+		expr.star !== true &&
+		expr.args.length === 0
+	) {
+		throw new SnqlError(
+			"count() sans argument — utilise 'count(*)' pour compter les rows ou 'count(<expr>)' pour compter les non-null",
+			"lower_call_count_missing_arg",
+			expr.span
+		);
+	}
 	const arityMsg = checkArity(expr.name, entry.arity, expr.args.length);
 	if (arityMsg !== null) {
 		throw new SnqlError(arityMsg, "lower_call_arity", expr.span);
@@ -1291,10 +1733,14 @@ function lowerCall(expr: Expr & { type: "call" }): PlanExpr {
 			"if"
 		);
 	}
+	// Sprint T2/6 : forward star/unique flags sur PlanCall — le codegen les
+	// consomme via ctx.star / ctx.unique.
 	return {
 		kind: "call",
 		name: expr.name,
 		args: expr.args.map(lowerExpr),
+		...(expr.star === true ? { star: true as const } : {}),
+		...(expr.unique === true ? { unique: true as const } : {}),
 		span: expr.span
 	};
 }

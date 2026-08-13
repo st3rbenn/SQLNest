@@ -1,4 +1,5 @@
 import { SnqlError } from "../diagnostics";
+import { SNQL_FUNCTIONS } from "../functions";
 import type {
 	Capability,
 	CastTarget,
@@ -28,6 +29,14 @@ export type CompensationOp =
 			readonly as: string;
 			readonly localField: readonly string[];
 			readonly foreignField: readonly string[];
+	  }
+	// Sprint T2/6 : agrégation scalaire fold. Runtime KV implémente via
+	// foldAggregate (1 row output sprint 6). groupKeys undefined = fold sur
+	// toute la collection ; sprint 7 le peuplera.
+	| {
+			readonly op: "aggregate";
+			readonly fields: readonly PlanProjectField[];
+			readonly groupKeys?: readonly (readonly string[])[];
 	  };
 
 /**
@@ -84,6 +93,9 @@ export function plan(
 	// Guards JSON engine-specific : redirige cast(json_get) et compare direct
 	// json_get vers les alternatives actionnables avant que PG throw 42883.
 	assertJsonPredicatesPg(logical, capabilities);
+	// Sprint T2/6 : refus sum(unique)/avg(unique) sur Mongo (2-stage $addToSet
+	// spec reportée sprint 8 avec aggregateMulti). count(unique) marche partout.
+	assertAggregateEngineRestrictions(logical, capabilities);
 
 	// Index du 1er opérateur non poussable (= début de la compensation).
 	let cut = ops.length;
@@ -159,6 +171,12 @@ function visitPlanCalls(plan: LogicalPlan, visit: (name: string) => void): void 
 			visitPlanCalls(plan.input, visit);
 			return;
 		case "project":
+			for (const field of plan.fields) {
+				if (field.expr !== undefined) visitExprCalls(field.expr, visit);
+			}
+			visitPlanCalls(plan.input, visit);
+			return;
+		case "aggregate":
 			for (const field of plan.fields) {
 				if (field.expr !== undefined) visitExprCalls(field.expr, visit);
 			}
@@ -257,6 +275,12 @@ function visitPlanCasts(
 			visitPlanCasts(plan.input, visit);
 			return;
 		case "project":
+			for (const field of plan.fields) {
+				if (field.expr !== undefined) visitExprCasts(field.expr, visit);
+			}
+			visitPlanCasts(plan.input, visit);
+			return;
+		case "aggregate":
 			for (const field of plan.fields) {
 				if (field.expr !== undefined) visitExprCasts(field.expr, visit);
 			}
@@ -368,6 +392,10 @@ function toCompensationOp(op: LogicalPlan): CompensationOp {
 				localField: op.localField,
 				foreignField: op.foreignField
 			};
+		case "aggregate":
+			return op.groupKeys !== undefined
+				? { op: "aggregate", fields: op.fields, groupKeys: op.groupKeys }
+				: { op: "aggregate", fields: op.fields };
 		case "scan":
 			throw new SnqlError(
 				"Un 'scan' ne peut pas être compensé",
@@ -479,6 +507,33 @@ function assertJsonPredicatesPg(
 	});
 }
 
+/**
+ * Sprint T2/6 : restrictions engine-spécifiques sur les aggregates.
+ *  - Mongo : sum(unique x) / avg(unique x) refusés v6 (2-stage $addToSet
+ *    reporté sprint 8 avec aggregateMulti). count(unique) marche partout.
+ *  - PG accepte SUM/AVG(DISTINCT x) nativement, aucune restriction.
+ *  - KV : sum(unique)/avg(unique) impl à venir (matérialisable), refus v6
+ *    aligné Mongo pour cohérence cross-engine.
+ */
+function assertAggregateEngineRestrictions(
+	plan: LogicalPlan,
+	capabilities: Capabilities
+): void {
+	if (capabilities.engine === "postgres") return;
+	visitPlanExprs(plan, (expr) => {
+		if (expr.kind !== "call" || expr.unique !== true) return;
+		const entry = SNQL_FUNCTIONS.get(expr.name);
+		if (entry?.kind !== "aggregate") return;
+		if (expr.name === "sum" || expr.name === "avg") {
+			throw new SnqlError(
+				`'${expr.name}(unique ...)' non supporté sur '${capabilities.engine}' sprint 6 — utilise 'count(unique x)' ou reporte sprint 8 (aggregateMulti 2-stage)`,
+				"planner_agg_unique_mongo_unsupported_sum_avg",
+				expr.span
+			);
+		}
+	});
+}
+
 /** Walker générique sur tous les PlanExpr d'un plan (filter + project fields). */
 function visitPlanExprs(
 	plan: LogicalPlan,
@@ -492,6 +547,12 @@ function visitPlanExprs(
 			visitPlanExprs(plan.input, visit);
 			return;
 		case "project":
+			for (const field of plan.fields) {
+				if (field.expr !== undefined) visitExprsIn(field.expr, visit);
+			}
+			visitPlanExprs(plan.input, visit);
+			return;
+		case "aggregate":
 			for (const field of plan.fields) {
 				if (field.expr !== undefined) visitExprsIn(field.expr, visit);
 			}

@@ -63,7 +63,9 @@ export const MONGODB_CAPABILITIES: Capabilities = caps(
  */
 export const KV_CAPABILITIES: Capabilities = caps(
 	"kv",
-	["scan", "filter", "mutate"],
+	// Sprint T2/6 : 'aggregate' ajouté — foldAggregate implémenté dans
+	// compensate.ts (1 row output sprint 6, N rows sprint 7 avec groupKeys).
+	["scan", "filter", "mutate", "aggregate"],
 	["int", "float", "text", "bool"]
 );
 

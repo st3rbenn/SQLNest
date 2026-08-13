@@ -122,6 +122,10 @@ function applyLogical(
 			// Transparents pour le shape des colonnes.
 			return;
 		case "project":
+		case "aggregate":
+			// Sprint T2/6 : aggregate projette les mêmes fields que project (une
+			// seule row output sprint 6). Le type inference dispatch sur call
+			// kind='aggregate' pour retourner bigint/float selon la fonction.
 			state.cols = projectFields(op.fields, state, schema);
 			return;
 		case "join":
@@ -152,6 +156,7 @@ function applyCompensation(
 		case "limit":
 			return;
 		case "project":
+		case "aggregate":
 			state.cols = projectFields(op.fields, state, schema);
 			return;
 		case "join":
@@ -200,6 +205,40 @@ function resolveProjectField(
 			nullable: true,
 			collection: ""
 		};
+	}
+
+	// Sprint T2/6 : agrégats scalaires directs — signal type fort.
+	//  - count → bigint (parité PG bigint natif ; KV Number sub-2^53 quand
+	//    même bigint sémantiquement, doc knownDivergences).
+	//  - sum/avg → float (cast ::double precision dans pgSum/pgAvg pour
+	//    préserver typeof number consumer JS).
+	//  - min/max → unknown v6 (résolution depuis args[0] reportée sprint 7+
+	//    quand le walker de fields sera enrichi). Le badge frontend reste "?".
+	if (field.expr?.kind === "call") {
+		const callName = field.expr.name;
+		if (callName === "count") {
+			return {
+				name: outputName,
+				type: "bigint",
+				nullable: false,
+				collection: ""
+			};
+		}
+		if (callName === "sum" || callName === "avg") {
+			return {
+				name: outputName,
+				type: "float",
+				nullable: true,
+				collection: ""
+			};
+		}
+		if (callName === "min" || callName === "max") {
+			return {
+				name: outputName,
+				...UNKNOWN_FIELD,
+				collection: ""
+			};
+		}
 	}
 
 	// Sprint object-literals : `pick {n: r.name} as doc` ou `pick [...] as arr`

@@ -220,8 +220,11 @@ function canAbsorb(sel: Select, op: LogicalPlan): boolean {
 		case "join":
 			return sel.maxPhase <= PHASE.join;
 		case "project":
+		case "aggregate":
 			// La SELECT-list est indépendante de WHERE/ORDER BY/LIMIT : un `project`
-			// peut rejoindre le SELECT courant tant que son slot est libre.
+			// (ou `aggregate` sprint T2/6, même slot mutex) peut rejoindre le SELECT
+			// courant tant que son slot est libre. PG accepte SELECT agg FROM t sans
+			// GROUP BY natif (implicit grouping) → zero refactor sprint 6.
 			return sel.project === null;
 		case "sort":
 			return sel.order === null && sel.maxPhase <= PHASE.sort;
@@ -250,6 +253,11 @@ function absorb(sel: Select, op: LogicalPlan): void {
 			sel.maxPhase = Math.max(sel.maxPhase, PHASE.join);
 			return;
 		case "project":
+		case "aggregate":
+			// Sprint T2/6 : aggregate rend une SELECT-list comme project pour PG
+			// (implicit grouping sans GROUP BY quand aucun field bare — sprint 6
+			// contract). Sprint 7 ajoutera GROUP BY explicit quand op.groupKeys
+			// non-empty.
 			sel.project = op.fields;
 			sel.maxPhase = Math.max(sel.maxPhase, PHASE.project);
 			return;
@@ -476,9 +484,13 @@ function renderExpr(expr: PlanExpr, params: ParamList): string {
 					"codegen_missing_function_mapping"
 				);
 			}
+			// Sprint T2/6 : propage star/unique flags aux renderers aggregates.
+			// Les renderers scalar existants ignorent ces flags (backward compat).
 			return entry.engines.postgres(expr.args, {
 				renderExpr: (arg) => renderExpr(arg as PlanExpr, params),
-				addParam: (v) => params.add(v as SqlValue)
+				addParam: (v) => params.add(v as SqlValue),
+				...(expr.star === true ? { star: true } : {}),
+				...(expr.unique === true ? { unique: true } : {})
 			}) as string;
 		}
 		case "cast":

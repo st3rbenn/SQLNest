@@ -7,6 +7,7 @@
  */
 
 import { extractStringLiteralArg } from "./builtins-shared";
+import { SnqlError } from "../diagnostics";
 import type { EngineRenderer } from "./registry";
 
 function renderArgs(args: readonly unknown[], ctx: { renderExpr: (e: unknown) => unknown }): unknown[] {
@@ -478,3 +479,84 @@ function buildMongoMinMax(
 		}
 	};
 }
+
+// ─── sprint T2/6 : aggregates scalaires (accumulators pour $group) ─────────
+// Les 5 renderers ci-dessous retournent un ACCUMULATOR body valide uniquement
+// dans un stage $group. Le SSA extract (codegen/mongodb.ts) matérialise
+// [$group{_id:null,...accs}, $project{_id:0,...renames}] paire pour un
+// aggregate op ; c'est à ce moment-là que ces renderers sont invoqués.
+
+/**
+ * `count(*)` → `{ $sum: 1 }` (ctx.star).
+ * `count(x)` → `{ $sum: {$cond:[{$ne:['$x',null]},1,0]} }` (NULL-ignore parité PG).
+ * `count(unique x)` — le SSA extract hardcode le 2-stage ($addToSet + $size)
+ * AVANT d'atteindre ce renderer. Si on arrive ici avec ctx.unique=true c'est
+ * un bug de synchronisation SSA — throw defense-in-depth.
+ */
+export const mongoCount: EngineRenderer = (args, ctx) => {
+	if (ctx.star === true) return { $sum: 1 };
+	if (ctx.unique === true) {
+		throw new Error(
+			"mongoCount(unique) doit être matérialisé par le SSA extract ($addToSet + $size), pas via le renderer direct"
+		);
+	}
+	const arg = ctx.renderExpr(args[0]);
+	return { $sum: { $cond: [{ $ne: [arg, null] }, 1, 0] } };
+};
+
+/**
+ * `sum(x)` → `{ $sum: '$x' }`. Empty collection → $sum retourne 0 côté Mongo
+ * (BSON quirk) vs NULL côté PG — divergence documentée dans knownDivergences.
+ * `sum(unique x)` refusé au planner (planner_agg_unique_mongo_unsupported_sum_avg,
+ * sprint 6). Defense-in-depth si ctx.unique atteint ce renderer.
+ */
+export const mongoSum: EngineRenderer = (args, ctx) => {
+	if (ctx.unique === true) {
+		throw new SnqlError(
+			"'sum(unique ...)' non supporté sur mongodb sprint 6 — utilise 'count(unique x)' ou reporte sprint 8 (aggregateMulti 2-stage)",
+			"planner_agg_unique_mongo_unsupported_sum_avg"
+		);
+	}
+	const arg = ctx.renderExpr(args[0]);
+	return { $sum: arg };
+};
+
+/**
+ * `avg(x)` → `{ $avg: '$x' }` — double natif Mongo. `avg(unique x)` refusé
+ * planner (sprint 6, cf mongoSum).
+ */
+export const mongoAvg: EngineRenderer = (args, ctx) => {
+	if (ctx.unique === true) {
+		throw new SnqlError(
+			"'avg(unique ...)' non supporté sur mongodb sprint 6 — utilise 'count(unique x)' ou reporte sprint 8 (aggregateMulti 2-stage)",
+			"planner_agg_unique_mongo_unsupported_sum_avg"
+		);
+	}
+	const arg = ctx.renderExpr(args[0]);
+	return { $avg: arg };
+};
+
+/**
+ * `min(x)` → `{ $min: '$x' }` — passthrough type BSON. `min(unique x)` refusé
+ * au lower (lower_call_unique_no_op_min_max) — le codegen ne devrait jamais
+ * voir ctx.unique=true sur min/max.
+ */
+export const mongoMin: EngineRenderer = (args, ctx) => {
+	if (ctx.unique === true) {
+		throw new Error(
+			"mongoMin(unique) refusé — lower_call_unique_no_op_min_max attendu avant codegen"
+		);
+	}
+	const arg = ctx.renderExpr(args[0]);
+	return { $min: arg };
+};
+
+export const mongoMax: EngineRenderer = (args, ctx) => {
+	if (ctx.unique === true) {
+		throw new Error(
+			"mongoMax(unique) refusé — lower_call_unique_no_op_min_max attendu avant codegen"
+		);
+	}
+	const arg = ctx.renderExpr(args[0]);
+	return { $max: arg };
+};

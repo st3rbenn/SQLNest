@@ -153,6 +153,18 @@ function appendStage(
 		case "project":
 			pipeline.push({ $project: renderProject(op.fields, alias) });
 			return;
+		case "aggregate": {
+			// Sprint T2/6 : PAIRE [$group{_id:null,...accs}, $project{_id:0,...renames}]
+			// via SSA extract. Sprint 7 (`group by`) remplira op.groupKeys pour un
+			// `_id: <keys>` non-null et un $project incluant les groupKeys.
+			const { groupStage, projectStage } = renderAggregatePipeline(
+				op.fields,
+				alias
+			);
+			pipeline.push({ $group: groupStage });
+			pipeline.push({ $project: projectStage });
+			return;
+		}
 		case "sort":
 			pipeline.push({ $sort: renderSort(op.keys, alias) });
 			return;
@@ -187,6 +199,251 @@ function appendStage(
 			}
 			return;
 	}
+}
+
+/**
+ * Sprint T2/6 : SSA extract pour un stage aggregate. Décompose les fields en :
+ *  - `groupStage` : {_id: null, __agg_0: {$sum:...}, __agg_1: {$avg:...}, ...}
+ *  - `projectStage` : {_id: 0, <alias>: <expr>, ...} — chaque expression
+ *    référence les slots __agg_N via `$__agg_N`.
+ *
+ * Déduplication : clé stable = name + JSON.stringify(argsCanonical) + flags.
+ * Deux fields référençant `sum(x)` partagent le même slot.
+ *
+ * count(unique x) : 2-stage hardcodé — $addToSet dans $group (filtre NULL via
+ * $cond+$$REMOVE pour parité PG COUNT(DISTINCT)), $size dans $project.
+ * sum(unique)/avg(unique) refusés au planner (planner_agg_unique_mongo_...).
+ */
+function renderAggregatePipeline(
+	fields: readonly PlanProjectField[],
+	alias: string | undefined
+): {
+	groupStage: Record<string, unknown>;
+	projectStage: Record<string, unknown>;
+} {
+	const groupStage: Record<string, unknown> = { _id: null };
+	const projectStage: Record<string, unknown> = { _id: 0 };
+	const slotByKey = new Map<string, string>();
+	let slotCounter = 0;
+	let uSlotCounter = 0;
+
+	function aggKeyOf(expr: PlanExpr & { kind: "call" }): string {
+		// Clé de dédup stable — strip les spans en canonicalisant récursivement.
+		return JSON.stringify({
+			name: expr.name,
+			args: expr.args.map(canonicalizeExpr),
+			star: expr.star === true,
+			unique: expr.unique === true
+		});
+	}
+
+	function canonicalizeExpr(e: PlanExpr): unknown {
+		if (e.kind === "literal") return { k: "literal", v: e.value };
+		if (e.kind === "field") return { k: "field", p: e.path };
+		if (e.kind === "call")
+			return {
+				k: "call",
+				n: e.name,
+				a: e.args.map(canonicalizeExpr),
+				s: e.star === true,
+				u: e.unique === true
+			};
+		if (e.kind === "arith")
+			return {
+				k: "arith",
+				o: e.op,
+				l: canonicalizeExpr(e.left),
+				r: canonicalizeExpr(e.right)
+			};
+		if (e.kind === "cast")
+			return { k: "cast", t: e.target, o: canonicalizeExpr(e.operand) };
+		return { k: e.kind };
+	}
+
+	function transformExpr(expr: PlanExpr, insideAggArg: boolean): unknown {
+		if (expr.kind === "call") {
+			const entry = SNQL_FUNCTIONS.get(expr.name);
+			if (entry?.kind === "aggregate") {
+				// Aggregate nested dans un arg d'agg → refusé au lower (defense).
+				if (insideAggArg) {
+					throw new SnqlError(
+						`Aggregate imbriqué '${expr.name}(...)' — bug de sync lower/codegen (lower_agg_nested attendu)`,
+						"codegen_mongo_agg_nested",
+						expr.span
+					);
+				}
+				const key = aggKeyOf(expr as PlanExpr & { kind: "call" });
+				// count(unique x) : 2-stage hardcodé
+				if (expr.name === "count" && expr.unique === true) {
+					const existing = slotByKey.get(key);
+					if (existing !== undefined) return { $size: `$${existing}` };
+					const argRendered = toExprOperand(expr.args[0]!, alias);
+					const uSlot = `__u_${uSlotCounter}`;
+					uSlotCounter += 1;
+					slotByKey.set(key, uSlot);
+					groupStage[uSlot] = {
+						$addToSet: {
+							$cond: [
+								{ $ne: [argRendered, null] },
+								argRendered,
+								"$$REMOVE"
+							]
+						}
+					};
+					return { $size: `$${uSlot}` };
+				}
+				// Cas standard : appel du renderer aggregate (accumulator body).
+				const existing = slotByKey.get(key);
+				if (existing !== undefined) return `$${existing}`;
+				if (entry.engines.mongodb === undefined) {
+					throw new SnqlError(
+						`Fonction '${expr.name}' : renderer MongoDB absent du registre`,
+						"codegen_missing_function_mapping"
+					);
+				}
+				const accBody = entry.engines.mongodb(expr.args, {
+					renderExpr: (arg) => toExprOperand(arg as PlanExpr, alias),
+					...(expr.star === true ? { star: true } : {}),
+					...(expr.unique === true ? { unique: true } : {})
+				});
+				const slot = `__agg_${slotCounter}`;
+				slotCounter += 1;
+				slotByKey.set(key, slot);
+				groupStage[slot] = accBody as Record<string, unknown>;
+				return `$${slot}`;
+			}
+			// Scalar call. Args passent via transformExpr (catch nested aggregates
+			// dans coalesce(sum(x), 0) → sum(x) devient '$__agg_0', 0 reste literal).
+			if (entry?.engines.mongodb === undefined) {
+				throw new SnqlError(
+					`Fonction '${expr.name}' : renderer MongoDB absent du registre`,
+					"codegen_missing_function_mapping"
+				);
+			}
+			return entry.engines.mongodb(expr.args, {
+				renderExpr: (arg) => transformExpr(arg as PlanExpr, insideAggArg)
+			});
+		}
+		if (expr.kind === "literal") {
+			const value = bsonStoreValue(expr.value);
+			return typeof value === "string" && value.startsWith("$")
+				? { $literal: value }
+				: value;
+		}
+		if (expr.kind === "field") {
+			// Field bare dans un pick agg field.expr → normalement refusé au lower
+			// (lower_bare_field_in_agg_scalar_wrapper). Defense : rendu direct.
+			return `$${mongoField(expr.path, alias)}`;
+		}
+		if (expr.kind === "arith") {
+			return {
+				[ARITH_TO_MONGO[expr.op]]: [
+					transformExpr(expr.left, insideAggArg),
+					transformExpr(expr.right, insideAggArg)
+				]
+			};
+		}
+		if (expr.kind === "cast") {
+			if (expr.target === "json") {
+				throw new SnqlError(
+					"cast(_ as json) non supporté sur mongodb — les documents Mongo sont déjà des BSON",
+					"codegen_mongo_cast_unsupported",
+					expr.span
+				);
+			}
+			const inner = transformExpr(expr.operand, insideAggArg);
+			const input =
+				expr.operand.kind === "field" ? { $ifNull: [inner, null] } : inner;
+			return {
+				$convert: {
+					input,
+					to: MONGO_CAST_TYPE[expr.target as Exclude<CastTarget, "json">]
+				}
+			};
+		}
+		if (expr.kind === "object") {
+			const out: Record<string, unknown> = {};
+			for (const e of expr.entries) {
+				out[e.key] = transformExpr(e.value, insideAggArg);
+			}
+			return out;
+		}
+		if (expr.kind === "array") {
+			return expr.items.map((i) => transformExpr(i, insideAggArg));
+		}
+		if (expr.kind === "case") {
+			return {
+				$switch: {
+					branches: expr.branches.map((b) => ({
+						case: transformExpr(b.cond, insideAggArg),
+						then: transformExpr(b.value, insideAggArg)
+					})),
+					default: transformExpr(expr.elseValue, insideAggArg)
+				}
+			};
+		}
+		if (expr.kind === "compare") {
+			return {
+				[MONGO_OP[expr.op]]: [
+					transformExpr(expr.left, insideAggArg),
+					transformExpr(expr.right, insideAggArg)
+				]
+			};
+		}
+		if (expr.kind === "and") {
+			return {
+				$and: [
+					transformExpr(expr.left, insideAggArg),
+					transformExpr(expr.right, insideAggArg)
+				]
+			};
+		}
+		if (expr.kind === "or") {
+			return {
+				$or: [
+					transformExpr(expr.left, insideAggArg),
+					transformExpr(expr.right, insideAggArg)
+				]
+			};
+		}
+		if (expr.kind === "not") {
+			return { $not: transformExpr(expr.operand, insideAggArg) };
+		}
+		if (expr.kind === "isNull") {
+			const op = expr.negated ? "$ne" : "$eq";
+			return {
+				[op]: [transformExpr(expr.operand, insideAggArg), null]
+			};
+		}
+		if (expr.kind === "in") {
+			return {
+				$in: [
+					transformExpr(expr.target, insideAggArg),
+					expr.values.map((v) => transformExpr(v, insideAggArg))
+				]
+			};
+		}
+		throw new SnqlError(
+			"Opérande non supporté dans une pipeline agrégée Mongo",
+			"codegen_mongo_agg_expr"
+		);
+	}
+
+	for (const field of fields) {
+		const aliasName = (field.alias ?? field.path[field.path.length - 1]) as string;
+		if (field.expr !== undefined) {
+			projectStage[aliasName] = transformExpr(field.expr, false);
+		} else {
+			// Path-only field dans pick agg — normalement refusé au lower
+			// (planner_agg_bare_field_needs_group). Defense.
+			throw new SnqlError(
+				`Field bare '${field.path.join(".")}' dans un pick agg — bug de sync lower/codegen`,
+				"codegen_mongo_agg_bare_field"
+			);
+		}
+	}
+
+	return { groupStage, projectStage };
 }
 
 function renderProject(
@@ -678,8 +935,12 @@ function toExprOperand(expr: PlanExpr, alias: string | undefined): unknown {
 				"codegen_missing_function_mapping"
 			);
 		}
+		// Sprint T2/6 : propage star/unique (defense-in-depth ; les aggregates
+		// arrivent normalement via renderAggregatePipeline, pas ici).
 		return entry.engines.mongodb(expr.args, {
-			renderExpr: (arg) => toExprOperand(arg as PlanExpr, alias)
+			renderExpr: (arg) => toExprOperand(arg as PlanExpr, alias),
+			...(expr.star === true ? { star: true } : {}),
+			...(expr.unique === true ? { unique: true } : {})
 		});
 	}
 	if (expr.kind === "cast") {

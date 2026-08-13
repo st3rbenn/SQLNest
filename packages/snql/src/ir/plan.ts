@@ -96,10 +96,16 @@ export type PlanExpr = (
 	  }
 	// Appel de fonction validé — nom canonique (lowercased), args lowered.
 	// Le codegen délègue au renderer du registre pour l'engine cible.
+	//
+	// Sprint T2/6 : flags optionnels pour les aggregates.
+	//  - `star` : `count(*)` — args=[]. Invariants documentés au parser/lower.
+	//  - `unique` : `count(unique x)` — args.length=1. Réservé aggregates.
 	| {
 			readonly kind: "call";
 			readonly name: string;
 			readonly args: readonly PlanExpr[];
+			readonly star?: true;
+			readonly unique?: true;
 	  }
 	// Cast explicite. Distinct de `call` : pas dans le registre de fonctions, pas
 	// soumis à assertNoCallInWrite (déterministe + NULL propagate → autorisé en
@@ -209,6 +215,19 @@ export type LogicalPlan =
 			readonly localField: readonly string[];
 			readonly foreignField: readonly string[];
 			readonly kind: "embed" | "join";
+	  }
+	// Sprint T2/6 : agrégation scalaire fold — `pick count(*)`, `pick sum(x)`.
+	// `groupKeys` toujours undefined en sprint 6 (fold sur toute la collection,
+	// 1 row output). Sprint 7 (`group by`) le peuplera sans refactor. `fields`
+	// contient au moins un PlanProjectField dont `expr` est un call kind='aggregate'
+	// (validation au lower). Codegen PG : SELECT-list nue (implicit grouping natif).
+	// Codegen Mongo : PAIRE [$group{_id:null,...}, $project{_id:0,...}] via SSA
+	// extract. Runtime KV : foldAggregate → 1 row.
+	| {
+			readonly op: "aggregate";
+			readonly input: LogicalPlan;
+			readonly fields: readonly PlanProjectField[];
+			readonly groupKeys?: readonly (readonly string[])[];
 	  };
 
 /** Une affectation de colonne dans un `update` : `column = value`. */
@@ -277,7 +296,8 @@ export const REQUIRED_CAPABILITY: Readonly<Record<PlanOp, Capability>> = {
 	project: "project",
 	sort: "sort",
 	limit: "paginate",
-	join: "join"
+	join: "join",
+	aggregate: "aggregate"
 };
 
 export function requiredCapability(plan: LogicalPlan): Capability {

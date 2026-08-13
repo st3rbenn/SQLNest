@@ -36,6 +36,22 @@ export interface RenderContext {
 	readonly renderExpr: (expr: unknown) => unknown;
 	readonly addParam?: (value: unknown) => string;
 	readonly alias?: string | undefined;
+	// Sprint T2/6 : flags call-level propagés depuis PlanCall.star / .unique.
+	// Les renderers scalar existants les ignorent (backward compat total). Les
+	// aggregates les lisent pour émettre COUNT(*) / COUNT(DISTINCT x) etc.
+	readonly star?: boolean;
+	readonly unique?: boolean;
+	// Sprint T2/6 : rows disponibles pour les renderers KV aggregate (fold).
+	// Absent pour les scalar per-row (compat sprint 5). Les aggregates KV
+	// lisent ctx.rows pour évaluer un fold sur toute la collection.
+	readonly rows?: readonly Record<string, unknown>[];
+	// Sprint T2/6 : évaluation d'un PlanExpr par row (KV aggregate). Sépare
+	// la responsabilité du fold (renderer KV agg) de l'évaluation scalar
+	// (evalValue dans compensate). Absent pour les scalar per-row.
+	readonly evalPerRow?: (
+		expr: unknown,
+		row: Record<string, unknown>
+	) => unknown;
 }
 
 /** Renderer par engine : reçoit les args (déjà lowered en PlanExpr) + le contexte engine-spécifique. */

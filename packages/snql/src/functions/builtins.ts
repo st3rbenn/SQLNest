@@ -14,12 +14,25 @@
  */
 
 import { extractStaticDotPath } from "./builtins-shared";
-import { kvGreatest, kvIf, kvLeast, kvNullif } from "./builtins.kv";
+import {
+	kvAvg,
+	kvCoalesce,
+	kvCount,
+	kvGreatest,
+	kvIf,
+	kvLeast,
+	kvMax,
+	kvMin,
+	kvNullif,
+	kvSum
+} from "./builtins.kv";
 import {
 	mongoAbs,
+	mongoAvg,
 	mongoCeil,
 	mongoConcat,
 	mongoCoalesce,
+	mongoCount,
 	mongoDateAdd,
 	mongoDateDiff,
 	mongoDatePart,
@@ -35,6 +48,8 @@ import {
 	mongoLength,
 	mongoLower,
 	mongoLtrim,
+	mongoMax,
+	mongoMin,
 	mongoNow,
 	mongoNullif,
 	mongoReplace,
@@ -42,15 +57,18 @@ import {
 	mongoRtrim,
 	mongoStrpos,
 	mongoSubstring,
+	mongoSum,
 	mongoToday,
 	mongoTrim,
 	mongoUpper
 } from "./builtins.mongo";
 import {
 	pgAbs,
+	pgAvg,
 	pgCeil,
 	pgConcat,
 	pgCoalesce,
+	pgCount,
 	pgDateAdd,
 	pgDateDiff,
 	pgDatePart,
@@ -67,6 +85,8 @@ import {
 	pgLength,
 	pgLower,
 	pgLtrim,
+	pgMax,
+	pgMin,
 	pgNow,
 	pgNullif,
 	pgReplace,
@@ -74,6 +94,7 @@ import {
 	pgRtrim,
 	pgStrpos,
 	pgSubstring,
+	pgSum,
 	pgToday,
 	pgTrim,
 	pgUpper
@@ -134,7 +155,9 @@ const BUILTINS: readonly FunctionEntry[] = [
 		// Args non typés — `coalesce(x, "default")` mixe types intentionnellement.
 		// Sémantique NULL "custom" : renvoie null ssi TOUS args null (pas absorb pur).
 		writeNullBehavior: "custom",
-		engines: { postgres: pgCoalesce, mongodb: mongoCoalesce }
+		// Sprint T2/6 : kvCoalesce ajouté pour débloquer scalar-around-agg côté KV
+		// (`coalesce(sum(x), 0)`). Migration inline → registre.
+		engines: { postgres: pgCoalesce, mongodb: mongoCoalesce, kv: kvCoalesce }
 	},
 	{
 		name: "now",
@@ -363,6 +386,53 @@ const BUILTINS: readonly FunctionEntry[] = [
 		arity: { min: 2, max: null },
 		writeNullBehavior: "custom",
 		engines: { postgres: pgLeast, mongodb: mongoLeast, kv: kvLeast }
+	},
+
+	// ─── sprint T2/6 : aggregates scalaires ───────────────────────────────
+	// `writeNullBehavior` VOLONTAIREMENT undefined : les aggregates n'ont
+	// aucun sens en contexte write (`update t set y = count(*)`). Refus
+	// spécifique lower_agg_in_set (ordre CRITIQUE avant assertNoCallInWrite
+	// pour émettre le message précis, pas lower_call_null_write générique).
+	// `mongoMatchHoist` undefined : agg jamais dans $match (refus walker
+	// lower_agg_in_where en amont).
+	//
+	// arity :
+	//  - count : {min:0,max:1} — 0 args = star (validation guard star_only_count
+	//    au parser refuse count() nu sans star ; ici arity accepte 0-1)
+	//  - sum/avg : {min:1,max:1} args:['number'] — le typing opt-in fire sur
+	//    literal NULL/string, laisse passer field ref (checkable au runtime)
+	//  - min/max : {min:1,max:1} args:['any'] — passthrough type
+	{
+		name: "count",
+		kind: "aggregate",
+		arity: { min: 0, max: 1 },
+		engines: { postgres: pgCount, mongodb: mongoCount, kv: kvCount }
+	},
+	{
+		name: "sum",
+		kind: "aggregate",
+		arity: { min: 1, max: 1 },
+		args: ["number"],
+		engines: { postgres: pgSum, mongodb: mongoSum, kv: kvSum }
+	},
+	{
+		name: "avg",
+		kind: "aggregate",
+		arity: { min: 1, max: 1 },
+		args: ["number"],
+		engines: { postgres: pgAvg, mongodb: mongoAvg, kv: kvAvg }
+	},
+	{
+		name: "min",
+		kind: "aggregate",
+		arity: { min: 1, max: 1 },
+		engines: { postgres: pgMin, mongodb: mongoMin, kv: kvMin }
+	},
+	{
+		name: "max",
+		kind: "aggregate",
+		arity: { min: 1, max: 1 },
+		engines: { postgres: pgMax, mongodb: mongoMax, kv: kvMax }
 	},
 
 	// ─── sprint 4 : reserved (sprint 5+) ──────────────────────────────────
