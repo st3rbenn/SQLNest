@@ -337,3 +337,40 @@ export const pgJsonContains: EngineRenderer = (args, ctx) => {
 	const subdoc = ctx.renderExpr(args[1]) as string;
 	return `((${doc})::jsonb @> (${subdoc})::jsonb)`;
 };
+
+// ─── sprint T2/5 : conditional ─────────────────────────────────────────────
+
+/**
+ * `if(cond, then, else)` → `CASE WHEN <cond> THEN <then> ELSE <else> END`.
+ * Sucre syntaxique 3-arg pour un `case { cond -> then, else -> else }` d'une
+ * seule branche. Le codegen PG traduit vers CASE WHEN (pas de fonction PG
+ * dédiée `IF` — c'est un `IIF` MSSQL / `IF` MySQL, absent chez PG).
+ */
+export const pgIf: EngineRenderer = (args, ctx) => {
+	const [c, t, e] = renderArgs(args, ctx);
+	return `CASE WHEN ${c} THEN ${t} ELSE ${e} END`;
+};
+
+/**
+ * `nullif(a, b)` → `NULLIF(<a>, <b>)`. Retourne NULL si a=b, sinon a. Pattern
+ * classique pour "vider" une valeur sentinelle (nullif(x, '') → NULL si vide).
+ */
+export const pgNullif: EngineRenderer = (args, ctx) => {
+	const [a, b] = renderArgs(args, ctx);
+	return `NULLIF(${a}, ${b})`;
+};
+
+/**
+ * `greatest(a, b, …)` / `least(a, b, …)` → `GREATEST(…)` / `LEAST(…)`. Variadic
+ * min 2. NULL-absorb côté PG (contrairement à `max`/`min` aggregate qui les
+ * ignorent) — parité maintenue avec Mongo via l'émulation $reduce à l'écrit.
+ */
+export const pgGreatest: EngineRenderer = (args, ctx) => {
+	const rendered = renderArgs(args, ctx);
+	return `GREATEST(${rendered.join(", ")})`;
+};
+
+export const pgLeast: EngineRenderer = (args, ctx) => {
+	const rendered = renderArgs(args, ctx);
+	return `LEAST(${rendered.join(", ")})`;
+};

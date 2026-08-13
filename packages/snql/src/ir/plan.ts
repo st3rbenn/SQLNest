@@ -125,11 +125,26 @@ export type PlanExpr = (
 			readonly kind: "array";
 			readonly items: readonly PlanExpr[];
 	  }
+	// Sprint T2/5 : `case { c1 -> v1, c2 -> v2, else -> v3 }`. First-match wins.
+	// elseValue toujours défini (else obligatoire à la surface). Codegen PG :
+	// CASE WHEN. Codegen Mongo : $switch. Runtime KV : evalValue short-circuit
+	// avec strict `=== true` sur cond (parité PG 3VL, null/false/0 → else).
+	| {
+			readonly kind: "case";
+			readonly branches: readonly PlanCaseBranch[];
+			readonly elseValue: PlanExpr;
+	  }
 ) & { readonly span?: Span };
 
 /** Entry d'un `PlanExpr.object` — key canonique + value lowered. */
 export interface PlanObjectEntry {
 	readonly key: string;
+	readonly value: PlanExpr;
+}
+
+/** Branche d'un `PlanExpr.case` — condition + valeur lowered. */
+export interface PlanCaseBranch {
+	readonly cond: PlanExpr;
 	readonly value: PlanExpr;
 }
 

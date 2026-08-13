@@ -337,6 +337,15 @@ function renderMatch(
 				"codegen_mongo_predicate",
 				expr.span
 			);
+		case "case":
+			// Sprint T2/5 : `case` bare en position where est refusé au lower
+			// (lower_case_bare_predicate). Cet arm reste défense-en-profondeur —
+			// un plan construit à la main ou un bug de sync lower/codegen tombe ici.
+			throw new SnqlError(
+				"`case { … }` n'est pas un prédicat — compare le résultat avec une valeur (ex: case { … } = true)",
+				"codegen_mongo_predicate",
+				expr.span
+			);
 	}
 }
 
@@ -411,6 +420,13 @@ function negateMatch(
 		case "array":
 			throw new SnqlError(
 				`Négation d'un ${expr.kind} literal non supportée (pas un prédicat)`,
+				"codegen_mongo_predicate",
+				expr.span
+			);
+		case "case":
+			// Défense-en-profondeur — même raisonnement que renderMatch.
+			throw new SnqlError(
+				"Négation d'un `case { … }` non supportée (pas un prédicat) — compare avec une valeur d'abord",
 				"codegen_mongo_predicate",
 				expr.span
 			);
@@ -546,13 +562,17 @@ function renderCompare(
 		const isExprLike =
 			left.kind === "call" ||
 			left.kind === "cast" ||
+			left.kind === "case" ||
 			right.kind === "call" ||
-			right.kind === "cast";
+			right.kind === "cast" ||
+			right.kind === "case";
 		if (isExprLike) {
 			throw new SnqlError(
-				"Expression fonction/cast dans un filtre de mutation Mongo non hoistable — matérialise le filtre côté application, ou utilise un pattern hoistable (json_get(field, ...literals) = literal)",
+				"Expression fonction/cast/case dans un filtre de mutation Mongo non hoistable — matérialise le filtre côté application, ou utilise un pattern hoistable (json_get(field, ...literals) = literal)",
 				"codegen_mongo_write_expr_predicate",
-				left.kind === "call" || left.kind === "cast" ? left.span : right.span
+				left.kind === "call" || left.kind === "cast" || left.kind === "case"
+					? left.span
+					: right.span
 			);
 		}
 		throw new SnqlError(
@@ -698,6 +718,63 @@ function toExprOperand(expr: PlanExpr, alias: string | undefined): unknown {
 	if (expr.kind === "array") {
 		// BSON array natif — chaque item passe par toExprOperand récursif.
 		return expr.items.map((item) => toExprOperand(item, alias));
+	}
+	if (expr.kind === "case") {
+		// Sprint T2/5 : `$switch` natif Mongo. Sémantique `case`/`then` (bool
+		// évalué → then), avec `default` obligatoire (miroir de l'else surface).
+		return {
+			$switch: {
+				branches: expr.branches.map((b) => ({
+					case: toExprOperand(b.cond, alias),
+					then: toExprOperand(b.value, alias)
+				})),
+				default: toExprOperand(expr.elseValue, alias)
+			}
+		};
+	}
+	// Sprint T2/5 : compare/and/or/not/isNull/in en forme $expr — nécessaires
+	// dès que ces nodes apparaissent comme sous-expressions (cond d'un case/if,
+	// arg d'un call, etc.). Avant, ces cas étaient invisibles car la surface
+	// ne permettait pas de sous-prédicats dans les expressions. Le lower `case`
+	// les fait tous transiter par toExprOperand — d'où l'ajout au step 10.
+	if (expr.kind === "compare") {
+		return {
+			[MONGO_OP[expr.op]]: [
+				toExprOperand(expr.left, alias),
+				toExprOperand(expr.right, alias)
+			]
+		};
+	}
+	if (expr.kind === "and") {
+		return {
+			$and: [
+				toExprOperand(expr.left, alias),
+				toExprOperand(expr.right, alias)
+			]
+		};
+	}
+	if (expr.kind === "or") {
+		return {
+			$or: [
+				toExprOperand(expr.left, alias),
+				toExprOperand(expr.right, alias)
+			]
+		};
+	}
+	if (expr.kind === "not") {
+		return { $not: toExprOperand(expr.operand, alias) };
+	}
+	if (expr.kind === "isNull") {
+		const op = expr.negated ? "$ne" : "$eq";
+		return { [op]: [toExprOperand(expr.operand, alias), null] };
+	}
+	if (expr.kind === "in") {
+		return {
+			$in: [
+				toExprOperand(expr.target, alias),
+				expr.values.map((v) => toExprOperand(v, alias))
+			]
+		};
 	}
 	throw new SnqlError(
 		"Opérande non supporté dans une comparaison $expr Mongo",

@@ -34,6 +34,7 @@ export type TokenKind =
 	| "lbrace" // {
 	| "rbrace" // }
 	| "colon" // :
+	| "arrow" // -> (sprint T2/5, séparateur `case { c -> v }`)
 	| "eof";
 
 export interface Token {

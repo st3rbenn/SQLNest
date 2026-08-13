@@ -89,6 +89,13 @@ export interface FunctionEntry {
 	readonly engines: {
 		readonly postgres?: EngineRenderer;
 		readonly mongodb?: EngineRenderer;
+		// Sprint T2/5 : dispatch KV pass-through via le registre (au lieu du switch
+		// hardcodé dans compensate.ts). Opt-in : tant qu'une fn n'a pas de renderer
+		// `kv`, elle reste inconnue du runtime (planner filtre déjà). Migration
+		// progressive — les fns héritées gardent leur dispatch inline le temps
+		// qu'on les migre. Ajout obligatoire immédiat pour if/nullif/greatest/least
+		// (validé par l'utilisateur — pas d'asymétrie planner/runtime tolérée).
+		readonly kv?: EngineRenderer;
 	};
 }
 
@@ -128,12 +135,13 @@ export function createRegistry(
 	}
 	const pgNames = new Set<string>();
 	const mongoNames = new Set<string>();
+	const kvNames = new Set<string>();
 	for (const [name, entry] of byName) {
 		if (entry.engines.postgres !== undefined) pgNames.add(name);
 		if (entry.engines.mongodb !== undefined) mongoNames.add(name);
+		if (entry.engines.kv !== undefined) kvNames.add(name);
 	}
 	const names = new Set(byName.keys());
-	const emptySet: ReadonlySet<string> = new Set();
 	return {
 		get: (name) => byName.get(name),
 		has: (name) => byName.has(name),
@@ -141,7 +149,7 @@ export function createRegistry(
 		forEngine: (engine) => {
 			if (engine === "postgres") return pgNames;
 			if (engine === "mongodb") return mongoNames;
-			return emptySet; // kv : aucune fonction du registre (planner filtre)
+			return kvNames;
 		}
 	};
 }

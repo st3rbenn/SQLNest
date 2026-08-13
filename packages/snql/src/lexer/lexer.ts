@@ -19,7 +19,8 @@ const SINGLE: Readonly<Record<string, TokenKind>> = {
 	"}": "rbrace",
 	":": "colon",
 	"+": "plus",
-	"-": "minus",
+	// Sprint T2/5 : `-` retiré de SINGLE, géré dans scanOperator avec lookahead
+	// sur `>` pour émettre `arrow` (2-char token, symétrique aux !=/<=/>=).
 	"*": "star",
 	"/": "slash",
 	"%": "percent",
@@ -142,7 +143,7 @@ class Lexer {
 		return true;
 	}
 
-	/** Opérateurs `!= < <= > >=`. Retourne true si consommé. */
+	/** Opérateurs `!= < <= > >= ->` + `-` (minus). Retourne true si consommé. */
 	private scanOperator(c: string, start: Position): boolean {
 		if (c === "!") {
 			this.advance();
@@ -164,6 +165,19 @@ class Lexer {
 				this.push("op", `${c}=`, start);
 			} else {
 				this.push("op", c, start);
+			}
+			return true;
+		}
+		// Sprint T2/5 : `-` géré ici (retiré de SINGLE). Lookahead sur `>`
+		// pour émettre `arrow` (`->`). Whitespace-strict : `- >` reste 2 tokens
+		// séparés (minus + op '>'), cohérent avec !=/<=/>= existants.
+		if (c === "-") {
+			this.advance();
+			if (this.peek() === ">") {
+				this.advance();
+				this.push("arrow", "->", start);
+			} else {
+				this.push("minus", "-", start);
 			}
 			return true;
 		}

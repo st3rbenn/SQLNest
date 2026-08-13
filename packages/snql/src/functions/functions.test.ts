@@ -4,7 +4,7 @@ import { checkArity, describeArity } from "./arity";
 import { SNQL_FUNCTIONS, createRegistry, type FunctionEntry } from "./index";
 
 describe("call node — registry + arity", () => {
-	it("SNQL_FUNCTIONS contient les 25 builtins (sprint 1 + 3 + 4) + 9 reserved", () => {
+	it("SNQL_FUNCTIONS contient les 29 builtins (sprint 1 + 3 + 4 + T2/5) + 8 reserved", () => {
 		expect(SNQL_FUNCTIONS.names()).toEqual(
 			new Set([
 				// sprint 1
@@ -39,8 +39,14 @@ describe("call node — registry + arity", () => {
 				"json_get_text",
 				"json_has_key",
 				"json_typeof",
-				// sprint 4 reserved
+				// sprint object-literals JSON PG-only
 				"json_contains",
+				// sprint T2/5 conditional
+				"if",
+				"nullif",
+				"greatest",
+				"least",
+				// sprint 4 reserved
 				"json_set",
 				"json_delete",
 				"json_merge",
@@ -52,13 +58,15 @@ describe("call node — registry + arity", () => {
 		);
 	});
 
-	it("forEngine expose les fonctions supportées par engine (26 PG / 25 Mongo — json_contains PG only sprint object-literals)", () => {
+	it("forEngine expose les fonctions supportées par engine (30 PG / 29 Mongo / 4 KV — T2/5 conditional +4)", () => {
 		// 8 sprint 1 + 13 sprint 3 + 4 sprint 4 = 25 mappées cross-engine.
 		// Sprint object-literals débloque json_contains PG only (+1 PG) — Mongo
 		// reste reporté sprint 6 (émulation $mergeObjects/$eq complexe).
-		expect(SNQL_FUNCTIONS.forEngine("postgres").size).toBe(26);
-		expect(SNQL_FUNCTIONS.forEngine("mongodb").size).toBe(25);
-		expect(SNQL_FUNCTIONS.forEngine("kv").size).toBe(0);
+		// Sprint T2/5 : +4 fns cross-engine (if/nullif/greatest/least) + entrée
+		// KV via engines.kv (introduction du dispatch registre côté runtime).
+		expect(SNQL_FUNCTIONS.forEngine("postgres").size).toBe(30);
+		expect(SNQL_FUNCTIONS.forEngine("mongodb").size).toBe(29);
+		expect(SNQL_FUNCTIONS.forEngine("kv").size).toBe(4);
 	});
 
 	it("createRegistry(base, overrides) écrase par nom", () => {

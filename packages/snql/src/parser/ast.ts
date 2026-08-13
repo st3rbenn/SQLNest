@@ -118,7 +118,31 @@ export type Expr =
 			readonly type: "array";
 			readonly items: readonly Expr[];
 			readonly span: Span;
+	  }
+	// Sprint T2/5 : structure conditionnelle `case { c1 -> v1, c2 -> v2, else -> v3 }`.
+	// Else obligatoire à la surface (pas de NULL implicite). First-match wins.
+	// PG codegen : CASE WHEN. Mongo codegen : $switch. Runtime KV : short-circuit
+	// évaluation lazy (parité PG 3VL, cond === true strict).
+	| {
+			readonly type: "case";
+			readonly branches: readonly CaseBranch[];
+			readonly elseValue: Expr;
+			readonly span: Span;
 	  };
+
+/**
+ * Branche d'un `case { cond -> value, … }`. `cond` doit être une expression
+ * booléenne (garde `lower_case_cond_type` au lower refuse les literals
+ * object/array/number/string non-bool).
+ */
+export interface CaseBranch {
+	readonly cond: Expr;
+	readonly value: Expr;
+	readonly span: Span;
+}
+
+/** Profondeur max d'imbrication `case { … }` — protection stack overflow parser. */
+export const MAX_CASE_DEPTH = 32;
 
 /**
  * Une entrée d'object literal — `key: value` avec key en ident (bare) ou

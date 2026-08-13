@@ -14,6 +14,7 @@
  */
 
 import { extractStaticDotPath } from "./builtins-shared";
+import { kvGreatest, kvIf, kvLeast, kvNullif } from "./builtins.kv";
 import {
 	mongoAbs,
 	mongoCeil,
@@ -24,14 +25,18 @@ import {
 	mongoDatePart,
 	mongoDateTrunc,
 	mongoFloor,
+	mongoGreatest,
+	mongoIf,
 	mongoJsonGet,
 	mongoJsonGetText,
 	mongoJsonHasKey,
 	mongoJsonTypeof,
+	mongoLeast,
 	mongoLength,
 	mongoLower,
 	mongoLtrim,
 	mongoNow,
+	mongoNullif,
 	mongoReplace,
 	mongoRound,
 	mongoRtrim,
@@ -51,15 +56,19 @@ import {
 	pgDatePart,
 	pgDateTrunc,
 	pgFloor,
+	pgGreatest,
+	pgIf,
 	pgJsonContains,
 	pgJsonGet,
 	pgJsonGetText,
 	pgJsonHasKey,
 	pgJsonTypeof,
+	pgLeast,
 	pgLength,
 	pgLower,
 	pgLtrim,
 	pgNow,
+	pgNullif,
 	pgReplace,
 	pgRound,
 	pgRtrim,
@@ -314,6 +323,46 @@ const BUILTINS: readonly FunctionEntry[] = [
 		// Reporté sprint 6+ ; côté Mongo, forEngine renvoie no renderer →
 		// planner_unsupported_function avec message actionnable.
 		engines: { postgres: pgJsonContains }
+	},
+
+	// ─── sprint T2/5 : conditional ────────────────────────────────────────
+	// writeNullBehavior 'custom' pour les 4 : NULL cond ≠ NULL result (if/case
+	// choisissent la else branch, greatest/least NULL-absorb parité PG, nullif
+	// retourne null ssi égalité). Validé par l'utilisateur — pas 'propagate'
+	// uniforme qui serait incorrect sémantiquement pour if.
+	{
+		name: "if",
+		kind: "scalar",
+		arity: { min: 3, max: 3 },
+		// args non typés : cond bool (garde lower_if_cond_type), then/else
+		// homogènes (garde lower_if_branches_type_mismatch).
+		writeNullBehavior: "custom",
+		engines: { postgres: pgIf, mongodb: mongoIf, kv: kvIf }
+	},
+	{
+		name: "nullif",
+		kind: "scalar",
+		arity: { min: 2, max: 2 },
+		writeNullBehavior: "custom",
+		engines: { postgres: pgNullif, mongodb: mongoNullif, kv: kvNullif }
+	},
+	{
+		name: "greatest",
+		kind: "scalar",
+		arity: { min: 2, max: null },
+		writeNullBehavior: "custom",
+		engines: {
+			postgres: pgGreatest,
+			mongodb: mongoGreatest,
+			kv: kvGreatest
+		}
+	},
+	{
+		name: "least",
+		kind: "scalar",
+		arity: { min: 2, max: null },
+		writeNullBehavior: "custom",
+		engines: { postgres: pgLeast, mongodb: mongoLeast, kv: kvLeast }
 	},
 
 	// ─── sprint 4 : reserved (sprint 5+) ──────────────────────────────────

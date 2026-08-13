@@ -510,6 +510,20 @@ function renderExpr(expr: PlanExpr, params: ParamList): string {
 			const parts = expr.items.map((item) => renderJsonValue(item, params));
 			return `jsonb_build_array(${parts.join(", ")})`;
 		}
+		case "case": {
+			// CASE WHEN <c1> THEN <v1> WHEN <c2> THEN <v2> ELSE <e> END.
+			// Parens autour : `case` peut apparaître comme opérande d'un
+			// compare/arith, PG accepte l'expression nue mais le formateur
+			// SNQL préfère l'isolement défensif (miroir arith).
+			const whens = expr.branches
+				.map(
+					(b) =>
+						`WHEN ${renderExpr(b.cond, params)} THEN ${renderExpr(b.value, params)}`
+				)
+				.join(" ");
+			const elseSql = renderExpr(expr.elseValue, params);
+			return `(CASE ${whens} ELSE ${elseSql} END)`;
+		}
 	}
 }
 

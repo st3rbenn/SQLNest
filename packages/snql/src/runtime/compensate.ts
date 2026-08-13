@@ -1,4 +1,5 @@
 import { SnqlError } from "../diagnostics";
+import { SNQL_FUNCTIONS } from "../functions/index";
 import type {
 	CastTarget,
 	CompareOp,
@@ -113,13 +114,31 @@ function evalValue(expr: PlanExpr, row: Row): unknown {
 		return evalArith(expr.op, evalValue(expr.left, row), evalValue(expr.right, row));
 	}
 	if (expr.kind === "call") {
-		// Pas d'exécution de fonctions côté runtime KV : le planner filtre déjà
-		// via Capabilities.functions (Set vide pour KV) et lève
-		// planner_unsupported_function avant d'atteindre la compensation. Un
-		// arrivée ici = bug de synchronisation.
+		// Sprint T2/5 : dispatch registre KV. Si l'entrée expose un renderer
+		// `kv`, on le délègue (short-circuit possible côté renderer — cf.
+		// `kvIf` qui n'évalue jamais les deux branches). Sans renderer, la
+		// fn est inconnue de KV → planner l'a filtrée en amont (Capabilities
+		// forEngine("kv") vide pour cette fn) → arrivée ici = bug de sync.
+		const entry = SNQL_FUNCTIONS.get(expr.name);
+		if (entry?.engines.kv !== undefined) {
+			return entry.engines.kv(expr.args, {
+				renderExpr: (arg) => evalValue(arg as PlanExpr, row)
+			});
+		}
 		throw new Error(
 			`Runtime KV : fonction '${expr.name}' non exécutable (planner should have rejected)`
 		);
+	}
+	if (expr.kind === "case") {
+		// Sprint T2/5 : short-circuit strict. Chaque cond évaluée dans l'ordre,
+		// premier `=== true` STRICT → sa value. null/false/undefined/0/'' →
+		// on passe à la suivante (parité PG 3VL, pas de truthy JS). Si aucune
+		// branche match → elseValue (obligatoire à la surface).
+		for (const branch of expr.branches) {
+			const cond = evalValue(branch.cond, row);
+			if (cond === true) return evalValue(branch.value, row);
+		}
+		return evalValue(expr.elseValue, row);
 	}
 	if (expr.kind === "cast") {
 		const inner = evalValue(expr.operand, row);
@@ -249,6 +268,7 @@ function evalBool(expr: PlanExpr, row: Row): boolean | null {
 		case "cast":
 		case "object":
 		case "array":
+		case "case":
 			return coerceBool(evalValue(expr, row));
 	}
 }

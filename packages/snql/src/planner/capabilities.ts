@@ -54,9 +54,12 @@ export const MONGODB_CAPABILITIES: Capabilities = caps(
 /**
  * Clé-valeur (façon Redis) : sait scanner et filtrer, mais NI trier, NI projeter,
  * NI paginer, NI joindre côté serveur → ces opérateurs déclenchent la compensation.
- * Aucune fonction du registre — un call déclenche `planner_unsupported_function`.
- * Cast : uniquement scalaires primitifs (JS n'a pas de parser portable pour
- * `date`/`timestamp`/`json` en compensation stricte).
+ * Fonctions : sprint T2/5 introduit le dispatch registre côté runtime — la liste
+ * `SNQL_FUNCTIONS.forEngine("kv")` correspond aux entrées avec `engines.kv`
+ * déclaré (aujourd'hui : if/nullif/greatest/least). Toute autre fonction
+ * déclenche `planner_unsupported_function`. Cast : uniquement scalaires
+ * primitifs (JS n'a pas de parser portable pour `date`/`timestamp`/`json`
+ * en compensation stricte).
  */
 export const KV_CAPABILITIES: Capabilities = caps(
 	"kv",

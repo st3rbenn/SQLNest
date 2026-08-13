@@ -295,6 +295,13 @@ function collectExprFieldsWithSpans(
 		case "array":
 			for (const item of expr.items) collectExprFieldsWithSpans(item, out);
 			return;
+		case "case":
+			for (const branch of expr.branches) {
+				collectExprFieldsWithSpans(branch.cond, out);
+				collectExprFieldsWithSpans(branch.value, out);
+			}
+			collectExprFieldsWithSpans(expr.elseValue, out);
+			return;
 	}
 }
 
@@ -471,6 +478,16 @@ function assertNoCallInWrite(expr: PlanExpr): void {
 			return;
 		case "array":
 			for (const item of expr.items) assertNoCallInWrite(item);
+			return;
+		case "case":
+			// Case structure : récurse cond+value de chaque branche + elseValue.
+			// Le case lui-même est déterministe (structure statique), un call
+			// non-safe dans une branche est attrapé récursivement.
+			for (const branch of expr.branches) {
+				assertNoCallInWrite(branch.cond);
+				assertNoCallInWrite(branch.value);
+			}
+			assertNoCallInWrite(expr.elseValue);
 			return;
 	}
 }
@@ -681,6 +698,13 @@ function collectExprFields(expr: Expr, out: (readonly string[])[]): void {
 			return;
 		case "array":
 			for (const item of expr.items) collectExprFields(item, out);
+			return;
+		case "case":
+			for (const branch of expr.branches) {
+				collectExprFields(branch.cond, out);
+				collectExprFields(branch.value, out);
+			}
+			collectExprFields(expr.elseValue, out);
 			return;
 	}
 }
@@ -974,7 +998,94 @@ function lowerExpr(expr: Expr): PlanExpr {
 				items: expr.items.map(lowerExpr),
 				span: expr.span
 			};
+		case "case": {
+			// Garde `lower_case_cond_type` : refuse un `cond` dont on peut prouver
+			// statiquement qu'il n'est pas bool. On accepte tout ce qu'on ne peut
+			// pas prouver faux (field, call, arith, compare, logical, not, in,
+			// cast) — la validation runtime PG/Mongo prend le relais si nécessaire.
+			for (const branch of expr.branches) {
+				assertCondIsBoolShaped(branch.cond, "case");
+			}
+			// Garde `lower_case_branches_type_mismatch` : si toutes les valeurs
+			// (branches + elseValue) sont des littéraux de kinds différents,
+			// signaler tôt — PG throwera sinon avec un `CASE types cannot be
+			// matched` opaque. Composites (object/array) → kind=`json`.
+			assertBranchLiteralsHomogeneous(
+				expr.branches.map((b) => b.value).concat(expr.elseValue),
+				"case"
+			);
+			return {
+				kind: "case",
+				branches: expr.branches.map((b) => ({
+					cond: lowerExpr(b.cond),
+					value: lowerExpr(b.value)
+				})),
+				elseValue: lowerExpr(expr.elseValue),
+				span: expr.span
+			};
+		}
 	}
+}
+
+/**
+ * Sprint T2/5 : bool-shape check pour `case` / `if` cond. On refuse les
+ * littéraux non-bool prouvés (number / string / null / object / array). Un
+ * `cond` field/call/arith/etc. passe — trop coûteux à typer statiquement, PG
+ * throwera 22P02 si non-bool réel.
+ */
+function assertCondIsBoolShaped(cond: Expr, ctx: "case" | "if"): void {
+	const kind = literalKindOrNull(cond);
+	if (kind === null || kind === "boolean") return;
+	const errCode = ctx === "case" ? "lower_case_cond_type" : "lower_if_cond_type";
+	const prefix = ctx === "case" ? "case { cond -> … }" : "if(cond, …, …)";
+	throw new SnqlError(
+		`${prefix} : cond doit être booléen — reçu littéral ${kind}`,
+		errCode,
+		cond.span
+	);
+}
+
+/**
+ * Sprint T2/5 : garde d'homogénéité des branches. Si TOUTES les valeurs
+ * fournies sont des littéraux et que leurs kinds diffèrent, on refuse au lower
+ * plutôt que de laisser PG throw un `CASE types cannot be matched` opaque
+ * (Mongo tolère plus, mais la promesse SNQL cross-engine impose PG comme
+ * plancher). Object/array literals → kind `json` unifié.
+ */
+function assertBranchLiteralsHomogeneous(
+	values: readonly Expr[],
+	ctx: "case" | "if"
+): void {
+	const kinds: string[] = [];
+	for (const v of values) {
+		const k = literalKindOrNull(v);
+		if (k === null) return; // Non-littéral → skip la garde
+		if (k === "null") continue; // NULL polymorphe → homogène avec tout
+		kinds.push(k);
+	}
+	const unique = new Set(kinds);
+	if (unique.size <= 1) return;
+	const errCode =
+		ctx === "case"
+			? "lower_case_branches_type_mismatch"
+			: "lower_if_branches_type_mismatch";
+	const prefix = ctx === "case" ? "case { … }" : "if(…)";
+	throw new SnqlError(
+		`${prefix} : branches de types incompatibles {${[...unique].join(", ")}} — cast explicite requis (ex: cast(x as text))`,
+		errCode,
+		values[0]!.span
+	);
+}
+
+/**
+ * Retourne le kind statique d'un `Expr` si littéral (`number`, `string`,
+ * `boolean`, `null`, `json` pour object/array), sinon `null`. Sert aux gardes
+ * `lower_*_cond_type` et `lower_*_branches_type_mismatch`.
+ */
+function literalKindOrNull(expr: Expr): string | null {
+	if (expr.type === "literal") return expr.value.kind;
+	if (expr.type === "object" || expr.type === "array") return "json";
+	return null;
 }
 
 /**
@@ -1171,6 +1282,15 @@ function lowerCall(expr: Expr & { type: "call" }): PlanExpr {
 	if (entry.name === "json_has_key") {
 		validateJsonHasKey(expr);
 	}
+	// Sprint T2/5 : guards spécifiques `if(cond, then, else)` — miroir des
+	// gardes `case`. cond bool-shaped + branches homogènes (then/else).
+	if (entry.name === "if" && expr.args.length === 3) {
+		assertCondIsBoolShaped(expr.args[0]!, "if");
+		assertBranchLiteralsHomogeneous(
+			[expr.args[1]!, expr.args[2]!],
+			"if"
+		);
+	}
 	return {
 		kind: "call",
 		name: expr.name,
@@ -1290,6 +1410,15 @@ function validateJsonHasKey(expr: Expr & { type: "call" }): void {
 const BOOL_RETURNING_CALLS: ReadonlySet<string> = new Set(["json_has_key"]);
 
 function assertNoBareCallPredicate(expr: Expr): void {
+	// Case en position bare where (`where case { … }`) refusé — non-booléen
+	// par nature. Le dev doit comparer explicitement (`case { … } = true`).
+	if (expr.type === "case") {
+		throw new SnqlError(
+			"'case { … }' n'est pas un prédicat — compare le résultat avec une valeur (ex: case { … } = true)",
+			"lower_case_bare_predicate",
+			expr.span
+		);
+	}
 	if (expr.type !== "call") return;
 	if (!BOOL_RETURNING_CALLS.has(expr.name)) return;
 	throw new SnqlError(

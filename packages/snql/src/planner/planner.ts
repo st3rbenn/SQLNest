@@ -209,6 +209,13 @@ function visitExprCalls(expr: PlanExpr, visit: (name: string) => void): void {
 		case "array":
 			for (const item of expr.items) visitExprCalls(item, visit);
 			return;
+		case "case":
+			for (const branch of expr.branches) {
+				visitExprCalls(branch.cond, visit);
+				visitExprCalls(branch.value, visit);
+			}
+			visitExprCalls(expr.elseValue, visit);
+			return;
 	}
 }
 
@@ -300,6 +307,13 @@ function visitExprCasts(
 			return;
 		case "array":
 			for (const item of expr.items) visitExprCasts(item, visit);
+			return;
+		case "case":
+			for (const branch of expr.branches) {
+				visitExprCasts(branch.cond, visit);
+				visitExprCasts(branch.value, visit);
+			}
+			visitExprCasts(expr.elseValue, visit);
 			return;
 	}
 }
@@ -523,6 +537,13 @@ function visitExprsIn(expr: PlanExpr, visit: (e: PlanExpr) => void): void {
 			return;
 		case "array":
 			for (const item of expr.items) visitExprsIn(item, visit);
+			return;
+		case "case":
+			for (const branch of expr.branches) {
+				visitExprsIn(branch.cond, visit);
+				visitExprsIn(branch.value, visit);
+			}
+			visitExprsIn(expr.elseValue, visit);
 			return;
 	}
 }

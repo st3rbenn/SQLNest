@@ -1,8 +1,9 @@
 import { SnqlError } from "../diagnostics";
 import type { Span, Token, TokenKind } from "../lexer/token";
-import { CAST_TARGETS, MAX_LITERAL_DEPTH } from "./ast";
+import { CAST_TARGETS, MAX_CASE_DEPTH, MAX_LITERAL_DEPTH } from "./ast";
 import type {
 	ArithOperator,
+	CaseBranch,
 	CastTarget,
 	CompareOperator,
 	Expr,
@@ -179,6 +180,17 @@ function parsePrefix(cursor: TokenCursor): Expr {
 		return { type: "literal", value: { kind: "null" }, span: tok.span };
 	}
 	if (tok.kind === "ident") {
+		// Sprint T2/5 : `case { … }` en position d'expression. `case` reste ident
+		// hors de cette position (pattern `cast` sprint 2) — utilisable comme
+		// colonne. La détection exige le `lbrace` immédiatement après le ident
+		// `case` (via lookahead 1). Sans ce guard, `pick case`, `where case = 42`,
+		// `case.foo` restent des fields normaux.
+		if (
+			tok.value.toLowerCase() === "case" &&
+			cursor.peek(1).kind === "lbrace"
+		) {
+			return parseCaseBlock(cursor);
+		}
 		const { path, span } = parseFieldPath(cursor);
 		// Postfix `(` sur un ident nu = appel de fonction. Requiert un chemin de
 		// longueur 1 : `x.y(...)` n'est pas un call (pas de méthode SNQL) — reste
@@ -499,4 +511,126 @@ export function parseArrayLiteral(cursor: TokenCursor, depth: number): Expr {
 	}
 	const close = cursor.expect("rbracket", "']' pour fermer l'array literal");
 	return { type: "array", items, span: joinSpan(open.span, close.span) };
+}
+
+/**
+ * Parse `case { c1 -> v1, c2 -> v2, else -> v3 }` en position d'expression.
+ * Le token ident 'case' a déjà été détecté par parsePrefix via lookahead
+ * sur lbrace — cette fn consomme 'case' puis le block.
+ *
+ * Contrat :
+ *  - Min 1 branche condition (`case { else -> v }` refusé — utiliser `if`)
+ *  - `else -> v` OBLIGATOIRE et forcément en dernier
+ *  - `else` reste ident hors position bare-tête-de-branche (soft-keyword)
+ *  - Depth guard MAX_CASE_DEPTH = 32 (protection stack overflow)
+ */
+export function parseCaseBlock(cursor: TokenCursor): Expr {
+	return parseCaseBlockAtDepth(cursor, 0);
+}
+
+function parseCaseBlockAtDepth(cursor: TokenCursor, depth: number): Expr {
+	if (depth >= MAX_CASE_DEPTH) {
+		throw new SnqlError(
+			`Profondeur d'imbrication case > ${MAX_CASE_DEPTH}`,
+			"parse_case_depth_exceeded",
+			cursor.peek().span
+		);
+	}
+	const caseTok = cursor.next(); // consomme 'case'
+	cursor.expect("lbrace", "'{' pour ouvrir 'case'");
+	const branches: CaseBranch[] = [];
+	let elseValue: Expr | undefined;
+	if (cursor.peek().kind !== "rbrace") {
+		for (;;) {
+			const head = cursor.peek();
+			// Détection soft-keyword `else` : ident 'else' suivi de `->`.
+			// Sans le check peek(1)=arrow, `case { alias.else -> x }` casserait.
+			if (
+				head.kind === "ident" &&
+				head.value.toLowerCase() === "else" &&
+				cursor.peek(1).kind === "arrow"
+			) {
+				cursor.next(); // consomme 'else'
+				cursor.expect(
+					"arrow",
+					"'->' attendu après 'else' (pas d'espace entre - et >)"
+				);
+				elseValue = parseCaseBranchValue(cursor, depth);
+				// Else DOIT être la dernière branche — comma-then-anything refusé.
+				const after = cursor.peek();
+				if (after.kind !== "rbrace") {
+					throw new SnqlError(
+						"'else' doit être la dernière branche du 'case'",
+						"parse_case_else_not_last",
+						after.span
+					);
+				}
+				break;
+			}
+			// Branche condition normale : parseExpr → arrow → parseExpr.
+			const cond = parseExpr(cursor, 0);
+			const arrowTok = cursor.peek();
+			if (arrowTok.kind !== "arrow") {
+				throw new SnqlError(
+					"'->' attendu entre condition et valeur (pas d'espace entre - et >)",
+					"parse_case_missing_arrow",
+					arrowTok.span
+				);
+			}
+			cursor.next(); // consomme arrow
+			const value = parseCaseBranchValue(cursor, depth);
+			branches.push({ cond, value, span: joinSpan(cond.span, value.span) });
+			const next = cursor.peek();
+			if (next.kind === "comma") {
+				cursor.next();
+				continue;
+			}
+			if (next.kind === "rbrace") {
+				break;
+			}
+			throw new SnqlError(
+				`',' ou '}' attendu, trouvé ${describe(next)}`,
+				"parse_case_close_expected",
+				next.span
+			);
+		}
+	}
+	const close = cursor.expect("rbrace", "'}' pour fermer 'case'");
+	if (branches.length === 0) {
+		throw new SnqlError(
+			"'case' sans branche condition — utilise directement la valeur ou 'if(c, a, b)' pour une seule condition",
+			"parse_case_no_branches",
+			joinSpan(caseTok.span, close.span)
+		);
+	}
+	if (elseValue === undefined) {
+		throw new SnqlError(
+			"'else -> <valeur>' obligatoire dans 'case' — ajoute une branche par défaut",
+			"parse_case_missing_else",
+			joinSpan(caseTok.span, close.span)
+		);
+	}
+	return {
+		type: "case",
+		branches,
+		elseValue,
+		span: joinSpan(caseTok.span, close.span)
+	};
+}
+
+/**
+ * Parse la valeur (RHS du `->`) d'une branche `case`. Bascule sur
+ * parseCaseBlockAtDepth+1 si la valeur est elle-même un `case { … }` pour
+ * propager le depth guard. Sinon parseExpr(0) standard.
+ */
+function parseCaseBranchValue(cursor: TokenCursor, depth: number): Expr {
+	const head = cursor.peek();
+	if (
+		head.kind === "ident" &&
+		head.value.toLowerCase() === "case" &&
+		cursor.peek(1).kind === "lbrace"
+	) {
+		return parseCaseBlockAtDepth(cursor, depth + 1);
+	}
+	return parseExpr(cursor, 0);
 }

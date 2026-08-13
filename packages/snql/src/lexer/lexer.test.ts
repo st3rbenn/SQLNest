@@ -67,4 +67,99 @@ describe("lexer", () => {
 		).map((t) => t.kind);
 		expect(kinds).toEqual(["verb", "ident", "keyword", "number", "eof"]);
 	});
+
+	describe("sprint T2/5 : token `arrow` (`->`)", () => {
+		it("`->` adjacent → 1 token arrow", () => {
+			expect(tokenize("a->b").map((t) => [t.kind, t.value])).toEqual([
+				["ident", "a"],
+				["arrow", "->"],
+				["ident", "b"],
+				["eof", ""]
+			]);
+		});
+
+		it("`- >` avec espace → 2 tokens séparés (minus + op)", () => {
+			expect(tokenize("a - > b").map((t) => [t.kind, t.value])).toEqual([
+				["ident", "a"],
+				["minus", "-"],
+				["op", ">"],
+				["ident", "b"],
+				["eof", ""]
+			]);
+		});
+
+		it("`-3` unary minus préservé", () => {
+			expect(tokenize("-3").map((t) => [t.kind, t.value])).toEqual([
+				["minus", "-"],
+				["number", "3"],
+				["eof", ""]
+			]);
+		});
+
+		it("`f(-3)` unary minus dans un call préservé", () => {
+			expect(tokenize("f(-3)").map((t) => t.kind)).toEqual([
+				"ident",
+				"lparen",
+				"minus",
+				"number",
+				"rparen",
+				"eof"
+			]);
+		});
+
+		it("`a - b` arith minus reste inchangé", () => {
+			expect(tokenize("a - b").map((t) => t.kind)).toEqual([
+				"ident",
+				"minus",
+				"ident",
+				"eof"
+			]);
+		});
+
+		it("`a-b` adjacent minus reste inchangé", () => {
+			expect(tokenize("a-b").map((t) => t.kind)).toEqual([
+				"ident",
+				"minus",
+				"ident",
+				"eof"
+			]);
+		});
+
+		it("`>-3` (op puis minus) sans confusion", () => {
+			expect(tokenize(">-3").map((t) => t.kind)).toEqual([
+				"op",
+				"minus",
+				"number",
+				"eof"
+			]);
+		});
+
+		it("`x - >= y` (minus puis op '>=' 2-char)", () => {
+			expect(tokenize("x - >= y").map((t) => [t.kind, t.value])).toEqual([
+				["ident", "x"],
+				["minus", "-"],
+				["op", ">="],
+				["ident", "y"],
+				["eof", ""]
+			]);
+		});
+
+		it("surface case complète : `case { c -> v, else -> w }` (tokens)", () => {
+			expect(
+				tokenize("case { a -> 1, else -> 2 }").map((t) => t.kind)
+			).toEqual([
+				"ident", // case (soft-keyword, reste ident)
+				"lbrace",
+				"ident", // a
+				"arrow",
+				"number",
+				"comma",
+				"ident", // else (soft-keyword, reste ident)
+				"arrow",
+				"number",
+				"rbrace",
+				"eof"
+			]);
+		});
+	});
 });

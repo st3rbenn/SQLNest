@@ -100,6 +100,13 @@ export function collectIdentSpans(statement: Statement): IdentSpans {
 			case "array":
 				for (const item of expr.items) walkExpr(item);
 				return;
+			case "case":
+				for (const branch of expr.branches) {
+					walkExpr(branch.cond);
+					walkExpr(branch.value);
+				}
+				walkExpr(expr.elseValue);
+				return;
 		}
 	}
 

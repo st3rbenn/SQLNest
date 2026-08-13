@@ -398,3 +398,83 @@ export const mongoJsonTypeof: EngineRenderer = (args, ctx) => {
 		}
 	};
 };
+
+// ─── sprint T2/5 : conditional ─────────────────────────────────────────────
+
+/**
+ * `if(cond, then, else)` → `{ $cond: [<cond>, <then>, <else>] }`. Sucre 3-arg
+ * pour un `case` d'une seule branche. Mongo `$cond` évalue strictement bool
+ * sur le premier arg (aligné PG `CASE WHEN cond THEN`).
+ */
+export const mongoIf: EngineRenderer = (args, ctx) => {
+	const [c, t, e] = renderArgs(args, ctx);
+	return { $cond: [c, t, e] };
+};
+
+/**
+ * `nullif(a, b)` → `{ $cond: [{ $eq: [<a>, <b>] }, null, <a>] }`. Pas
+ * d'opérateur $nullIf natif en Mongo — l'émulation via $cond est directe.
+ * `a` évalué deux fois : côté BSON pipeline pas de side-effect à craindre.
+ */
+export const mongoNullif: EngineRenderer = (args, ctx) => {
+	const [a, b] = renderArgs(args, ctx);
+	return { $cond: [{ $eq: [a, b] }, null, a] };
+};
+
+/**
+ * `greatest(a, b, …)` → émulation via `$reduce` (Option C validée par
+ * l'utilisateur, écarte Option D natif `$max`/`$min`).
+ *
+ * Why : `$max`/`$min` en pipeline (hors accumulator) réduisent sur un array,
+ * mais leur sémantique NULL diverge de PG :
+ *  - PG `GREATEST` retourne NULL si tous args NULL (NULL-absorb sur mix)
+ *  - Mongo `$max` sur `[3, null, 5]` retourne `5` (ignore null, PG-incompat)
+ *
+ * L'émulation `$reduce` force l'absorbance NULL parité PG :
+ *  - Initial value = premier arg
+ *  - Chaque étape : `$cond` sur `$eq` value null OU acc null → null,
+ *    sinon `$cond` sur `$gt`/`$lt` → sélectionne
+ *
+ * Coût : légèrement plus lourd que `$max` natif, mais correct sur tous les
+ * cas et safe cross-version Mongo (aucune divergence NULL entre releases).
+ */
+export const mongoGreatest: EngineRenderer = (args, ctx) => {
+	const rendered = renderArgs(args, ctx);
+	return buildMongoMinMax(rendered, "greatest");
+};
+
+export const mongoLeast: EngineRenderer = (args, ctx) => {
+	const rendered = renderArgs(args, ctx);
+	return buildMongoMinMax(rendered, "least");
+};
+
+/**
+ * Construit un `$reduce` NULL-absorb parité PG. `mode` détermine l'opérateur
+ * de comparaison (`$gt` pour greatest, `$lt` pour least).
+ */
+function buildMongoMinMax(
+	rendered: readonly unknown[],
+	mode: "greatest" | "least"
+): unknown {
+	const cmp = mode === "greatest" ? "$gt" : "$lt";
+	const [first, ...rest] = rendered;
+	return {
+		$reduce: {
+			input: rest,
+			initialValue: first,
+			in: {
+				$cond: [
+					// NULL-absorb : acc null OU next null → null (parité PG).
+					{
+						$or: [
+							{ $eq: ["$$value", null] },
+							{ $eq: ["$$this", null] }
+						]
+					},
+					null,
+					{ $cond: [{ [cmp]: ["$$this", "$$value"] }, "$$this", "$$value"] }
+				]
+			}
+		}
+	};
+}
