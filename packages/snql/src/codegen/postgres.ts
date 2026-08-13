@@ -486,15 +486,18 @@ function renderExpr(expr: PlanExpr, params: ParamList): string {
 			// (idiome portable, aligné avec la surface SNQL).
 			return `CAST(${renderExpr(expr.operand, params)} AS ${PG_CAST_TYPE[expr.target]})`;
 		case "object": {
-			// jsonb_build_object($1, $2::TYPE, $3, $4::TYPE, ...) — clés ET valeurs
-			// bindées (anti-injection sur clés user-controlled type `O'Brien`).
-			// Type PG natif per-scalar via `renderJsonValue` : sans annotation,
-			// `$N` unknown → text par défaut → `{n:42}` deviendrait `{"n":"42"}`
-			// dans le jsonb (bug destructeur silencieux).
+			// jsonb_build_object($1::text, $2::TYPE, $3::text, $4::TYPE, ...) —
+			// clés ET valeurs bindées (anti-injection sur clés user-controlled type
+			// `O'Brien`). Cast `::text` sur les KEYS obligatoire pour désambigüer
+			// l'overload variadic PG (sans cast, param unknown → 42P18
+			// `could not determine data type of parameter $1` — même famille que
+			// pgConcat ::text). Cast type PG natif per-scalar sur les VALUES via
+			// `renderJsonValue` : sans annotation, `$N` unknown → text par défaut →
+			// `{n:42}` deviendrait `{"n":"42"}` dans le jsonb (bug destructeur).
 			if (expr.entries.length === 0) return "jsonb_build_object()";
 			const parts: string[] = [];
 			for (const entry of expr.entries) {
-				parts.push(params.add(entry.key));
+				parts.push(`${params.add(entry.key)}::text`);
 				parts.push(renderJsonValue(entry.value, params));
 			}
 			return `jsonb_build_object(${parts.join(", ")})`;

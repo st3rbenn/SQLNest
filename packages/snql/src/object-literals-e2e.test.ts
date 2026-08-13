@@ -134,10 +134,10 @@ describe("parser array literal", () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe("codegen PG object literal", () => {
-	it("{n: 1} → jsonb_build_object($1, $2::bigint)", () => {
+	it("{n: 1} → jsonb_build_object($1::text, $2::bigint) — keys castées text (désambigüe 42P18)", () => {
 		const { text, params } = pg('find t pick {n: 1} as d');
 		expect(text).toBe(
-			`SELECT jsonb_build_object($1, $2::bigint) AS "d" FROM "t"`
+			`SELECT jsonb_build_object($1::text, $2::bigint) AS "d" FROM "t"`
 		);
 		expect(params).toEqual(["n", 1]);
 	});
@@ -162,7 +162,7 @@ describe("codegen PG object literal", () => {
 
 	it("value avec field ref : {name: r.name}", () => {
 		expect(pg('find users as r pick {name: r.name} as u').text).toBe(
-			`SELECT jsonb_build_object($1, "r"."name") AS "u" FROM "users" AS "r"`
+			`SELECT jsonb_build_object($1::text, "r"."name") AS "u" FROM "users" AS "r"`
 		);
 	});
 
