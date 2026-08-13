@@ -41,6 +41,14 @@ export function formatSnql(source: string): string {
 	}
 	const chainingAnds = markChainingAnds(toks);
 	const { splitCommas, multilineStages } = markMultiline(toks);
+	// Sprint object-literals — marker les {…} / […] multi-ligne (≥ 3 items).
+	// Ajoute aux splitCommas les commas internes du bloc + retourne les
+	// openers/closers pour insérer newline+indent block-style.
+	const { blockOpeners, blockClosers } = markBlockLiterals(
+		toks,
+		splitCommas,
+		multilineStages
+	);
 	const parts: string[] = [];
 	// Set après avoir émis un `\n<indent>` (soit newline de stage/and/comma-split,
 	// soit newline d'item après un keyword stage multi-ligne). Bypasse la logique
@@ -54,6 +62,8 @@ export function formatSnql(source: string): string {
 		const isChainAnd =
 			tok.kind === "keyword" && tok.value === "and" && chainingAnds.has(i);
 		const splitIndent = splitCommas.get(i);
+		const blockOpenIndent = blockOpeners.get(i);
+		const blockCloseIndent = blockClosers.get(i);
 
 		if (isStage && parts.length > 0) {
 			parts.push(`\n${STAGE_INDENT}${tok.value}`);
@@ -65,10 +75,15 @@ export function formatSnql(source: string): string {
 			continue;
 		}
 		if (splitIndent !== undefined) {
-			// Virgule top-level d'un pick/sort/set multi-item : la virgule reste
-			// collée à l'item précédent, puis newline + indent block.
+			// Virgule top-level d'un pick/sort/set OU d'un object/array literal
+			// multi-ligne : virgule collée à l'item précédent, puis newline + indent.
 			parts.push(`,\n${splitIndent}`);
 			suppressNextSpace = true;
+			continue;
+		}
+		if (blockCloseIndent !== undefined) {
+			// `}` ou `]` d'un bloc multi-ligne : newline+indent parent avant le closer.
+			parts.push(`\n${blockCloseIndent}${tok.value}`);
 			continue;
 		}
 		if (parts.length > 0) {
@@ -87,6 +102,12 @@ export function formatSnql(source: string): string {
 			}
 		}
 		parts.push(renderToken(tok));
+		if (blockOpenIndent !== undefined) {
+			// `{` ou `[` d'un bloc multi-ligne : émettre newline+indent enfant
+			// APRÈS l'opener, avant le premier item.
+			parts.push(`\n${blockOpenIndent}`);
+			suppressNextSpace = true;
+		}
 	}
 	return parts.join("");
 }
@@ -103,7 +124,7 @@ export function formatSnql(source: string): string {
  *    le premier item doit aussi passer à la ligne (style block cohérent).
  */
 function markMultiline(toks: readonly Token[]): {
-	splitCommas: ReadonlyMap<number, string>;
+	splitCommas: Map<number, string>;
 	multilineStages: ReadonlySet<number>;
 } {
 	const splitCommas = new Map<number, string>();
@@ -150,6 +171,83 @@ function markMultiline(toks: readonly Token[]): {
 		i = j;
 	}
 	return { splitCommas, multilineStages };
+}
+
+/**
+ * Sprint object-literals — repère les `{…}` / `[…]` multi-ligne (≥ 3 items
+ * top-level de ce bloc). Retourne :
+ *  - `blockOpeners` : Map `index de `{` ou `[` → childIndent` (à émettre
+ *    APRÈS l'opener sous forme `\n<indent>`, pour le premier item).
+ *  - `blockClosers` : Map `index de `}` ou `]` → parentIndent` (à émettre
+ *    AVANT le closer sous forme `\n<indent>`).
+ *  - Effet de bord : les commas top-level de chaque bloc multi-ligne sont
+ *    ajoutés à `splitCommas` (in-place) avec le childIndent adapté.
+ *
+ * Depth counter : chaque niveau d'imbrication ajoute `ITEM_INDENT` (4 spaces).
+ * Le bloc top-level est à profondeur 1 (contenu = 4 spaces, closer = 0). Un
+ * bloc nested dans un autre bloc est à profondeur parent+1.
+ */
+function markBlockLiterals(
+	toks: readonly Token[],
+	splitCommas: Map<number, string>,
+	multilineStages: ReadonlySet<number>
+): {
+	blockOpeners: Map<number, string>;
+	blockClosers: Map<number, string>;
+} {
+	const blockOpeners = new Map<number, string>();
+	const blockClosers = new Map<number, string>();
+
+	interface Frame {
+		readonly openerIdx: number;
+		readonly depth: number; // profondeur du contenu du bloc (childIndent = ITEM_INDENT × depth)
+		readonly commas: number[];
+	}
+	const stack: Frame[] = [];
+	// Track si on est actuellement dans les items d'un stage pick/sort/set
+	// multi-ligne — dans ce cas, l'opener `{`/`[` d'un bloc top-level est déjà
+	// à ITEM_INDENT, donc son contenu doit s'indenter à ITEM_INDENT × 2.
+	let inMultilineStage = false;
+
+	for (let i = 0; i < toks.length; i += 1) {
+		const tok = toks[i] as Token;
+		if (tok.kind === "keyword" && STAGE_KEYWORDS.has(tok.value)) {
+			inMultilineStage = multilineStages.has(i);
+			continue;
+		}
+		if (tok.kind === "lbrace" || tok.kind === "lbracket") {
+			// Depth du contenu = depth du parent + 1. Sans parent : 1 seul si
+			// pas dans un stage multi-ligne, sinon 2 (car opener déjà à indent 1).
+			const parentDepth =
+				stack.length > 0
+					? (stack[stack.length - 1] as Frame).depth
+					: inMultilineStage
+						? 1
+						: 0;
+			stack.push({ openerIdx: i, depth: parentDepth + 1, commas: [] });
+		} else if (tok.kind === "rbrace" || tok.kind === "rbracket") {
+			const frame = stack.pop();
+			if (frame === undefined) continue;
+			// Multi-ligne si ≥ MULTILINE_MIN_ITEMS items (items = commas + 1).
+			// Empty `{}` / `[]` (0 comma, 0 item) reste inline.
+			const itemCount = frame.commas.length + 1;
+			if (itemCount < MULTILINE_MIN_ITEMS) continue;
+			const childIndent = ITEM_INDENT.repeat(frame.depth);
+			// Closer aligné : depth > 1 → parent bloc (ITEM_INDENT × depth-1),
+			// depth == 1 → parent stage (STAGE_INDENT, aligné avec le keyword).
+			const parentIndent =
+				frame.depth > 1 ? ITEM_INDENT.repeat(frame.depth - 1) : STAGE_INDENT;
+			blockOpeners.set(frame.openerIdx, childIndent);
+			blockClosers.set(i, parentIndent);
+			for (const commaIdx of frame.commas) {
+				splitCommas.set(commaIdx, childIndent);
+			}
+		} else if (tok.kind === "comma" && stack.length > 0) {
+			(stack[stack.length - 1] as Frame).commas.push(i);
+		}
+	}
+
+	return { blockOpeners, blockClosers };
 }
 
 /**
@@ -205,6 +303,7 @@ function needsSpaceBefore(prev: Token, curr: Token): boolean {
 	if (
 		prev.kind === "lparen" ||
 		prev.kind === "lbracket" ||
+		prev.kind === "lbrace" ||
 		prev.kind === "dot"
 	) {
 		return false;
