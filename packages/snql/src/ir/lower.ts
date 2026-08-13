@@ -326,6 +326,7 @@ export function lowerMutation(
 				);
 			}
 		}
+		if (statement.predicate !== undefined) assertNoBareCallPredicate(statement.predicate);
 		const assignments = statement.assignments.map((assignment) => ({
 			column: assignment.column,
 			value: lowerExpr(assignment.value)
@@ -350,6 +351,7 @@ export function lowerMutation(
 			statement.collection
 		);
 	}
+	if (statement.predicate !== undefined) assertNoBareCallPredicate(statement.predicate);
 	const predicate =
 		statement.predicate !== undefined ? lowerExpr(statement.predicate) : undefined;
 	if (predicate !== undefined) assertNoCallInWrite(predicate);
@@ -668,8 +670,10 @@ function lowerStage(
 	schema: SchemaModel | undefined
 ): LogicalPlan {
 	switch (stage.type) {
-		case "where":
+		case "where": {
+			assertNoBareCallPredicate(stage.predicate);
 			return { op: "filter", input, predicate: lowerExpr(stage.predicate) };
+		}
 		case "pick": {
 			const fields = stage.fields.map(lowerField);
 			assertUniqueProjectionKeys(fields);
@@ -926,6 +930,27 @@ function lowerExpr(expr: Expr): PlanExpr {
 }
 
 /**
+ * Hints par nom de fonction reserved — pointe le sprint prévu et l'alternative.
+ * Utilisé par `lower_call_reserved` pour un message actionnable.
+ */
+const RESERVED_FUNCTION_HINTS: Readonly<Record<string, string>> = {
+	regex_replace: "sprint 4 (registre string étendu)",
+	json_contains:
+		"sprint 5+ (attend object-literal SNQL natif — utilise json_get + composition d'ici là)",
+	json_set: "sprint 5+ (coordination avec `set doc.a.b = value` natif SNQL)",
+	json_delete: "sprint 5+ (idem json_set)",
+	json_merge: "sprint 5+ (design deep-merge vs shallow)",
+	json_path:
+		"sprint 5+ (JSONPath complet — utilise json_get variadic pour l'accès simple)",
+	json_array_length:
+		"sprint 5+ (cluster introspection étendue — utilise length ou compose)",
+	json_length:
+		"sprint 5+ (cardinalité unifiée array/object — utilise length pour arrays)",
+	json_object_keys:
+		"sprint 5+ (set-returning, nécessite décision array-typed returns)"
+};
+
+/**
  * Aliases connus vers les canoniques SNQL — suggestions pour
  * `lower_unknown_function`. Chaque `?` d'un dev perdu = un alias à ajouter.
  */
@@ -1003,11 +1028,12 @@ function lowerCall(expr: Expr & { type: "call" }): PlanExpr {
 		throw new SnqlError(message, "lower_unknown_function", expr.span);
 	}
 	if (entry.kind === "reserved") {
-		throw new SnqlError(
-			`Fonction '${expr.name}' réservée pour un sprint futur — pas encore implémentée`,
-			"lower_call_reserved",
-			expr.span
-		);
+		const hint = RESERVED_FUNCTION_HINTS[expr.name];
+		const message =
+			hint !== undefined
+				? `Fonction '${expr.name}' réservée — ${hint}`
+				: `Fonction '${expr.name}' réservée pour un sprint futur — pas encore implémentée`;
+		throw new SnqlError(message, "lower_call_reserved", expr.span);
 	}
 	const arityMsg = checkArity(expr.name, entry.arity, expr.args.length);
 	if (arityMsg !== null) {
@@ -1091,12 +1117,138 @@ function lowerCall(expr: Expr & { type: "call" }): PlanExpr {
 			);
 		}
 	}
+	if (entry.name === "json_get" || entry.name === "json_get_text") {
+		validateJsonPathSegments(expr, entry.name);
+	}
+	if (entry.name === "json_has_key") {
+		validateJsonHasKey(expr);
+	}
 	return {
 		kind: "call",
 		name: expr.name,
 		args: expr.args.map(lowerExpr),
 		span: expr.span
 	};
+}
+
+/**
+ * Valide les segments path d'un `json_get`/`json_get_text` variadic. Chaque
+ * segment (args[1..]) doit être un littéral string non-vide OU un littéral
+ * number entier positif ≤ INT32_MAX. Rejet précoce au lower — le renderer
+ * discrimine sur le type de la value pour choisir `::text` / `::int`.
+ */
+function validateJsonPathSegments(
+	expr: Expr & { type: "call" },
+	fnName: string
+): void {
+	// args[0] = doc, args[1..] = segments path
+	if (expr.args.length < 2) {
+		throw new SnqlError(
+			`Fonction '${fnName}' attend au moins un segment path (ex: ${fnName}(doc, "key") ou ${fnName}(doc, "a", 0, "b"))`,
+			"lower_call_json_path_empty",
+			expr.span
+		);
+	}
+	for (let i = 1; i < expr.args.length; i += 1) {
+		const seg = expr.args[i]!;
+		if (seg.type !== "literal") {
+			throw new SnqlError(
+				`Fonction '${fnName}' segment path ${i} : expression dynamique non supportée v1 — attend un littéral string ou int`,
+				"lower_call_json_path_dynamic_segment",
+				seg.span
+			);
+		}
+		const v = seg.value;
+		if (v.kind === "string") {
+			if (v.value === "") {
+				throw new SnqlError(
+					`Fonction '${fnName}' segment path ${i} : string vide refusée`,
+					"lower_call_json_path_empty_segment",
+					seg.span
+				);
+			}
+			continue;
+		}
+		if (v.kind === "number") {
+			// Raw parsing : rejeter float, bigint hors range, décimal exact.
+			if (/[.eE]/.test(v.raw)) {
+				throw new SnqlError(
+					`Fonction '${fnName}' segment path ${i} : type reçu float — attend int littéral positif`,
+					"lower_call_json_path_invalid_segment_type",
+					seg.span
+				);
+			}
+			const n = Number(v.raw);
+			if (!Number.isInteger(n)) {
+				throw new SnqlError(
+					`Fonction '${fnName}' segment path ${i} : type reçu non-int — attend int littéral positif`,
+					"lower_call_json_path_invalid_segment_type",
+					seg.span
+				);
+			}
+			if (n < 0) {
+				throw new SnqlError(
+					`Fonction '${fnName}' segment path ${i} : index négatif refusé v1 (support natif PG/Mongo différé)`,
+					"lower_call_json_path_negative_index",
+					seg.span
+				);
+			}
+			if (n > 2147483647) {
+				throw new SnqlError(
+					`Fonction '${fnName}' segment path ${i} : index > INT32_MAX (PG '->' overload jsonb∘int n'a pas de variante bigint)`,
+					"lower_call_json_path_int_overflow",
+					seg.span
+				);
+			}
+			continue;
+		}
+		throw new SnqlError(
+			`Fonction '${fnName}' segment path ${i} : type reçu ${v.kind} — attend un littéral string ou int`,
+			"lower_call_json_path_invalid_segment_type",
+			seg.span
+		);
+	}
+}
+
+/** Valide `json_has_key(doc, key)` : key doit être un literal string non-vide. */
+function validateJsonHasKey(expr: Expr & { type: "call" }): void {
+	const keyArg = expr.args[1];
+	if (keyArg === undefined) return; // arity l'attrapera avant
+	if (keyArg.type !== "literal" || keyArg.value.kind !== "string") {
+		throw new SnqlError(
+			"json_has_key : arg 2 (key) attend un littéral string, pas une expression dynamique",
+			"lower_call_json_has_key_dynamic_key",
+			keyArg.span
+		);
+	}
+	if (keyArg.value.value === "") {
+		throw new SnqlError(
+			"json_has_key : arg 2 (key) string vide refusée",
+			"lower_call_json_has_key_empty_key",
+			keyArg.span
+		);
+	}
+}
+
+/**
+ * Refuse un call bool-returning en position bare de prédicat where
+ * (`where json_has_key(doc, 'k')` sans `= true/false`). Aligne le comportement
+ * cross-engine : PG accepterait bool nu mais Mongo throw à la traduction —
+ * l'asymétrie surprend le dev. Rejet au lower avec message actionnable.
+ *
+ * Bool-returning aujourd'hui = `json_has_key` (sprint 4). Extensible via un
+ * champ registry futur ; hardcoded ici pour éviter la modif du shape.
+ */
+const BOOL_RETURNING_CALLS: ReadonlySet<string> = new Set(["json_has_key"]);
+
+function assertNoBareCallPredicate(expr: Expr): void {
+	if (expr.type !== "call") return;
+	if (!BOOL_RETURNING_CALLS.has(expr.name)) return;
+	throw new SnqlError(
+		`Fonction bool '${expr.name}' en position bare de where — écris '${expr.name}(...) = true' ou '= false' (aligne le comportement cross-engine)`,
+		"lower_call_bool_bare_predicate",
+		expr.span
+	);
 }
 
 /** Opérateur symétrique après échange des opérandes (a < b ⇔ b > a). */

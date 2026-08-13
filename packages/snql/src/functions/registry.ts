@@ -51,6 +51,25 @@ export type FunctionKind = "scalar" | "aggregate" | "window" | "reserved";
 export type EngineName = "postgres" | "mongodb" | "kv";
 
 /**
+ * Descripteur opt-in pour hoister un appel de fonction Mongo en dot-notation
+ * native (indexable). Sans descripteur → fallback `$expr` (non indexable).
+ *
+ * Le codegen consomme `toPath(args, alias)` : renvoie le path Mongo si
+ * hoistable (arg[0] field + segments literals), sinon `null` → fallback.
+ *
+ * `kind` détermine la SHAPE du hoist final :
+ *  - `'value'` (défaut) : `{path: <literal>}` — pour json_get, extract simple
+ *  - `'exists'` : `{path: {$exists: bool}}` — pour json_has_key
+ */
+export interface MongoMatchHoist {
+	readonly toPath: (
+		args: readonly unknown[],
+		alias?: string
+	) => string | null;
+	readonly kind?: "value" | "exists";
+}
+
+/**
  * Une entrée du registre. Un renderer engine absent = fonction non-supportée
  * par ce moteur → détecté au planner via `Capabilities.functions`.
  *
@@ -66,6 +85,7 @@ export interface FunctionEntry {
 	readonly args?: readonly TypeSpec[];
 	readonly argEnum?: readonly (readonly string[] | undefined)[];
 	readonly writeNullBehavior?: NullBehavior;
+	readonly mongoMatchHoist?: MongoMatchHoist;
 	readonly engines: {
 		readonly postgres?: EngineRenderer;
 		readonly mongodb?: EngineRenderer;

@@ -258,3 +258,143 @@ export const mongoDateDiff: EngineRenderer = (args, ctx) => {
 	const earlier = ctx.renderExpr(args[2]);
 	return { $dateDiff: { startDate: earlier, endDate: later, unit } };
 };
+
+// ─── sprint 4 : JSON ───────────────────────────────────────────────────────
+
+/**
+ * Duck-type un PlanExpr literal pour un segment path JSON. Le lower a déjà
+ * validé — le renderer discrimine sur le type de la value pour choisir
+ * `$getField` (string key) ou `$arrayElemAt` (int index).
+ */
+function segmentValue(arg: unknown): string | number {
+	const literal = arg as { kind?: unknown; value?: unknown };
+	if (literal.kind !== "literal") {
+		throw new Error(
+			"mongo json path segment : literal attendu (bug lower — guard aurait dû bloquer)"
+		);
+	}
+	const v = literal.value as string | number;
+	if (typeof v === "string" || typeof v === "number") return v;
+	throw new Error(
+		`mongo json path segment : type ${typeof v} inattendu (bug lower)`
+	);
+}
+
+/**
+ * Chain BSON pour un path variadic. Chaque segment string → `$getField`,
+ * chaque segment int → `$cond` sur $type='array' + `$arrayElemAt` (parité
+ * PG NULL silencieux sur non-array vs Mongo throw sinon). Baseline Mongo 5.0+.
+ */
+function mongoRenderJsonPathChain(
+	args: readonly unknown[],
+	ctx: { renderExpr: (e: unknown) => unknown }
+): unknown {
+	const docExpr = ctx.renderExpr(args[0]);
+	// Wrap $ifNull OBLIGATOIRE sur input doc pour parité NULL PG.
+	let chain: unknown = { $ifNull: [docExpr, null] };
+	for (let i = 1; i < args.length; i += 1) {
+		const value = segmentValue(args[i]);
+		if (typeof value === "string") {
+			chain = { $getField: { field: value, input: chain } };
+		} else {
+			// Wrap $cond OBLIGATOIRE : sur non-array, $arrayElemAt throw
+			// runtime alors que PG `->` retourne NULL silencieux.
+			chain = {
+				$cond: [
+					{ $eq: [{ $type: chain }, "array"] },
+					{ $arrayElemAt: [chain, value] },
+					null
+				]
+			};
+		}
+	}
+	return chain;
+}
+
+/**
+ * `json_get(doc, ...path)` → chain BSON via $getField + $arrayElemAt wrapped.
+ * Wrap final `$ifNull` pour uniformiser missing key → null.
+ */
+export const mongoJsonGet: EngineRenderer = (args, ctx) => {
+	const chain = mongoRenderJsonPathChain(args, ctx);
+	return { $ifNull: [chain, null] };
+};
+
+/**
+ * `json_get_text(doc, ...path)` → chain identique + wrap final `$cond` AVANT
+ * `$toString` (PIÈGE : `$ifNull:[{$toString:chain}, null]` NE MARCHE PAS car
+ * `$toString` throw AVANT que `$ifNull` intervienne sur null). Pattern éprouvé
+ * mongoSubstring sprint 3.
+ */
+export const mongoJsonGetText: EngineRenderer = (args, ctx) => {
+	const chain = mongoRenderJsonPathChain(args, ctx);
+	return {
+		$let: {
+			vars: { v: chain },
+			in: {
+				$cond: [{ $eq: ["$$v", null] }, null, { $toString: "$$v" }]
+			}
+		}
+	};
+};
+
+/**
+ * `json_has_key(doc, "key")` → `{$ne: [{$type: {$getField: ...}}, 'missing']}`.
+ * Wrap `$ifNull:[doc, {}]` OBLIGATOIRE : sans lui, `$getField` sur null input
+ * renvoie null, `$type: null` = 'null' ≠ 'missing' → renvoie true silencieux
+ * (bug identifié à l'adversarial verify). Avec fallback objet vide,
+ * doc null → tous fields → 'missing' → false (parité pragmatique documentée).
+ */
+export const mongoJsonHasKey: EngineRenderer = (args, ctx) => {
+	const docExpr = ctx.renderExpr(args[0]);
+	const key = segmentValue(args[1]);
+	return {
+		$ne: [
+			{
+				$type: {
+					$getField: { field: key, input: { $ifNull: [docExpr, {}] } }
+				}
+			},
+			"missing"
+		]
+	};
+};
+
+/**
+ * `json_typeof(doc)` → `$switch` avec remap BSON→JSON canonique. Missing → null,
+ * int/long/double/decimal → 'number', bool → 'boolean', array/object
+ * identiques, null → 'null'. Types BSON hors JSON (ObjectId/Date/Timestamp/
+ * binData) → 'string' (approximation cohérente avec sérialisation drivers,
+ * pas de throw runtime sur ObjectId ubiquitaire des _id Mongo).
+ */
+export const mongoJsonTypeof: EngineRenderer = (args, ctx) => {
+	const docExpr = ctx.renderExpr(args[0]);
+	return {
+		$let: {
+			vars: { t: { $type: docExpr } },
+			in: {
+				$switch: {
+					branches: [
+						{ case: { $eq: ["$$t", "missing"] }, then: null },
+						{
+							case: {
+								$in: ["$$t", ["int", "long", "double", "decimal"]]
+							},
+							then: "number"
+						},
+						{ case: { $eq: ["$$t", "string"] }, then: "string" },
+						{ case: { $eq: ["$$t", "bool"] }, then: "boolean" },
+						{ case: { $eq: ["$$t", "null"] }, then: "null" },
+						{ case: { $eq: ["$$t", "array"] }, then: "array" },
+						{ case: { $eq: ["$$t", "object"] }, then: "object" },
+						{ case: { $eq: ["$$t", "objectId"] }, then: "string" },
+						{ case: { $eq: ["$$t", "date"] }, then: "string" },
+						{ case: { $eq: ["$$t", "timestamp"] }, then: "string" },
+						{ case: { $eq: ["$$t", "binData"] }, then: "string" }
+					],
+					default: null
+				}
+			}
+		}
+	};
+};

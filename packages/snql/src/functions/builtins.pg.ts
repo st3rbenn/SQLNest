@@ -232,3 +232,96 @@ export const pgDateDiff: EngineRenderer = (args, ctx) => {
 			return `FLOOR(${epochDiff})::int`;
 	}
 };
+
+// ─── sprint 4 : JSON ───────────────────────────────────────────────────────
+
+/**
+ * Duck-type un PlanExpr literal pour un segment path JSON. Renvoie la
+ * valeur brute si c'est un literal string ou number entier positif ≤ INT32_MAX.
+ * Le lower a déjà validé — le renderer discrimine sur le type de la value pour
+ * choisir le cast `::text` ou `::int`.
+ */
+function segmentValue(arg: unknown): string | number {
+	const literal = arg as { kind?: unknown; value?: unknown };
+	if (literal.kind !== "literal") {
+		throw new Error(
+			"pg json path segment : literal attendu (bug lower — guard aurait dû bloquer)"
+		);
+	}
+	const v = literal.value as string | number;
+	if (typeof v === "string" || typeof v === "number") return v;
+	throw new Error(
+		`pg json path segment : type ${typeof v} inattendu (bug lower)`
+	);
+}
+
+/**
+ * Helper factorisé pour json_get et json_get_text. Rend la chain d'opérateurs
+ * `->` PG (`->>` sur le dernier hop si `lastAsText`). Chaque segment passe par
+ * `ctx.addParam` (JAMAIS d'inline string user-controlled) avec cast `::text`
+ * ou `::int` per-segment — désambigüe l'overload PG jsonb∘text vs jsonb∘int
+ * sur param bindé (sans cast, `0` bindé tomberait silencieusement sur
+ * overload text et chercherait la clé "0").
+ */
+function pgRenderJsonPathChain(
+	args: readonly unknown[],
+	ctx: { renderExpr: (e: unknown) => unknown; addParam?: (v: unknown) => string },
+	lastAsText: boolean
+): string {
+	if (ctx.addParam === undefined) {
+		throw new Error(
+			"pg json_get* : ctx.addParam requis pour la sécurité (params bindés per-segment)"
+		);
+	}
+	const doc = ctx.renderExpr(args[0]) as string;
+	let sql = doc;
+	const lastIdx = args.length - 1;
+	for (let i = 1; i < args.length; i += 1) {
+		const value = segmentValue(args[i]);
+		const isLast = i === lastIdx;
+		const op = isLast && lastAsText ? "->>" : "->";
+		const cast = typeof value === "string" ? "::text" : "::int";
+		sql = `(${sql} ${op} ${ctx.addParam(value)}${cast})`;
+	}
+	return sql;
+}
+
+/**
+ * `json_get(doc, ...path)` → chaine `->` PG, retour jsonb. Chaque segment est
+ * bindé + cast pour désambigüer l'overload jsonb∘text vs jsonb∘int.
+ */
+export const pgJsonGet: EngineRenderer = (args, ctx) =>
+	pgRenderJsonPathChain(args, ctx, false);
+
+/**
+ * `json_get_text(doc, ...path)` → identique à `json_get` mais dernier hop
+ * utilise `->>` (déserialise scalaire en text natif, pas `'"a"'` avec guillemets
+ * JSON). C'est pourquoi c'est une fonction distincte, PAS un raccourci
+ * `cast(json_get as text)`.
+ */
+export const pgJsonGetText: EngineRenderer = (args, ctx) =>
+	pgRenderJsonPathChain(args, ctx, true);
+
+/**
+ * `json_has_key(doc, "key")` → `((doc) ? $N::text)` PG. TOP-LEVEL uniquement
+ * (parité stricte PG `?`). Pour nested → composition
+ * `json_has_key(json_get(doc, 'a'), 'b')`. Cast `::text` obligatoire pour
+ * désambigüer overload sur param bindé.
+ */
+export const pgJsonHasKey: EngineRenderer = (args, ctx) => {
+	if (ctx.addParam === undefined) {
+		throw new Error("pg json_has_key : ctx.addParam requis");
+	}
+	const doc = ctx.renderExpr(args[0]) as string;
+	const key = segmentValue(args[1]);
+	return `(${doc} ? ${ctx.addParam(key)}::text)`;
+};
+
+/**
+ * `json_typeof(doc)` → `jsonb_typeof(<doc>)`. Retour ∈ {'object','array',
+ * 'string','number','boolean','null'}. SQL NULL input → SQL NULL.
+ */
+export const pgJsonTypeof: EngineRenderer = (args, ctx) => {
+	const doc = ctx.renderExpr(args[0]) as string;
+	return `jsonb_typeof(${doc})`;
+};

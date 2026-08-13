@@ -13,6 +13,7 @@ export {
 	type FunctionEntry,
 	type FunctionKind,
 	type FunctionRegistry,
+	type MongoMatchHoist,
 	type NullBehavior,
 	type RenderContext,
 	type TypeSpec

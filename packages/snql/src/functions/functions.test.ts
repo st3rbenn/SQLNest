@@ -4,7 +4,7 @@ import { checkArity, describeArity } from "./arity";
 import { SNQL_FUNCTIONS, createRegistry, type FunctionEntry } from "./index";
 
 describe("call node — registry + arity", () => {
-	it("SNQL_FUNCTIONS contient les 20 builtins (sprint 1 + 3) + 1 reserved", () => {
+	it("SNQL_FUNCTIONS contient les 25 builtins (sprint 1 + 3 + 4) + 9 reserved", () => {
 		expect(SNQL_FUNCTIONS.names()).toEqual(
 			new Set([
 				// sprint 1
@@ -33,16 +33,30 @@ describe("call node — registry + arity", () => {
 				"date_add",
 				"date_diff",
 				// sprint 3 reserved
-				"regex_replace"
+				"regex_replace",
+				// sprint 4 JSON
+				"json_get",
+				"json_get_text",
+				"json_has_key",
+				"json_typeof",
+				// sprint 4 reserved
+				"json_contains",
+				"json_set",
+				"json_delete",
+				"json_merge",
+				"json_path",
+				"json_array_length",
+				"json_length",
+				"json_object_keys"
 			])
 		);
 	});
 
-	it("forEngine expose les fonctions supportées par engine (21 mappées + 1 reserved sans engine)", () => {
-		// 8 sprint 1 + 13 sprint 3 mappées = 21 ; regex_replace reserved
-		// n'a pas de renderer → absent de forEngine.
-		expect(SNQL_FUNCTIONS.forEngine("postgres").size).toBe(21);
-		expect(SNQL_FUNCTIONS.forEngine("mongodb").size).toBe(21);
+	it("forEngine expose les fonctions supportées par engine (25 mappées + 9 reserved sans engine)", () => {
+		// 8 sprint 1 + 13 sprint 3 + 4 sprint 4 mappées = 25 ; 9 reserved
+		// (regex_replace + 8 sprint 4) n'ont pas de renderer → absents.
+		expect(SNQL_FUNCTIONS.forEngine("postgres").size).toBe(25);
+		expect(SNQL_FUNCTIONS.forEngine("mongodb").size).toBe(25);
 		expect(SNQL_FUNCTIONS.forEngine("kv").size).toBe(0);
 	});
 

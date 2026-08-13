@@ -81,6 +81,9 @@ export function plan(
 	assertFunctionsSupported(logical, capabilities);
 	// Vérifie que tous les targets de cast sont supportés par l'engine.
 	assertCastTargetsSupported(logical, capabilities);
+	// Guards JSON engine-specific : redirige cast(json_get) et compare direct
+	// json_get vers les alternatives actionnables avant que PG throw 42883.
+	assertJsonPredicatesPg(logical, capabilities);
 
 	// Index du 1er opérateur non poussable (= début de la compensation).
 	let cut = ops.length;
@@ -344,5 +347,104 @@ function toCompensationOp(op: LogicalPlan): CompensationOp {
 				"Un 'scan' ne peut pas être compensé",
 				"planner_scan_compensation"
 			);
+	}
+}
+
+/**
+ * Guards JSON engine-specific (sprint 4). Actifs uniquement pour Postgres —
+ * `cast(json_get(...) as T)` et `json_get(...) op literal` produisent des
+ * SQL invalides (42883) car PG n'a pas de cast direct jsonb→primitive ni
+ * d'opérateur jsonb=text. Redirection actionnable vers `json_get_text`.
+ * Mongo n'a pas ce problème (dot notation / $expr sont naturellement typés).
+ */
+function assertJsonPredicatesPg(
+	plan: LogicalPlan,
+	capabilities: Capabilities
+): void {
+	if (capabilities.engine !== "postgres") return;
+	visitPlanExprs(plan, (expr) => {
+		// Cas 1 : cast(json_get(...) as <primitive>) → planner_cast_from_jsonb_unsupported
+		if (
+			expr.kind === "cast" &&
+			expr.operand.kind === "call" &&
+			expr.operand.name === "json_get" &&
+			expr.target !== "json" &&
+			expr.target !== "text"
+		) {
+			throw new SnqlError(
+				`cast(json_get(...) as ${expr.target}) non supporté PG — utilise cast(json_get_text(...) as ${expr.target}) (chain ->> puis cast primitif)`,
+				"planner_cast_from_jsonb_unsupported",
+				expr.span
+			);
+		}
+		// Cas 2 : json_get(...) op literal → planner_json_get_compare_ambiguous
+		if (
+			expr.kind === "compare" &&
+			expr.left.kind === "call" &&
+			expr.left.name === "json_get" &&
+			expr.right.kind === "literal"
+		) {
+			throw new SnqlError(
+				"Compare direct sur json_get produit jsonb=text (PG 42883) — utilise json_get_text pour comparer un scalaire text",
+				"planner_json_get_compare_ambiguous",
+				expr.left.span
+			);
+		}
+	});
+}
+
+/** Walker générique sur tous les PlanExpr d'un plan (filter + project fields). */
+function visitPlanExprs(
+	plan: LogicalPlan,
+	visit: (expr: PlanExpr) => void
+): void {
+	switch (plan.op) {
+		case "scan":
+			return;
+		case "filter":
+			visitExprsIn(plan.predicate, visit);
+			visitPlanExprs(plan.input, visit);
+			return;
+		case "project":
+			for (const field of plan.fields) {
+				if (field.expr !== undefined) visitExprsIn(field.expr, visit);
+			}
+			visitPlanExprs(plan.input, visit);
+			return;
+		case "sort":
+		case "limit":
+		case "join":
+			visitPlanExprs(plan.input, visit);
+			return;
+	}
+}
+
+function visitExprsIn(expr: PlanExpr, visit: (e: PlanExpr) => void): void {
+	visit(expr);
+	switch (expr.kind) {
+		case "literal":
+		case "field":
+			return;
+		case "cast":
+			visitExprsIn(expr.operand, visit);
+			return;
+		case "call":
+			for (const arg of expr.args) visitExprsIn(arg, visit);
+			return;
+		case "arith":
+		case "compare":
+		case "and":
+		case "or":
+			visitExprsIn(expr.left, visit);
+			visitExprsIn(expr.right, visit);
+			return;
+		case "not":
+		case "isNull":
+			visitExprsIn(expr.operand, visit);
+			return;
+		case "in":
+			visitExprsIn(expr.target, visit);
+			for (const v of expr.values) visitExprsIn(v, visit);
+			return;
 	}
 }

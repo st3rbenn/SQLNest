@@ -13,6 +13,7 @@
  * avec le grouping, marqués `aggregate` dans le registre à ce moment-là.
  */
 
+import { extractStaticDotPath } from "./builtins-shared";
 import {
 	mongoAbs,
 	mongoCeil,
@@ -23,6 +24,10 @@ import {
 	mongoDatePart,
 	mongoDateTrunc,
 	mongoFloor,
+	mongoJsonGet,
+	mongoJsonGetText,
+	mongoJsonHasKey,
+	mongoJsonTypeof,
 	mongoLength,
 	mongoLower,
 	mongoLtrim,
@@ -46,6 +51,10 @@ import {
 	pgDatePart,
 	pgDateTrunc,
 	pgFloor,
+	pgJsonGet,
+	pgJsonGetText,
+	pgJsonHasKey,
+	pgJsonTypeof,
 	pgLength,
 	pgLower,
 	pgLtrim,
@@ -251,6 +260,92 @@ const BUILTINS: readonly FunctionEntry[] = [
 	// ─── sprint 3 : reserved (sprint 4) ───────────────────────────────────
 	{
 		name: "regex_replace",
+		kind: "reserved",
+		arity: { min: 0, max: null },
+		engines: {}
+	},
+
+	// ─── sprint 4 : JSON (read-only) ──────────────────────────────────────
+	{
+		name: "json_get",
+		kind: "scalar",
+		arity: { min: 2, max: null },
+		// Path segments = literals string/int — validation dédiée au lower (pas argEnum).
+		writeNullBehavior: "propagate",
+		mongoMatchHoist: { toPath: extractStaticDotPath, kind: "value" },
+		engines: { postgres: pgJsonGet, mongodb: mongoJsonGet }
+	},
+	{
+		name: "json_get_text",
+		kind: "scalar",
+		arity: { min: 2, max: null },
+		writeNullBehavior: "propagate",
+		// PAS de mongoMatchHoist v1 : coercion type sans schema introspection
+		// risquerait `field int32 42 != string "42"` silencieux cross-engine.
+		// Fallback $expr avec $toString explicite. Type-aware hoist reporté sprint 5+.
+		engines: { postgres: pgJsonGetText, mongodb: mongoJsonGetText }
+	},
+	{
+		name: "json_has_key",
+		kind: "scalar",
+		arity: { min: 2, max: 2 },
+		writeNullBehavior: "propagate",
+		mongoMatchHoist: { toPath: extractStaticDotPath, kind: "exists" },
+		engines: { postgres: pgJsonHasKey, mongodb: mongoJsonHasKey }
+	},
+	{
+		name: "json_typeof",
+		kind: "scalar",
+		arity: { min: 1, max: 1 },
+		writeNullBehavior: "propagate",
+		engines: { postgres: pgJsonTypeof, mongodb: mongoJsonTypeof }
+	},
+
+	// ─── sprint 4 : reserved (sprint 5+) ──────────────────────────────────
+	{
+		name: "json_contains",
+		kind: "reserved",
+		arity: { min: 0, max: null },
+		engines: {}
+	},
+	{
+		name: "json_set",
+		kind: "reserved",
+		arity: { min: 0, max: null },
+		engines: {}
+	},
+	{
+		name: "json_delete",
+		kind: "reserved",
+		arity: { min: 0, max: null },
+		engines: {}
+	},
+	{
+		name: "json_merge",
+		kind: "reserved",
+		arity: { min: 0, max: null },
+		engines: {}
+	},
+	{
+		name: "json_path",
+		kind: "reserved",
+		arity: { min: 0, max: null },
+		engines: {}
+	},
+	{
+		name: "json_array_length",
+		kind: "reserved",
+		arity: { min: 0, max: null },
+		engines: {}
+	},
+	{
+		name: "json_length",
+		kind: "reserved",
+		arity: { min: 0, max: null },
+		engines: {}
+	},
+	{
+		name: "json_object_keys",
 		kind: "reserved",
 		arity: { min: 0, max: null },
 		engines: {}

@@ -258,6 +258,19 @@ function renderMatch(
 				? negateMatch(expr.operand, alias)
 				: { $nor: [renderMatch(expr.operand, alias, mode)] };
 		case "isNull": {
+			// Sprint 4 : is null sur un call JSON hoistable → `{path: {$exists: bool}}`.
+			// `where json_get(doc, 'k') is null` équivaut à `not $exists` (missing key).
+			// `is not null` équivaut à `$exists: true`.
+			if (expr.operand.kind === "call") {
+				const entry = SNQL_FUNCTIONS.get(expr.operand.name);
+				const hoist = entry?.mongoMatchHoist;
+				if (hoist !== undefined && hoist.kind !== "exists") {
+					const path = hoist.toPath(expr.operand.args, alias);
+					if (path !== null) {
+						return { [path]: { $exists: expr.negated } };
+					}
+				}
+			}
 			if (expr.operand.kind !== "field") {
 				throw new SnqlError(
 					"IS NULL Mongo attend un champ",
@@ -389,12 +402,34 @@ const NEGATED_COMPARE: Readonly<Record<CompareOp, string>> = {
 	like: "$regex"
 };
 
+/**
+ * Opérateur SNQL inverse pour la négation via hoist (sprint 4). `not (json_has_key
+ * = true)` doit hoister comme `json_has_key = false` avec op inversé. Undefined
+ * = pas de hoist négation (like : forme complexe $not+$regex+$ne préservée).
+ */
+const NEGATED_HOIST_OP: Readonly<Partial<Record<CompareOp, CompareOp>>> = {
+	eq: "ne",
+	ne: "eq",
+	lt: "ge",
+	le: "gt",
+	gt: "le",
+	ge: "lt"
+};
+
 function negateCompare(
 	op: CompareOp,
 	left: PlanExpr,
 	right: PlanExpr,
 	alias: string | undefined
 ): Record<string, unknown> {
+	// Mirror sprint 4 : hoist JSON dans la négation. `not (json_get(x,'k')='v')`
+	// et `not (json_has_key(x,'k')=true)` doivent produire l'inverse hoisté
+	// natif (sinon fallback $expr non-indexable via composition not/$eq).
+	const negatedOp = NEGATED_HOIST_OP[op];
+	if (negatedOp !== undefined) {
+		const hoisted = tryMongoMatchHoist(negatedOp, left, right, alias, "write");
+		if (hoisted !== null) return hoisted;
+	}
 	// Cas idiomatique `champ op littéral` : on inverse l'opérateur.
 	if (left.kind === "field" && right.kind === "literal") {
 		const field = mongoField(left.path, alias);
@@ -460,6 +495,11 @@ function renderCompare(
 	if (op === "like") {
 		return renderLike(left, right, alias);
 	}
+	// Sprint 4 : hoist JSON via mongoMatchHoist si applicable. Traduit
+	// `where json_get(doc, 'a', 'b') = 'v'` en `{'doc.a.b': 'v'}` indexable
+	// natif (au lieu du fallback $expr COLLSCAN).
+	const hoisted = tryMongoMatchHoist(op, left, right, alias, mode);
+	if (hoisted !== null) return hoisted;
 	// Forme idiomatique : `{ champ: { $op: valeur } }`.
 	if (left.kind === "field" && right.kind === "literal") {
 		const field = mongoField(left.path, alias);
@@ -471,11 +511,24 @@ function renderCompare(
 		}
 		return { [field]: { [MONGO_OP[op]]: bsonValue(right.value) } };
 	}
-	// Repli $expr pour champ↔champ. En ÉCRITURE, la 3VL d'une comparaison
-	// champ↔champ (a=b, a!=b avec a/b absents/null) diverge de SQL et `$expr` ne
-	// distingue pas absent/null → on REFUSE plutôt que de risquer une
-	// sur-suppression. (La lecture garde la sémantique Mongo.)
+	// Repli $expr : en écriture, on refuse — deux codes selon l'origine :
+	//  - call / cast (fonction ou cast dans un prédicat write, non hoisté) :
+	//    message actionnable pointant vers un pattern hoistable ou matérialisation
+	//    côté application (nouveau `codegen_mongo_write_expr_predicate` sprint 4).
+	//  - vrais champ↔champ : ancien message conservé (`codegen_mongo_write_field_compare`).
 	if (mode === "write") {
+		const isExprLike =
+			left.kind === "call" ||
+			left.kind === "cast" ||
+			right.kind === "call" ||
+			right.kind === "cast";
+		if (isExprLike) {
+			throw new SnqlError(
+				"Expression fonction/cast dans un filtre de mutation Mongo non hoistable — matérialise le filtre côté application, ou utilise un pattern hoistable (json_get(field, ...literals) = literal)",
+				"codegen_mongo_write_expr_predicate",
+				left.kind === "call" || left.kind === "cast" ? left.span : right.span
+			);
+		}
 		throw new SnqlError(
 			"Comparaison champ↔champ non supportée dans un filtre d'écriture (sémantique 3VL ambiguë sur les champs absents/null)",
 			"codegen_mongo_write_field_compare"
@@ -666,6 +719,46 @@ function mongoField(
 
 // Caractères spéciaux regex à échapper lors de la conversion LIKE → $regex.
 const REGEX_SPECIAL = /[.*+?^${}()|[\]\\]/;
+
+/**
+ * Sprint 4 — hoist opt-in d'un `call` vers dot-notation Mongo native
+ * indexable. Consomme `entry.mongoMatchHoist` :
+ *  - kind='value' (json_get) : `{path: <op literal>}` — réutilise la logique
+ *    fast-path field/literal existante (write mode inclus : ne → $nin[v,null]).
+ *  - kind='exists' (json_has_key) : `{path: {$exists: bool}}` — right doit
+ *    être boolean literal, op ∈ {eq, ne}.
+ *
+ * Renvoie `null` si le hoist échoue (pas de call à gauche, pas de descripteur,
+ * toPath renvoie null, right pas literal…). Le codegen bascule alors sur le
+ * fast-path field/literal ou le fallback $expr.
+ */
+function tryMongoMatchHoist(
+	op: CompareOp,
+	left: PlanExpr,
+	right: PlanExpr,
+	alias: string | undefined,
+	mode: MatchMode
+): Record<string, unknown> | null {
+	if (left.kind !== "call") return null;
+	if (right.kind !== "literal") return null;
+	const entry = SNQL_FUNCTIONS.get(left.name);
+	const hoist = entry?.mongoMatchHoist;
+	if (hoist === undefined) return null;
+	const path = hoist.toPath(left.args, alias);
+	if (path === null) return null;
+	if (hoist.kind === "exists") {
+		if (typeof right.value !== "boolean") return null;
+		if (op !== "eq" && op !== "ne") return null;
+		// eq true → exists true. eq false → exists false. ne inverse.
+		const wantExists = (op === "eq") === right.value;
+		return { [path]: { $exists: wantExists } };
+	}
+	// kind='value' (défaut). Réutilise la logique field/literal existante.
+	if (op === "ne" && mode === "write") {
+		return { [path]: { $nin: [bsonValue(right.value), null] } };
+	}
+	return { [path]: { [MONGO_OP[op]]: bsonValue(right.value) } };
+}
 
 /**
  * Convertit un motif SQL LIKE en regex ancrée sur toute la chaîne.
