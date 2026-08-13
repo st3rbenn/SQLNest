@@ -4,9 +4,10 @@ import { checkArity, describeArity } from "./arity";
 import { SNQL_FUNCTIONS, createRegistry, type FunctionEntry } from "./index";
 
 describe("call node — registry + arity", () => {
-	it("SNQL_FUNCTIONS contient les 8 builtins sprint 1", () => {
+	it("SNQL_FUNCTIONS contient les 20 builtins (sprint 1 + 3) + 1 reserved", () => {
 		expect(SNQL_FUNCTIONS.names()).toEqual(
 			new Set([
+				// sprint 1
 				"upper",
 				"lower",
 				"length",
@@ -14,14 +15,35 @@ describe("call node — registry + arity", () => {
 				"round",
 				"coalesce",
 				"now",
-				"concat"
+				"concat",
+				// sprint 3 string
+				"trim",
+				"ltrim",
+				"rtrim",
+				"substring",
+				"replace",
+				"strpos",
+				// sprint 3 number
+				"floor",
+				"ceil",
+				// sprint 3 date
+				"today",
+				"date_part",
+				"date_trunc",
+				"date_add",
+				"date_diff",
+				// sprint 3 reserved
+				"regex_replace"
 			])
 		);
 	});
 
-	it("forEngine expose les fonctions supportées par engine", () => {
-		expect(SNQL_FUNCTIONS.forEngine("postgres").size).toBe(8);
-		expect(SNQL_FUNCTIONS.forEngine("mongodb").size).toBe(8);
+	it("forEngine expose les fonctions supportées par engine (21 mappées + 1 reserved sans engine)", () => {
+		// 8 sprint 1 + 13 sprint 3 mappées = 21 ; regex_replace reserved
+		// n'a pas de renderer → absent de forEngine.
+		expect(SNQL_FUNCTIONS.forEngine("postgres").size).toBe(21);
+		expect(SNQL_FUNCTIONS.forEngine("mongodb").size).toBe(21);
+		expect(SNQL_FUNCTIONS.forEngine("kv").size).toBe(0);
 	});
 
 	it("createRegistry(base, overrides) écrase par nom", () => {
@@ -89,8 +111,27 @@ describe("call node — parser + lower + codegen PG", () => {
 		);
 	});
 
-	it("call range : round(x, 2)", () => {
-		expect(sqlOf("find t pick round(rate, 2) as r")).toContain("ROUND(");
+	it("call range : round(x, 2) — 2-args double-cast (fix quirk 42883)", () => {
+		// round(double, int) n'existe pas en PG (quirk documenté). Le renderer
+		// wrap ::numeric pour typer, puis re-cast ::double precision pour ne
+		// pas casser le contrat de type côté driver pg (numeric → string JS).
+		expect(sqlOf("find t pick round(rate, 2) as r")).toBe(
+			`SELECT ROUND(("rate")::numeric, $1)::double precision AS "r" FROM "t"`
+		);
+	});
+
+	it("call range : round(x) mono-arg inchangé", () => {
+		expect(sqlOf("find t pick round(rate) as r")).toBe(
+			`SELECT ROUND("rate") AS "r" FROM "t"`
+		);
+	});
+
+	it("call range : round(cast(x as float), 3) — fix E2E RNAcentral", () => {
+		// Le cas qui a explosé sprint 2 : cast(x as float) → double precision,
+		// puis round(double, int) → 42883. B++ absorbe le quirk.
+		expect(sqlOf("find t pick round(cast(rate as float), 3) as r")).toBe(
+			`SELECT ROUND((CAST("rate" AS double precision))::numeric, $1)::double precision AS "r" FROM "t"`
+		);
 	});
 
 	it("call dans WHERE compare", () => {
@@ -131,15 +172,17 @@ describe("call node — erreurs lower", () => {
 		);
 	});
 
-	it("call en position write refusé (update predicate)", () => {
-		expect(() =>
-			compile("update t where upper(name) = \"X\" set y = 1", {
-				engine: "postgres"
-			})
-		).toThrow(/lecture seule/i);
-		// via lowerMutation direct :
+	it("call `propagate` autorisé en write (sprint 3 — writeNullBehavior activé)", () => {
+		// upper est déclaré `writeNullBehavior: "propagate"` → passe en write.
 		const stmt = parse(tokenize("update t where upper(name) = \"X\" set y = 1"));
 		if (stmt.operation !== "update") throw new Error("attendu update");
-		expect(() => lowerMutation(stmt)).toThrow(/contexte d'écriture/i);
+		expect(() => lowerMutation(stmt)).not.toThrow();
+	});
+
+	it("call sans writeNullBehavior déclaré reste refusé en write (concat)", () => {
+		// concat volontairement NON déclaré (divergence PG absorb vs Mongo propagate).
+		const stmt = parse(tokenize('update t where concat(a, b) = "xy" set y = 1'));
+		if (stmt.operation !== "update") throw new Error("attendu update");
+		expect(() => lowerMutation(stmt)).toThrow(/sémantique NULL non déclarée/i);
 	});
 });

@@ -1,4 +1,4 @@
-import { SNQL_FUNCTIONS } from "../functions";
+import { SNQL_FUNCTIONS, type EngineName } from "../functions";
 import type { Capability, CastTarget } from "../ir/plan";
 
 /**
@@ -18,19 +18,18 @@ export interface Capabilities {
 }
 
 function caps(
-	engine: string,
+	engine: EngineName,
 	supported: readonly Capability[],
 	castTargets: readonly CastTarget[]
 ): Capabilities {
+	// Baseline Mongo 5.0+ assumée pour les fonctions sprint 3
+	// ($dateTrunc / $dateAdd / $dateDiff / $replaceAll). Ticket futur :
+	// introduire Capabilities.mongoServerVersion pour version gating côté
+	// planner et rejeter à la compilation plutôt qu'au runtime cryptique.
 	return {
 		engine,
 		supports: new Set(supported),
-		functions:
-			engine === "postgres"
-				? SNQL_FUNCTIONS.forEngine("postgres")
-				: engine === "mongodb"
-					? SNQL_FUNCTIONS.forEngine("mongodb")
-					: new Set<string>(),
+		functions: SNQL_FUNCTIONS.forEngine(engine),
 		castTargets: new Set(castTargets)
 	};
 }

@@ -21,11 +21,15 @@
 export type TypeSpec = "any" | "string" | "number" | "bool" | "date";
 
 /**
- * Comportement NULL dans un contexte d'écriture (mode write : filtres de
- * remove/update dans une négation). Non déclaré → refusé au lower avec
- * `lower_call_null_write`. À muscle plus tard sans breaking change.
+ * Comportement NULL dans un contexte d'écriture. Non déclaré → refusé au lower
+ * avec `lower_call_null_write`. Déclaré (n'importe quelle valeur) → autorisé.
+ *
+ *  - `propagate` : arg null → résultat null (95% des fonctions pures scalaires)
+ *  - `absorb` : null traité comme neutre (concat PG ignore les null, pas Mongo)
+ *  - `custom` : logique dédiée (coalesce renvoie null ssi TOUS args null)
+ *  - `deterministic` : 0-arg pur (now, today) — pas de null à propager, safe en write
  */
-export type NullBehavior = "propagate" | "absorb" | "custom";
+export type NullBehavior = "propagate" | "absorb" | "custom" | "deterministic";
 
 /** Contexte transmis au renderer par le codegen. Générique — chaque engine en pousse ses invariants. */
 export interface RenderContext {
@@ -43,15 +47,24 @@ export type EngineRenderer = (
 /** Kind d'une fonction — pilote comment le codegen la place dans le SQL/pipeline. */
 export type FunctionKind = "scalar" | "aggregate" | "window" | "reserved";
 
+/** Nom d'engine supporté (aligné avec `capabilitiesFor`). */
+export type EngineName = "postgres" | "mongodb" | "kv";
+
 /**
  * Une entrée du registre. Un renderer engine absent = fonction non-supportée
  * par ce moteur → détecté au planner via `Capabilities.functions`.
+ *
+ * `argEnum[i]` = si présent, l'arg i doit être un **littéral string** membre
+ * de cet ensemble. Vérifié au lower avec suggestion Levenshtein sur valeur
+ * hors whitelist. Utilisé par les fns date_* pour figer l'unit au lower
+ * (`date_part("year", d)`) sans introduire de syntaxe spéciale.
  */
 export interface FunctionEntry {
 	readonly name: string;
 	readonly kind: FunctionKind;
 	readonly arity: Arity;
 	readonly args?: readonly TypeSpec[];
+	readonly argEnum?: readonly (readonly string[] | undefined)[];
 	readonly writeNullBehavior?: NullBehavior;
 	readonly engines: {
 		readonly postgres?: EngineRenderer;
@@ -74,7 +87,7 @@ export interface FunctionRegistry {
 	get(name: string): FunctionEntry | undefined;
 	has(name: string): boolean;
 	names(): ReadonlySet<string>;
-	forEngine(engine: "postgres" | "mongodb"): ReadonlySet<string>;
+	forEngine(engine: EngineName): ReadonlySet<string>;
 }
 
 /**
@@ -100,10 +113,15 @@ export function createRegistry(
 		if (entry.engines.mongodb !== undefined) mongoNames.add(name);
 	}
 	const names = new Set(byName.keys());
+	const emptySet: ReadonlySet<string> = new Set();
 	return {
 		get: (name) => byName.get(name),
 		has: (name) => byName.has(name),
 		names: () => names,
-		forEngine: (engine) => (engine === "postgres" ? pgNames : mongoNames)
+		forEngine: (engine) => {
+			if (engine === "postgres") return pgNames;
+			if (engine === "mongodb") return mongoNames;
+			return emptySet; // kv : aucune fonction du registre (planner filtre)
+		}
 	};
 }

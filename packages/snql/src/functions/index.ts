@@ -8,6 +8,7 @@ export { SNQL_FUNCTIONS } from "./builtins";
 export {
 	createRegistry,
 	type Arity,
+	type EngineName,
 	type EngineRenderer,
 	type FunctionEntry,
 	type FunctionKind,

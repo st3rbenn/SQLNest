@@ -411,19 +411,26 @@ function checkExprPathsAgainstColumns(
 }
 
 /**
- * T2 sprint 1 : les fonctions n'ont pas encore de `nullBehavior` déclaré, ce
- * qui rendrait leur sémantique 3VL prévisible en négation Mongo (parité avec
- * la garde champ↔champ existante). En attendant, on refuse tout `call` en
- * contexte write (predicate d'update/delete + valeurs de set) — non-breaking
- * quand on musclera avec `nullBehavior` plus tard.
+ * Refuse un `call` en contexte write (predicate d'update/delete + valeurs de
+ * set) sauf si sa sémantique NULL est explicitement déclarée via
+ * `writeNullBehavior` (propagate/absorb/custom/deterministic). Récursion
+ * conservée pour attraper un call sous cast/arith/etc. — un cast passe
+ * (déterministe), mais `set y = cast(concat(x, "!") as text)` refuse concat.
  */
 function assertNoCallInWrite(expr: PlanExpr): void {
 	switch (expr.kind) {
-		case "call":
-			throw new SnqlError(
-				`Fonction '${expr.name}' non autorisée dans un contexte d'écriture (update/remove) tant que sa sémantique NULL n'est pas déclarée`,
-				"lower_call_null_write"
-			);
+		case "call": {
+			const entry = SNQL_FUNCTIONS.get(expr.name);
+			if (entry?.writeNullBehavior === undefined) {
+				throw new SnqlError(
+					`Fonction '${expr.name}' non autorisée dans un contexte d'écriture (update/remove) — sémantique NULL non déclarée`,
+					"lower_call_null_write"
+				);
+			}
+			// Récursion sur les args : un call safe peut wrapper un call non-safe.
+			for (const arg of expr.args) assertNoCallInWrite(arg);
+			return;
+		}
 		case "literal":
 		case "field":
 			return;
@@ -919,18 +926,81 @@ function lowerExpr(expr: Expr): PlanExpr {
 }
 
 /**
+ * Aliases connus vers les canoniques SNQL — suggestions pour
+ * `lower_unknown_function`. Chaque `?` d'un dev perdu = un alias à ajouter.
+ */
+const FUNCTION_ALIASES: Readonly<Record<string, string>> = {
+	regexp_replace: "regex_replace (réservé sprint 4)",
+	position: "strpos",
+	instr: "strpos",
+	substr: "substring",
+	ceiling: "ceil",
+	datediff: "date_diff",
+	dateadd: "date_add",
+	current_date: "today()",
+	current_timestamp: "now()",
+	sysdate: "now()",
+	getdate: "now()"
+};
+
+/** Distance d'édition (Damerau-Levenshtein 1-swap) — utilisé pour les
+ * suggestions "voulez-vous dire" sur les units. Coût O(n*m), négligeable pour
+ * des chaînes de ≤ 20 chars. */
+function editDistance(a: string, b: string): number {
+	if (a === b) return 0;
+	const la = a.length;
+	const lb = b.length;
+	if (la === 0) return lb;
+	if (lb === 0) return la;
+	let prev: number[] = Array(lb + 1);
+	for (let j = 0; j <= lb; j += 1) prev[j] = j;
+	let curr: number[] = Array(lb + 1);
+	for (let i = 1; i <= la; i += 1) {
+		curr[0] = i;
+		for (let j = 1; j <= lb; j += 1) {
+			const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+			curr[j] = Math.min(
+				(curr[j - 1] as number) + 1,
+				(prev[j] as number) + 1,
+				(prev[j - 1] as number) + cost
+			);
+		}
+		[prev, curr] = [curr, prev];
+	}
+	return prev[lb] as number;
+}
+
+/** Trouve la meilleure suggestion dans une whitelist (distance ≤ 2, plus courte gagne). */
+function bestSuggestion(
+	input: string,
+	candidates: readonly string[]
+): string | null {
+	let best: { name: string; dist: number } | null = null;
+	for (const cand of candidates) {
+		const d = editDistance(input.toLowerCase(), cand);
+		if (d <= 2 && (best === null || d < best.dist)) {
+			best = { name: cand, dist: d };
+		}
+	}
+	return best?.name ?? null;
+}
+
+/**
  * Résout un appel de fonction contre le registre : fonction connue, arité
  * conforme, kind non-`reserved`. Types opt-in : si `entry.args` est déclaré et
  * que l'arg correspondant est statiquement typable (littéral), on vérifie.
+ * `argEnum` (sprint 3) : whitelist pour un arg littéral string (unit de date_*)
+ * avec suggestion Levenshtein sur valeur hors whitelist.
  */
 function lowerCall(expr: Expr & { type: "call" }): PlanExpr {
 	const entry = SNQL_FUNCTIONS.get(expr.name);
 	if (entry === undefined) {
-		throw new SnqlError(
-			`Fonction '${expr.name}' inconnue`,
-			"lower_unknown_function",
-			expr.span
-		);
+		const aliasHint = FUNCTION_ALIASES[expr.name];
+		const message =
+			aliasHint !== undefined
+				? `Fonction '${expr.name}' inconnue — utilisez '${aliasHint}'`
+				: `Fonction '${expr.name}' inconnue`;
+		throw new SnqlError(message, "lower_unknown_function", expr.span);
 	}
 	if (entry.kind === "reserved") {
 		throw new SnqlError(
@@ -963,6 +1033,62 @@ function lowerCall(expr: Expr & { type: "call" }): PlanExpr {
 					);
 				}
 			}
+		}
+	}
+	// argEnum : whitelist stricte pour les unit littéraux (date_*).
+	if (entry.argEnum !== undefined) {
+		for (let i = 0; i < expr.args.length && i < entry.argEnum.length; i += 1) {
+			const whitelist = entry.argEnum[i];
+			if (whitelist === undefined) continue;
+			const arg = expr.args[i];
+			if (arg === undefined) continue;
+			if (arg.type !== "literal" || arg.value.kind !== "string") {
+				throw new SnqlError(
+					`Fonction '${expr.name}' arg ${i + 1} attend un littéral string parmi {${whitelist.join(", ")}}, pas une expression dynamique`,
+					"lower_call_enum_literal_required",
+					arg.span
+				);
+			}
+			const value = arg.value.value.toLowerCase();
+			if (!whitelist.includes(value)) {
+				const suggestion = bestSuggestion(value, whitelist);
+				const suggestionHint =
+					suggestion !== null ? ` — voulez-vous dire '${suggestion}' ?` : "";
+				throw new SnqlError(
+					`Fonction '${expr.name}' arg ${i + 1} '${arg.value.value}' hors enum {${whitelist.join(", ")}}${suggestionHint}`,
+					"lower_call_enum_value",
+					arg.span
+				);
+			}
+		}
+	}
+	// Guards dédiés : catch les pièges courants avec un message actionnable.
+	if (entry.name === "substring") {
+		const startArg = expr.args[1];
+		if (
+			startArg?.type === "literal" &&
+			startArg.value.kind === "number" &&
+			Number(startArg.value.raw) === 0
+		) {
+			throw new SnqlError(
+				"substring est 1-indexed — voulez-vous dire substring(s, 1, ...) ?",
+				"lower_call_substring_zero_index",
+				startArg.span
+			);
+		}
+	}
+	if (entry.name === "replace") {
+		const fromArg = expr.args[1];
+		if (
+			fromArg?.type === "literal" &&
+			fromArg.value.kind === "string" &&
+			fromArg.value.value === ""
+		) {
+			throw new SnqlError(
+				"replace : `from` vide non supporté cross-engine (PG no-op, Mongo null/throw)",
+				"lower_call_replace_empty_find",
+				fromArg.span
+			);
 		}
 	}
 	return {

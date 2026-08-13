@@ -113,25 +113,28 @@ describe("lower cast — autorisé en write (déterministe + NULL propagate)", (
 	});
 });
 
-describe("lower cast — call sous cast reste refusé récursivement", () => {
-	it("set y = cast(upper(name) as text) → lower_call_null_write sur upper", () => {
+describe("lower cast — call `propagate` autorisé sous cast (sprint 3)", () => {
+	it("set y = cast(upper(name) as text) passe (upper propagate)", () => {
+		// sprint 3 : upper est writeNullBehavior:'propagate' → autorisé en write.
 		const stmt = parse(
 			tokenize("update t where id = 1 set y = cast(upper(name) as text)")
 		);
 		if (stmt.operation !== "update") throw new Error("update attendu");
-		try {
-			lowerMutation(stmt);
-			throw new Error("SnqlError attendu");
-		} catch (e) {
-			if (!(e instanceof SnqlError)) throw e;
-			expect(e.code).toBe("lower_call_null_write");
-			expect(e.message).toContain("upper");
-		}
+		expect(() => lowerMutation(stmt)).not.toThrow();
 	});
 
-	it("update where cast(round(x) as int) = 0 refusé (round dans predicate)", () => {
+	it("update where cast(round(x) as int) = 0 passe (round propagate)", () => {
 		const stmt = parse(
 			tokenize("update t where cast(round(x) as int) = 0 set y = 1")
+		);
+		if (stmt.operation !== "update") throw new Error("update attendu");
+		expect(() => lowerMutation(stmt)).not.toThrow();
+	});
+
+	it("set y = cast(concat(a, b) as text) refusé (concat non déclaré)", () => {
+		// concat volontairement non déclaré (divergence PG absorb vs Mongo propagate).
+		const stmt = parse(
+			tokenize("update t where id = 1 set y = cast(concat(a, b) as text)")
 		);
 		if (stmt.operation !== "update") throw new Error("update attendu");
 		try {
@@ -140,6 +143,7 @@ describe("lower cast — call sous cast reste refusé récursivement", () => {
 		} catch (e) {
 			if (!(e instanceof SnqlError)) throw e;
 			expect(e.code).toBe("lower_call_null_write");
+			expect(e.message).toContain("concat");
 		}
 	});
 });
