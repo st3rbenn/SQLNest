@@ -192,7 +192,13 @@ function describeTableSql(): string {
 			// 'RESOURCE_STATUS') dans ce cas.
 			`(CASE WHEN c.data_type = 'USER-DEFINED' THEN c.udt_name ELSE c.data_type END) AS type, ` +
 			`(c.is_nullable = 'YES') AS nullable, ` +
-			`c.column_default AS "default", ` +
+			// column_default remonte tel quel du catalog PG, y compris les casts
+			// bruts : 'draft'::"RESOURCE_STATUS", 'N/A'::character varying,
+			// nextval('users_id_seq'::regclass), NULL::text… Illisible en UI.
+			// On strip tous les `::TYPE` (typename quoted OU unquoted avec
+			// modifiers `character varying`), les appels de fonction gardent
+			// leur nom et leurs paramètres.
+			`regexp_replace(c.column_default, '::(?:"[^"]+"|[a-z][a-z0-9_ ]*)', '', 'g') AS "default", ` +
 			`COALESCE(pk.is_primary_key, FALSE) AS is_primary_key, ` +
 			`fk.foreign_key AS foreign_key ` +
 		`FROM information_schema.columns c ` +

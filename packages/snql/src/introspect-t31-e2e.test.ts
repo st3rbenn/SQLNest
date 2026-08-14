@@ -179,9 +179,28 @@ describe("codegen PG — describe <table>", () => {
 		// T3/2.1 : enum PG (USER-DEFINED) → udt_name lisible ('RESOURCE_STATUS').
 		expect(native.text).toContain("USER-DEFINED");
 		expect(native.text).toContain("udt_name");
+		// T3/2.2 : column_default nettoyé des `::TYPE` casts (typename quoted
+		// OU unquoted) — l'UI voit `'synced'` au lieu de `'synced'::"NOMADIA…"`.
+		expect(native.text).toContain("regexp_replace(c.column_default");
 		expect(native.text).toContain("$1");
 		expect(native.text).toContain("$2");
 		expect(native.params).toEqual(["apollon_schema", "users"]);
+	});
+
+	it("regex `::TYPE` cleanup — patterns attendus", () => {
+		// Auto-doc du contrat de nettoyage. Le pattern PG est POSIX ERE — on
+		// vérifie ici le comportement JS équivalent (les 2 dialectes acceptent
+		// le pattern tel quel).
+		const strip = (s: string): string =>
+			s.replace(/::(?:"[^"]+"|[a-z][a-z0-9_ ]*)/g, "");
+		expect(strip(`'synced'::"NOMADIA_SYNC_STATUS"`)).toBe(`'synced'`);
+		expect(strip(`'N/A'::character varying`)).toBe(`'N/A'`);
+		expect(strip(`nextval('users_id_seq'::regclass)`)).toBe(
+			`nextval('users_id_seq')`
+		);
+		expect(strip(`NULL::text`)).toBe(`NULL`);
+		expect(strip(`gen_random_uuid()`)).toBe(`gen_random_uuid()`);
+		expect(strip(`now()`)).toBe(`now()`);
 	});
 
 	it("fallback namespace = 'public'", () => {
