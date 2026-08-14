@@ -146,6 +146,25 @@ describe("add doc — position valeur (enum)", () => {
 		const options = labels(src, 17);
 		expect(options).not.toContain("field_expert");
 	});
+
+	// Sprint T2/13.6 : le smart-apply insère `role: "|"` et le curseur atterrit
+	// entre les guillemets — le complete doit reconnaître ce cas (string
+	// ouverte) et proposer les labels enum en insertion nue (pas de re-wrap).
+	it("cursor entre `\"|\"` (string ouverte) : propose labels nus", () => {
+		// `add {role: "|"} into resource` — position 12 = entre les quotes.
+		const src = 'add {role: ""} into resource';
+		const opts = at(src, 12).options;
+		expect(opts.map((o) => o.label)).toContain("field_expert");
+		// Insertion nue (pas de wrap `"..."` car on est déjà entre les guillemets).
+		const opt = opts.find((o) => o.label === "field_expert");
+		expect(opt?.apply).toBeUndefined();
+	});
+
+	it("cursor entre `\"|\"` sur col non-enum : pas de suggestions", () => {
+		const src = 'add {first_name: ""} into resource';
+		const opts = at(src, 18).options;
+		expect(opts).toHaveLength(0);
+	});
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

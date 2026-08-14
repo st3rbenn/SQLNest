@@ -99,9 +99,17 @@ export function completeSnql(
 		return { from, options: [] };
 	}
 
+	// Sprint T2/13.6 : le smart-apply insère `col: "|"` avec curseur entre
+	// guillemets — le préfixe contient alors un `"` ouvert que le lexer refuse
+	// (`lex_unterminated_string`). On détecte le cas via un compte des `"` non
+	// échappés dans le préfixe (impair = string ouverte) et on ajoute une
+	// fermeture heuristique pour tokeniser proprement.
 	let toks: Token[];
+	const prefixSlice = source.slice(0, from);
+	const insideOpenString = isInsideOpenString(prefixSlice);
+	const prefixForLex = insideOpenString ? prefixSlice + '"' : prefixSlice;
 	try {
-		toks = tokenize(source.slice(0, from)).filter((t) => t.kind !== "eof");
+		toks = tokenize(prefixForLex).filter((t) => t.kind !== "eof");
 	} catch {
 		return { from, options: [] };
 	}
@@ -111,20 +119,72 @@ export function completeSnql(
 	// sinon on ne pourrait rien proposer dans un doc quand l'user commence par
 	// `add {|`. Silence si suffixe non-tokenisable.
 	let suffixToks: Token[] = [];
+	// Sprint T2/13.6 : si le curseur est dans une string ouverte, le suffixe
+	// démarre par le reste de la string (jusqu'au `"` fermant). Skippe-le
+	// pour tokeniser proprement le reste (`into resource`).
+	const suffixSlice = insideOpenString
+		? skipToClosingQuote(source, at)
+		: source.slice(at);
 	try {
-		suffixToks = tokenize(source.slice(at)).filter((t) => t.kind !== "eof");
+		suffixToks = tokenize(suffixSlice).filter((t) => t.kind !== "eof");
 	} catch {
 		// Suffixe cassé — pas grave, on tentera la détection sur le préfixe seul.
 	}
 
-	return { from, options: contextOptions(toks, schema, suffixToks) };
+	return {
+		from,
+		options: contextOptions(toks, schema, suffixToks, insideOpenString)
+	};
+}
+
+/**
+ * Sprint T2/13.6 : true ssi le curseur est à l'intérieur d'une string
+ * ouverte (nombre impair de `"` non-échappés dans le préfixe). Ignore les
+ * quotes échappées `\"`. Simple mais suffisant : les single-quotes SNQL
+ * suivent le même contrat et sont couvertes symétriquement plus tard si
+ * besoin (v1 : `"` uniquement, cf. surface JSON-y du doc d'insert).
+ */
+function isInsideOpenString(prefix: string): boolean {
+	let count = 0;
+	let escaped = false;
+	for (const ch of prefix) {
+		if (escaped) {
+			escaped = false;
+			continue;
+		}
+		if (ch === "\\") {
+			escaped = true;
+			continue;
+		}
+		if (ch === '"') count += 1;
+	}
+	return count % 2 === 1;
+}
+
+/** Depuis `at`, skip jusqu'au prochain `"` non-échappé (fin de string ouverte). */
+function skipToClosingQuote(source: string, at: number): string {
+	let i = at;
+	let escaped = false;
+	while (i < source.length) {
+		const ch = source[i]!;
+		if (escaped) {
+			escaped = false;
+		} else if (ch === "\\") {
+			escaped = true;
+		} else if (ch === '"') {
+			return source.slice(i + 1);
+		}
+		i += 1;
+	}
+	return "";
 }
 
 /** Détermine les candidats à partir du flux de tokens qui précède le mot courant. */
 function contextOptions(
 	toks: readonly Token[],
 	schema: SchemaModel,
-	suffixToks: readonly Token[] = []
+	suffixToks: readonly Token[] = [],
+	insideOpenString = false
 ): readonly SnqlCompletion[] {
 	const last = toks[toks.length - 1];
 	if (last === undefined) {
@@ -139,11 +199,11 @@ function contextOptions(
 	// badges obligatoire/facultatif, skip celles déjà tapées.
 	const docCtx = insertDocContext(toks, suffixToks);
 	if (docCtx !== null) {
-		return docCompletions(docCtx, schema, last);
+		return docCompletions(docCtx, schema, last, insideOpenString);
 	}
 	const setCtx = updateSetContext(toks, operation, scope);
 	if (setCtx !== null) {
-		return setCompletions(setCtx, schema, last);
+		return setCompletions(setCtx, schema, last, insideOpenString);
 	}
 
 	// Un verbe ne pilote le contexte qu'en **tête de requête**. Le lexer classe
@@ -706,10 +766,11 @@ function findLastOp(
 function docCompletions(
 	ctx: DocFieldContext,
 	schema: SchemaModel,
-	last: Token
+	last: Token,
+	insideOpenString = false
 ): readonly SnqlCompletion[] {
 	if (ctx.position === "value") {
-		return valueSuggestions(ctx, schema, last);
+		return valueSuggestions(ctx, schema, last, insideOpenString);
 	}
 	// Position clé : garde qu'après `{` ou `,` (sinon on complète pas au milieu
 	// d'un ident déjà partiel — laissons le mécanisme prefix-match de CM6 filtrer).
@@ -723,10 +784,11 @@ function docCompletions(
 function setCompletions(
 	ctx: DocFieldContext,
 	schema: SchemaModel,
-	last: Token
+	last: Token,
+	insideOpenString = false
 ): readonly SnqlCompletion[] {
 	if (ctx.position === "value") {
-		return valueSuggestions(ctx, schema, last);
+		return valueSuggestions(ctx, schema, last, insideOpenString);
 	}
 	// Position clé : refuser si le dernier token est un verbe orphelin (ex.
 	// `set edit ` — `edit` = alias verb, ne pilote pas la clé). Autorise
@@ -820,7 +882,8 @@ function fieldDetailForDoc(
 function valueSuggestions(
 	ctx: DocFieldContext,
 	schema: SchemaModel,
-	last: Token
+	last: Token,
+	insideOpenString = false
 ): readonly SnqlCompletion[] {
 	if (ctx.currentColumn === undefined) return [];
 	const coll = schema.collections.find((c) => c.name === ctx.collection);
@@ -828,9 +891,12 @@ function valueSuggestions(
 	const field = coll.fields.find((f) => f.name === ctx.currentColumn);
 	if (field === undefined || field.enumValues === undefined) return [];
 
-	// Si l'user vient de taper `col: "` (string ouverte), on insère le label nu ;
-	// sinon on wrappe entre guillemets.
-	const alreadyQuoted = last.kind === "string";
+	// Sprint T2/13.6 : le smart-apply insère `col: "|"` avec curseur entre les
+	// guillemets — insideOpenString détecte ce cas et on insère le label nu
+	// (sans re-wrap). `last.kind === "string"` couvre le cas symétrique où
+	// l'user a explicitement tapé `col: "foo"` puis revient dedans (le lexer
+	// voit une string fermée mais on est peut-être encore avant/à la fin).
+	const alreadyQuoted = insideOpenString || last.kind === "string";
 	return field.enumValues.map((label) => ({
 		label,
 		type: "field" as const,
