@@ -28,6 +28,9 @@ const ITEM_INDENT = "    ";
 // Un pick/sort/set devient multi-ligne à partir de N items (compter les virgules
 // TOP-LEVEL — celles imbriquées dans un call ou un [] ne comptent pas).
 const MULTILINE_MIN_ITEMS = 3;
+// Sprint T2/15 : indent d'un niveau de container statement (transaction /
+// savepoint). Chaque niveau ajoute STAGE_INDENT (2 spaces) au préfixe.
+const CONTAINER_STEP = "  ";
 
 /** Formate une source SNQL avec sauts de ligne canoniques (par étape). */
 export function formatSnql(source: string): string {
@@ -51,6 +54,17 @@ export function formatSnql(source: string): string {
 		splitCommas,
 		multilineStages
 	);
+	// Sprint T2/15 — marker les blocs `transaction { … }` / `savepoint <name>
+	// { … }`. Ces containers indentent leurs stmts enfants + split sur `;`.
+	// containerDepthAt[i] = profondeur au token i (0 = top-level, 1 = dans un
+	// transaction ou savepoint, 2 = savepoint nested dans transaction).
+	const {
+		containerOpeners,
+		containerClosers,
+		containerSemicolons,
+		containerDepthAt
+	} = markStatementContainers(toks);
+
 	const parts: string[] = [];
 	// Set après avoir émis un `\n<indent>` (soit newline de stage/and/comma-split,
 	// soit newline d'item après un keyword stage multi-ligne). Bypasse la logique
@@ -66,21 +80,41 @@ export function formatSnql(source: string): string {
 		const splitIndent = splitCommas.get(i);
 		const blockOpenIndent = blockOpeners.get(i);
 		const blockCloseIndent = blockClosers.get(i);
+		const containerOpenIndent = containerOpeners.get(i);
+		const containerCloseIndent = containerClosers.get(i);
+		const containerSemicolonIndent = containerSemicolons.get(i);
+		// Sprint T2/15 : offset d'indent additionnel pour stages/ands quand
+		// on est dans un container (transaction/savepoint). Depth 0 = pas
+		// d'offset (top-level), depth ≥ 1 = CONTAINER_STEP × depth spaces.
+		const containerDepth = containerDepthAt[i] ?? 0;
+		const containerOffset = CONTAINER_STEP.repeat(containerDepth);
 
 		if (isStage && parts.length > 0) {
-			parts.push(`\n${STAGE_INDENT}${tok.value}`);
+			parts.push(`\n${containerOffset}${STAGE_INDENT}${tok.value}`);
 			pendingItemNewline = multilineStages.has(i);
 			continue;
 		}
 		if (isChainAnd) {
-			parts.push(`\n${AND_INDENT}and`);
+			parts.push(`\n${containerOffset}${AND_INDENT}and`);
 			continue;
 		}
 		if (splitIndent !== undefined) {
 			// Virgule top-level d'un pick/sort/set OU d'un object/array literal
 			// multi-ligne : virgule collée à l'item précédent, puis newline + indent.
-			parts.push(`,\n${splitIndent}`);
+			parts.push(`,\n${containerOffset}${splitIndent}`);
 			suppressNextSpace = true;
+			continue;
+		}
+		if (containerSemicolonIndent !== undefined) {
+			// Sprint T2/15 : `;` intra-transaction — collé au stmt précédent,
+			// puis newline + indent container (le stmt suivant démarre à cet indent).
+			parts.push(`;\n${containerSemicolonIndent}`);
+			suppressNextSpace = true;
+			continue;
+		}
+		if (containerCloseIndent !== undefined) {
+			// Sprint T2/15 : `}` d'un container — newline + indent parent avant.
+			parts.push(`\n${containerCloseIndent}${tok.value}`);
 			continue;
 		}
 		if (blockCloseIndent !== undefined) {
@@ -90,7 +124,7 @@ export function formatSnql(source: string): string {
 		}
 		if (parts.length > 0) {
 			if (pendingItemNewline) {
-				parts.push(`\n${ITEM_INDENT}`);
+				parts.push(`\n${containerOffset}${ITEM_INDENT}`);
 				pendingItemNewline = false;
 				suppressNextSpace = true;
 			}
@@ -104,7 +138,11 @@ export function formatSnql(source: string): string {
 			}
 		}
 		parts.push(renderToken(tok));
-		if (blockOpenIndent !== undefined) {
+		if (containerOpenIndent !== undefined) {
+			// Sprint T2/15 : `{` d'un container — newline + indent child après.
+			parts.push(`\n${containerOpenIndent}`);
+			suppressNextSpace = true;
+		} else if (blockOpenIndent !== undefined) {
 			// `{` ou `[` d'un bloc multi-ligne : émettre newline+indent enfant
 			// APRÈS l'opener, avant le premier item.
 			parts.push(`\n${blockOpenIndent}`);
@@ -250,6 +288,118 @@ function markBlockLiterals(
 	}
 
 	return { blockOpeners, blockClosers };
+}
+
+/**
+ * Sprint T2/15 : détecte les blocs `transaction { … }` et `savepoint <name>
+ * { … }`. Ces containers indentent leurs stmts enfants (childIndent =
+ * CONTAINER_STEP × depth) et splittent sur `;` (chaque stmt sur sa ligne).
+ * `depth` compte le nesting (savepoint dans transaction = depth 2).
+ *
+ * Retourne :
+ *  - `containerOpeners[openerIdx]` = childIndent à émettre après `{`
+ *  - `containerClosers[closerIdx]` = parentIndent à émettre avant `}`
+ *  - `containerSemicolons[semicolonIdx]` = childIndent pour split après `;`
+ *  - `containerDepthAt[i]` = profondeur containers ouverts à la position i
+ */
+function markStatementContainers(toks: readonly Token[]): {
+	containerOpeners: Map<number, string>;
+	containerClosers: Map<number, string>;
+	containerSemicolons: Map<number, string>;
+	containerDepthAt: readonly number[];
+} {
+	const containerOpeners = new Map<number, string>();
+	const containerClosers = new Map<number, string>();
+	const containerSemicolons = new Map<number, string>();
+	const containerDepthAt: number[] = new Array(toks.length).fill(0);
+
+	interface ContainerFrame {
+		readonly openerIdx: number;
+		readonly depth: number; // 1-indexed (première ouverture = 1)
+		readonly childIndent: string;
+		readonly parentIndent: string;
+	}
+	const stack: ContainerFrame[] = [];
+
+	// Pattern detection : le `{` qui suit `transaction [isolation …]` ou
+	// `savepoint <ident>` ouvre un statement container. Toute autre `{` est
+	// un object literal (géré par markBlockLiterals).
+	let expectingContainerBrace = false;
+
+	for (let i = 0; i < toks.length; i += 1) {
+		const tok = toks[i] as Token;
+		containerDepthAt[i] = stack.length;
+
+		if (tok.kind === "keyword" && (tok.value === "transaction" || tok.value === "savepoint")) {
+			expectingContainerBrace = true;
+			continue;
+		}
+		if (tok.kind === "lbrace" && expectingContainerBrace) {
+			const depth = stack.length + 1;
+			const childIndent = CONTAINER_STEP.repeat(depth);
+			const parentIndent = CONTAINER_STEP.repeat(depth - 1);
+			stack.push({ openerIdx: i, depth, childIndent, parentIndent });
+			containerOpeners.set(i, childIndent);
+			expectingContainerBrace = false;
+			// L'opener lui-même est encore à parent depth ; le contenu à depth++.
+			// containerDepthAt[i] déjà = ancien depth (avant push). OK.
+			containerDepthAt[i] = depth; // le token `{` est au niveau parent, mais
+			// on l'annote au niveau enfant pour cohérence (aucun effet sur l'output
+			// car `{` ne déclenche pas de stage/comma path).
+			continue;
+		}
+		if (tok.kind === "rbrace" && stack.length > 0) {
+			// Vérifier que ce `}` est bien le closer d'un container (pas d'un
+			// object literal nested). Le container au sommet du stack a un
+			// openerIdx ; si toutes les lbrace/rbrace intermédiaires balancent,
+			// on ferme le container. Simplification : le stack ne contient que
+			// des containers (les object literals sont traités séparément par
+			// markBlockLiterals). Mais un object literal `{a:1}` interne va
+			// aussi émettre lbrace/rbrace qu'on doit skipper.
+			//
+			// Heuristique : on ne pop qu'à profondeur brace globale balancée.
+			// Approche plus simple : compter le nesting brace depuis openerIdx
+			// et pop quand `}` correspondant.
+			const top = stack[stack.length - 1] as ContainerFrame;
+			if (bracesBalanceBetween(toks, top.openerIdx + 1, i)) {
+				stack.pop();
+				containerClosers.set(i, top.parentIndent);
+			}
+			// Sinon : `}` d'un object literal nested — ne rien faire ici,
+			// markBlockLiterals s'en occupe.
+			continue;
+		}
+		if (tok.kind === "semicolon" && stack.length > 0) {
+			// `;` intra-container top-level (pas dans un sub-block). Le split
+			// utilise le childIndent du container immédiatement englobant.
+			const top = stack[stack.length - 1] as ContainerFrame;
+			containerSemicolons.set(i, top.childIndent);
+			continue;
+		}
+		// Toute autre keyword réinitialise l'attente de container brace
+		// (ex : `transaction isolation serializable` — les 2 keywords isolation
+		// et serializable ne doivent pas cancel, mais `find` derrière `{` ne
+		// pas cancel non plus). Simplification : cancel seulement sur lbrace
+		// consommée sans être container, ce qui n'arrive pas en pratique.
+	}
+
+	return { containerOpeners, containerClosers, containerSemicolons, containerDepthAt };
+}
+
+/**
+ * Vrai si les braces `{` / `}` entre [from, to) (exclusif `to`) balancent
+ * globalement. Utilisé pour vérifier que `toks[to]` (un `}`) ferme bien le
+ * container ouvert en `openerIdx = from - 1`, sans que des object literals
+ * internes viennent perturber le compte.
+ */
+function bracesBalanceBetween(toks: readonly Token[], from: number, to: number): boolean {
+	let balance = 0;
+	for (let i = from; i < to; i += 1) {
+		const t = toks[i] as Token;
+		if (t.kind === "lbrace") balance += 1;
+		else if (t.kind === "rbrace") balance -= 1;
+	}
+	return balance === 0;
 }
 
 /**

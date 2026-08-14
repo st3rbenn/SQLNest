@@ -118,3 +118,56 @@ describe("format — pick multi-ligne + object literal item", () => {
 		);
 	});
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Sprint T2/15 : transaction + savepoint + `;` séparateur
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("format — transaction bloc", () => {
+	it("transaction simple : `{` ouvre bloc + `;` split + stmts indentés", () => {
+		expect(
+			fmt("transaction { find users pick id; find agency pick name }")
+		).toBe(
+			"transaction {\n  find users\n    pick id;\n  find agency\n    pick name\n}"
+		);
+	});
+
+	it("isolation reste inline avec `transaction`", () => {
+		expect(
+			fmt(
+				"transaction isolation serializable { find users pick id; find agency pick name }"
+			)
+		).toBe(
+			"transaction isolation serializable {\n  find users\n    pick id;\n  find agency\n    pick name\n}"
+		);
+	});
+
+	it("savepoint bloc — indent enfant + stages à indent supérieur", () => {
+		expect(
+			fmt(
+				"transaction { find users pick id; savepoint sp1 { update users set is_active = true }; find agency pick name }"
+			)
+		).toBe(
+			[
+				"transaction {",
+				"  find users",
+				"    pick id;",
+				"  savepoint sp1 {",
+				"    update users",
+				"      set is_active = true",
+				"  };",
+				"  find agency",
+				"    pick name",
+				"}"
+			].join("\n")
+		);
+	});
+
+	it("idempotent : format(format(x)) == format(x) sur transaction", () => {
+		const src =
+			"transaction isolation serializable { find resource limit 1; savepoint sp1 { find agency limit 1 }; find resource_pair limit 1 }";
+		const once = fmt(src);
+		const twice = fmt(once);
+		expect(twice).toBe(once);
+	});
+});
