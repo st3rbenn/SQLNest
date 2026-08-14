@@ -27,6 +27,38 @@ import type {
 } from "./plan";
 
 /**
+ * Sprint T2/12 : scope d'une query outer visible par une subquery corrélée.
+ * Contient les alias déclarés (source + with-joins) + colonnes source pour
+ * résoudre `alias.field` lookup depuis l'intérieur d'un `(find ...)`.
+ */
+interface OuterScope {
+	readonly aliases: ReadonlySet<string>;
+	readonly sourceColumns: ReadonlySet<string> | null;
+	readonly collection: string;
+	readonly alias?: string;
+}
+
+/**
+ * Module-level scope stack — JS single-thread → safe. Push par lower() à
+ * chaque entrée d'une subquery, pop à la sortie. Consulté par
+ * checkAliasDefined pour résoudre les alias corrélés.
+ *
+ * NOTE : le stack contient les scopes OUTER, pas le scope courant. Le scope
+ * courant est reconstruit par lowerInternal en direct depuis ses locals et
+ * assigné à `currentScope` avant chaque appel à lowerExpr.
+ */
+const outerScopeStack: OuterScope[] = [];
+
+/**
+ * Scope courant de la query en cours de lowering — mis à jour par
+ * lowerInternal après chaque stage `with` qui ajoute un alias. Poussé sur
+ * outerScopeStack quand lower() est appelé récursivement (subquery).
+ */
+let currentScope: OuterScope | null = null;
+
+const MAX_SUBQUERY_DEPTH = 32;
+
+/**
  * Abaisse l'AST de surface en Logical Plan canonique (collapse des synonymes, etc.).
  *
  * Le [[SchemaModel]] optionnel permet d'inférer la multiplicité des joins `with`
@@ -35,7 +67,12 @@ import type {
  * embed en array (`kind: "embed"`). Sans schéma ou sans relation matchante, on
  * retombe sur `embed` (comportement historique). L'utilisateur peut forcer via
  * `with one X` / `with many X`.
+ *
+ * Sprint T2/12 : gère les sub-queries corrélées via un scope stack module-level
+ * (poussé quand lowerExpr descend dans une subquery, popé au retour).
  */
+let moduleSchema: SchemaModel | undefined; // schema courant pour lowerExpr subquery
+
 export function lower(query: Query, schema?: SchemaModel): LogicalPlan {
 	if (query.operation !== "select") {
 		throw new SnqlError(
@@ -43,6 +80,33 @@ export function lower(query: Query, schema?: SchemaModel): LogicalPlan {
 			"lower_unsupported_operation"
 		);
 	}
+	if (outerScopeStack.length > MAX_SUBQUERY_DEPTH) {
+		throw new SnqlError(
+			`Sub-queries imbriquées > ${MAX_SUBQUERY_DEPTH} — refactorise avec des CTE (T3)`,
+			"lower_subquery_depth_exceeded",
+			query.span
+		);
+	}
+	// Sprint T2/12 : capture le schema courant pour que lowerExpr puisse le
+	// propager aux subqueries. Push l'outer scope (currentScope) sur le
+	// stack si on est en recursion — la subquery pourra lire ses alias
+	// via checkAliasDefined.
+	const previousSchema = moduleSchema;
+	const previousCurrentScope = currentScope;
+	moduleSchema = schema ?? moduleSchema;
+	if (previousCurrentScope !== null) {
+		outerScopeStack.push(previousCurrentScope);
+	}
+	try {
+		return lowerInternal(query, schema ?? moduleSchema);
+	} finally {
+		if (previousCurrentScope !== null) outerScopeStack.pop();
+		currentScope = previousCurrentScope;
+		moduleSchema = previousSchema;
+	}
+}
+
+function lowerInternal(query: Query, schema?: SchemaModel): LogicalPlan {
 
 	// Sprint T2/11.5 : typecheck cross-type predicates si schema dispo.
 	// Fire-early : messages actionnables avant PG remonte du 42883 cryptique.
@@ -77,6 +141,18 @@ export function lower(query: Query, schema?: SchemaModel): LogicalPlan {
 	// Idem si la source n'est pas dans le schéma OU si ses `fields` sont
 	// vides (Mongo pré-sampling, stale post-DDL) — permissif via `null`.
 	const sourceColumns = resolveSourceColumns(schema, query.source.collection);
+	// Sprint T2/12 : initialise currentScope = scope de la query courante.
+	// Réassigné dynamiquement après chaque `with` join qui ajoute un alias.
+	// Consulté par le `lower()` récursif quand une subquery est rencontrée.
+	const refreshCurrentScope = (): void => {
+		currentScope = {
+			aliases: new Set(knownAliases),
+			sourceColumns,
+			collection: query.source.collection,
+			...(query.source.alias !== undefined ? { alias: query.source.alias } : {})
+		};
+	};
+	refreshCurrentScope();
 	// Sprint T2/7 : group by / having accumulation. Les stages `group` et
 	// `having` ne produisent pas d'op IR directement — ils alimentent le `pick`
 	// qui suit (groupKeys sur l'aggregate op, having comme filtre post-agg).
@@ -205,6 +281,10 @@ export function lower(query: Query, schema?: SchemaModel): LogicalPlan {
 				embedAliases.add(stage.alias ?? stage.collection);
 			}
 			knownAliases.add(stage.alias ?? stage.collection);
+			// Sprint T2/12 : refresh currentScope pour que les subqueries dans
+			// les prochains stages (where/having/pick.expr) puissent voir cet
+			// alias join comme partie du scope outer.
+			refreshCurrentScope();
 		}
 	}
 	// Sprint T2/7 : group by requires pick.
@@ -345,6 +425,15 @@ function checkAliasDefined(
 		// document de la source (accès JSON `col.subfield`) — les deux sont
 		// des utilisations légitimes de la syntaxe pointée.
 		if (knownAliases.has(head) || sourceColumns.has(head)) continue;
+		// Sprint T2/12 : correlated subquery — l'alias peut appartenir à un
+		// scope outer (query englobante). Chercher du plus récent au plus
+		// ancien (LIFO), les scopes plus proches ont priorité.
+		if (
+			outerScopeStack.length > 0 &&
+			outerScopeStack.some((s) => s.aliases.has(head))
+		) {
+			continue;
+		}
 		const rest = path.slice(1).join(".");
 		const suggestions: string[] = [];
 		if (head === source.collection) {
@@ -1720,11 +1809,12 @@ function lowerExpr(expr: Expr): PlanExpr {
 		case "windowCall":
 			return lowerWindowCall(expr);
 		case "subquery": {
-			// Sprint T2/11 : lower la Query nested récursivement. Uncorrelated
-			// v1 — pas de scope-lookup vers les alias outer (T2/12 correlated).
-			// La subquery est self-contained : elle voit son propre alias source
-			// mais pas ceux de l'outer.
-			const subPlan = lower(expr.query);
+			// Sprint T2/12 : lower récursif. Le `lower()` détecte le contexte
+			// non-null (currentScope !== null) et pousse automatiquement le
+			// scope outer sur outerScopeStack, permettant à la subquery de
+			// résoudre les alias corrélés via checkAliasDefined.
+			// Le schema est propagé via moduleSchema (module state).
+			const subPlan = lower(expr.query, moduleSchema);
 			return { kind: "subquery", plan: subPlan, span: expr.span };
 		}
 		case "exists": {
@@ -1737,7 +1827,7 @@ function lowerExpr(expr: Expr): PlanExpr {
 					expr.span
 				);
 			}
-			const subPlan = lower(expr.subquery.query);
+			const subPlan = lower(expr.subquery.query, moduleSchema);
 			return { kind: "exists", subplan: subPlan, span: expr.span };
 		}
 		case "cast": {
@@ -2628,6 +2718,27 @@ function resolveFieldTypeInAst(
 	source: { readonly collection: string; readonly alias?: string },
 	schema: SchemaModel
 ): SnqlType {
+	// Sprint T2/12 : path `outerAlias.field` — chercher dans les scopes outer.
+	// Ex : `find users as u where exists (find orders as o where o.total > u.age)`
+	// → `u.age` doit résoudre vers `users.age` via outer scope.
+	if (path.length === 2) {
+		const head = path[0]!;
+		const rest = path[1]!;
+		// Priorité 1 : alias source current
+		if (source.alias === head) {
+			const coll = schema.collections.find((c) => c.name === source.collection);
+			return coll?.fields.find((f) => f.name === rest)?.type ?? "unknown";
+		}
+		// Priorité 2 : outer scopes (correlated)
+		for (let i = outerScopeStack.length - 1; i >= 0; i -= 1) {
+			const outerScope = outerScopeStack[i]!;
+			const matchesAlias = outerScope.alias === head;
+			if (matchesAlias) {
+				const coll = schema.collections.find((c) => c.name === outerScope.collection);
+				return coll?.fields.find((f) => f.name === rest)?.type ?? "unknown";
+			}
+		}
+	}
 	const stripped =
 		source.alias !== undefined && path.length > 1 && path[0] === source.alias
 			? path.slice(1)
@@ -2772,9 +2883,24 @@ function typecheckExprTypes(
 		case "windowCall":
 			for (const arg of expr.args) typecheckExprTypes(arg, source, schema);
 			return;
-		case "subquery":
-			typecheckQuery(expr.query, schema);
+		case "subquery": {
+			// Sprint T2/12 : push l'outer scope pendant le typecheck récursif
+			// pour que resolveFieldTypeInAst puisse résoudre les refs
+			// corrélées (`outerAlias.field`).
+			const outerScope: OuterScope = {
+				aliases: new Set(source.alias !== undefined ? [source.alias] : []),
+				sourceColumns: null,
+				collection: source.collection,
+				...(source.alias !== undefined ? { alias: source.alias } : {})
+			};
+			outerScopeStack.push(outerScope);
+			try {
+				typecheckQuery(expr.query, schema);
+			} finally {
+				outerScopeStack.pop();
+			}
 			return;
+		}
 		case "exists":
 			typecheckExprTypes(expr.subquery, source, schema);
 			return;
