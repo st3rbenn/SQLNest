@@ -4,7 +4,7 @@ import { checkArity, describeArity } from "./arity";
 import { SNQL_FUNCTIONS, createRegistry, type FunctionEntry } from "./index";
 
 describe("call node — registry + arity", () => {
-	it("SNQL_FUNCTIONS contient les 37 builtins (sprint 1 + 3 + 4 + T2/5 + T2/6 + T2/8) + 7 reserved", () => {
+	it("SNQL_FUNCTIONS contient les 40 builtins (sprint 1 + 3 + 4 + T2/5 + T2/6 + T2/8 + T2/9) + 7 reserved", () => {
 		expect(SNQL_FUNCTIONS.names()).toEqual(
 			new Set([
 				// sprint 1
@@ -56,6 +56,10 @@ describe("call node — registry + arity", () => {
 				"array_agg",
 				"string_agg",
 				"json_agg",
+				// sprint T2/9 window functions
+				"row_number",
+				"rank",
+				"dense_rank",
 				// sprint 4 reserved
 				"json_set",
 				"json_delete",
@@ -68,12 +72,12 @@ describe("call node — registry + arity", () => {
 		);
 	});
 
-	it("forEngine expose les fonctions supportées par engine (38 PG / 37 Mongo / 13 KV — T2/8 aggregateMulti +3)", () => {
-		// Sprint T2/8 : +3 aggregateMulti (array_agg/string_agg/json_agg) cross-engine
-		// PG+Mongo+KV. Total : PG 35+3=38, Mongo 34+3=37, KV 10+3=13.
-		expect(SNQL_FUNCTIONS.forEngine("postgres").size).toBe(38);
-		expect(SNQL_FUNCTIONS.forEngine("mongodb").size).toBe(37);
-		expect(SNQL_FUNCTIONS.forEngine("kv").size).toBe(13);
+	it("forEngine expose les fonctions supportées par engine (41 PG / 40 Mongo / 16 KV — T2/9 window +3)", () => {
+		// Sprint T2/9 : +3 window fns (row_number/rank/dense_rank) cross-engine.
+		// Total : PG 38+3=41, Mongo 37+3=40, KV 13+3=16.
+		expect(SNQL_FUNCTIONS.forEngine("postgres").size).toBe(41);
+		expect(SNQL_FUNCTIONS.forEngine("mongodb").size).toBe(40);
+		expect(SNQL_FUNCTIONS.forEngine("kv").size).toBe(16);
 	});
 
 	it("createRegistry(base, overrides) écrase par nom", () => {

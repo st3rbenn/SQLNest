@@ -354,3 +354,21 @@ export const kvStringAgg: EngineRenderer = (args, ctx) => {
 export const kvJsonAgg: EngineRenderer = (args, ctx) => {
 	return collectAggMulti(args, ctx, { skipNulls: false });
 };
+
+// ─── sprint T2/9 : window functions ─────────────────────────────────────────
+
+/**
+ * Runtime KV : les window fns ne s'évaluent PAS ici (pas per-row-in-isolation).
+ * Le codegen KV (compensate.ts pre-project pass) bucket les rows par
+ * partition, sort dans le bucket, puis assign le compute par row. Ces
+ * renderers ne sont appelés qu'en cas de bug de sync — throw defense.
+ */
+export const kvRowNumber: EngineRenderer = () => {
+	throw new Error("kvRowNumber : window functions évaluées en pre-project (bug sync codegen)");
+};
+export const kvRank: EngineRenderer = () => {
+	throw new Error("kvRank : window functions évaluées en pre-project (bug sync codegen)");
+};
+export const kvDenseRank: EngineRenderer = () => {
+	throw new Error("kvDenseRank : window functions évaluées en pre-project (bug sync codegen)");
+};

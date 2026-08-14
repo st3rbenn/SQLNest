@@ -33,9 +33,17 @@ export function compensate(
 			case "filter":
 				out = out.filter((row) => evalBool(op.predicate, row) === true);
 				break;
-			case "project":
-				out = out.map((row) => projectRow(row, op.fields));
+			case "project": {
+				// Sprint T2/9 : si des windowCalls dans project.fields, préciser
+				// leurs valeurs par row (bucket partition + sort + assign
+				// row_number/rank/dense_rank), injecter comme fields dans les
+				// rows, puis projectRow les lit comme valeurs déjà résolues.
+				const preprocessed = preprocessWindowCalls(op.fields, out);
+				out = preprocessed.rows.map((row) =>
+					projectRow(row, op.fields, preprocessed.windowSlots)
+				);
 				break;
+			}
 			case "sort":
 				out = sortRows(out, op.keys);
 				break;
@@ -169,6 +177,15 @@ function evalValue(expr: PlanExpr, row: Row): unknown {
 	if (expr.kind === "array") {
 		return expr.items.map((item) => evalValue(item, row));
 	}
+	if (expr.kind === "windowCall") {
+		// Sprint T2/9 : defense-in-depth — les windowCalls sont pre-processed
+		// par preprocessWindowCalls avant projectRow ; arriver ici = bug de
+		// sync codegen/runtime (windowCall dans un contexte non-project).
+		throw new SnqlError(
+			`Runtime KV : windowCall '${expr.name}' rencontré hors project — bug lower/planner (les window fns sont refusées ailleurs)`,
+			"runtime_window_out_of_project"
+		);
+	}
 	// Expression booléenne utilisée comme valeur.
 	return evalBool(expr, row);
 }
@@ -278,6 +295,7 @@ function evalBool(expr: PlanExpr, row: Row): boolean | null {
 		case "object":
 		case "array":
 		case "case":
+		case "windowCall":
 			return coerceBool(evalValue(expr, row));
 	}
 }
@@ -587,15 +605,137 @@ function evalAggregateExpr(
 
 // --- Projection / tri / accès ---
 
-function projectRow(row: Row, fields: readonly PlanProjectField[]): Row {
+function projectRow(
+	row: Row,
+	fields: readonly PlanProjectField[],
+	windowSlots?: Map<string, string>
+): Row {
 	const out: Row = {};
 	for (const field of fields) {
 		const key = field.alias ?? field.path[field.path.length - 1] ?? "";
+		if (field.expr?.kind === "windowCall" && windowSlots !== undefined) {
+			const slot = windowSlots.get(windowCallKvKey(field.expr));
+			if (slot !== undefined) {
+				out[key] = row[slot];
+				continue;
+			}
+		}
 		out[key] = field.expr !== undefined
 			? evalValue(field.expr, row)
 			: getPath(row, field.path);
 	}
 	return out;
+}
+
+/**
+ * Sprint T2/9 : clé stable pour dédup les windowCalls identiques côté KV.
+ * Miroir de `windowCallKey` dans mongodb.ts.
+ */
+function windowCallKvKey(expr: PlanExpr & { kind: "windowCall" }): string {
+	return JSON.stringify({
+		n: expr.name,
+		p: expr.partitionKeys,
+		s: expr.sortKeys.map((k) => ({ p: k.path, d: k.direction }))
+	});
+}
+
+/**
+ * Sprint T2/9 : pre-processing des windowCalls dans un project. Pour chaque
+ * windowCall unique (par name+partition+sort) :
+ *  1. Bucket les rows par partition keys (JSON.stringify).
+ *  2. Sort chaque bucket par sortKeys.
+ *  3. Assign row_number/rank/dense_rank per row → écrit sur un slot
+ *     `__win_N` du row cloné.
+ *  4. Reconstitue l'ordre original des rows (préserve la stabilité — le
+ *     project ne réordonne pas, seuls les windows lisent l'ordre par
+ *     partition).
+ *
+ * Retourne les rows enrichies + slotByKey pour projectRow.
+ */
+function preprocessWindowCalls(
+	fields: readonly PlanProjectField[],
+	rows: readonly Row[]
+): { rows: Row[]; windowSlots: Map<string, string> | undefined } {
+	const windowCalls: (PlanExpr & { kind: "windowCall" })[] = [];
+	const slotByKey = new Map<string, string>();
+	let slotCounter = 0;
+	for (const field of fields) {
+		if (field.expr?.kind !== "windowCall") continue;
+		const key = windowCallKvKey(field.expr);
+		if (slotByKey.has(key)) continue;
+		slotByKey.set(key, `__win_${slotCounter}`);
+		windowCalls.push(field.expr);
+		slotCounter += 1;
+	}
+	if (windowCalls.length === 0) {
+		return { rows: [...rows], windowSlots: undefined };
+	}
+	// Clone rows pour ne pas muter l'input compensate.
+	const enriched = rows.map((r) => ({ ...r }));
+	for (const w of windowCalls) {
+		const slot = slotByKey.get(windowCallKvKey(w))!;
+		// Bucket par partition keys.
+		const buckets = new Map<string, { row: Row; origIdx: number }[]>();
+		for (const [origIdx, row] of enriched.entries()) {
+			const partKey = JSON.stringify(
+				w.partitionKeys.map((p) => getPath(row, p)),
+				(_, v) => (typeof v === "bigint" ? `__bi:${v.toString()}` : v)
+			);
+			let bucket = buckets.get(partKey);
+			if (bucket === undefined) {
+				bucket = [];
+				buckets.set(partKey, bucket);
+			}
+			bucket.push({ row, origIdx });
+		}
+		// Pour chaque bucket : sort + assign.
+		for (const bucket of buckets.values()) {
+			if (w.sortKeys.length > 0) {
+				bucket.sort((a, b) => {
+					for (const k of w.sortKeys) {
+						const va = getPath(a.row, k.path);
+						const vb = getPath(b.row, k.path);
+						const cmp = compareForSort(va, vb);
+						if (cmp !== 0) return k.direction === "desc" ? -cmp : cmp;
+					}
+					return 0;
+				});
+			}
+			// Assign compute per row du bucket.
+			let currentRank = 0;
+			let currentDenseRank = 0;
+			let prevSortValues: unknown[] | null = null;
+			let sameGroupCount = 0;
+			for (const [idx, entry] of bucket.entries()) {
+				const rowNumber = idx + 1;
+				// Check if this row shares sort values with previous (for RANK/DENSE_RANK ties).
+				const currentSortValues = w.sortKeys.map((k) => getPath(entry.row, k.path));
+				const isSameGroup =
+					prevSortValues !== null &&
+					w.sortKeys.length > 0 &&
+					currentSortValues.every((v, i) => compareForSort(v, prevSortValues![i]) === 0);
+				if (!isSameGroup) {
+					currentRank = rowNumber;
+					currentDenseRank += 1;
+					sameGroupCount = 1;
+				} else {
+					sameGroupCount += 1;
+				}
+				prevSortValues = currentSortValues;
+				let value: number;
+				if (w.name === "row_number") value = rowNumber;
+				else if (w.name === "rank") value = currentRank;
+				else if (w.name === "dense_rank") value = currentDenseRank;
+				else {
+					throw new Error(
+						`Runtime KV : window '${w.name}' non implémenté (sprint T2/10+)`
+					);
+				}
+				entry.row[slot] = value;
+			}
+		}
+	}
+	return { rows: enriched, windowSlots: slotByKey };
 }
 
 function sortRows(rows: readonly Row[], keys: readonly PlanSortKey[]): Row[] {

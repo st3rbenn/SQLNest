@@ -574,6 +574,38 @@ function renderExpr(expr: PlanExpr, params: ParamList): string {
 			const elseSql = renderExpr(expr.elseValue, params);
 			return `(CASE ${whens} ELSE ${elseSql} END)`;
 		}
+		case "windowCall": {
+			// Sprint T2/9 : `FN() OVER (PARTITION BY ... ORDER BY ...)`. Le
+			// renderer window (pgRowNumber/pgRank/pgDenseRank) retourne juste
+			// `FN()` ; on append la clause OVER.
+			const entry = SNQL_FUNCTIONS.get(expr.name);
+			if (entry?.engines.postgres === undefined) {
+				throw new SnqlError(
+					`Window function '${expr.name}' : renderer Postgres absent`,
+					"codegen_missing_function_mapping"
+				);
+			}
+			const fnSql = entry.engines.postgres(expr.args, {
+				renderExpr: (a) => renderExpr(a as PlanExpr, params),
+				addParam: (v) => params.add(v as SqlValue)
+			}) as string;
+			const parts: string[] = [];
+			if (expr.partitionKeys.length > 0) {
+				parts.push(
+					`PARTITION BY ${expr.partitionKeys.map((k) => renderPath(k)).join(", ")}`
+				);
+			}
+			if (expr.sortKeys.length > 0) {
+				parts.push(
+					`ORDER BY ${expr.sortKeys
+						.map(
+							(k) => `${renderPath(k.path)} ${k.direction === "desc" ? "DESC" : "ASC"}`
+						)
+						.join(", ")}`
+				);
+			}
+			return `${fnSql} OVER (${parts.join(" ")})`;
+		}
 	}
 }
 

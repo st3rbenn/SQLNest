@@ -150,9 +150,17 @@ function appendStage(
 		case "filter":
 			pipeline.push({ $match: renderMatch(op.predicate, alias, "read") });
 			return;
-		case "project":
-			pipeline.push({ $project: renderProject(op.fields, alias) });
+		case "project": {
+			// Sprint T2/9 : windowCalls dans project.fields → $setWindowFields
+			// AVANT $project (assign compute per row, réf en alias). Le project
+			// final projette les alias comme des field refs directs.
+			const windowSlots = extractWindowCallsToSlots(op.fields, alias);
+			for (const stage of windowSlots.stages) pipeline.push(stage);
+			pipeline.push({
+				$project: renderProject(op.fields, alias, windowSlots.slotByKey)
+			});
 			return;
+		}
 		case "aggregate": {
 			// Sprint T2/6 : PAIRE [$group{_id:null,...accs}, $project{_id:0,...renames}]
 			// via SSA extract. Sprint T2/7 : op.groupKeys peuplé → `_id: <keys>`
@@ -760,14 +768,24 @@ function renderAggregatePipeline(
 
 function renderProject(
 	fields: readonly PlanProjectField[],
-	alias: string | undefined
+	alias: string | undefined,
+	windowSlots?: Map<string, string>
 ): Record<string, unknown> {
 	const out: Record<string, unknown> = {};
 	let picksId = false;
 	for (const field of fields) {
 		if (field.expr !== undefined) {
-			// Expression projetée : Mongo l'évalue dans un $project (agrégation
-			// expression). L'alias est le nom de sortie ; sa valeur est l'expression.
+			// Sprint T2/9 : si l'expr est un windowCall, référencer le slot
+			// précalculé par $setWindowFields (au lieu de tenter toExprOperand
+			// qui ne saurait pas gérer windowCall).
+			if (field.expr.kind === "windowCall" && windowSlots !== undefined) {
+				const slot = windowSlots.get(windowCallKey(field.expr));
+				if (slot !== undefined) {
+					out[field.alias as string] = `$${slot}`;
+					if (field.alias === "_id") picksId = true;
+					continue;
+				}
+			}
 			out[field.alias as string] = toExprOperand(field.expr, alias);
 			if (field.alias === "_id") {
 				picksId = true;
@@ -782,12 +800,108 @@ function renderProject(
 			picksId = true;
 		}
 	}
-	// Mongo inclut `_id` par défaut ; on le supprime pour coller à la sémantique
-	// « pick = exactement ces champs » (parité avec SQL), sauf si `_id` est explicitement projeté.
 	if (!picksId) {
 		out._id = 0;
 	}
 	return out;
+}
+
+/**
+ * Sprint T2/9 : clé stable pour dédup les windowCalls identiques (même fn +
+ * partition + sort) — deux fields référençant le même windowCall partagent
+ * un seul slot dans $setWindowFields.
+ */
+function windowCallKey(expr: PlanExpr & { kind: "windowCall" }): string {
+	return JSON.stringify({
+		n: expr.name,
+		p: expr.partitionKeys,
+		s: expr.sortKeys.map((k) => ({ p: k.path, d: k.direction }))
+	});
+}
+
+/**
+ * Sprint T2/9 : scanne les fields pour extraire les windowCalls, produit les
+ * $setWindowFields stages à insérer avant $project. Retourne aussi le
+ * slotByKey pour que renderProject référence `$__win_N` au lieu d'essayer de
+ * rendre l'expression.
+ *
+ * `$setWindowFields` a une contrainte : un seul stage peut avoir une seule
+ * `partitionBy` + `sortBy`. Pour des windows différents (partition/sort
+ * différents), on émet plusieurs stages consécutifs.
+ */
+function extractWindowCallsToSlots(
+	fields: readonly PlanProjectField[],
+	alias: string | undefined
+): {
+	stages: MongoStage[];
+	slotByKey: Map<string, string>;
+} {
+	const slotByKey = new Map<string, string>();
+	// Group par (partition, sort) key — chaque groupe = un $setWindowFields.
+	const groupsByPartitionSort = new Map<
+		string,
+		{
+			partitionBy: unknown;
+			sortBy: Record<string, 1 | -1> | undefined;
+			outputs: Record<string, unknown>;
+		}
+	>();
+	let slotCounter = 0;
+	for (const field of fields) {
+		if (field.expr?.kind !== "windowCall") continue;
+		const w = field.expr;
+		const key = windowCallKey(w);
+		if (slotByKey.has(key)) continue; // dédup
+		const slot = `__win_${slotCounter}`;
+		slotCounter += 1;
+		slotByKey.set(key, slot);
+		// Group key : partition + sort canonique.
+		const groupKey = JSON.stringify({ p: w.partitionKeys, s: w.sortKeys });
+		let group = groupsByPartitionSort.get(groupKey);
+		if (group === undefined) {
+			const partitionBy =
+				w.partitionKeys.length === 0
+					? null
+					: w.partitionKeys.length === 1
+						? `$${mongoField(w.partitionKeys[0]!, alias)}`
+						: w.partitionKeys.reduce<Record<string, string>>((acc, p) => {
+								const seg = p[p.length - 1]!;
+								acc[seg] = `$${mongoField(p, alias)}`;
+								return acc;
+							}, {});
+			const sortBy: Record<string, 1 | -1> | undefined =
+				w.sortKeys.length === 0
+					? undefined
+					: w.sortKeys.reduce<Record<string, 1 | -1>>((acc, k) => {
+							acc[mongoField(k.path, alias)] = k.direction === "desc" ? -1 : 1;
+							return acc;
+						}, {});
+			group = { partitionBy, sortBy, outputs: {} };
+			groupsByPartitionSort.set(groupKey, group);
+		}
+		// Renderer body du windowCall.
+		const entry = SNQL_FUNCTIONS.get(w.name);
+		if (entry?.engines.mongodb === undefined) {
+			throw new SnqlError(
+				`Window function '${w.name}' : renderer MongoDB absent`,
+				"codegen_missing_function_mapping"
+			);
+		}
+		const body = entry.engines.mongodb(w.args, {
+			renderExpr: (a) => toExprOperand(a as PlanExpr, alias)
+		});
+		group.outputs[slot] = body;
+	}
+	const stages: MongoStage[] = [];
+	for (const group of groupsByPartitionSort.values()) {
+		const setStage: Record<string, unknown> = {
+			partitionBy: group.partitionBy,
+			output: group.outputs
+		};
+		if (group.sortBy !== undefined) setStage.sortBy = group.sortBy;
+		stages.push({ $setWindowFields: setStage });
+	}
+	return { stages, slotByKey };
 }
 
 function renderSort(
@@ -907,11 +1021,15 @@ function renderMatch(
 				expr.span
 			);
 		case "case":
-			// Sprint T2/5 : `case` bare en position where est refusé au lower
-			// (lower_case_bare_predicate). Cet arm reste défense-en-profondeur —
-			// un plan construit à la main ou un bug de sync lower/codegen tombe ici.
 			throw new SnqlError(
 				"`case { … }` n'est pas un prédicat — compare le résultat avec une valeur (ex: case { … } = true)",
+				"codegen_mongo_predicate",
+				expr.span
+			);
+		case "windowCall":
+			// Sprint T2/9 : windowCall en where refusé au lower — defense.
+			throw new SnqlError(
+				"Window function dans un prédicat non supporté (refusé au lower normalement)",
 				"codegen_mongo_predicate",
 				expr.span
 			);
@@ -993,9 +1111,15 @@ function negateMatch(
 				expr.span
 			);
 		case "case":
-			// Défense-en-profondeur — même raisonnement que renderMatch.
 			throw new SnqlError(
 				"Négation d'un `case { … }` non supportée (pas un prédicat) — compare avec une valeur d'abord",
+				"codegen_mongo_predicate",
+				expr.span
+			);
+		case "windowCall":
+			// Sprint T2/9 : négation d'un windowCall refusé (refusé au lower).
+			throw new SnqlError(
+				"Négation d'un window function non supportée",
 				"codegen_mongo_predicate",
 				expr.span
 			);

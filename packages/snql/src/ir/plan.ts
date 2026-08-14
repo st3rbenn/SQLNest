@@ -146,6 +146,20 @@ export type PlanExpr = (
 			readonly branches: readonly PlanCaseBranch[];
 			readonly elseValue: PlanExpr;
 	  }
+	// Sprint T2/9 : window function — `fn(args) over (partition <col> sort <key>)`.
+	// Distinct de `call` : sémantique per-row-in-partition-context (row_number,
+	// rank, dense_rank + agg-over-window plus tard). Codegen PG émet `FN() OVER
+	// (PARTITION BY ... ORDER BY ...)` dans le SELECT. Codegen Mongo insère un
+	// `$setWindowFields` AVANT le `$project` avec un alias interne réutilisé.
+	// Runtime KV : pre-processing dans compensate (bucket par partition, sort,
+	// assign compute par row).
+	| {
+			readonly kind: "windowCall";
+			readonly name: string;
+			readonly args: readonly PlanExpr[];
+			readonly partitionKeys: readonly (readonly string[])[];
+			readonly sortKeys: readonly PlanSortKey[];
+	  }
 ) & { readonly span?: Span };
 
 /** Entry d'un `PlanExpr.object` — key canonique + value lowered. */

@@ -41,6 +41,8 @@ export const KEYWORDS: ReadonlySet<string> = new Set([
 	"group",
 	"by",
 	"having",
+	"over",
+	"partition",
 	"and",
 	"or",
 	"not",

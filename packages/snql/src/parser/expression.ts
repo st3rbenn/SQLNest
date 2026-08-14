@@ -198,7 +198,17 @@ function parsePrefix(cursor: TokenCursor): Expr {
 		// longueur 1 : `x.y(...)` n'est pas un call (pas de méthode SNQL) — reste
 		// donc un field. Les parens sont obligatoires ; 0 arg = `now()`.
 		if (path.length === 1 && cursor.peek().kind === "lparen") {
-			return parseCall(cursor, path[0] as string, span);
+			const call = parseCall(cursor, path[0] as string, span);
+			// Sprint T2/9 : postfix `over (...)` sur un call déclaré window
+			// dans le registre. Refuse `over` sur non-window (message clair).
+			if (
+				call.type === "call" &&
+				cursor.peek().kind === "keyword" &&
+				cursor.peek().value === "over"
+			) {
+				return parseWindowClause(cursor, call);
+			}
+			return call;
 		}
 		return { type: "field", path, span };
 	}
@@ -405,6 +415,58 @@ function parseIntraCallSortKey(cursor: TokenCursor): SortKey {
 		endSpan = dirTok.span;
 	}
 	return { path, direction, span: joinSpan(span, endSpan) };
+}
+
+/**
+ * Sprint T2/9 : parse la clause `over (partition <col>[, <col>]* sort <key>[,
+ * <key>]*)`. Appelé quand `over` détecté après un `call` — vérifie que le
+ * name est déclaré `window` dans le registre, sinon message clair.
+ *
+ * Parts (partition, sort) sont toutes deux optionnelles ; les deux vides =
+ * OVER () valide (window sur toute la relation, row_number global).
+ */
+function parseWindowClause(cursor: TokenCursor, call: Expr & { type: "call" }): Expr {
+	const entry = SNQL_FUNCTIONS.get(call.name);
+	if (entry?.kind !== "window") {
+		throw new SnqlError(
+			`'over' réservé aux window functions ; '${call.name}' est ${entry?.kind ?? "inconnu"} — retire 'over (...)' ou utilise row_number()/rank()/dense_rank()`,
+			"parse_over_not_window",
+			cursor.peek().span
+		);
+	}
+	cursor.next(); // consomme 'over'
+	cursor.expect("lparen", "'(' après 'over'");
+	const partitionKeys: (readonly string[])[] = [];
+	const sortKeys: SortKey[] = [];
+	// `partition <col>[, <col>]*` — optionnel
+	const p0 = cursor.peek();
+	if (p0.kind === "keyword" && p0.value === "partition") {
+		cursor.next();
+		partitionKeys.push(parseFieldPath(cursor).path);
+		while (cursor.peek().kind === "comma") {
+			cursor.next();
+			partitionKeys.push(parseFieldPath(cursor).path);
+		}
+	}
+	// `sort <key>[, <key>]*` — optionnel, peut suivre partition ou être seul
+	const p1 = cursor.peek();
+	if (p1.kind === "keyword" && p1.value === "sort") {
+		cursor.next();
+		sortKeys.push(parseIntraCallSortKey(cursor));
+		while (cursor.peek().kind === "comma") {
+			cursor.next();
+			sortKeys.push(parseIntraCallSortKey(cursor));
+		}
+	}
+	const close = cursor.expect("rparen", "')' pour fermer 'over (...)'");
+	return {
+		type: "windowCall",
+		name: call.name,
+		args: call.args,
+		partitionKeys,
+		sortKeys,
+		span: joinSpan(call.span, close.span)
+	};
 }
 
 /**

@@ -140,6 +140,20 @@ export type Expr =
 			readonly branches: readonly CaseBranch[];
 			readonly elseValue: Expr;
 			readonly span: Span;
+	  }
+	// Sprint T2/9 : window function — `fn(args) over (partition <col> sort <key>)`.
+	// Distinct de `call` : sémantique différente (assign per-row basé sur
+	// partition context, pas per-row scalaire ni fold), lifecycle IR distinct
+	// (codegen Mongo insère un $setWindowFields avant $project ; PG émet
+	// OVER clause dans SELECT ; KV pre-processing runtime). `partitionKeys` et
+	// `sortKeys` optionnels (vide = OVER toute la relation).
+	| {
+			readonly type: "windowCall";
+			readonly name: string;
+			readonly args: readonly Expr[];
+			readonly partitionKeys: readonly (readonly string[])[];
+			readonly sortKeys: readonly SortKey[];
+			readonly span: Span;
 	  };
 
 /**

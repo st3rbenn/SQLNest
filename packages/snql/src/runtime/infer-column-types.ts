@@ -283,6 +283,27 @@ function resolveProjectField(
 		}
 	}
 
+	// Sprint T2/9 : window functions — types de retour forts.
+	//  - row_number / rank / dense_rank → bigint, jamais NULL (chaque row
+	//    reçoit un index par définition, même partition vide).
+	if (field.expr?.kind === "windowCall") {
+		const name = field.expr.name;
+		if (name === "row_number" || name === "rank" || name === "dense_rank") {
+			return {
+				name: outputName,
+				type: "bigint",
+				nullable: false,
+				collection: ""
+			};
+		}
+		// Autres window fns (T2/10+) : unknown pour l'instant.
+		return {
+			name: outputName,
+			...UNKNOWN_FIELD,
+			collection: ""
+		};
+	}
+
 	// Sprint object-literals : `pick {n: r.name} as doc` ou `pick [...] as arr`
 	// → type 'json' statique. Retour non-null par construction (le literal est
 	// toujours défini, indépendamment des valeurs qu'il contient).

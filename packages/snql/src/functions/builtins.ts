@@ -19,6 +19,7 @@ import {
 	kvAvg,
 	kvCoalesce,
 	kvCount,
+	kvDenseRank,
 	kvGreatest,
 	kvIf,
 	kvJsonAgg,
@@ -26,12 +27,15 @@ import {
 	kvMax,
 	kvMin,
 	kvNullif,
+	kvRank,
+	kvRowNumber,
 	kvStringAgg,
 	kvSum
 } from "./builtins.kv";
 import {
 	mongoAbs,
 	mongoArrayAgg,
+	mongoDenseRank,
 	mongoAvg,
 	mongoCeil,
 	mongoConcat,
@@ -57,8 +61,10 @@ import {
 	mongoMin,
 	mongoNow,
 	mongoNullif,
+	mongoRank,
 	mongoReplace,
 	mongoRound,
+	mongoRowNumber,
 	mongoRtrim,
 	mongoStringAgg,
 	mongoStrpos,
@@ -71,6 +77,7 @@ import {
 import {
 	pgAbs,
 	pgArrayAgg,
+	pgDenseRank,
 	pgAvg,
 	pgCeil,
 	pgConcat,
@@ -97,8 +104,10 @@ import {
 	pgMin,
 	pgNow,
 	pgNullif,
+	pgRank,
 	pgReplace,
 	pgRound,
+	pgRowNumber,
 	pgRtrim,
 	pgStringAgg,
 	pgStrpos,
@@ -478,6 +487,42 @@ const BUILTINS: readonly FunctionEntry[] = [
 			postgres: pgJsonAgg,
 			mongodb: mongoJsonAgg,
 			kv: kvJsonAgg
+		}
+	},
+
+	// ─── sprint T2/9 : window functions ───────────────────────────────────
+	// Kind `window` : produit une valeur per-row basée sur le contexte
+	// partition (partitionBy + sortBy dans OVER). Le codegen émet OVER clause
+	// (PG), $setWindowFields (Mongo), ou pre-project pass (KV runtime).
+	// Position autorisée : uniquement `pick.expr` — refus dans where/having/
+	// group by/sort/set (garde lower_window_in_position).
+	//
+	// Arity 0-0 pour row_number/rank/dense_rank (pas d'args obligatoires).
+	// La partition + sort viennent du `over (...)` clause, pas des args.
+	{
+		name: "row_number",
+		kind: "window",
+		arity: { min: 0, max: 0 },
+		engines: {
+			postgres: pgRowNumber,
+			mongodb: mongoRowNumber,
+			kv: kvRowNumber
+		}
+	},
+	{
+		name: "rank",
+		kind: "window",
+		arity: { min: 0, max: 0 },
+		engines: { postgres: pgRank, mongodb: mongoRank, kv: kvRank }
+	},
+	{
+		name: "dense_rank",
+		kind: "window",
+		arity: { min: 0, max: 0 },
+		engines: {
+			postgres: pgDenseRank,
+			mongodb: mongoDenseRank,
+			kv: kvDenseRank
 		}
 	},
 

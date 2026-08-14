@@ -236,6 +236,12 @@ function visitExprCalls(expr: PlanExpr, visit: (name: string) => void): void {
 			}
 			visitExprCalls(expr.elseValue, visit);
 			return;
+		case "windowCall":
+			// Sprint T2/9 : visite le nom + args (partition/sort keys sont
+			// des paths, aucune fonction dedans).
+			visit(expr.name);
+			for (const arg of expr.args) visitExprCalls(arg, visit);
+			return;
 	}
 }
 
@@ -341,6 +347,9 @@ function visitExprCasts(
 				visitExprCasts(branch.value, visit);
 			}
 			visitExprCasts(expr.elseValue, visit);
+			return;
+		case "windowCall":
+			for (const arg of expr.args) visitExprCasts(arg, visit);
 			return;
 	}
 }
@@ -612,6 +621,9 @@ function visitExprsIn(expr: PlanExpr, visit: (e: PlanExpr) => void): void {
 				visitExprsIn(branch.value, visit);
 			}
 			visitExprsIn(expr.elseValue, visit);
+			return;
+		case "windowCall":
+			for (const arg of expr.args) visitExprsIn(arg, visit);
 			return;
 	}
 }

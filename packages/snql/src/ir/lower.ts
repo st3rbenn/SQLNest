@@ -89,6 +89,15 @@ export function lower(query: Query, schema?: SchemaModel): LogicalPlan {
 		if (sourceColumns !== null) {
 			checkAliasDefined(stage, knownAliases, sourceColumns, query.source);
 		}
+		// Sprint T2/9 : window function refusée dans where/having (per-row
+		// context inutilisable pour filtrer, sub-query needed) — refus AVANT
+		// lowerStage pour message précis.
+		if (stage.type === "where") {
+			refuseWindowCallInPosition(stage.predicate, "lower_window_in_where", "where");
+		}
+		if (stage.type === "having") {
+			refuseWindowCallInPosition(stage.predicate, "lower_window_in_having", "having");
+		}
 		if (stage.type === "group") {
 			if (stage.keys.length === 0) {
 				throw new SnqlError(
@@ -390,6 +399,13 @@ function collectExprFieldsWithSpans(
 			}
 			collectExprFieldsWithSpans(expr.elseValue, out);
 			return;
+		case "windowCall":
+			// Sprint T2/9 : collecte les field refs des args (ex: sum(x) over)
+			// + partitionKeys + sortKeys — comptent tous pour l'alias-check.
+			for (const arg of expr.args) collectExprFieldsWithSpans(arg, out);
+			for (const p of expr.partitionKeys) out.push({ path: p, span: expr.span });
+			for (const k of expr.sortKeys) out.push({ path: k.path, span: k.span });
+			return;
 	}
 }
 
@@ -436,13 +452,27 @@ export function lowerMutation(
 		}));
 		// Sprint T2/6 : aggregate dans set — refus AVANT assertNoCallInWrite
 		// (ordre CRITIQUE : message précis, pas générique lower_call_null_write).
-		for (const a of assignments) {
+		// Sprint T2/9 : window aussi refusé en set (per-row-context inutile
+		// pour un update).
+		for (const [i, a] of assignments.entries()) {
+			refuseWindowCallInPosition(
+				statement.assignments[i]!.value,
+				"lower_window_in_set",
+				`set ${a.column}`
+			);
 			refuseAggregateInPosition(
 				a.value,
 				"lower_agg_in_set",
 				`'set ${a.column} = <aggregate>' non supporté — l'aggregate n'a pas de sens en écriture (une seule row cible)`
 			);
 			assertNoCallInWrite(a.value);
+		}
+		if (statement.predicate !== undefined) {
+			refuseWindowCallInPosition(
+				statement.predicate,
+				"lower_window_in_write_predicate",
+				"where d'update"
+			);
 		}
 		const predicate =
 			statement.predicate !== undefined ? lowerExpr(statement.predicate) : undefined;
@@ -471,6 +501,13 @@ export function lowerMutation(
 		);
 	}
 	if (statement.predicate !== undefined) assertNoBareCallPredicate(statement.predicate);
+	if (statement.predicate !== undefined) {
+		refuseWindowCallInPosition(
+			statement.predicate,
+			"lower_window_in_write_predicate",
+			"where de delete"
+		);
+	}
 	const predicate =
 		statement.predicate !== undefined ? lowerExpr(statement.predicate) : undefined;
 	if (predicate !== undefined) {
@@ -578,6 +615,10 @@ function containsAggregateAst(expr: Expr): boolean {
 					(b) => containsAggregateAst(b.cond) || containsAggregateAst(b.value)
 				) || containsAggregateAst(expr.elseValue)
 			);
+		case "windowCall":
+			// Sprint T2/9 : windowCall n'est PAS un aggregate — pick avec
+			// windowCall reste op='project' (pas 'aggregate').
+			return false;
 	}
 }
 
@@ -637,6 +678,9 @@ function firstAggregateSpanAst(
 			}
 			return firstAggregateSpanAst(expr.elseValue);
 		}
+		case "windowCall":
+			// Sprint T2/9 : windowCall n'est PAS un aggregate.
+			return undefined;
 	}
 }
 
@@ -1193,6 +1237,11 @@ function collectExprFields(expr: Expr, out: (readonly string[])[]): void {
 			}
 			collectExprFields(expr.elseValue, out);
 			return;
+		case "windowCall":
+			for (const arg of expr.args) collectExprFields(arg, out);
+			for (const p of expr.partitionKeys) out.push(p);
+			for (const k of expr.sortKeys) out.push(k.path);
+			return;
 	}
 }
 
@@ -1231,6 +1280,26 @@ function lowerStage(
 			const hasAggregate = stage.fields.some(
 				(f) => f.expr !== undefined && containsAggregateAst(f.expr)
 			);
+			// Sprint T2/9 : window fns et aggregates dans le même pick sont
+			// exclusifs (2 stages logiques différents — un ORDER BY dans window
+			// puis un fold aggregate n'a pas de sémantique naturelle).
+			const hasWindowCall = stage.fields.some(
+				(f) => f.expr !== undefined && containsWindowCallAst(f.expr)
+			);
+			if (hasAggregate && hasWindowCall) {
+				throw new SnqlError(
+					"Mix window function + aggregate dans le même pick non supporté — sépare en deux queries ou utilise une sub-query (T2/11)",
+					"lower_window_agg_mix",
+					stage.span
+				);
+			}
+			if (hasWindowCall && groupKeys !== undefined) {
+				throw new SnqlError(
+					"Window function dans un pick après 'group by' non supporté — le group by change le shape des rows sur lequel la window opère",
+					"lower_window_after_group",
+					stage.span
+				);
+			}
 			// groupKeys are alias-stripped already. Build the lookup set from them.
 			const groupKeySet = groupKeys !== undefined
 				? new Set(groupKeys.map((k) => k.join(".")))
@@ -1495,6 +1564,8 @@ function lowerExpr(expr: Expr): PlanExpr {
 			};
 		case "call":
 			return lowerCall(expr);
+		case "windowCall":
+			return lowerWindowCall(expr);
 		case "cast": {
 			// Défense-en-profondeur : le parser filtre déjà via CAST_TARGETS, mais un
 			// PlanExpr construit à la main (tests, futur workflow) pourrait passer un
@@ -1902,6 +1973,126 @@ function lowerCall(expr: Expr & { type: "call" }): PlanExpr {
 		...(loweredSortKeys !== undefined ? { sortKeys: loweredSortKeys } : {}),
 		span: expr.span
 	};
+}
+
+/**
+ * Sprint T2/9 : lower d'un windowCall. Vérifie l'existence dans le registre
+ * + kind=window + arité + refus contextes non-pick (validé en amont par le
+ * walker). Retourne un PlanExpr.windowCall.
+ */
+function lowerWindowCall(expr: Expr & { type: "windowCall" }): PlanExpr {
+	const entry = SNQL_FUNCTIONS.get(expr.name);
+	if (entry === undefined) {
+		throw new SnqlError(
+			`Fonction '${expr.name}' inconnue`,
+			"lower_unknown_function",
+			expr.span
+		);
+	}
+	if (entry.kind !== "window") {
+		// Defense-in-depth : parser filtre déjà (parse_over_not_window).
+		throw new SnqlError(
+			`'${expr.name}' n'est pas une window function`,
+			"lower_windowcall_not_window",
+			expr.span
+		);
+	}
+	const arityMsg = checkArity(expr.name, entry.arity, expr.args.length);
+	if (arityMsg !== null) {
+		throw new SnqlError(arityMsg, "lower_call_arity", expr.span);
+	}
+	return {
+		kind: "windowCall",
+		name: expr.name,
+		args: expr.args.map(lowerExpr),
+		partitionKeys: expr.partitionKeys,
+		sortKeys: expr.sortKeys.map((k) => ({
+			path: k.path,
+			direction: k.direction
+		})),
+		span: expr.span
+	};
+}
+
+/**
+ * Sprint T2/9 : walker AST — refuse windowCall dans une position autre que
+ * pick.expr. Utilisé par where/having/group by/sort/set predicates.
+ */
+function refuseWindowCallInPosition(
+	expr: Expr,
+	code: string,
+	positionLabel: string
+): void {
+	const span = firstWindowCallSpanAst(expr);
+	if (span === undefined) return;
+	throw new SnqlError(
+		`Window function dans '${positionLabel}' non autorisée — les window fns produisent une valeur per-row ordonnée qui n'a de sens qu'en projection ; utilise un pick + sub-query pour filtrer (T2/11)`,
+		code,
+		span
+	);
+}
+
+/**
+ * Sprint T2/9 : walker AST — true ssi l'expression contient un windowCall
+ * (au top ou nested dans un scalar wrapper). Utilisé pour détecter le mix
+ * window+agg dans un pick.
+ */
+function containsWindowCallAst(expr: Expr): boolean {
+	return firstWindowCallSpanAst(expr) !== undefined;
+}
+
+function firstWindowCallSpanAst(
+	expr: Expr
+): import("../lexer/token").Span | undefined {
+	if (expr.type === "windowCall") return expr.span;
+	if (expr.type === "call") {
+		for (const arg of expr.args) {
+			const s = firstWindowCallSpanAst(arg);
+			if (s !== undefined) return s;
+		}
+		return undefined;
+	}
+	switch (expr.type) {
+		case "literal":
+		case "field":
+			return undefined;
+		case "compare":
+		case "logical":
+		case "arith":
+			return firstWindowCallSpanAst(expr.left) ?? firstWindowCallSpanAst(expr.right);
+		case "not":
+			return firstWindowCallSpanAst(expr.operand);
+		case "in": {
+			const t = firstWindowCallSpanAst(expr.target);
+			if (t !== undefined) return t;
+			for (const v of expr.values) {
+				const s = firstWindowCallSpanAst(v);
+				if (s !== undefined) return s;
+			}
+			return undefined;
+		}
+		case "cast":
+			return firstWindowCallSpanAst(expr.operand);
+		case "object":
+			for (const e of expr.entries) {
+				const s = firstWindowCallSpanAst(e.value);
+				if (s !== undefined) return s;
+			}
+			return undefined;
+		case "array":
+			for (const i of expr.items) {
+				const s = firstWindowCallSpanAst(i);
+				if (s !== undefined) return s;
+			}
+			return undefined;
+		case "case": {
+			for (const b of expr.branches) {
+				const s = firstWindowCallSpanAst(b.cond) ?? firstWindowCallSpanAst(b.value);
+				if (s !== undefined) return s;
+			}
+			return firstWindowCallSpanAst(expr.elseValue);
+		}
+	}
 }
 
 /**

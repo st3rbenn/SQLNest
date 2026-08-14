@@ -605,3 +605,19 @@ export const mongoJsonAgg: EngineRenderer = (args, ctx) => {
 	const arg = ctx.renderExpr(args[0]);
 	return ctx.unique === true ? { $addToSet: arg } : { $push: arg };
 };
+
+// ─── sprint T2/9 : window functions ─────────────────────────────────────────
+
+/**
+ * Mongo `$setWindowFields` — chaque window fn produit un accumulator body
+ * qui est set sur un slot du doc. Le codegen mongodb.ts wrap avec
+ * `$setWindowFields: {partitionBy, sortBy, output: {slot: <body>}}`. Ces
+ * renderers retournent juste le body accumulator (pas le wrapper stage).
+ *
+ * `row_number()` → `{$rank: {}}` — non, Mongo utilise `$documentNumber`.
+ * `rank()` → `{$rank: {}}`.
+ * `dense_rank()` → `{$denseRank: {}}`.
+ */
+export const mongoRowNumber: EngineRenderer = () => ({ $documentNumber: {} });
+export const mongoRank: EngineRenderer = () => ({ $rank: {} });
+export const mongoDenseRank: EngineRenderer = () => ({ $denseRank: {} });

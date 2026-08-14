@@ -500,3 +500,19 @@ export const pgJsonAgg: EngineRenderer = (args, ctx) => {
 	const distinct = ctx.unique === true ? "DISTINCT " : "";
 	return `JSON_AGG(${distinct}${a}${renderOrderByClause(ctx)})`;
 };
+
+// ─── sprint T2/9 : window functions ─────────────────────────────────────────
+
+/**
+ * `row_number()` → `ROW_NUMBER()`. Le OVER clause est émis par le codegen
+ * postgres.ts (renderExpr case windowCall) qui appelle ce renderer pour la
+ * partie fonction et append `OVER (PARTITION BY ... ORDER BY ...)` autour.
+ * Renderer window : args toujours [] pour row_number/rank/dense_rank.
+ */
+export const pgRowNumber: EngineRenderer = () => `ROW_NUMBER()`;
+
+/** `rank()` → `RANK()`. */
+export const pgRank: EngineRenderer = () => `RANK()`;
+
+/** `dense_rank()` → `DENSE_RANK()`. */
+export const pgDenseRank: EngineRenderer = () => `DENSE_RANK()`;
