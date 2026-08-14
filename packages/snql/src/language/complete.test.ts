@@ -331,6 +331,63 @@ describe("completeSnql — robustesse", () => {
 		expect(labels("describe u")).toEqual(["users", "orders"]);
 	});
 
+	// T3/2.3 : autocomplete des rows de sortie après pick/where/sort
+	it("`describe users pick ` propose les cols du shape describe", () => {
+		expect(labels("describe users pick ")).toEqual([
+			"name",
+			"type",
+			"nullable",
+			"default",
+			"is_primary_key",
+			"foreign_key"
+		]);
+	});
+
+	it("`describe users pick name, ` propose encore le shape", () => {
+		expect(labels("describe users pick name, ")).toEqual([
+			"name",
+			"type",
+			"nullable",
+			"default",
+			"is_primary_key",
+			"foreign_key"
+		]);
+	});
+
+	it("`describe users where ` propose le shape (predicate)", () => {
+		expect(labels("describe users where ")).toEqual([
+			"name",
+			"type",
+			"nullable",
+			"default",
+			"is_primary_key",
+			"foreign_key"
+		]);
+	});
+
+	it("`describe users sort ` propose le shape", () => {
+		expect(labels("describe users sort ")).toEqual([
+			"name",
+			"type",
+			"nullable",
+			"default",
+			"is_primary_key",
+			"foreign_key"
+		]);
+	});
+
+	it("`list tables pick ` propose uniquement `name`", () => {
+		expect(labels("list tables pick ")).toEqual(["name"]);
+	});
+
+	it("`describe users ` propose stages restants introspect", () => {
+		expect(labels("describe users ")).toEqual(["where", "pick", "sort", "limit"]);
+	});
+
+	it("`describe users pick name ` propose stages restants (sans pick)", () => {
+		expect(labels("describe users pick name ")).toEqual(["where", "sort", "limit"]);
+	});
+
 	it("schéma sans collection : propose quand même les verbes/étapes", () => {
 		const empty: SchemaModel = {
 			engine: "postgres",

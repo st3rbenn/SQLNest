@@ -69,6 +69,27 @@ const PRIMARY_VERBS: readonly {
 /** Sous-commandes reconnues après `list` (v1 : tables). */
 const LIST_SUBCOMMANDS: readonly string[] = ["tables"];
 
+/**
+ * Shape stable de sortie par kind d'introspection. Le complete propose ces
+ * cols dans les stages `pick`/`where`/`sort` qui suivent un `describe`/`list`.
+ * Aligné positionnellement avec le codegen (postgres.describeTableSql +
+ * mongo.adapter DESCRIBE_COLUMNS + listCollections rows).
+ */
+const INTROSPECT_SHAPES: Readonly<Record<string, readonly string[]>> = {
+	"list-tables": ["name"],
+	"describe-table": [
+		"name",
+		"type",
+		"nullable",
+		"default",
+		"is_primary_key",
+		"foreign_key"
+	]
+};
+
+/** Stages autorisés post-introspection (aligné parseIntrospectTail). */
+const INTROSPECT_STAGES: readonly string[] = ["where", "pick", "sort", "limit"];
+
 /** Étapes valides par opération, dans l'ordre canonique imposé par le parser. */
 const STAGES: Readonly<Record<OperationKind, readonly string[]>> = {
 	select: ["with", "where", "sort", "pick", "limit"],
@@ -230,6 +251,31 @@ function contextOptions(
 		}
 	}
 
+	// T3/2.3 : après une commande d'introspection, dispatch spécifique — les
+	// stages `pick`/`where`/`sort` réfèrent aux cols du shape de sortie, pas
+	// aux cols d'une collection schema (qui n'existent pas ici).
+	const introShape = introspectShapeOf(toks);
+	if (introShape !== null) {
+		if (last.kind === "keyword") {
+			if (last.value === "pick" || last.value === "where" || last.value === "sort") {
+				return introspectFields(introShape);
+			}
+			// Autre keyword post-introspect (ex: `limit` déjà consommé) →
+			// stages restants dans l'ordre canonique.
+			return remainingIntrospectStages(toks);
+		}
+		if (last.kind === "comma") {
+			// Prolongement de liste pick/sort — mêmes cols.
+			if (introActiveStage(toks) === "pick" || introActiveStage(toks) === "sort") {
+				return introspectFields(introShape);
+			}
+			return [];
+		}
+		if (last.kind === "ident" || last.kind === "number" || last.kind === "rparen") {
+			return remainingIntrospectStages(toks);
+		}
+	}
+
 	// Un verbe ne pilote le contexte qu'en **tête de requête**. Le lexer classe
 	// `verb` tout synonyme (create, edit, delete…) où qu'il apparaisse : sans ce
 	// garde, un ident nommé comme un verbe proposerait des collections.
@@ -300,6 +346,64 @@ function contextOptions(
 	}
 
 	return [];
+}
+
+/**
+ * T3/2.3 : détecte une commande d'introspection en tête de flux — retourne
+ * les cols du shape de sortie associées (list-tables → [name], describe-table
+ * → [name, type, nullable, default, is_primary_key, foreign_key]). Retourne
+ * null si les toks ne matchent pas une commande d'introspection.
+ */
+function introspectShapeOf(toks: readonly Token[]): readonly string[] | null {
+	const first = toks[0];
+	if (first === undefined || first.kind !== "ident") return null;
+	const lower = first.value.toLowerCase();
+	if (lower === "list") {
+		// `list tables` — cursor > position 1 => on est au-delà de `tables`.
+		const sub = toks[1];
+		if (sub?.kind === "ident" && sub.value.toLowerCase() === "tables") {
+			return INTROSPECT_SHAPES["list-tables"] ?? null;
+		}
+		return null;
+	}
+	if (lower === "describe") {
+		// `describe <target>` — target ident en position 1.
+		const target = toks[1];
+		if (target?.kind === "ident") {
+			return INTROSPECT_SHAPES["describe-table"] ?? null;
+		}
+		return null;
+	}
+	return null;
+}
+
+/** Cols du shape en candidats field (icône property, sans détail). */
+function introspectFields(cols: readonly string[]): readonly SnqlCompletion[] {
+	return cols.map((name) => ({ label: name, type: "field" as const }));
+}
+
+/** Stages introspect non encore consommés, dans l'ordre canonique. */
+function remainingIntrospectStages(
+	toks: readonly Token[]
+): readonly SnqlCompletion[] {
+	const seen = new Set<string>();
+	for (const tok of toks) {
+		if (tok.kind === "keyword" && INTROSPECT_STAGES.includes(tok.value)) {
+			seen.add(tok.value);
+		}
+	}
+	return INTROSPECT_STAGES.filter((s) => !seen.has(s)).map(keyword);
+}
+
+/** Stage introspect actif (le dernier keyword INTROSPECT_STAGES vu). */
+function introActiveStage(toks: readonly Token[]): string | undefined {
+	for (let i = toks.length - 1; i >= 0; i -= 1) {
+		const t = toks[i];
+		if (t?.kind === "keyword" && INTROSPECT_STAGES.includes(t.value)) {
+			return t.value;
+		}
+	}
+	return undefined;
 }
 
 /** Stages non encore consommés pour l'opération courante, dans l'ordre canonique. */
