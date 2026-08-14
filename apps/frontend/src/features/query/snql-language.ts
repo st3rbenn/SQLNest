@@ -14,6 +14,7 @@ import type { Extension } from "@codemirror/state";
 import { tags as t } from "@lezer/highlight";
 import {
 	completeSnql,
+	INTROSPECT_VERBS,
 	KEYWORDS,
 	type SchemaModel,
 	type SnqlCompletion,
@@ -227,6 +228,9 @@ function classifyWord(word: string): string {
 		return "keyword";
 	}
 	if (KEYWORDS.has(lower)) {
+		return "keyword";
+	}
+	if (INTROSPECT_VERBS.has(lower)) {
 		return "keyword";
 	}
 	return "variableName";

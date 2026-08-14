@@ -67,6 +67,17 @@ export const KEYWORD_ALIASES: Readonly<Record<string, string>> = {
 };
 
 /**
+ * Verbes d'introspection T3 — soft-keywords contextuels (détectés au parser
+ * en tête de statement uniquement, pour ne pas rentrer en conflit avec un
+ * usage `pick x as list`/`as describe`). Absent de [[KEYWORDS]] à dessein —
+ * mais highlightés comme des keywords côté éditeur.
+ */
+export const INTROSPECT_VERBS: ReadonlySet<string> = new Set([
+	"list",
+	"describe"
+]);
+
+/**
  * Retourne l'opération canonique d'un verbe, ou `undefined` si le mot n'est pas un verbe.
  * `Object.hasOwn` évite que des propriétés héritées (`constructor`, `__proto__`) remontent
  * comme des verbes et cassent la tokenisation d'identifiants ainsi nommés.
