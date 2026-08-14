@@ -315,3 +315,53 @@ describe("Mongo compensate — postOps sur listCollections", () => {
 		expect(planned.postOps![0]!.op).toBe("filter");
 	});
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// T3/2.4 — `for` filter shortcut
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("parser — `for` shortcut", () => {
+	it("`describe agency for id` désucre en where name in [\"id\"]", () => {
+		const stmt = parse(tokenize("describe agency for id"));
+		if (stmt.operation !== "introspect") throw new Error();
+		expect(stmt.stages).toHaveLength(1);
+		const s = stmt.stages![0]!;
+		if (s.type !== "where") throw new Error("where attendu");
+		if (s.predicate.type !== "in") throw new Error("in attendu");
+		expect(s.predicate.target.type).toBe("field");
+		if (s.predicate.target.type !== "field") throw new Error();
+		expect(s.predicate.target.path).toEqual(["name"]);
+		expect(s.predicate.values).toHaveLength(1);
+	});
+
+	it("`describe agency for id, name, email` → in avec 3 values", () => {
+		const stmt = parse(tokenize("describe agency for id, name, email"));
+		if (stmt.operation !== "introspect") throw new Error();
+		const s = stmt.stages![0]!;
+		if (s.type !== "where" || s.predicate.type !== "in") throw new Error();
+		expect(s.predicate.values).toHaveLength(3);
+	});
+
+	it("`for` + `where` combinables (2 stages where séparés)", () => {
+		const stmt = parse(
+			tokenize("describe agency for id, name where nullable = true")
+		);
+		if (stmt.operation !== "introspect") throw new Error();
+		expect(stmt.stages).toHaveLength(2);
+		expect(stmt.stages!.map((s) => s.type)).toEqual(["where", "where"]);
+	});
+
+	it("refus `for` sans ident", () => {
+		expectCode(
+			() => parse(tokenize("describe agency for")),
+			"parse_introspect_for_missing_name"
+		);
+	});
+
+	it("refus `for` après where (ordre canonique)", () => {
+		expectCode(
+			() => parse(tokenize("describe agency where nullable = true for id")),
+			"parse_introspect_for_out_of_order"
+		);
+	});
+});

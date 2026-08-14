@@ -74,7 +74,10 @@ export const KEYWORD_ALIASES: Readonly<Record<string, string>> = {
  */
 export const INTROSPECT_VERBS: ReadonlySet<string> = new Set([
 	"list",
-	"describe"
+	"describe",
+	// T3/2.4 : `for` — filter shortcut. Highlight comme keyword, mais reste
+	// soft-keyword (utilisable en ident hors introspect).
+	"for"
 ]);
 
 /**

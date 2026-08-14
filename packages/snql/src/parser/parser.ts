@@ -159,6 +159,45 @@ function parseIntrospectDescribe(cursor: TokenCursor): IntrospectStatement {
 }
 
 /**
+ * Sprint T3/2.4 : `for <col1>, <col2>, ...` — sucre parseur qui désucre en
+ * `where name in ["col1", "col2", ...]`. Utile pour cibler des rows précises
+ * d'un `describe` ou `list` sans écrire le prédicat verbeux. `for` est un
+ * soft-keyword contextuel (non ajouté à KEYWORDS pour rester utilisable en
+ * ident ailleurs — ex. col nommée `for`).
+ */
+function parseIntrospectForShortcut(cursor: TokenCursor): Stage {
+	const forTok = cursor.next(); // `for`
+	const names: { value: string; span: import("../lexer/token").Span }[] = [];
+	for (;;) {
+		const nameTok = cursor.peek();
+		if (nameTok.kind !== "ident") {
+			throw new SnqlError(
+				`'for' attend une liste de noms de colonnes, trouvé '${nameTok.value}'`,
+				"parse_introspect_for_missing_name",
+				nameTok.span
+			);
+		}
+		cursor.next();
+		names.push({ value: nameTok.value, span: nameTok.span });
+		if (cursor.peek().kind !== "comma") break;
+		cursor.next();
+	}
+	const lastSpan = names[names.length - 1]!.span;
+	const span = { start: forTok.span.start, end: lastSpan.end };
+	const predicate: Expr = {
+		type: "in",
+		target: { type: "field", path: ["name"], span },
+		values: names.map((n) => ({
+			type: "literal" as const,
+			value: { kind: "string" as const, value: n.value },
+			span: n.span
+		})),
+		span
+	};
+	return { type: "where", predicate, span };
+}
+
+/**
  * Sprint T3/2.3 : parse la suite `where`/`pick`/`sort`/`limit` d'une commande
  * d'introspection. Ordre canonique aligné avec un `find` (parser + lower
  * réutilisent la même infra pour typecheck alias / stage order).
@@ -181,10 +220,26 @@ function parseIntrospectTail(cursor: TokenCursor): { stages: Stage[] } {
 			peekedFirst.span
 		);
 	}
+	// T3/2.4 : `for a, b, ...` — filter shortcut sur le nom de col/table.
+	// Soft-keyword contextuel : `for` n'est jamais dans KEYWORDS (pas de
+	// conflit avec les usages ident ailleurs). Ordre canonique impose
+	// `for` avant `where` — s'il vient après on refuse (message dédié).
+	if (peekedFirst.kind === "ident" && peekedFirst.value.toLowerCase() === "for") {
+		stages.push(parseIntrospectForShortcut(cursor));
+	}
 	if (peekKeyword(cursor, "where")) stages.push(parseWhere(cursor));
 	if (peekKeyword(cursor, "pick")) stages.push(parsePick(cursor));
 	if (peekKeyword(cursor, "sort")) stages.push(parseSort(cursor));
 	if (peekKeyword(cursor, "limit")) stages.push(parseLimit(cursor));
+	// Un `for` post-where/pick/sort/limit = ordre violé.
+	const trailing = cursor.peek();
+	if (trailing.kind === "ident" && trailing.value.toLowerCase() === "for") {
+		throw new SnqlError(
+			"'for' doit précéder les stages classiques — écris 'describe t for a, b [where ...]'",
+			"parse_introspect_for_out_of_order",
+			trailing.span
+		);
+	}
 	// Un stage encore présent après le parse dans l'ordre = ordre violé.
 	rejectTrailingStage(
 		cursor,

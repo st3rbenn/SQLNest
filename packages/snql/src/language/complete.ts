@@ -254,20 +254,26 @@ function contextOptions(
 	// T3/2.3 : après une commande d'introspection, dispatch spécifique — les
 	// stages `pick`/`where`/`sort` réfèrent aux cols du shape de sortie, pas
 	// aux cols d'une collection schema (qui n'existent pas ici).
-	const introShape = introspectShapeOf(toks);
-	if (introShape !== null) {
+	// T3/2.4 : `for <col1>, <col2>` propose les cols de la table cible.
+	const introContext = introspectContextOf(toks);
+	if (introContext !== null) {
+		// `for a, |` OU `describe X for |` — propose les cibles du shortcut.
+		if (
+			(last.kind === "comma" || last.kind === "ident") &&
+			lastKeywordIsFor(toks)
+		) {
+			return forShortcutTargets(introContext, schema);
+		}
 		if (last.kind === "keyword") {
 			if (last.value === "pick" || last.value === "where" || last.value === "sort") {
-				return introspectFields(introShape);
+				return introspectFields(introContext.shape);
 			}
-			// Autre keyword post-introspect (ex: `limit` déjà consommé) →
-			// stages restants dans l'ordre canonique.
 			return remainingIntrospectStages(toks);
 		}
 		if (last.kind === "comma") {
-			// Prolongement de liste pick/sort — mêmes cols.
+			// Prolongement de liste pick/sort — mêmes cols du shape.
 			if (introActiveStage(toks) === "pick" || introActiveStage(toks) === "sort") {
-				return introspectFields(introShape);
+				return introspectFields(introContext.shape);
 			}
 			return [];
 		}
@@ -348,33 +354,90 @@ function contextOptions(
 	return [];
 }
 
+/** Contexte introspect détecté (kind + optionnellement la table cible). */
+interface IntrospectContext {
+	readonly kind: "list-tables" | "describe-table";
+	readonly shape: readonly string[];
+	/** Target présent uniquement pour `describe <target>` — nom de la table. */
+	readonly target: string | undefined;
+}
+
 /**
  * T3/2.3 : détecte une commande d'introspection en tête de flux — retourne
  * les cols du shape de sortie associées (list-tables → [name], describe-table
- * → [name, type, nullable, default, is_primary_key, foreign_key]). Retourne
- * null si les toks ne matchent pas une commande d'introspection.
+ * → [name, type, nullable, default, is_primary_key, foreign_key]) + la table
+ * cible quand pertinent. Retourne null si non-introspect.
  */
-function introspectShapeOf(toks: readonly Token[]): readonly string[] | null {
+function introspectContextOf(toks: readonly Token[]): IntrospectContext | null {
 	const first = toks[0];
 	if (first === undefined || first.kind !== "ident") return null;
 	const lower = first.value.toLowerCase();
 	if (lower === "list") {
-		// `list tables` — cursor > position 1 => on est au-delà de `tables`.
 		const sub = toks[1];
 		if (sub?.kind === "ident" && sub.value.toLowerCase() === "tables") {
-			return INTROSPECT_SHAPES["list-tables"] ?? null;
+			return {
+				kind: "list-tables",
+				shape: INTROSPECT_SHAPES["list-tables"] ?? [],
+				target: undefined
+			};
 		}
 		return null;
 	}
 	if (lower === "describe") {
-		// `describe <target>` — target ident en position 1.
 		const target = toks[1];
 		if (target?.kind === "ident") {
-			return INTROSPECT_SHAPES["describe-table"] ?? null;
+			return {
+				kind: "describe-table",
+				shape: INTROSPECT_SHAPES["describe-table"] ?? [],
+				target: target.value
+			};
 		}
 		return null;
 	}
 	return null;
+}
+
+/**
+ * T3/2.4 : candidats après `for ` — les noms que le shortcut peut cibler.
+ *  - describe-table : cols de la table cible (via schema).
+ *  - list-tables : noms de collections (la liste des tables).
+ */
+function forShortcutTargets(
+	context: IntrospectContext,
+	schema: SchemaModel
+): readonly SnqlCompletion[] {
+	if (context.kind === "describe-table" && context.target !== undefined) {
+		return fieldsOf(schema, context.target);
+	}
+	if (context.kind === "list-tables") {
+		return collections(schema);
+	}
+	return [];
+}
+
+/**
+ * T3/2.4 : détecte si le dernier token pertinent est un `for` soft-kw dans
+ * un contexte introspect — utilisé par le dispatch pour proposer les cibles
+ * du shortcut plutôt qu'un stage.
+ */
+function lastKeywordIsFor(toks: readonly Token[]): boolean {
+	// Scan backward — ignore rien : `for` doit être le dernier ident-kw.
+	for (let i = toks.length - 1; i >= 0; i -= 1) {
+		const t = toks[i];
+		if (t === undefined) continue;
+		if (t.kind === "comma") continue; // `for a, |` — traverse la virgule
+		if (t.kind === "ident") {
+			if (i > 0 && t.value.toLowerCase() === "for") {
+				const prev = toks[i - 1];
+				// `for` en position 0 = ident de tête (list/describe) — impossible ici.
+				if (prev?.kind === "ident" || prev?.kind === "keyword") return true;
+			}
+			// Un autre ident (nom déjà tapé) → cherche encore en arrière.
+			continue;
+		}
+		return false;
+	}
+	return false;
 }
 
 /** Cols du shape en candidats field (icône property, sans détail). */
@@ -387,12 +450,25 @@ function remainingIntrospectStages(
 	toks: readonly Token[]
 ): readonly SnqlCompletion[] {
 	const seen = new Set<string>();
+	let sawFor = false;
 	for (const tok of toks) {
 		if (tok.kind === "keyword" && INTROSPECT_STAGES.includes(tok.value)) {
 			seen.add(tok.value);
 		}
+		if (tok.kind === "ident" && tok.value.toLowerCase() === "for") {
+			sawFor = true;
+		}
 	}
-	return INTROSPECT_STAGES.filter((s) => !seen.has(s)).map(keyword);
+	const out: SnqlCompletion[] = [];
+	// T3/2.4 : `for` en tête tant que non déjà consommé, tant qu'aucun stage
+	// classique n'a démarré (l'ordre canonique impose for AVANT where/pick/...).
+	if (!sawFor && seen.size === 0) {
+		out.push({ label: "for", type: "keyword", detail: "filtre rapide" });
+	}
+	for (const s of INTROSPECT_STAGES) {
+		if (!seen.has(s)) out.push(keyword(s));
+	}
+	return out;
 }
 
 /** Stage introspect actif (le dernier keyword INTROSPECT_STAGES vu). */

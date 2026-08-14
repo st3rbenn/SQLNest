@@ -380,12 +380,42 @@ describe("completeSnql — robustesse", () => {
 		expect(labels("list tables pick ")).toEqual(["name"]);
 	});
 
-	it("`describe users ` propose stages restants introspect", () => {
-		expect(labels("describe users ")).toEqual(["where", "pick", "sort", "limit"]);
+	it("`describe users ` propose stages restants introspect + for", () => {
+		expect(labels("describe users ")).toEqual([
+			"for",
+			"where",
+			"pick",
+			"sort",
+			"limit"
+		]);
 	});
 
-	it("`describe users pick name ` propose stages restants (sans pick)", () => {
+	it("`describe users pick name ` propose stages restants (sans pick ni for)", () => {
+		// `for` disparaît dès qu'un stage classique a démarré (ordre canonique).
 		expect(labels("describe users pick name ")).toEqual(["where", "sort", "limit"]);
+	});
+
+	// T3/2.4 : `for <col1>, <col2>` shortcut
+	it("`describe users for ` propose les cols de la table cible", () => {
+		expect(labels("describe users for ")).toEqual([
+			"id",
+			"email",
+			"display_name",
+			"is_active"
+		]);
+	});
+
+	it("`describe users for id, ` continue avec les cols de la table", () => {
+		expect(labels("describe users for id, ")).toEqual([
+			"id",
+			"email",
+			"display_name",
+			"is_active"
+		]);
+	});
+
+	it("`list tables for ` propose les collections", () => {
+		expect(labels("list tables for ")).toEqual(["users", "orders"]);
 	});
 
 	it("schéma sans collection : propose quand même les verbes/étapes", () => {
