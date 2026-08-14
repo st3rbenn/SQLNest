@@ -29,6 +29,8 @@ import type {
 	PlanSortKey,
 	SqlValue
 } from "./plan";
+import { linearize } from "./plan";
+import { toCompensationOp } from "../planner/planner";
 
 /**
  * Sprint T2/12 : scope d'une query outer visible par une subquery corrélée.
@@ -581,17 +583,49 @@ function lowerTransactionItem(
 }
 
 /**
- * Sprint T3/1 : abaisse un statement d'introspection. Trivial pour v1 —
- * pas de typecheck expr, pas de scope, juste passe kind + target au codegen
- * qui produit un native adapté à l'engine cible.
+ * Sprint T3/1 : abaisse un statement d'introspection.
+ * Sprint T3/2.3 : les stages `where`/`pick`/`sort`/`limit` sont lowered via
+ * une fausse Query (source virtuelle `__introspect__`), puis extraits en
+ * ops post-scan et convertis en CompensationOp. PG les inline dans un SELECT
+ * wrapper, Mongo les applique via compensate() côté engine.
  */
 export function lowerIntrospect(
 	statement: import("../parser/ast").IntrospectStatement,
 	_schema?: SchemaModel
 ): import("./plan").IntrospectPlan {
-	return statement.target !== undefined
-		? { op: "introspect", kind: statement.kind, target: statement.target }
-		: { op: "introspect", kind: statement.kind };
+	const base: import("./plan").IntrospectPlan =
+		statement.target !== undefined
+			? { op: "introspect", kind: statement.kind, target: statement.target }
+			: { op: "introspect", kind: statement.kind };
+	if (statement.stages === undefined || statement.stages.length === 0) {
+		return base;
+	}
+	const postOps = lowerIntrospectStages(statement.stages, statement.span);
+	return { ...base, postOps };
+}
+
+/**
+ * Lowere les stages d'un introspect via l'infra Query (réutilise checkColumnsAvailable
+ * / typecheck / stripAlias). La source virtuelle `__introspect__` n'existe dans
+ * aucun SchemaModel → `sourceColumns` = null → mode permissif (skip alias
+ * checks). C'est le comportement voulu : le shape stable de l'introspect ne
+ * s'auto-décrit pas au niveau SchemaModel.
+ */
+function lowerIntrospectStages(
+	stages: readonly import("../parser/ast").Stage[],
+	span: import("../lexer/token").Span
+): readonly import("../planner/planner").CompensationOp[] {
+	const fakeQuery: import("../parser/ast").Query = {
+		operation: "select",
+		verb: "get",
+		source: { collection: "__introspect__", span },
+		stages,
+		span
+	};
+	const plan = lower(fakeQuery);
+	const linear = linearize(plan);
+	// Le premier op est le scan virtuel — on ne le compense pas.
+	return linear.slice(1).map((op) => toCompensationOp(op));
 }
 
 export function lowerMutation(

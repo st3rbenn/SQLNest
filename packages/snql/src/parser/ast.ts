@@ -452,6 +452,14 @@ export interface IntrospectStatement {
 	readonly operation: "introspect";
 	readonly kind: IntrospectKind;
 	readonly target?: string;
+	/**
+	 * Sprint T3/2.3 : stages classiques (`where`/`pick`/`sort`/`limit`) appliqués
+	 * en post-traitement sur le dataset produit par l'introspection. Uniforme
+	 * avec `find` — `describe users pick name, type sort name` marche comme
+	 * une requête. `with`/`group`/`having` refusés v1 (utilité limitée, coût
+	 * lowering élevé).
+	 */
+	readonly stages?: readonly Stage[];
 	readonly span: Span;
 }
 

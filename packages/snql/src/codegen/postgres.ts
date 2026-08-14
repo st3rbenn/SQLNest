@@ -94,34 +94,38 @@ export const postgresMapper: Mapper = {
 		ctx?: import("./mapper").MapperContext
 	): NativeQuery {
 		const namespace = ctx?.namespace ?? "public";
+		const params = new ParamList();
+		let baseText: string;
 		if (plan.kind === "list-tables") {
-			return {
-				engine: "postgres",
-				kind: "sql",
-				text: `SELECT table_name AS name FROM information_schema.tables WHERE table_schema = $1 AND table_type = 'BASE TABLE' ORDER BY table_name`,
-				params: [namespace],
-				paramSpans: [undefined]
-			};
-		}
-		if (plan.kind === "describe-table") {
+			const nsRef = params.add(namespace);
+			baseText = `SELECT table_name AS name FROM information_schema.tables WHERE table_schema = ${nsRef} AND table_type = 'BASE TABLE' ORDER BY table_name`;
+		} else if (plan.kind === "describe-table") {
 			if (plan.target === undefined) {
 				throw new SnqlError(
 					"'describe' sans table cible (bug parser)",
 					"codegen_introspect_missing_target"
 				);
 			}
-			return {
-				engine: "postgres",
-				kind: "sql",
-				text: describeTableSql(),
-				params: [namespace, plan.target],
-				paramSpans: [undefined, undefined]
-			};
+			const nsRef = params.add(namespace);
+			const targetRef = params.add(plan.target);
+			baseText = describeTableSql(nsRef, targetRef);
+		} else {
+			throw new SnqlError(
+				`Introspect kind '${plan.kind}' non supporté par le codegen Postgres v1`,
+				"codegen_introspect_unsupported"
+			);
 		}
-		throw new SnqlError(
-			`Introspect kind '${plan.kind}' non supporté par le codegen Postgres v1`,
-			"codegen_introspect_unsupported"
-		);
+		// T3/2.3 : stages pipeline (where/pick/sort/limit) → SELECT wrapper.
+		const text = plan.postOps !== undefined && plan.postOps.length > 0
+			? wrapIntrospectWithPostOps(baseText, plan.postOps, params)
+			: baseText;
+		return {
+			engine: "postgres",
+			kind: "sql",
+			text,
+			params: params.all(),
+			paramSpans: params.allSpans()
+		};
 	}
 };
 
@@ -182,7 +186,7 @@ function renderWriteAsSqlQuery(plan: MutationPlan): SqlQuery {
  * par col PK cible ; sur PK composite ça duplique — v1 accepte, on garde
  * la première (STRING_AGG une prochaine version si vraiment gênant).
  */
-function describeTableSql(): string {
+function describeTableSql(ns: string, target: string): string {
 	return (
 		`SELECT ` +
 			`c.column_name AS name, ` +
@@ -210,7 +214,7 @@ function describeTableSql(): string {
 				`AND kcu.table_schema = tc.table_schema ` +
 				`AND kcu.table_name = tc.table_name ` +
 			`WHERE tc.constraint_type = 'PRIMARY KEY' ` +
-				`AND tc.table_schema = $1 AND tc.table_name = $2` +
+				`AND tc.table_schema = ${ns} AND tc.table_name = ${target}` +
 		`) pk ON pk.column_name = c.column_name ` +
 		`LEFT JOIN (` +
 			`SELECT DISTINCT ON (kcu.column_name) ` +
@@ -225,12 +229,69 @@ function describeTableSql(): string {
 				`ON ccu.constraint_name = tc.constraint_name ` +
 				`AND ccu.table_schema = tc.table_schema ` +
 			`WHERE tc.constraint_type = 'FOREIGN KEY' ` +
-				`AND tc.table_schema = $1 AND tc.table_name = $2 ` +
+				`AND tc.table_schema = ${ns} AND tc.table_name = ${target} ` +
 			`ORDER BY kcu.column_name, ccu.table_name, ccu.column_name` +
 		`) fk ON fk.column_name = c.column_name ` +
-		`WHERE c.table_schema = $1 AND c.table_name = $2 ` +
+		`WHERE c.table_schema = ${ns} AND c.table_name = ${target} ` +
 		`ORDER BY c.ordinal_position`
 	);
+}
+
+/**
+ * Sprint T3/2.3 : wrap la query d'introspection en subquery et applique les
+ * postOps (filter/project/sort/limit) via un SELECT wrapper standard. Les
+ * $N nouveaux (predicates, limit) sont ajoutés au ParamList commun — l'ordre
+ * séquentiel `$1..$N` reste bind-safe côté driver PG.
+ *
+ * Aggregate/join dans postOps refusés (le parseIntrospectTail rejette déjà
+ * with/group/having) — cette route reste sur les stages simples.
+ */
+function wrapIntrospectWithPostOps(
+	baseText: string,
+	postOps: readonly import("../planner/planner").CompensationOp[],
+	params: ParamList
+): string {
+	const wrapAlias = "t";
+	const whereClauses: string[] = [];
+	let projectSql: string | undefined;
+	let orderSql: string | undefined;
+	let limitSql: string | undefined;
+	let offsetSql: string | undefined;
+	for (const op of postOps) {
+		switch (op.op) {
+			case "filter":
+				whereClauses.push(renderExpr(op.predicate, params));
+				break;
+			case "project":
+				projectSql = op.fields.map((f) => renderProjection(f, params)).join(", ");
+				break;
+			case "sort":
+				orderSql = op.keys.map(renderSortKey).join(", ");
+				break;
+			case "limit":
+				limitSql = String(op.count);
+				if (op.offset !== undefined) offsetSql = String(op.offset);
+				break;
+			case "join":
+			case "aggregate":
+				// Ces cas ne devraient pas apparaître (parseIntrospectTail refuse
+				// with/group/having), mais on cadre pour fail fast si un futur
+				// refactor introduit la voie.
+				throw new SnqlError(
+					`Op '${op.op}' non supporté dans un post-traitement d'introspection`,
+					"codegen_introspect_postop_unsupported"
+				);
+		}
+	}
+	const parts: string[] = [
+		`SELECT ${projectSql ?? "*"}`,
+		`FROM (${baseText}) AS ${quoteIdent(wrapAlias)}`
+	];
+	if (whereClauses.length > 0) parts.push(`WHERE ${whereClauses.join(" AND ")}`);
+	if (orderSql !== undefined) parts.push(`ORDER BY ${orderSql}`);
+	if (limitSql !== undefined) parts.push(`LIMIT ${limitSql}`);
+	if (offsetSql !== undefined) parts.push(`OFFSET ${offsetSql}`);
+	return parts.join(" ");
 }
 
 function renderMutation(plan: MutationPlan, params: ParamList): string {

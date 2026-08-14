@@ -110,10 +110,15 @@ function parseIntrospectList(cursor: TokenCursor): IntrospectStatement {
 	const sub = cursor.peek();
 	if (sub.kind === "ident" && sub.value.toLowerCase() === "tables") {
 		const subTok = cursor.next();
+		const tail = parseIntrospectTail(cursor);
+		const endSpan = tail.stages.length > 0
+			? tail.stages[tail.stages.length - 1]!.span
+			: subTok.span;
 		return {
 			operation: "introspect",
 			kind: "list-tables",
-			span: { start: listTok.span.start, end: subTok.span.end }
+			...(tail.stages.length > 0 ? { stages: tail.stages } : {}),
+			span: { start: listTok.span.start, end: endSpan.end }
 		};
 	}
 	throw new SnqlError(
@@ -140,12 +145,53 @@ function parseIntrospectDescribe(cursor: TokenCursor): IntrospectStatement {
 		);
 	}
 	cursor.next();
+	const tail = parseIntrospectTail(cursor);
+	const endSpan = tail.stages.length > 0
+		? tail.stages[tail.stages.length - 1]!.span
+		: target.span;
 	return {
 		operation: "introspect",
 		kind: "describe-table",
 		target: target.value,
-		span: { start: descTok.span.start, end: target.span.end }
+		...(tail.stages.length > 0 ? { stages: tail.stages } : {}),
+		span: { start: descTok.span.start, end: endSpan.end }
 	};
+}
+
+/**
+ * Sprint T3/2.3 : parse la suite `where`/`pick`/`sort`/`limit` d'une commande
+ * d'introspection. Ordre canonique aligné avec un `find` (parser + lower
+ * réutilisent la même infra pour typecheck alias / stage order).
+ *
+ * Stages refusés v1 : `with`, `group`, `having` — l'introspection produit un
+ * dataset autonome (pas de join possible sans schéma virtuel du shape, pas
+ * d'aggregation pertinente sur 20 rows de metadata). Le rejet est explicite
+ * (`parse_introspect_stage_unsupported`) pour orienter l'utilisateur.
+ */
+function parseIntrospectTail(cursor: TokenCursor): { stages: Stage[] } {
+	const stages: Stage[] = [];
+	// Refuse les stages hors périmètre AVANT de parser — sinon `describe t with`
+	// consomme `with` en tentant de le parser et casse avec un message obscur.
+	const unsupported = new Set(["with", "group", "having"]);
+	const peekedFirst = cursor.peek();
+	if (peekedFirst.kind === "keyword" && unsupported.has(peekedFirst.value)) {
+		throw new SnqlError(
+			`'${peekedFirst.value}' non supporté après une commande d'introspection — v1 : where / pick / sort / limit.`,
+			"parse_introspect_stage_unsupported",
+			peekedFirst.span
+		);
+	}
+	if (peekKeyword(cursor, "where")) stages.push(parseWhere(cursor));
+	if (peekKeyword(cursor, "pick")) stages.push(parsePick(cursor));
+	if (peekKeyword(cursor, "sort")) stages.push(parseSort(cursor));
+	if (peekKeyword(cursor, "limit")) stages.push(parseLimit(cursor));
+	// Un stage encore présent après le parse dans l'ordre = ordre violé.
+	rejectTrailingStage(
+		cursor,
+		new Set(["where", "pick", "sort", "limit"]),
+		["where", "pick", "sort", "limit"]
+	);
+	return { stages };
 }
 
 /**

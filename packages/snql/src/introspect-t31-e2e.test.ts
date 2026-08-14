@@ -228,3 +228,90 @@ describe("codegen Mongo — describe <table>", () => {
 		expect(native.plan.target).toBe("users");
 	});
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// T3/2.3 — pipeline stages après introspection
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("parser — stages après introspection", () => {
+	it("`describe users pick name, type`", () => {
+		const stmt = parse(tokenize("describe users pick name, type"));
+		if (stmt.operation !== "introspect") throw new Error();
+		expect(stmt.stages).toBeDefined();
+		expect(stmt.stages).toHaveLength(1);
+		expect(stmt.stages![0]!.type).toBe("pick");
+	});
+
+	it("`list tables where name like \"%users%\" sort name limit 5`", () => {
+		const stmt = parse(
+			tokenize('list tables where name like "%users%" sort name limit 5')
+		);
+		if (stmt.operation !== "introspect") throw new Error();
+		expect(stmt.stages).toHaveLength(3);
+		expect(stmt.stages!.map((s) => s.type)).toEqual(["where", "sort", "limit"]);
+	});
+
+	it("refus `describe users with X on ...`", () => {
+		expectCode(
+			() => parse(tokenize("describe users with orders on id = user_id")),
+			"parse_introspect_stage_unsupported"
+		);
+	});
+
+	it("refus `describe users group by name`", () => {
+		expectCode(
+			() => parse(tokenize("describe users group by name")),
+			"parse_introspect_stage_unsupported"
+		);
+	});
+
+	it("refus ordre stage violé", () => {
+		expectCode(
+			() => parse(tokenize("describe users sort name where nullable = true")),
+			"parse_stage_out_of_order"
+		);
+	});
+});
+
+describe("codegen PG — stages après introspection", () => {
+	it("`describe users pick name` wrap la baseQuery en subquery", () => {
+		const stmt = parse(tokenize("describe users pick name"));
+		if (stmt.operation !== "introspect") throw new Error();
+		const planned = lowerIntrospect(stmt);
+		expect(planned.postOps).toBeDefined();
+		expect(planned.postOps).toHaveLength(1);
+		const mapper = getMapper("postgres");
+		const native = mapper.mapIntrospect!(planned, { namespace: "public" });
+		if (native.kind !== "sql") throw new Error();
+		expect(native.text).toContain("SELECT ");
+		expect(native.text).toContain(`FROM (`);
+		expect(native.text).toContain(`) AS "t"`);
+		expect(native.text).toContain(`"name"`);
+	});
+
+	it("`list tables where name like \"%usr%\" limit 3` binde les params", () => {
+		const stmt = parse(
+			tokenize('list tables where name like "%usr%" limit 3')
+		);
+		if (stmt.operation !== "introspect") throw new Error();
+		const planned = lowerIntrospect(stmt);
+		const mapper = getMapper("postgres");
+		const native = mapper.mapIntrospect!(planned, { namespace: "apollon" });
+		if (native.kind !== "sql") throw new Error();
+		// namespace + like pattern bindés séquentiellement.
+		expect(native.params).toEqual(["apollon", "%usr%"]);
+		expect(native.text).toContain("LIKE");
+		expect(native.text).toContain("LIMIT 3");
+	});
+});
+
+describe("Mongo compensate — postOps sur listCollections", () => {
+	it("plan porte postOps lowered", () => {
+		const stmt = parse(tokenize("list tables where name = \"users\""));
+		if (stmt.operation !== "introspect") throw new Error();
+		const planned = lowerIntrospect(stmt);
+		expect(planned.postOps).toBeDefined();
+		expect(planned.postOps).toHaveLength(1);
+		expect(planned.postOps![0]!.op).toBe("filter");
+	});
+});

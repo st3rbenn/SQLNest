@@ -452,6 +452,13 @@ export interface IntrospectPlan {
 	readonly op: "introspect";
 	readonly kind: import("../parser/ast").IntrospectKind;
 	readonly target?: string;
+	/**
+	 * Sprint T3/2.3 : stages post-introspection (where/pick/sort/limit) déjà
+	 * lowered en ops de compensation. PG les inline dans un SELECT wrapper
+	 * `FROM (baseSql) AS t`. Mongo les applique via compensate() côté engine
+	 * sur les rows renvoyées par listCollections/sample.
+	 */
+	readonly postOps?: readonly import("../planner/planner").CompensationOp[];
 }
 
 /** Un plan complet : lecture, mutation, transaction (T2/15) ou introspect (T3/1). */

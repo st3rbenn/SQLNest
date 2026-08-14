@@ -90,7 +90,24 @@ export async function runQuery(
 			? { namespace: connection.namespace }
 			: undefined;
 		const native = mapper.mapIntrospect(introPlan, ctx);
-		return { ...(await connection.execute(native)), written: false };
+		const executed = await connection.execute(native);
+		// Sprint T3/2.3 : PG inline les postOps dans son SELECT wrapper, donc
+		// le résultat est déjà filtré/projeté. Pour les engines qui renvoient
+		// des rows brutes (Mongo), on applique compensate() côté runtime.
+		if (
+			native.kind === "mongo-introspect" &&
+			introPlan.postOps !== undefined &&
+			introPlan.postOps.length > 0
+		) {
+			const rows = compensate(introPlan.postOps, executed.rows);
+			return {
+				columns: columnsFromRows(rows, executed.columns),
+				rows,
+				rowCount: rows.length,
+				written: false
+			};
+		}
+		return { ...executed, written: false };
 	}
 
 	// Sprint T2/15 : transaction bloc atomique. Le mapper.mapTransaction est

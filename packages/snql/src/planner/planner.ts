@@ -502,7 +502,7 @@ export function assertIntrospectSupported(
 	);
 }
 
-function toCompensationOp(op: LogicalPlan): CompensationOp {
+export function toCompensationOp(op: LogicalPlan): CompensationOp {
 	switch (op.op) {
 		case "filter":
 			return { op: "filter", predicate: op.predicate };
