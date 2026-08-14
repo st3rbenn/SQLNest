@@ -171,3 +171,89 @@ describe("format — transaction bloc", () => {
 		expect(twice).toBe(once);
 	});
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Post-format-audit — stages intra-parens et on-conflict-action inline
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("format — stages intra-parens restent inline", () => {
+	it("sort intra `string_agg(…)` reste inline", () => {
+		expect(
+			fmt('get t pick string_agg(name, ", " sort name asc) as names')
+		).toBe(
+			'get t\n  pick string_agg(name, ", " sort name asc) as names'
+		);
+	});
+
+	it("sort intra `over (…)` de window function reste inline", () => {
+		expect(
+			fmt(
+				"get t pick id, row_number() over (partition dept sort salary desc) as rank"
+			)
+		).toBe(
+			"get t\n  pick id, row_number() over (partition dept sort salary desc) as rank"
+		);
+	});
+
+	it("pick intra sub-query `in (find …)` reste inline", () => {
+		expect(fmt("find users where id in (find orders pick user_id)")).toBe(
+			"find users\n  where id in (find orders pick user_id)"
+		);
+	});
+
+	it("where intra sub-query `exists (find …)` reste inline", () => {
+		expect(
+			fmt("find users as u where exists (find orders where user_id = u.id)")
+		).toBe(
+			"find users as u\n  where exists (find orders where user_id = u.id)"
+		);
+	});
+
+	it("insert-select : where + pick intra `(find …)` restent inline", () => {
+		expect(
+			fmt(
+				"add (find users where active pick id, email as mail) into archive"
+			)
+		).toBe(
+			"add (find users where active pick id, email as mail)\n  into archive"
+		);
+	});
+});
+
+describe("format — on-conflict edit action reste inline", () => {
+	it("`edit set …` inline sans split", () => {
+		expect(
+			fmt("add {a: 1, b: 2, c: 3} into t on conflict (a) edit set b = new.b")
+		).toBe(
+			"add {\n    a: 1,\n    b: 2,\n    c: 3\n  }\n  into t on conflict (a) edit set b = new.b"
+		);
+	});
+
+	it("`edit set … where …` inline entièrement", () => {
+		expect(
+			fmt(
+				"add {a: 1, b: 2, c: 3} into t on conflict (a) edit set b = new.b where a < new.a"
+			)
+		).toBe(
+			"add {\n    a: 1,\n    b: 2,\n    c: 3\n  }\n  into t on conflict (a) edit set b = new.b where a < new.a"
+		);
+	});
+
+	it("`pick count` post-action reste split (fin de stmt)", () => {
+		expect(
+			fmt(
+				"add {a: 1, b: 2, c: 3} into t on conflict (a) edit set b = new.b pick count"
+			)
+		).toBe(
+			"add {\n    a: 1,\n    b: 2,\n    c: 3\n  }\n  into t on conflict (a) edit set b = new.b\n  pick count"
+		);
+	});
+
+	it("`ignore` (pas `edit`) : pas d'inline forcé", () => {
+		expect(
+			fmt("add {a: 1, b: 2, c: 3} into t on conflict (a) ignore pick count")
+		).toBe(
+			"add {\n    a: 1,\n    b: 2,\n    c: 3\n  }\n  into t on conflict (a) ignore\n  pick count"
+		);
+	});
+});

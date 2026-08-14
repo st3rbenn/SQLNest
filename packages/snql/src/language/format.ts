@@ -45,7 +45,14 @@ export function formatSnql(source: string): string {
 		return "";
 	}
 	const chainingAnds = markChainingAnds(toks);
-	const { splitCommas, multilineStages } = markMultiline(toks);
+	// Post-format-audit — les stages ne doivent PAS se splitter en newline
+	// quand ils apparaissent intra-parens (sub-query `(find … pick …)`,
+	// `over (partition … sort …)`, `string_agg(… sort …)`) ou dans l'action
+	// d'un `on conflict (…) edit set … [where …]`. inlineStages[i] = true
+	// signale au walker principal de traiter le stage keyword comme un token
+	// regular (sans newline+indent).
+	const inlineStages = markInlineStages(toks);
+	const { splitCommas, multilineStages } = markMultiline(toks, inlineStages);
 	// Sprint object-literals — marker les {…} / […] multi-ligne (≥ 3 items).
 	// Ajoute aux splitCommas les commas internes du bloc + retourne les
 	// openers/closers pour insérer newline+indent block-style.
@@ -89,7 +96,7 @@ export function formatSnql(source: string): string {
 		const containerDepth = containerDepthAt[i] ?? 0;
 		const containerOffset = CONTAINER_STEP.repeat(containerDepth);
 
-		if (isStage && parts.length > 0) {
+		if (isStage && parts.length > 0 && !inlineStages.has(i)) {
 			parts.push(`\n${containerOffset}${STAGE_INDENT}${tok.value}`);
 			pendingItemNewline = multilineStages.has(i);
 			continue;
@@ -163,7 +170,10 @@ export function formatSnql(source: string): string {
  *  - `multilineStages` : Set des index des keywords stage (pick/sort/set) dont
  *    le premier item doit aussi passer à la ligne (style block cohérent).
  */
-function markMultiline(toks: readonly Token[]): {
+function markMultiline(
+	toks: readonly Token[],
+	inlineStages: ReadonlySet<number>
+): {
 	splitCommas: Map<number, string>;
 	multilineStages: ReadonlySet<number>;
 } {
@@ -174,7 +184,10 @@ function markMultiline(toks: readonly Token[]): {
 		const tok = toks[i] as Token;
 		if (
 			tok.kind !== "keyword" ||
-			(tok.value !== "pick" && tok.value !== "sort" && tok.value !== "set" && tok.value !== "group")
+			(tok.value !== "pick" && tok.value !== "sort" && tok.value !== "set" && tok.value !== "group") ||
+			// Stage inline (intra-parens / on-conflict action) — n'entre pas en
+			// mode multi-ligne : ses items restent inline avec le contexte.
+			inlineStages.has(i)
 		) {
 			i += 1;
 			continue;
@@ -288,6 +301,98 @@ function markBlockLiterals(
 	}
 
 	return { blockOpeners, blockClosers };
+}
+
+/**
+ * Post-format-audit : marque les stage keywords qui doivent rester inline
+ * (pas de `\n<indent>stage` split). Deux cas :
+ *
+ *  1. **Intra-parens** — quand `sort`/`pick`/`where`/`set` apparaît dans un
+ *     `(…)` (sub-query `(find … pick …)`, `over (partition … sort …)`,
+ *     `string_agg(… sort …)`), il fait partie de l'expression courante et
+ *     ne doit pas casser la ligne.
+ *
+ *  2. **On-conflict action** — dans `add {…} into t on conflict (…) edit
+ *     set … [where …]`, les `set` et `where` appartiennent à l'action
+ *     `edit` et restent inline. `pick count` post-action se resplit
+ *     normalement.
+ */
+function markInlineStages(toks: readonly Token[]): ReadonlySet<number> {
+	const out = new Set<number>();
+	let parenDepth = 0;
+	// State machine on-conflict :
+	//   idle → seen-on → seen-on-conflict → expecting-edit → in-action
+	// Retour à idle sur : `;` / `}` / `pick` (top-level) / EOF, ou si la
+	// séquence attendue est cassée (`ignore` au lieu de `edit` par ex.).
+	type Phase = "idle" | "seen-on" | "seen-on-conflict" | "expecting-edit" | "in-action";
+	let phase: Phase = "idle";
+	for (let i = 0; i < toks.length; i += 1) {
+		const tok = toks[i] as Token;
+
+		// Exit de l'action on-conflict à un breakpoint top-level.
+		if (phase === "in-action" && parenDepth === 0) {
+			if (
+				tok.kind === "semicolon" ||
+				tok.kind === "rbrace" ||
+				(tok.kind === "keyword" && tok.value === "pick")
+			) {
+				phase = "idle";
+			}
+		}
+
+		// State machine progression.
+		if (phase === "idle" && tok.kind === "keyword" && tok.value === "on") {
+			phase = "seen-on";
+		} else if (phase === "seen-on") {
+			if (tok.kind === "keyword" && tok.value === "conflict") {
+				phase = "seen-on-conflict";
+			} else {
+				phase = "idle";
+			}
+		} else if (
+			phase === "seen-on-conflict" &&
+			tok.kind === "rparen" &&
+			parenDepth === 1
+		) {
+			// Sort de `(col1, col2)` — attend l'action `edit` ou `ignore`.
+			phase = "expecting-edit";
+		} else if (phase === "expecting-edit") {
+			if (tok.kind === "verb" && tok.value === "edit") {
+				phase = "in-action";
+			} else if (!(tok.kind === "rparen" || tok.kind === "lparen")) {
+				// `ignore` ou autre chose que `edit` — pas d'action inline.
+				phase = "idle";
+			}
+		}
+
+		// Cas 1 : stage intra-parens → inline.
+		if (
+			parenDepth > 0 &&
+			tok.kind === "keyword" &&
+			(tok.value === "sort" ||
+				tok.value === "pick" ||
+				tok.value === "where" ||
+				tok.value === "set" ||
+				tok.value === "limit" ||
+				tok.value === "group" ||
+				tok.value === "having")
+		) {
+			out.add(i);
+		}
+		// Cas 2 : `set` / `where` intra-action on-conflict → inline.
+		if (
+			phase === "in-action" &&
+			parenDepth === 0 &&
+			tok.kind === "keyword" &&
+			(tok.value === "set" || tok.value === "where")
+		) {
+			out.add(i);
+		}
+
+		if (tok.kind === "lparen") parenDepth += 1;
+		else if (tok.kind === "rparen") parenDepth -= 1;
+	}
+	return out;
 }
 
 /**
