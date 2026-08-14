@@ -18,7 +18,10 @@ export type Capability =
 	| "sort"
 	| "paginate"
 	| "mutate"
-	| "graph";
+	| "graph"
+	// Sprint T2/11 : support des sub-queries inline (`in (find ...)` /
+	// `exists (find ...)`). PG only v1 (natif SQL) ; Mongo/KV refusés.
+	| "subquery";
 
 /**
  * Décimal **exact** : on garde le texte brut. Les colonnes NUMERIC/DECIMAL de
@@ -159,6 +162,21 @@ export type PlanExpr = (
 			readonly args: readonly PlanExpr[];
 			readonly partitionKeys: readonly (readonly string[])[];
 			readonly sortKeys: readonly PlanSortKey[];
+	  }
+	// Sprint T2/11 : sub-query uncorrelated — `(find t pick y)` en position
+	// d'expression. Le `plan` est un LogicalPlan récursif (query nested
+	// abaissée). Codegen PG : `(SELECT ...)` inline. Autres engines : refusé
+	// v1 (capability `subquery` PG-only).
+	| {
+			readonly kind: "subquery";
+			readonly plan: LogicalPlan;
+	  }
+	// Sprint T2/11 : `exists (find ...)` — retourne bool ssi subquery renvoie
+	// au moins une row. Le `subplan` est TOUJOURS un LogicalPlan (unwrap du
+	// PlanExpr.subquery au lower).
+	| {
+			readonly kind: "exists";
+			readonly subplan: LogicalPlan;
 	  }
 ) & { readonly span?: Span };
 

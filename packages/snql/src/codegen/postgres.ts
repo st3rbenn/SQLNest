@@ -513,6 +513,15 @@ function renderExpr(expr: PlanExpr, params: ParamList): string {
 				return "FALSE";
 			}
 			const target = renderExpr(expr.target, params);
+			// Sprint T2/11 : `x in (subquery)` — le subquery se rend déjà en
+			// `(SELECT ...)`, donc pas de parens supplémentaires. Détecte le
+			// cas single-value=subquery.
+			if (
+				expr.values.length === 1 &&
+				expr.values[0]?.kind === "subquery"
+			) {
+				return `${target} IN ${renderExpr(expr.values[0], params)}`;
+			}
 			const list = expr.values.map((v) => renderExpr(v, params)).join(", ");
 			return `${target} IN (${list})`;
 		}
@@ -622,6 +631,16 @@ function renderExpr(expr: PlanExpr, params: ParamList): string {
 				);
 			}
 			return `${fnSql} OVER (${parts.join(" ")})`;
+		}
+		case "subquery": {
+			// Sprint T2/11 : `(SELECT ...)` inline. Le sous-plan est rendu via
+			// renderPlan avec les mêmes params (les $N sont partagés — tous
+			// bindés séquentiellement). Le résultat est wrappé en parens.
+			return `(${renderPlan(expr.plan, params)})`;
+		}
+		case "exists": {
+			// Sprint T2/11 : `EXISTS (SELECT ... )`. Idem — sous-plan inline.
+			return `EXISTS (${renderPlan(expr.subplan, params)})`;
 		}
 	}
 }

@@ -43,6 +43,7 @@ export const KEYWORDS: ReadonlySet<string> = new Set([
 	"having",
 	"over",
 	"partition",
+	"exists",
 	"and",
 	"or",
 	"not",

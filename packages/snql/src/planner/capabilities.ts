@@ -34,10 +34,12 @@ function caps(
 	};
 }
 
-/** Relationnel complet (lecture). Tous les casts canoniques supportés. */
+/** Relationnel complet (lecture). Tous les casts canoniques supportés.
+ * Sprint T2/11 : 'subquery' ajouté — sub-queries inline (`in (find ...)` /
+ * `exists (find ...)`) natives PG (nested SELECT). */
 export const POSTGRES_CAPABILITIES: Capabilities = caps(
 	"postgres",
-	["scan", "filter", "project", "join", "aggregate", "sort", "paginate", "mutate"],
+	["scan", "filter", "project", "join", "aggregate", "sort", "paginate", "mutate", "subquery"],
 	["int", "float", "text", "bool", "date", "timestamp", "json"]
 );
 

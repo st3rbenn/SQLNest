@@ -103,6 +103,9 @@ export function plan(
 	// Sprint T2/6 : refus sum(unique)/avg(unique) sur Mongo (2-stage $addToSet
 	// spec reportée sprint 8 avec aggregateMulti). count(unique) marche partout.
 	assertAggregateEngineRestrictions(logical, capabilities);
+	// Sprint T2/11 : refus sub-queries si l'engine n'a pas la capability
+	// (Mongo/KV v1). Message actionable.
+	assertSubqueryCapability(logical, capabilities);
 
 	// Index du 1er opérateur non poussable (= début de la compensation).
 	let cut = ops.length;
@@ -248,6 +251,14 @@ function visitExprCalls(expr: PlanExpr, visit: (name: string) => void): void {
 			visit(expr.name);
 			for (const arg of expr.args) visitExprCalls(arg, visit);
 			return;
+		case "subquery":
+			// Sprint T2/11 : descend dans le subplan pour vérifier ses
+			// fonctions supportées (cohérence engine sur toute la query).
+			visitPlanCalls(expr.plan, visit);
+			return;
+		case "exists":
+			visitPlanCalls(expr.subplan, visit);
+			return;
 	}
 }
 
@@ -356,6 +367,12 @@ function visitExprCasts(
 			return;
 		case "windowCall":
 			for (const arg of expr.args) visitExprCasts(arg, visit);
+			return;
+		case "subquery":
+			visitPlanCasts(expr.plan, visit);
+			return;
+		case "exists":
+			visitPlanCasts(expr.subplan, visit);
 			return;
 	}
 }
@@ -541,6 +558,27 @@ function assertJsonPredicatesPg(
  *  - KV : sum(unique)/avg(unique) impl à venir (matérialisable), refus v6
  *    aligné Mongo pour cohérence cross-engine.
  */
+/**
+ * Sprint T2/11 : refus sub-queries si l'engine n'a pas la capability.
+ * Aujourd'hui PG only. Mongo/KV : message dédié pointant T3+ (matérialisation
+ * côté application ou attente cross-engine subquery support).
+ */
+function assertSubqueryCapability(
+	plan: LogicalPlan,
+	capabilities: Capabilities
+): void {
+	if (capabilities.supports.has("subquery")) return;
+	visitPlanExprs(plan, (expr) => {
+		if (expr.kind === "subquery" || expr.kind === "exists") {
+			throw new SnqlError(
+				`Sub-query (${expr.kind === "exists" ? "exists" : "in"}) non supportée sur '${capabilities.engine}' v1 — matérialise le résultat côté application ou attends le cross-engine subquery support (T3+)`,
+				"planner_subquery_unsupported",
+				expr.span
+			);
+		}
+	});
+}
+
 function assertAggregateEngineRestrictions(
 	plan: LogicalPlan,
 	capabilities: Capabilities
@@ -635,6 +673,12 @@ function visitExprsIn(expr: PlanExpr, visit: (e: PlanExpr) => void): void {
 			return;
 		case "windowCall":
 			for (const arg of expr.args) visitExprsIn(arg, visit);
+			return;
+		case "subquery":
+			visitPlanExprs(expr.plan, visit);
+			return;
+		case "exists":
+			visitPlanExprs(expr.subplan, visit);
 			return;
 	}
 }

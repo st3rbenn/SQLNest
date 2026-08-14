@@ -198,6 +198,14 @@ function evalValue(expr: PlanExpr, row: Row): unknown {
 			"runtime_window_out_of_project"
 		);
 	}
+	if (expr.kind === "subquery" || expr.kind === "exists") {
+		// Sprint T2/11 : sub-queries refusées au planner (KV n'a pas la
+		// capability). Defense — jamais atteint normalement.
+		throw new SnqlError(
+			`Runtime KV : sub-query rencontrée — planner_subquery_unsupported attendu avant (bug de sync)`,
+			"runtime_subquery_unsupported"
+		);
+	}
 	// Expression booléenne utilisée comme valeur.
 	return evalBool(expr, row);
 }
@@ -308,6 +316,8 @@ function evalBool(expr: PlanExpr, row: Row): boolean | null {
 		case "array":
 		case "case":
 		case "windowCall":
+		case "subquery":
+		case "exists":
 			return coerceBool(evalValue(expr, row));
 	}
 }

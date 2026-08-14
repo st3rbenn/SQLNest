@@ -18,7 +18,12 @@ import type {
 	UpdateStatement
 } from "./ast";
 import { TokenCursor } from "./cursor";
-import { parseExpression, parseFieldPath, parseKeyValueEntry } from "./expression";
+import {
+	parseExpression,
+	parseFieldPath,
+	parseKeyValueEntry,
+	setSubqueryParser
+} from "./expression";
 
 /** Mots-clés de stage d'un select, dans l'ordre canonique imposé. */
 const SELECT_STAGE_ORDER = ["with", "where", "group", "having", "pick", "sort", "limit"] as const;
@@ -600,3 +605,29 @@ function parseLimit(cursor: TokenCursor): Stage {
 		? { type: "limit", count, offset, span }
 		: { type: "limit", count, span };
 }
+
+/**
+ * Sprint T2/11 : hook parser sub-query. Consomme le verb + délègue à
+ * parseSelect. Refuse mutation (add/update/remove) — sub-queries en
+ * position d'expression sont read-only par nature.
+ */
+setSubqueryParser((cursor: TokenCursor): Query => {
+	const verbTok = cursor.peek();
+	if (verbTok.kind !== "verb") {
+		throw new SnqlError(
+			"Sub-query attendue : commence par un verb de lecture (find/get)",
+			"parse_subquery_expected_verb",
+			verbTok.span
+		);
+	}
+	const op = verbOperation(verbTok.value);
+	if (op !== "select") {
+		throw new SnqlError(
+			`Sub-query doit être une lecture (find/get), pas '${verbTok.value}' (${op})`,
+			"parse_subquery_not_select",
+			verbTok.span
+		);
+	}
+	cursor.next();
+	return parseSelect(cursor, verbTok);
+});

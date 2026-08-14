@@ -154,6 +154,24 @@ export type Expr =
 			readonly partitionKeys: readonly (readonly string[])[];
 			readonly sortKeys: readonly SortKey[];
 			readonly span: Span;
+	  }
+	// Sprint T2/11 : sub-query uncorrelated — `(find t pick y)` en position
+	// d'expression, typiquement à droite d'un `in` ou wrappé par `exists`.
+	// La `query` est une full Query nested (parsée récursivement). Uncorrelated
+	// = pas de scope-lookup vers les alias de la query outer (T2/12 correlated
+	// introduira ScopeStack).
+	| {
+			readonly type: "subquery";
+			readonly query: Query;
+			readonly span: Span;
+	  }
+	// Sprint T2/11 : EXISTS prefix — `exists (find ...)`. Le subquery est
+	// TOUJOURS un Expr.subquery (invariant vérifié au parser). Retourne bool
+	// (true si la subquery renvoie au moins une row).
+	| {
+			readonly type: "exists";
+			readonly subquery: Expr;
+			readonly span: Span;
 	  };
 
 /**

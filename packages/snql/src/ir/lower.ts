@@ -430,6 +430,11 @@ function collectExprFieldsWithSpans(
 			for (const p of expr.partitionKeys) out.push({ path: p, span: expr.span });
 			for (const k of expr.sortKeys) out.push({ path: k.path, span: k.span });
 			return;
+		case "subquery":
+		case "exists":
+			// Sprint T2/11 : uncorrelated — la sub-query est self-contained, ne
+			// contribue à aucun field ref de l'outer.
+			return;
 	}
 }
 
@@ -643,6 +648,11 @@ function containsAggregateAst(expr: Expr): boolean {
 			// Sprint T2/9 : windowCall n'est PAS un aggregate — pick avec
 			// windowCall reste op='project' (pas 'aggregate').
 			return false;
+		case "subquery":
+		case "exists":
+			// Sprint T2/11 : uncorrelated — aggregates dans la subquery ne
+			// contribuent pas au pick outer.
+			return false;
 	}
 }
 
@@ -704,6 +714,10 @@ function firstAggregateSpanAst(
 		}
 		case "windowCall":
 			// Sprint T2/9 : windowCall n'est PAS un aggregate.
+			return undefined;
+		case "subquery":
+		case "exists":
+			// Sprint T2/11 : uncorrelated — pas de span aggregate pour outer.
 			return undefined;
 	}
 }
@@ -941,6 +955,15 @@ export function firstAggregateSpan(
 			}
 			return firstAggregateSpan(expr.elseValue);
 		}
+		case "windowCall":
+			for (const arg of expr.args) {
+				const s = firstAggregateSpan(arg);
+				if (s !== undefined) return s;
+			}
+			return undefined;
+		case "subquery":
+		case "exists":
+			return undefined;
 	}
 }
 
@@ -1025,6 +1048,21 @@ function assertNoCallInWrite(expr: PlanExpr): void {
 			}
 			assertNoCallInWrite(expr.elseValue);
 			return;
+		case "windowCall":
+			throw new SnqlError(
+				`Window function '${expr.name}' non autorisée dans un contexte d'écriture`,
+				"lower_window_in_write",
+				expr.span
+			);
+		case "subquery":
+		case "exists":
+			// Sprint T2/11 : sub-queries refusées en write v1 — sémantique
+			// complexe (correlated updates). Read-only pour l'instant.
+			throw new SnqlError(
+				"Sub-query dans un contexte d'écriture (update/remove) non supportée v1 — matérialise le résultat côté application",
+				"lower_subquery_in_write",
+				expr.span
+			);
 	}
 }
 
@@ -1265,6 +1303,10 @@ function collectExprFields(expr: Expr, out: (readonly string[])[]): void {
 			for (const arg of expr.args) collectExprFields(arg, out);
 			for (const p of expr.partitionKeys) out.push(p);
 			for (const k of expr.sortKeys) out.push(k.path);
+			return;
+		case "subquery":
+		case "exists":
+			// Sprint T2/11 : uncorrelated — pas de field ref outer.
 			return;
 	}
 }
@@ -1627,13 +1669,38 @@ function lowerExpr(expr: Expr): PlanExpr {
 					};
 		case "not":
 			return { kind: "not", operand: lowerExpr(expr.operand), span: expr.span };
-		case "in":
+		case "in": {
+			// Sprint T2/11 : `x in (subquery)` — validate subquery a exactement
+			// 1 output field (parité PG `x IN (SELECT y FROM t)`).
+			const isSubqueryVariant =
+				expr.values.length === 1 && expr.values[0]?.type === "subquery";
+			if (isSubqueryVariant) {
+				const subExpr = expr.values[0]! as Expr & { type: "subquery" };
+				const pickStage = subExpr.query.stages.find(
+					(s) => s.type === "pick"
+				);
+				if (pickStage === undefined || pickStage.type !== "pick") {
+					throw new SnqlError(
+						"'in (subquery)' — la sub-query doit avoir un 'pick' avec exactement 1 field",
+						"lower_in_subquery_no_pick",
+						expr.values[0]!.span
+					);
+				}
+				if (pickStage.fields.length !== 1) {
+					throw new SnqlError(
+						`'in (subquery)' — la sub-query doit projeter exactement 1 field, reçu ${pickStage.fields.length}`,
+						"lower_in_subquery_arity",
+						expr.values[0]!.span
+					);
+				}
+			}
 			return {
 				kind: "in",
 				target: lowerExpr(expr.target),
 				values: expr.values.map(lowerExpr),
 				span: expr.span
 			};
+		}
 		case "arith":
 			return {
 				kind: "arith",
@@ -1646,6 +1713,27 @@ function lowerExpr(expr: Expr): PlanExpr {
 			return lowerCall(expr);
 		case "windowCall":
 			return lowerWindowCall(expr);
+		case "subquery": {
+			// Sprint T2/11 : lower la Query nested récursivement. Uncorrelated
+			// v1 — pas de scope-lookup vers les alias outer (T2/12 correlated).
+			// La subquery est self-contained : elle voit son propre alias source
+			// mais pas ceux de l'outer.
+			const subPlan = lower(expr.query);
+			return { kind: "subquery", plan: subPlan, span: expr.span };
+		}
+		case "exists": {
+			// `exists (subquery)` — le subquery est TOUJOURS un Expr.subquery
+			// (invariant parser). On unwrap pour obtenir le LogicalPlan direct.
+			if (expr.subquery.type !== "subquery") {
+				throw new SnqlError(
+					"'exists' attend une sub-query (bug parser)",
+					"lower_exists_not_subquery",
+					expr.span
+				);
+			}
+			const subPlan = lower(expr.subquery.query);
+			return { kind: "exists", subplan: subPlan, span: expr.span };
+		}
 		case "cast": {
 			// Défense-en-profondeur : le parser filtre déjà via CAST_TARGETS, mais un
 			// PlanExpr construit à la main (tests, futur workflow) pourrait passer un
@@ -2172,6 +2260,10 @@ function firstWindowCallSpanAst(
 			}
 			return firstWindowCallSpanAst(expr.elseValue);
 		}
+		case "subquery":
+		case "exists":
+			// Sprint T2/11 : uncorrelated — pas de window ref outer.
+			return undefined;
 	}
 }
 

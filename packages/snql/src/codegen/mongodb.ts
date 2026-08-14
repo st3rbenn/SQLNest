@@ -1095,6 +1095,15 @@ function renderMatch(
 				"codegen_mongo_predicate",
 				expr.span
 			);
+		case "subquery":
+		case "exists":
+			// Sprint T2/11 : sub-queries refusées au planner (Mongo n'a pas
+			// la capability). Defense — jamais atteint normalement.
+			throw new SnqlError(
+				"Sub-query dans un prédicat Mongo non supportée (planner_subquery_unsupported attendu avant)",
+				"codegen_mongo_subquery_unsupported",
+				expr.span
+			);
 	}
 }
 
@@ -1183,6 +1192,13 @@ function negateMatch(
 			throw new SnqlError(
 				"Négation d'un window function non supportée",
 				"codegen_mongo_predicate",
+				expr.span
+			);
+		case "subquery":
+		case "exists":
+			throw new SnqlError(
+				"Négation d'une sub-query Mongo non supportée",
+				"codegen_mongo_subquery_unsupported",
 				expr.span
 			);
 	}

@@ -9,9 +9,21 @@ import type {
 	CompareOperator,
 	Expr,
 	ObjectEntry,
+	Query,
 	SortKey
 } from "./ast";
 import type { TokenCursor } from "./cursor";
+
+/**
+ * Sprint T2/11 : hook pour parser une sub-query. Évite la dép circulaire
+ * expression.ts ↔ parser.ts (parseSelect vit dans parser.ts). Parser.ts fait
+ * `setSubqueryParser(parseStatement)` au module load. La sub-query doit être
+ * une Query (verb `find`/`get`), pas une mutation.
+ */
+let subqueryParser: ((cursor: TokenCursor) => Query) | null = null;
+export function setSubqueryParser(fn: (cursor: TokenCursor) => Query): void {
+	subqueryParser = fn;
+}
 
 const COMPARE_OPS: ReadonlySet<string> = new Set([
 	"=",
@@ -74,13 +86,26 @@ function parseExpr(cursor: TokenCursor, minBindingPower: number): Expr {
 			};
 		} else if (tok.kind === "keyword" && tok.value === "in") {
 			cursor.next();
-			const { values, endSpan } = parseInList(cursor);
-			left = {
-				type: "in",
-				target: left,
-				values,
-				span: joinSpan(left.span, endSpan)
-			};
+			// Sprint T2/11 : `in (find ...)` sub-query vs `in [...]` value list.
+			// Discriminant : `(` + verb dedans = subquery ; `[` = value list.
+			const next = cursor.peek();
+			if (next.kind === "lparen" && cursor.peek(1).kind === "verb") {
+				const subq = parseSubqueryParen(cursor);
+				left = {
+					type: "in",
+					target: left,
+					values: [subq],
+					span: joinSpan(left.span, subq.span)
+				};
+			} else {
+				const { values, endSpan } = parseInList(cursor);
+				left = {
+					type: "in",
+					target: left,
+					values,
+					span: joinSpan(left.span, endSpan)
+				};
+			}
 		} else if (isArithToken(tok)) {
 			// Arithmétique binaire : `+ - * / %`. Left-associatif via `bp + 1`.
 			cursor.next();
@@ -118,6 +143,31 @@ function parsePrefix(cursor: TokenCursor): Expr {
 		cursor.next();
 		const operand = parseExpr(cursor, 3);
 		return { type: "not", operand, span: joinSpan(tok.span, operand.span) };
+	}
+	// Sprint T2/11 : `exists (find ...)` — prefix keyword. Exige `(` + verb
+	// dedans (subquery obligatoire, pas une expression scalaire).
+	if (tok.kind === "keyword" && tok.value === "exists") {
+		cursor.next();
+		if (cursor.peek().kind !== "lparen") {
+			throw new SnqlError(
+				"'exists' attend '(find ...)' — la sub-query doit être entre parens",
+				"parse_exists_missing_paren",
+				cursor.peek().span
+			);
+		}
+		if (cursor.peek(1).kind !== "verb") {
+			throw new SnqlError(
+				"'exists (...)' attend une sub-query (verb 'find'/'get' après '(')",
+				"parse_exists_not_subquery",
+				cursor.peek().span
+			);
+		}
+		const subq = parseSubqueryParen(cursor);
+		return {
+			type: "exists",
+			subquery: subq,
+			span: joinSpan(tok.span, subq.span)
+		};
 	}
 	// Signe unaire : uniquement devant un littéral numérique.
 	if (tok.kind === "minus" || tok.kind === "plus") {
@@ -533,6 +583,27 @@ function parseCastBody(cursor: TokenCursor, nameSpan: Span): Expr {
 		target: targetName as CastTarget,
 		targetSpan: targetTok.span,
 		span: joinSpan(nameSpan, close.span)
+	};
+}
+
+/**
+ * Sprint T2/11 : parse `(find/get ...)` en position d'expression. Consomme
+ * la lparen, délègue au subqueryParser hook (parser.ts:parseStatement) qui
+ * parse un full Query, puis expect rparen.
+ */
+function parseSubqueryParen(cursor: TokenCursor): Expr & { type: "subquery" } {
+	if (subqueryParser === null) {
+		throw new Error(
+			"Sub-query parser hook non initialisé — parser.ts doit appeler setSubqueryParser au module load"
+		);
+	}
+	const open = cursor.expect("lparen", "'(' pour ouvrir la sub-query");
+	const query = subqueryParser(cursor);
+	const close = cursor.expect("rparen", "')' pour fermer la sub-query");
+	return {
+		type: "subquery",
+		query,
+		span: joinSpan(open.span, close.span)
 	};
 }
 
