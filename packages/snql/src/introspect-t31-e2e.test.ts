@@ -365,3 +365,120 @@ describe("parser — `for` shortcut", () => {
 		);
 	});
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// T3/3 — list schemas + list indexes
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("parser — `list schemas` / `list indexes`", () => {
+	it("parse `list schemas`", () => {
+		const stmt = parse(tokenize("list schemas"));
+		if (stmt.operation !== "introspect") throw new Error();
+		expect(stmt.kind).toBe("list-schemas");
+		expect(stmt.target).toBeUndefined();
+	});
+
+	it("parse `list indexes` (sans target)", () => {
+		const stmt = parse(tokenize("list indexes"));
+		if (stmt.operation !== "introspect") throw new Error();
+		expect(stmt.kind).toBe("list-indexes");
+		expect(stmt.target).toBeUndefined();
+	});
+
+	it("parse `list indexes on agency`", () => {
+		const stmt = parse(tokenize("list indexes on agency"));
+		if (stmt.operation !== "introspect") throw new Error();
+		expect(stmt.kind).toBe("list-indexes");
+		expect(stmt.target).toBe("agency");
+	});
+
+	it("refus `list indexes on` sans table", () => {
+		expectCode(
+			() => parse(tokenize("list indexes on")),
+			"parse_introspect_indexes_missing_target"
+		);
+	});
+
+	it("refus sous-commande list inconnue", () => {
+		expectCode(
+			() => parse(tokenize("list foobar")),
+			"parse_introspect_unknown_list"
+		);
+	});
+
+	it("`list schemas where name like \"apollon%\"` — stages pipeline", () => {
+		const stmt = parse(tokenize('list schemas where name like "apollon%"'));
+		if (stmt.operation !== "introspect") throw new Error();
+		expect(stmt.stages).toHaveLength(1);
+	});
+
+	it("`list indexes on agency for agency_pkey` — for shortcut", () => {
+		const stmt = parse(tokenize("list indexes on agency for agency_pkey"));
+		if (stmt.operation !== "introspect") throw new Error();
+		expect(stmt.target).toBe("agency");
+		expect(stmt.stages).toHaveLength(1);
+	});
+});
+
+describe("codegen PG — list schemas / list indexes", () => {
+	it("`list schemas` — exclut pg_* et information_schema", () => {
+		const stmt = parse(tokenize("list schemas"));
+		if (stmt.operation !== "introspect") throw new Error();
+		const planned = lowerIntrospect(stmt);
+		const mapper = getMapper("postgres");
+		const native = mapper.mapIntrospect!(planned);
+		if (native.kind !== "sql") throw new Error();
+		expect(native.text).toContain("information_schema.schemata");
+		expect(native.text).toContain("pg\\_%");
+		expect(native.text).toContain("information_schema");
+		// list-schemas ne prend PAS de namespace — pas de $1 pour ns.
+		expect(native.params).toEqual([]);
+	});
+
+	it("`list indexes` — pg_index join sans target filter", () => {
+		const stmt = parse(tokenize("list indexes"));
+		if (stmt.operation !== "introspect") throw new Error();
+		const planned = lowerIntrospect(stmt);
+		const mapper = getMapper("postgres");
+		const native = mapper.mapIntrospect!(planned, { namespace: "apollon" });
+		if (native.kind !== "sql") throw new Error();
+		expect(native.text).toContain("pg_index");
+		expect(native.text).toContain("indisunique");
+		expect(native.text).not.toContain("t.relname = $2");
+		expect(native.params).toEqual(["apollon"]);
+	});
+
+	it("`list indexes on agency` — filter table bindé $2", () => {
+		const stmt = parse(tokenize("list indexes on agency"));
+		if (stmt.operation !== "introspect") throw new Error();
+		const planned = lowerIntrospect(stmt);
+		const mapper = getMapper("postgres");
+		const native = mapper.mapIntrospect!(planned, { namespace: "apollon" });
+		if (native.kind !== "sql") throw new Error();
+		expect(native.text).toContain("t.relname = $2");
+		expect(native.params).toEqual(["apollon", "agency"]);
+	});
+});
+
+describe("codegen Mongo — list schemas / list indexes", () => {
+	it("`list schemas` produit mongo-introspect kind list-schemas", () => {
+		const stmt = parse(tokenize("list schemas"));
+		if (stmt.operation !== "introspect") throw new Error();
+		const planned = lowerIntrospect(stmt);
+		const mapper = getMapper("mongodb");
+		const native = mapper.mapIntrospect!(planned);
+		if (native.kind !== "mongo-introspect") throw new Error();
+		expect(native.plan.kind).toBe("list-schemas");
+	});
+
+	it("`list indexes on users` produit plan avec target", () => {
+		const stmt = parse(tokenize("list indexes on users"));
+		if (stmt.operation !== "introspect") throw new Error();
+		const planned = lowerIntrospect(stmt);
+		const mapper = getMapper("mongodb");
+		const native = mapper.mapIntrospect!(planned);
+		if (native.kind !== "mongo-introspect") throw new Error();
+		expect(native.plan.kind).toBe("list-indexes");
+		expect(native.plan.target).toBe("users");
+	});
+});

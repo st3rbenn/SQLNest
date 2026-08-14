@@ -317,8 +317,8 @@ describe("completeSnql — robustesse", () => {
 	});
 
 	// T3/2.2 : après `list ` / `describe `, orienter vers sous-commande / tables.
-	it("`list ` propose la sous-commande tables", () => {
-		expect(labels("list ")).toEqual(["tables"]);
+	it("`list ` propose les sous-commandes (tables/schemas/indexes)", () => {
+		expect(labels("list ")).toEqual(["tables", "schemas", "indexes"]);
 	});
 
 	it("`describe ` propose les collections", () => {
@@ -416,6 +416,49 @@ describe("completeSnql — robustesse", () => {
 
 	it("`list tables for ` propose les collections", () => {
 		expect(labels("list tables for ")).toEqual(["users", "orders"]);
+	});
+
+	// T3/3 : list schemas + list indexes
+	it("`list schemas ` propose stages restants (pas de target)", () => {
+		expect(labels("list schemas ")).toEqual(["for", "where", "pick", "sort", "limit"]);
+	});
+
+	it("`list indexes ` propose `on` en tête + stages", () => {
+		expect(labels("list indexes ")).toEqual([
+			"on",
+			"for",
+			"where",
+			"pick",
+			"sort",
+			"limit"
+		]);
+	});
+
+	it("`list indexes on ` propose les collections", () => {
+		expect(labels("list indexes on ")).toEqual(["users", "orders"]);
+	});
+
+	it("`list indexes on users ` propose stages (sans on)", () => {
+		expect(labels("list indexes on users ")).toEqual([
+			"for",
+			"where",
+			"pick",
+			"sort",
+			"limit"
+		]);
+	});
+
+	it("`list indexes pick ` propose le shape (name/table/unique/columns)", () => {
+		expect(labels("list indexes pick ")).toEqual([
+			"name",
+			"table",
+			"unique",
+			"columns"
+		]);
+	});
+
+	it("`list schemas pick ` propose `name`", () => {
+		expect(labels("list schemas pick ")).toEqual(["name"]);
 	});
 
 	it("schéma sans collection : propose quand même les verbes/étapes", () => {

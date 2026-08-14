@@ -109,6 +109,14 @@ export const postgresMapper: Mapper = {
 			const nsRef = params.add(namespace);
 			const targetRef = params.add(plan.target);
 			baseText = describeTableSql(nsRef, targetRef);
+		} else if (plan.kind === "list-schemas") {
+			// Exclut les schemas système PG (`pg_*`, `information_schema`) — l'user
+			// veut voir SES schemas, pas la plomberie du catalog.
+			baseText = `SELECT schema_name AS name FROM information_schema.schemata WHERE schema_name NOT LIKE 'pg\\_%' ESCAPE '\\' AND schema_name != 'information_schema' ORDER BY schema_name`;
+		} else if (plan.kind === "list-indexes") {
+			const nsRef = params.add(namespace);
+			const targetRef = plan.target !== undefined ? params.add(plan.target) : undefined;
+			baseText = listIndexesSql(nsRef, targetRef);
 		} else {
 			throw new SnqlError(
 				`Introspect kind '${plan.kind}' non supporté par le codegen Postgres v1`,
@@ -234,6 +242,31 @@ function describeTableSql(ns: string, target: string): string {
 		`) fk ON fk.column_name = c.column_name ` +
 		`WHERE c.table_schema = ${ns} AND c.table_name = ${target} ` +
 		`ORDER BY c.ordinal_position`
+	);
+}
+
+/**
+ * Sprint T3/3 : SQL de `list indexes [on <table>]`. `pg_index` porte les
+ * flags (unique/primary), `pg_class` les noms, `pg_attribute` les colonnes.
+ * `string_agg(...)` reconstruit la liste des cols dans l'ordre déclaré
+ * (`indkey` est un int[] positionnel). $1 = namespace, $2 = table (opt).
+ */
+function listIndexesSql(ns: string, target: string | undefined): string {
+	const tableFilter = target !== undefined ? ` AND t.relname = ${target}` : "";
+	return (
+		`SELECT ` +
+			`i.relname AS name, ` +
+			`t.relname AS "table", ` +
+			`ix.indisunique AS "unique", ` +
+			`(SELECT string_agg(a.attname, ', ' ORDER BY array_position(ix.indkey::int[], a.attnum::int)) ` +
+			`FROM pg_attribute a ` +
+			`WHERE a.attrelid = t.oid AND a.attnum = ANY(ix.indkey::int[])) AS columns ` +
+		`FROM pg_index ix ` +
+		`JOIN pg_class i ON i.oid = ix.indexrelid ` +
+		`JOIN pg_class t ON t.oid = ix.indrelid ` +
+		`JOIN pg_namespace n ON n.oid = t.relnamespace ` +
+		`WHERE n.nspname = ${ns}${tableFilter} ` +
+		`ORDER BY t.relname, i.relname`
 	);
 }
 

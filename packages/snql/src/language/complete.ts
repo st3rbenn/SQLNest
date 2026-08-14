@@ -66,8 +66,8 @@ const PRIMARY_VERBS: readonly {
 	{ label: "describe", detail: "introspection", type: "keyword" }
 ];
 
-/** Sous-commandes reconnues après `list` (v1 : tables). */
-const LIST_SUBCOMMANDS: readonly string[] = ["tables"];
+/** Sous-commandes reconnues après `list` (T3/1 + T3/3). */
+const LIST_SUBCOMMANDS: readonly string[] = ["tables", "schemas", "indexes"];
 
 /**
  * Shape stable de sortie par kind d'introspection. Le complete propose ces
@@ -84,7 +84,9 @@ const INTROSPECT_SHAPES: Readonly<Record<string, readonly string[]>> = {
 		"default",
 		"is_primary_key",
 		"foreign_key"
-	]
+	],
+	"list-schemas": ["name"],
+	"list-indexes": ["name", "table", "unique", "columns"]
 };
 
 /** Stages autorisés post-introspection (aligné parseIntrospectTail). */
@@ -257,6 +259,14 @@ function contextOptions(
 	// T3/2.4 : `for <col1>, <col2>` propose les cols de la table cible.
 	const introContext = introspectContextOf(toks);
 	if (introContext !== null) {
+		// T3/3 : `list indexes on |` → collections (la table cible du filter).
+		if (
+			introContext.kind === "list-indexes" &&
+			last.kind === "keyword" &&
+			last.value === "on"
+		) {
+			return collections(schema);
+		}
 		// `for a, |` OU `describe X for |` — propose les cibles du shortcut.
 		if (
 			(last.kind === "comma" || last.kind === "ident") &&
@@ -356,17 +366,16 @@ function contextOptions(
 
 /** Contexte introspect détecté (kind + optionnellement la table cible). */
 interface IntrospectContext {
-	readonly kind: "list-tables" | "describe-table";
+	readonly kind: "list-tables" | "describe-table" | "list-schemas" | "list-indexes";
 	readonly shape: readonly string[];
-	/** Target présent uniquement pour `describe <target>` — nom de la table. */
+	/** Target présent pour `describe <t>` ou `list indexes on <t>`. */
 	readonly target: string | undefined;
 }
 
 /**
- * T3/2.3 : détecte une commande d'introspection en tête de flux — retourne
- * les cols du shape de sortie associées (list-tables → [name], describe-table
- * → [name, type, nullable, default, is_primary_key, foreign_key]) + la table
- * cible quand pertinent. Retourne null si non-introspect.
+ * T3/2.3 + T3/3 : détecte une commande d'introspection en tête de flux et
+ * retourne le shape de sortie + la table cible quand pertinent. Retourne
+ * null si non-introspect ou sous-commande inconnue.
  */
 function introspectContextOf(toks: readonly Token[]): IntrospectContext | null {
 	const first = toks[0];
@@ -374,11 +383,37 @@ function introspectContextOf(toks: readonly Token[]): IntrospectContext | null {
 	const lower = first.value.toLowerCase();
 	if (lower === "list") {
 		const sub = toks[1];
-		if (sub?.kind === "ident" && sub.value.toLowerCase() === "tables") {
+		if (sub?.kind !== "ident") return null;
+		const subLower = sub.value.toLowerCase();
+		if (subLower === "tables") {
 			return {
 				kind: "list-tables",
 				shape: INTROSPECT_SHAPES["list-tables"] ?? [],
 				target: undefined
+			};
+		}
+		if (subLower === "schemas") {
+			return {
+				kind: "list-schemas",
+				shape: INTROSPECT_SHAPES["list-schemas"] ?? [],
+				target: undefined
+			};
+		}
+		if (subLower === "indexes") {
+			// `list indexes on <t>` — extrait la table si `on <ident>` est présent.
+			// toks[2] = `on` (keyword), toks[3] = <ident>.
+			const onKw = toks[2];
+			const targetTok = toks[3];
+			const target =
+				onKw?.kind === "keyword" &&
+				onKw.value === "on" &&
+				targetTok?.kind === "ident"
+					? targetTok.value
+					: undefined;
+			return {
+				kind: "list-indexes",
+				shape: INTROSPECT_SHAPES["list-indexes"] ?? [],
+				target
 			};
 		}
 		return null;
@@ -451,15 +486,29 @@ function remainingIntrospectStages(
 ): readonly SnqlCompletion[] {
 	const seen = new Set<string>();
 	let sawFor = false;
+	let sawOn = false;
 	for (const tok of toks) {
 		if (tok.kind === "keyword" && INTROSPECT_STAGES.includes(tok.value)) {
 			seen.add(tok.value);
 		}
+		if (tok.kind === "keyword" && tok.value === "on") sawOn = true;
 		if (tok.kind === "ident" && tok.value.toLowerCase() === "for") {
 			sawFor = true;
 		}
 	}
 	const out: SnqlCompletion[] = [];
+	// T3/3 : `on <table>` proposé après `list indexes` (kind spécifique, jamais
+	// pertinent après `list tables`/`describe`/etc.). Précède `for` — ordre
+	// canonique `list indexes on t for … where … pick … sort … limit`.
+	const ctx = introspectContextOf(toks);
+	if (
+		ctx?.kind === "list-indexes" &&
+		!sawOn &&
+		!sawFor &&
+		seen.size === 0
+	) {
+		out.push({ label: "on", type: "keyword", detail: "table cible" });
+	}
 	// T3/2.4 : `for` en tête tant que non déjà consommé, tant qu'aucun stage
 	// classique n'a démarré (l'ordre canonique impose for AVANT where/pick/...).
 	if (!sawFor && seen.size === 0) {

@@ -39,6 +39,17 @@ const DESCRIBE_COLUMNS: readonly ResultColumn[] = [
 ];
 
 /**
+ * Sprint T3/3 : shape stable de `list indexes`. Identique côté PG (le SQL
+ * pg_index produit ces mêmes colonnes) → l'UI n'a pas à brancher sur l'engine.
+ */
+const INDEXES_COLUMNS: readonly ResultColumn[] = [
+	{ name: "name", type: "string", nullable: false },
+	{ name: "table", type: "string", nullable: false },
+	{ name: "unique", type: "bool", nullable: false },
+	{ name: "columns", type: "string", nullable: false }
+];
+
+/**
  * Normalise une valeur BSON en scalaire portable, pour respecter le contrat de
  * ResultSet « normalisé » : là où Postgres renvoie des scalaires, le driver Mongo
  * renvoie des objets BSON (ObjectId, Decimal128, Long, Timestamp…). On les ramène
@@ -359,6 +370,50 @@ class MongoConnection implements Connection {
 				}));
 				return { columns: DESCRIBE_COLUMNS, rows, rowCount: rows.length };
 			}
+			if (query.plan.kind === "list-schemas") {
+				// Mongo n'a pas de "schema" au sens PG — le concept équivalent
+				// est la database. admin.listDatabases() nécessite le rôle
+				// admin ; certaines connexions n'y ont pas accès. On rebalance
+				// avec la DB courante seulement si la commande échoue.
+				try {
+					const admin = this.#requireClient().db().admin();
+					const result = await admin.listDatabases({ nameOnly: true });
+					const rows: Row[] = result.databases.map((d) => ({ name: d.name }));
+					return {
+						columns: [{ name: "name", type: "string", nullable: false }],
+						rows,
+						rowCount: rows.length
+					};
+				} catch {
+					// Fallback : au moins la DB courante (visible = accessible).
+					const rows: Row[] = [{ name: db.databaseName }];
+					return {
+						columns: [{ name: "name", type: "string", nullable: false }],
+						rows,
+						rowCount: rows.length
+					};
+				}
+			}
+			if (query.plan.kind === "list-indexes") {
+				const collectionNames = query.plan.target !== undefined
+					? [query.plan.target]
+					: (await db.listCollections({ type: "collection" }, { nameOnly: true }).toArray())
+						.map((c) => c.name);
+				const rows: Row[] = [];
+				for (const name of collectionNames) {
+					const idx = await db.collection(name).indexes();
+					for (const info of idx) {
+						const key = (info as { key: Record<string, unknown> }).key;
+						rows.push({
+							name: info.name ?? "",
+							table: name,
+							unique: (info as { unique?: boolean }).unique === true,
+							columns: Object.keys(key).join(", ")
+						});
+					}
+				}
+				return { columns: INDEXES_COLUMNS, rows, rowCount: rows.length };
+			}
 			throw new EngineExecutionError(
 				`Introspect kind '${query.plan.kind}' non supporté par l'adapter Mongo v1`
 			);
@@ -385,6 +440,13 @@ class MongoConnection implements Connection {
 			throw new ConnectionClosedError(this.engine);
 		}
 		return this.#client.db(this.#dbName);
+	}
+
+	#requireClient(): MongoClient {
+		if (this.#client === undefined) {
+			throw new ConnectionClosedError(this.engine);
+		}
+		return this.#client;
 	}
 }
 

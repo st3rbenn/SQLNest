@@ -446,7 +446,9 @@ export interface TransactionStatement {
  */
 export type IntrospectKind =
 	| "list-tables" // T3/1 — v1 : liste plate des tables du schéma courant
-	| "describe-table"; // T3/2 — colonnes d'une table (name/type/nullable/default/PK/FK)
+	| "describe-table" // T3/2 — colonnes d'une table (name/type/nullable/default/PK/FK)
+	| "list-schemas" // T3/3 — schemas PG (ou databases Mongo) — shape {name}
+	| "list-indexes"; // T3/3 — indexes, target optionnel — shape {name,table,unique,columns}
 
 export interface IntrospectStatement {
 	readonly operation: "introspect";

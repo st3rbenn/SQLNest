@@ -108,7 +108,15 @@ function parseStatement(cursor: TokenCursor): Statement {
 function parseIntrospectList(cursor: TokenCursor): IntrospectStatement {
 	const listTok = cursor.next(); // `list`
 	const sub = cursor.peek();
-	if (sub.kind === "ident" && sub.value.toLowerCase() === "tables") {
+	if (sub.kind !== "ident") {
+		throw new SnqlError(
+			`'list' attend une sous-commande (tables / schemas / indexes), trouvé '${sub.value}'`,
+			"parse_introspect_unknown_list",
+			sub.span
+		);
+	}
+	const subLower = sub.value.toLowerCase();
+	if (subLower === "tables") {
 		const subTok = cursor.next();
 		const tail = parseIntrospectTail(cursor);
 		const endSpan = tail.stages.length > 0
@@ -121,8 +129,52 @@ function parseIntrospectList(cursor: TokenCursor): IntrospectStatement {
 			span: { start: listTok.span.start, end: endSpan.end }
 		};
 	}
+	if (subLower === "schemas") {
+		const subTok = cursor.next();
+		const tail = parseIntrospectTail(cursor);
+		const endSpan = tail.stages.length > 0
+			? tail.stages[tail.stages.length - 1]!.span
+			: subTok.span;
+		return {
+			operation: "introspect",
+			kind: "list-schemas",
+			...(tail.stages.length > 0 ? { stages: tail.stages } : {}),
+			span: { start: listTok.span.start, end: endSpan.end }
+		};
+	}
+	if (subLower === "indexes") {
+		const subTok = cursor.next();
+		// `on <table>` optionnel — restreint aux indexes de la table cible.
+		let target: string | undefined;
+		let targetEnd = subTok.span.end;
+		if (peekKeyword(cursor, "on")) {
+			cursor.next();
+			const targetTok = cursor.peek();
+			if (targetTok.kind !== "ident") {
+				throw new SnqlError(
+					`'list indexes on' attend un nom de table, trouvé '${targetTok.value}'`,
+					"parse_introspect_indexes_missing_target",
+					targetTok.span
+				);
+			}
+			cursor.next();
+			target = targetTok.value;
+			targetEnd = targetTok.span.end;
+		}
+		const tail = parseIntrospectTail(cursor);
+		const endSpan = tail.stages.length > 0
+			? tail.stages[tail.stages.length - 1]!.span
+			: { start: targetEnd, end: targetEnd };
+		return {
+			operation: "introspect",
+			kind: "list-indexes",
+			...(target !== undefined ? { target } : {}),
+			...(tail.stages.length > 0 ? { stages: tail.stages } : {}),
+			span: { start: listTok.span.start, end: endSpan.end }
+		};
+	}
 	throw new SnqlError(
-		`'list' attend une sous-commande connue (v1: tables), trouvé '${sub.value}'`,
+		`'list' attend une sous-commande connue (tables / schemas / indexes), trouvé '${sub.value}'`,
 		"parse_introspect_unknown_list",
 		sub.span
 	);
