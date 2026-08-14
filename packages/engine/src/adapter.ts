@@ -28,6 +28,12 @@ export interface PingResult {
  */
 export interface Connection {
 	readonly engine: string;
+	/**
+	 * Sprint T3/1 : namespace runtime — PG schema (search_path), Mongo DB
+	 * name. Utilisé par le codegen d'introspection (`list tables` filtre par
+	 * ce namespace). Absent = engine sans notion de namespace.
+	 */
+	readonly namespace?: string;
 	/** Vérifie que le moteur répond (aller-retour réseau). Lève si injoignable. */
 	ping(): Promise<PingResult>;
 	/** Lit la structure de la base → SchemaModel unifié. */

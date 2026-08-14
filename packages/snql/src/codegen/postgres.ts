@@ -3,6 +3,7 @@ import { SNQL_FUNCTIONS } from "../functions";
 import type {
 	CastTarget,
 	CompareOp,
+	IntrospectPlan,
 	LogicalPlan,
 	MutationPlan,
 	PlanExpr,
@@ -82,6 +83,30 @@ export const postgresMapper: Mapper = {
 		return plan.isolation !== undefined
 			? { engine: "postgres", kind: "transaction", isolation: plan.isolation, steps }
 			: { engine: "postgres", kind: "transaction", steps };
+	},
+	/**
+	 * Sprint T3/1 : rend un IntrospectPlan en SqlQuery via `information_schema`.
+	 * Le namespace (PG schema, ex: "public") vient du context runtime — fallback
+	 * "public" si absent (default PG standard). Query text stable, params bindés.
+	 */
+	mapIntrospect(
+		plan: IntrospectPlan,
+		ctx?: import("./mapper").MapperContext
+	): NativeQuery {
+		const namespace = ctx?.namespace ?? "public";
+		if (plan.kind === "list-tables") {
+			return {
+				engine: "postgres",
+				kind: "sql",
+				text: `SELECT table_name AS name FROM information_schema.tables WHERE table_schema = $1 AND table_type = 'BASE TABLE' ORDER BY table_name`,
+				params: [namespace],
+				paramSpans: [undefined]
+			};
+		}
+		throw new SnqlError(
+			`Introspect kind '${plan.kind}' non supporté par le codegen Postgres v1`,
+			"codegen_introspect_unsupported"
+		);
 	}
 };
 

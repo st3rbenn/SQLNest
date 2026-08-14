@@ -3,6 +3,7 @@ import { SNQL_FUNCTIONS } from "../functions";
 import type {
 	CastTarget,
 	CompareOp,
+	IntrospectPlan,
 	LogicalPlan,
 	MutationPlan,
 	PlanColumnValue,
@@ -69,6 +70,15 @@ export const mongoMapper: Mapper = {
 			case "delete":
 				return { ...base, op: "delete", filter: renderFilter(plan.predicate) };
 		}
+	},
+	/**
+	 * Sprint T3/1 : passe l'IntrospectPlan tel quel au shape MongoIntrospectQuery.
+	 * L'adapter Mongo dispatch selon `plan.kind` (list-tables → db.listCollections
+	 * sur la DB de la connection). Namespace (DB name) déjà dans la connection —
+	 * l'adapter n'a pas besoin de le lire depuis ctx.
+	 */
+	mapIntrospect(plan: IntrospectPlan): NativeQuery {
+		return { engine: "mongodb", kind: "mongo-introspect", plan };
 	}
 };
 

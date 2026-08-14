@@ -213,6 +213,9 @@ class MongoConnection implements Connection {
 		if (query.kind === "mongo-write") {
 			return this.#executeWrite(query);
 		}
+		if (query.kind === "mongo-introspect") {
+			return this.#executeIntrospect(query);
+		}
 		if (query.kind !== "mongo") {
 			throw new EngineExecutionError(
 				`Adapter MongoDB : requête native '${query.kind}' non supportée (pipeline attendu)`
@@ -293,6 +296,39 @@ class MongoConnection implements Connection {
 			throw new EngineExecutionError(writeErrorMessage(query.op, cause), {
 				cause
 			});
+		}
+	}
+
+	/**
+	 * Sprint T3/1 : dispatch introspection Mongo. `list-tables` → listCollections
+	 * sur la DB courante, filtre sur les collections user (`type: "collection"`)
+	 * pour exclure les views/system.
+	 */
+	async #executeIntrospect(
+		query: Extract<NativeQuery, { kind: "mongo-introspect" }>
+	): Promise<ResultSet> {
+		const db = this.#requireDb();
+		try {
+			if (query.plan.kind === "list-tables") {
+				const infos = await db
+					.listCollections({ type: "collection" }, { nameOnly: true })
+					.toArray();
+				const rows: Row[] = infos.map((info) => ({ name: info.name }));
+				return {
+					columns: [{ name: "name", type: "string", nullable: false }],
+					rows,
+					rowCount: rows.length
+				};
+			}
+			throw new EngineExecutionError(
+				`Introspect kind '${query.plan.kind}' non supporté par l'adapter Mongo v1`
+			);
+		} catch (cause) {
+			if (cause instanceof EngineExecutionError) throw cause;
+			throw new EngineExecutionError(
+				`Introspection MongoDB échouée — ${describeMongoExecutionError(cause)}`,
+				{ cause }
+			);
 		}
 	}
 

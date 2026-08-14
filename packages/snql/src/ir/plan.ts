@@ -38,7 +38,13 @@ export type Capability =
 	// Sprint T2/15 : `transaction [isolation …] { stmt; stmt }` bloc atomique
 	// multi-statements. PG only v1 (BEGIN/COMMIT/ROLLBACK natif). Mongo/KV
 	// hors scope pour l'instant.
-	| "transaction";
+	| "transaction"
+	// Sprint T3/1 : introspection (`list tables`, `describe <t>`, `list
+	// schemas`, `list indexes`). PG + Mongo v1 — chaque engine mappe vers
+	// son propre mécanisme (information_schema PG, listCollections Mongo).
+	// Chaque IntrospectKind renvoie un shape de colonnes stable cross-engine
+	// (ex: list-tables → {name: string}).
+	| "introspect";
 
 /**
  * Décimal **exact** : on garde le texte brut. Les colonnes NUMERIC/DECIMAL de
@@ -436,8 +442,20 @@ export interface TransactionPlan {
 	readonly body: readonly TransactionPlanItem[];
 }
 
-/** Un plan complet : lecture, mutation ou transaction (T2/15). */
-export type Plan = LogicalPlan | MutationPlan | TransactionPlan;
+/**
+ * Sprint T3/1 : plan d'introspection. Exige capability `introspect`. Le
+ * codegen produit un native adapté à l'engine cible (SqlQuery PG via
+ * information_schema, MongoIntrospect via listCollections). `target` porte
+ * l'ident cible quand pertinent (ex: `describe <target>`).
+ */
+export interface IntrospectPlan {
+	readonly op: "introspect";
+	readonly kind: import("../parser/ast").IntrospectKind;
+	readonly target?: string;
+}
+
+/** Un plan complet : lecture, mutation, transaction (T2/15) ou introspect (T3/1). */
+export type Plan = LogicalPlan | MutationPlan | TransactionPlan | IntrospectPlan;
 
 export type PlanOp = LogicalPlan["op"];
 

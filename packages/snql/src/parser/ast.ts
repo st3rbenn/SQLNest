@@ -437,10 +437,28 @@ export interface TransactionStatement {
 	readonly span: Span;
 }
 
-/** Racine de l'AST : lecture (`Query`), mutation, ou transaction (T2/15). */
+/**
+ * Sprint T3/1 : statement d'introspection — `list tables`, `describe <table>`,
+ * `list schemas`, `list indexes`, etc. Le `kind` discrimine la sous-commande ;
+ * `target` porte l'ident cible quand applicable (ex: `describe users`). Chaque
+ * kind est cadré par un mini-schéma (colonnes fixes en sortie) — pas de
+ * projection user (contrat SNQL : introspection retourne un shape stable).
+ */
+export type IntrospectKind =
+	| "list-tables"; // T3/1 — v1 : liste plate des tables du schéma courant
+
+export interface IntrospectStatement {
+	readonly operation: "introspect";
+	readonly kind: IntrospectKind;
+	readonly target?: string;
+	readonly span: Span;
+}
+
+/** Racine de l'AST : lecture (`Query`), mutation, transaction (T2/15), ou introspection (T3/1). */
 export type Statement =
 	| Query
 	| InsertStatement
 	| UpdateStatement
 	| DeleteStatement
-	| TransactionStatement;
+	| TransactionStatement
+	| IntrospectStatement;

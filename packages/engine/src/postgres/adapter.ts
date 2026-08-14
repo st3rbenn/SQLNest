@@ -151,6 +151,11 @@ class PostgresConnection implements Connection {
 	readonly engine = "postgres";
 	#pool: PgPool | undefined;
 	readonly #schema: string;
+	/** Sprint T3/1 : expose le search_path PG comme namespace runtime pour
+	 *  que le codegen d'introspection puisse binder le WHERE table_schema. */
+	get namespace(): string {
+		return this.#schema;
+	}
 
 	constructor(pool: PgPool, schema: string) {
 		this.#pool = pool;

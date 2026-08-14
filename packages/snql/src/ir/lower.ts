@@ -580,6 +580,20 @@ function lowerTransactionItem(
 	return { kind: "write", plan: lowerMutation(item, schema) };
 }
 
+/**
+ * Sprint T3/1 : abaisse un statement d'introspection. Trivial pour v1 —
+ * pas de typecheck expr, pas de scope, juste passe kind + target au codegen
+ * qui produit un native adapté à l'engine cible.
+ */
+export function lowerIntrospect(
+	statement: import("../parser/ast").IntrospectStatement,
+	_schema?: SchemaModel
+): import("./plan").IntrospectPlan {
+	return statement.target !== undefined
+		? { op: "introspect", kind: statement.kind, target: statement.target }
+		: { op: "introspect", kind: statement.kind };
+}
+
 export function lowerMutation(
 	statement: InsertStatement | UpdateStatement | DeleteStatement,
 	schema?: SchemaModel

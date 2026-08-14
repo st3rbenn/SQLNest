@@ -1,4 +1,9 @@
-import type { LogicalPlan, MutationPlan, TransactionPlan } from "../ir/plan";
+import type {
+	IntrospectPlan,
+	LogicalPlan,
+	MutationPlan,
+	TransactionPlan
+} from "../ir/plan";
 import type { IsolationLevel } from "../parser/ast";
 
 /** Une étape de pipeline d'agrégation MongoDB (ex. `{ $match: … }`). */
@@ -103,8 +108,35 @@ export interface SqlTransaction {
 	readonly steps: readonly SqlTransactionStep[];
 }
 
+/**
+ * Sprint T3/1 : native shape pour une commande d'introspection Mongo. PG
+ * produit une SqlQuery normale (via information_schema, avec le namespace
+ * bindé). Mongo utilise une commande dédiée (`listCollections`) qui n'est
+ * pas exprimable en pipeline aggregation.
+ */
+export interface MongoIntrospectQuery {
+	readonly engine: string;
+	readonly kind: "mongo-introspect";
+	readonly plan: IntrospectPlan;
+}
+
+/**
+ * Sprint T3/1 : options passées aux méthodes du Mapper qui ont besoin du
+ * contexte runtime. Aujourd'hui : namespace (PG schema / Mongo DB name)
+ * pour l'introspection. Extensible pour d'autres options futures sans
+ * casser la signature.
+ */
+export interface MapperContext {
+	readonly namespace?: string;
+}
+
 /** Requête native produite pour un moteur donné. */
-export type NativeQuery = SqlQuery | MongoQuery | MongoWriteQuery | SqlTransaction;
+export type NativeQuery =
+	| SqlQuery
+	| MongoQuery
+	| MongoWriteQuery
+	| SqlTransaction
+	| MongoIntrospectQuery;
 
 /** Contrat de codegen par moteur : plan → requête native. Pur, sans I/O. */
 export interface Mapper {
@@ -115,4 +147,6 @@ export interface Mapper {
 	mapMutation(plan: MutationPlan): NativeQuery;
 	/** Sprint T2/15 : transaction PG-only. Absent = engine sans support. */
 	mapTransaction?(plan: TransactionPlan): SqlTransaction;
+	/** Sprint T3/1 : introspection (list/describe/etc.). PG et Mongo v1. */
+	mapIntrospect?(plan: IntrospectPlan, ctx?: MapperContext): NativeQuery;
 }

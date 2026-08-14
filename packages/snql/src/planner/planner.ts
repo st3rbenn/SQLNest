@@ -486,6 +486,22 @@ export function assertTransactionSupported(
 	);
 }
 
+/**
+ * Sprint T3/1 : refuse `list tables` / `describe …` / etc. si l'engine cible
+ * n'a pas la capability `introspect`. Message actionable pointant les
+ * alternatives (raw commands côté power user).
+ */
+export function assertIntrospectSupported(
+	plan: import("../ir/plan").IntrospectPlan,
+	capabilities: Capabilities
+): void {
+	if (capabilities.supports.has("introspect")) return;
+	throw new SnqlError(
+		`'${plan.kind}' non supporté sur '${capabilities.engine}' — capability 'introspect' absente. Utilise \`raw "…"\` (SQL) ou \`raw {…}\` (Mongo) pour les commandes natives.`,
+		"planner_introspect_unsupported"
+	);
+}
+
 function toCompensationOp(op: LogicalPlan): CompensationOp {
 	switch (op.op) {
 		case "filter":

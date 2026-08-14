@@ -45,7 +45,7 @@ function caps(
  * via `BEGIN [ISOLATION LEVEL X] / COMMIT / ROLLBACK` + SAVEPOINT natifs. */
 export const POSTGRES_CAPABILITIES: Capabilities = caps(
 	"postgres",
-	["scan", "filter", "project", "join", "aggregate", "sort", "paginate", "mutate", "subquery", "upsert", "write-join", "insert-select", "transaction"],
+	["scan", "filter", "project", "join", "aggregate", "sort", "paginate", "mutate", "subquery", "upsert", "write-join", "insert-select", "transaction", "introspect"],
 	["int", "float", "text", "bool", "date", "timestamp", "json"]
 );
 
@@ -55,7 +55,7 @@ export const POSTGRES_CAPABILITIES: Capabilities = caps(
  */
 export const MONGODB_CAPABILITIES: Capabilities = caps(
 	"mongodb",
-	["scan", "filter", "project", "join", "aggregate", "sort", "paginate", "mutate"],
+	["scan", "filter", "project", "join", "aggregate", "sort", "paginate", "mutate", "introspect"],
 	["int", "float", "text", "bool", "date", "timestamp"]
 );
 

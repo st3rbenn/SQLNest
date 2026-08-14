@@ -85,6 +85,8 @@ export function planFor(
 
 export type {
 	Mapper,
+	MapperContext,
+	MongoIntrospectQuery,
 	MongoQuery,
 	MongoStage,
 	MongoWriteQuery,
@@ -95,10 +97,11 @@ export type {
 	SqlTransactionStep
 } from "./codegen/mapper";
 export { SnqlError } from "./diagnostics";
-export { lower, lowerMutation, lowerTransaction } from "./ir/lower";
+export { lower, lowerIntrospect, lowerMutation, lowerTransaction } from "./ir/lower";
 export type {
 	Capability,
 	CompareOp,
+	IntrospectPlan,
 	LogicalPlan,
 	MutationPlan,
 	Plan,
@@ -140,6 +143,8 @@ export type {
 	InsertField,
 	InsertRow,
 	InsertStatement,
+	IntrospectKind,
+	IntrospectStatement,
 	IsolationLevel,
 	LiteralValue,
 	Query,
@@ -168,6 +173,7 @@ export type {
 	PlanOptions
 } from "./planner/planner";
 export {
+	assertIntrospectSupported,
 	assertMutationCastTargetsSupported,
 	assertMutationInsertSelectSupported,
 	assertMutationUpsertSupported,

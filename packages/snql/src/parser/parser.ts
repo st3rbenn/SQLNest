@@ -10,6 +10,7 @@ import type {
 	InsertField,
 	InsertRow,
 	InsertStatement,
+	IntrospectStatement,
 	IsolationLevel,
 	OnConflictAction,
 	OnConflictClause,
@@ -58,6 +59,12 @@ function parseStatement(cursor: TokenCursor): Statement {
 	if (first.kind === "keyword" && first.value === "transaction") {
 		return parseTransaction(cursor);
 	}
+	// Sprint T3/1 : `list tables` — statement d'introspection. `list` reste
+	// ident soft-keyword (pour ne pas casser `pick x as list` où list est
+	// alias) — détecté ici uniquement en tête de statement.
+	if (first.kind === "ident" && first.value.toLowerCase() === "list") {
+		return parseIntrospectList(cursor);
+	}
 	const verbTok = first;
 	if (verbTok.kind !== "verb") {
 		throw new SnqlError(
@@ -86,6 +93,29 @@ function parseStatement(cursor: TokenCursor): Statement {
 		case "insert":
 			return parseInsert(cursor, verbTok);
 	}
+}
+
+/**
+ * Sprint T3/1 : `list <sub-command>` — statement d'introspection.
+ * Sous-commandes v1 : `list tables`. Extensible pour T3/2 (`list schemas`,
+ * `list indexes [on t]`) sans refactor.
+ */
+function parseIntrospectList(cursor: TokenCursor): IntrospectStatement {
+	const listTok = cursor.next(); // `list`
+	const sub = cursor.peek();
+	if (sub.kind === "ident" && sub.value.toLowerCase() === "tables") {
+		const subTok = cursor.next();
+		return {
+			operation: "introspect",
+			kind: "list-tables",
+			span: { start: listTok.span.start, end: subTok.span.end }
+		};
+	}
+	throw new SnqlError(
+		`'list' attend une sous-commande connue (v1: tables), trouvé '${sub.value}'`,
+		"parse_introspect_unknown_list",
+		sub.span
+	);
 }
 
 /**
@@ -206,6 +236,16 @@ function parseTransactionItem(cursor: TokenCursor): TransactionBodyItem {
 		throw new SnqlError(
 			"Transactions imbriquées interdites (bug parseStatement — devrait avoir été bloqué).",
 			"parse_transaction_nested",
+			first.span
+		);
+	}
+	// Sprint T3/1 : introspection interdite dans une transaction (pas de
+	// sémantique claire — `list tables` retourne un shape stable, mais son
+	// placement dans un bloc atomique n'apporte rien vs l'exécuter à part).
+	if (stmt.operation === "introspect") {
+		throw new SnqlError(
+			"Introspection ('list', 'describe') interdite dans une transaction — exécute-la à part.",
+			"parse_introspect_in_transaction",
 			first.span
 		);
 	}

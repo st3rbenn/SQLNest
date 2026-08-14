@@ -8,6 +8,7 @@ import type {
 	Statement
 } from "@sqlnest/snql";
 import {
+	assertIntrospectSupported,
 	assertMutationCastTargetsSupported,
 	assertMutationInsertSelectSupported,
 	assertMutationUpsertSupported,
@@ -19,6 +20,7 @@ import {
 	getMapper,
 	inferResultColumns,
 	lower,
+	lowerIntrospect,
 	lowerMutation,
 	lowerTransaction,
 	parse,
@@ -70,6 +72,26 @@ export async function runQuery(
 	// niveau AST. Attaché à la requête native pour que l'adapter le remonte
 	// dans le pgError → résolution `column "X" does not exist` → span source.
 	const identSpans = collectIdentSpans(statement);
+
+	// Sprint T3/1 : introspection (`list tables`, `describe <t>`, ...). Le
+	// mapper.mapIntrospect est absent sur les engines sans support —
+	// assertIntrospectSupported remonte l'erreur claire avant TypeError.
+	if (statement.operation === "introspect") {
+		const introPlan = lowerIntrospect(statement, schema);
+		assertIntrospectSupported(introPlan, capabilities);
+		if (mapper.mapIntrospect === undefined) {
+			throw new EngineExecutionError(
+				`Aucun codegen 'introspect' pour le moteur '${engine}'`
+			);
+		}
+		// Le namespace runtime (PG search_path / Mongo DB) vient de la
+		// connection — le mapper le bind dans ses params.
+		const ctx = connection.namespace !== undefined
+			? { namespace: connection.namespace }
+			: undefined;
+		const native = mapper.mapIntrospect(introPlan, ctx);
+		return { ...(await connection.execute(native)), written: false };
+	}
 
 	// Sprint T2/15 : transaction bloc atomique. Le mapper.mapTransaction est
 	// absent sur les engines sans support (Mongo/KV) — assertTransactionSupported
