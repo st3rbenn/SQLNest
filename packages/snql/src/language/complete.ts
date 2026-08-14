@@ -51,12 +51,23 @@ export interface SnqlCompletionResult {
 }
 
 /** Verbes proposés en début de requête (canonique par opération). */
-const PRIMARY_VERBS: readonly { label: string; detail: string }[] = [
+const PRIMARY_VERBS: readonly {
+	label: string;
+	detail: string;
+	type?: SnqlCompletionType;
+}[] = [
 	{ label: "get", detail: "lecture" },
 	{ label: "add", detail: "insertion" },
 	{ label: "update", detail: "mise à jour" },
-	{ label: "remove", detail: "suppression" }
+	{ label: "remove", detail: "suppression" },
+	// T3 introspection : soft-keywords, taggés `keyword` (pas verb CRUD) —
+	// affichés avec l'icône keyword mais dans la même palette top-level.
+	{ label: "list", detail: "introspection", type: "keyword" },
+	{ label: "describe", detail: "introspection", type: "keyword" }
 ];
+
+/** Sous-commandes reconnues après `list` (v1 : tables). */
+const LIST_SUBCOMMANDS: readonly string[] = ["tables"];
 
 /** Étapes valides par opération, dans l'ordre canonique imposé par le parser. */
 const STAGES: Readonly<Record<OperationKind, readonly string[]>> = {
@@ -204,6 +215,19 @@ function contextOptions(
 	const setCtx = updateSetContext(toks, operation, scope);
 	if (setCtx !== null) {
 		return setCompletions(setCtx, schema, last, insideOpenString);
+	}
+
+	// T3/1+T3/2 : introspection verbs (soft-keyword). En tête de statement
+	// uniquement — les mots `list`/`describe` restent utilisables comme
+	// idents ailleurs (ex. `pick x as list`), donc pas de spécial-case au-delà.
+	if (last.kind === "ident" && toks.length === 1) {
+		const lower = last.value.toLowerCase();
+		if (lower === "list") {
+			return LIST_SUBCOMMANDS.map(keyword);
+		}
+		if (lower === "describe") {
+			return collections(schema);
+		}
 	}
 
 	// Un verbe ne pilote le contexte qu'en **tête de requête**. Le lexer classe
@@ -910,7 +934,7 @@ function valueSuggestions(
 function verbs(): readonly SnqlCompletion[] {
 	return PRIMARY_VERBS.map((v) => ({
 		label: v.label,
-		type: "verb" as const,
+		type: v.type ?? ("verb" as const),
 		detail: v.detail
 	}));
 }

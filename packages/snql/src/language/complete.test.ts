@@ -60,9 +60,26 @@ const labels = (src: string, offset = src.length) =>
 	at(src, offset).options.map((o) => o.label);
 
 describe("completeSnql — début de requête", () => {
-	it("propose les verbes canoniques sur une entrée vide", () => {
-		expect(labels("")).toEqual(["get", "add", "update", "remove"]);
-		expect(at("").options.every((o) => o.type === "verb")).toBe(true);
+	it("propose les verbes canoniques + introspection sur une entrée vide", () => {
+		expect(labels("")).toEqual([
+			"get",
+			"add",
+			"update",
+			"remove",
+			"list",
+			"describe"
+		]);
+		// Les CRUD sont taggés `verb` ; list/describe sont `keyword` (soft-kw).
+		const opts = at("").options;
+		expect(opts.filter((o) => o.type === "verb").map((o) => o.label)).toEqual([
+			"get",
+			"add",
+			"update",
+			"remove"
+		]);
+		expect(opts.filter((o) => o.type === "keyword").map((o) => o.label)).toEqual(
+			["list", "describe"]
+		);
 	});
 
 	it("remplace le verbe partiel depuis son début", () => {
@@ -299,6 +316,21 @@ describe("completeSnql — robustesse", () => {
 		).toEqual(["users", "orders"]);
 	});
 
+	// T3/2.2 : après `list ` / `describe `, orienter vers sous-commande / tables.
+	it("`list ` propose la sous-commande tables", () => {
+		expect(labels("list ")).toEqual(["tables"]);
+	});
+
+	it("`describe ` propose les collections", () => {
+		expect(labels("describe ")).toEqual(["users", "orders"]);
+	});
+
+	it("`describe u` (mot partiel) propose toujours les collections", () => {
+		// Le mot partiel `u` est le trailing word remplacé par le CM6 layer —
+		// completeSnql renvoie la liste complète, le préfixe est filtré côté UI.
+		expect(labels("describe u")).toEqual(["users", "orders"]);
+	});
+
 	it("schéma sans collection : propose quand même les verbes/étapes", () => {
 		const empty: SchemaModel = {
 			engine: "postgres",
@@ -309,7 +341,9 @@ describe("completeSnql — robustesse", () => {
 			"get",
 			"add",
 			"update",
-			"remove"
+			"remove",
+			"list",
+			"describe"
 		]);
 		expect(
 			completeSnql("get users ", 10, empty).options.map((o) => o.label)

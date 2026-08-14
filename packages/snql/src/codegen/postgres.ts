@@ -186,7 +186,11 @@ function describeTableSql(): string {
 	return (
 		`SELECT ` +
 			`c.column_name AS name, ` +
-			`c.data_type AS type, ` +
+			// USER-DEFINED = enum/composite/domain PG. `data_type` renvoie
+			// littéralement 'USER-DEFINED' — inutile pour l'utilisateur. On
+			// bascule sur `udt_name` (nom du type sous-jacent, ex.
+			// 'RESOURCE_STATUS') dans ce cas.
+			`(CASE WHEN c.data_type = 'USER-DEFINED' THEN c.udt_name ELSE c.data_type END) AS type, ` +
 			`(c.is_nullable = 'YES') AS nullable, ` +
 			`c.column_default AS "default", ` +
 			`COALESCE(pk.is_primary_key, FALSE) AS is_primary_key, ` +

@@ -176,6 +176,9 @@ describe("codegen PG — describe <table>", () => {
 		expect(native.text).toContain("information_schema.columns");
 		expect(native.text).toContain("PRIMARY KEY");
 		expect(native.text).toContain("FOREIGN KEY");
+		// T3/2.1 : enum PG (USER-DEFINED) → udt_name lisible ('RESOURCE_STATUS').
+		expect(native.text).toContain("USER-DEFINED");
+		expect(native.text).toContain("udt_name");
 		expect(native.text).toContain("$1");
 		expect(native.text).toContain("$2");
 		expect(native.params).toEqual(["apollon_schema", "users"]);
