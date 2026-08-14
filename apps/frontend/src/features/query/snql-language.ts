@@ -16,9 +16,11 @@ import {
 	completeSnql,
 	KEYWORDS,
 	type SchemaModel,
+	type SnqlCompletion,
 	type SnqlCompletionType,
 	verbOperation
 } from "@sqlnest/snql";
+import type { EditorView } from "@codemirror/view";
 
 // --- Complétion schema-aware -------------------------------------------------
 
@@ -61,14 +63,16 @@ export function snqlCompletionSource(
 		// notre ordre pédagogique (les mots-clés `one`/`many` en tête après `with`,
 		// les collections liées avant les autres). On boost décroissant selon
 		// l'index source (99 → 0, tronqué à 100) pour préserver l'ordre.
-		const cmOptions: Completion[] = options.map((o, i) => ({
-			label: o.label,
-			type: CM_TYPE[o.type],
-			boost: Math.max(0, 99 - i),
-			...(o.detail !== undefined ? { detail: o.detail } : {}),
-			// `apply` porte la clause `on` pré-remplie des jointures liées.
-			...(o.apply !== undefined ? { apply: o.apply } : {})
-		}));
+		const cmOptions: Completion[] = options.map((o, i) => {
+			const applyFn = pickApply(o);
+			return {
+				label: o.label,
+				type: CM_TYPE[o.type],
+				boost: Math.max(0, 99 - i),
+				...(o.detail !== undefined ? { detail: o.detail } : {}),
+				...(applyFn !== null ? { apply: applyFn } : {})
+			};
+		});
 		return {
 			from,
 			options: cmOptions,
@@ -76,6 +80,60 @@ export function snqlCompletionSource(
 			// sans re-interroger la source (le contexte ne change pas).
 			validFor: IDENT_CONTINUE
 		};
+	};
+}
+
+/**
+ * Sprint T2/13.6 : choisit le apply pour un candidat.
+ *  - `o.apply` string custom (ex. `on <local> = <foreign>` d'un with) → priorité.
+ *  - `o.insertKind` (fields de doc/set) → apply function smart : insère
+ *    `<name>: "|"` ou `<name>: |` avec indent auto si l'user vient de taper
+ *    `{`/`,`. Curseur positionné pour taper directement la valeur.
+ *  - Sinon `null` (renderer laisse CM insérer `label` nu).
+ */
+function pickApply(
+	o: SnqlCompletion
+): string | ((view: EditorView, _c: Completion, from: number, to: number) => void) | null {
+	if (o.apply !== undefined) return o.apply;
+	if (o.insertKind !== undefined) return smartFieldApply(o.label, o.insertKind);
+	return null;
+}
+
+function smartFieldApply(name: string, kind: "string" | "number" | "raw") {
+	return (view: EditorView, _c: Completion, from: number, to: number): void => {
+		const doc = view.state.doc;
+		const lineAtFrom = doc.lineAt(from);
+		const beforeCursorInLine = lineAtFrom.text.slice(0, from - lineAtFrom.from);
+		const onFreshLine = beforeCursorInLine.trim() === "";
+
+		// Char non-whitespace le plus récent AVANT `from` (regarde jusqu'à 60 chars
+		// avant, largement suffisant pour trouver le `{` ou `,`).
+		const scan = doc.sliceString(Math.max(0, from - 60), from);
+		const trimmed = scan.replace(/\s+$/, "");
+		const lastNonWs = trimmed.slice(-1);
+		const afterOpener = lastNonWs === "{" || lastNonWs === ",";
+
+		// Prepend `\n<indent>` si l'user est encore sur la même ligne que le
+		// `{` / `,` (donc pas déjà à une nouvelle ligne indentée). Indent = 4
+		// espaces, cohérent avec le formatter block-style existant.
+		const prefix = !onFreshLine && afterOpener ? "\n    " : "";
+
+		// Construit l'insertion + position curseur selon kind.
+		let insert: string;
+		let cursorFromStart: number;
+		if (kind === "string") {
+			insert = `${prefix}${name}: ""`;
+			cursorFromStart = insert.length - 1; // entre les guillemets
+		} else {
+			// number / raw : espace après `:`, pas de quote.
+			insert = `${prefix}${name}: `;
+			cursorFromStart = insert.length;
+		}
+
+		view.dispatch({
+			changes: { from, to, insert },
+			selection: { anchor: from + cursorFromStart }
+		});
 	};
 }
 

@@ -33,6 +33,15 @@ export interface SnqlCompletion {
 	readonly detail?: string;
 	/** Texte réellement inséré si différent du label (ex. clause `on` complète). */
 	readonly apply?: string;
+	/**
+	 * Sprint T2/13.6 : hint pour un renderer surface (CM6) qui veut fabriquer
+	 * un apply function smart (auto-indent, guillemets pour string, curseur
+	 * positionné). Absent = pas de smart-apply, le renderer insère `label` nu.
+	 *  - "string" : type texte/uuid/enum — insérer `label: "|"` (curseur entre guillemets)
+	 *  - "number" : type numeric/bool/date/json — insérer `label: |` (curseur après space)
+	 *  - "raw"    : type inconnu — insérer `label: |` sans quotes
+	 */
+	readonly insertKind?: "string" | "number" | "raw";
 }
 
 export interface SnqlCompletionResult {
@@ -748,8 +757,30 @@ function fieldsForDoc(
 		.map((f) => ({
 			label: f.name,
 			type: "field" as const,
-			detail: fieldDetailForDoc(f, ctx.collection, schema)
+			detail: fieldDetailForDoc(f, ctx.collection, schema),
+			insertKind: insertKindOf(f.type)
 		}));
+}
+
+/**
+ * Sprint T2/13.6 : classifie un `SnqlType` pour choisir le format d'insertion.
+ * string/uuid/enum → wrappé en guillemets, numeric/bool/date/json → nu, autre
+ * → raw (`: ` sans quote — laisse l'user finir).
+ */
+function insertKindOf(t: import("../schema/model").SnqlType): "string" | "number" | "raw" {
+	if (t === "string" || t === "uuid" || t === "enum") return "string";
+	if (
+		t === "int" ||
+		t === "bigint" ||
+		t === "float" ||
+		t === "decimal" ||
+		t === "bool" ||
+		t === "date" ||
+		t === "json"
+	) {
+		return "number";
+	}
+	return "raw";
 }
 
 /**

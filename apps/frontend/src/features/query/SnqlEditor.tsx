@@ -1,4 +1,8 @@
-import { completionKeymap } from "@codemirror/autocomplete";
+import {
+	acceptCompletion,
+	completionKeymap,
+	completionStatus
+} from "@codemirror/autocomplete";
 import {
 	defaultKeymap,
 	history,
@@ -235,6 +239,18 @@ export const SnqlEditor = forwardRef<SnqlEditorHandle, SnqlEditorProps>(
 							run: () => {
 								onRunRef.current();
 								return true;
+							}
+						},
+						// Sprint T2/13.6 : Tab accepte le candidat courant quand le
+						// popup d'autocomplete est ouvert ; sinon fallthrough vers
+						// `indentWithTab` (comportement historique).
+						{
+							key: "Tab",
+							run: (view) => {
+								if (completionStatus(view.state) === "active") {
+									return acceptCompletion(view);
+								}
+								return false;
 							}
 						},
 						indentWithTab,

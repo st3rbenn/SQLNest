@@ -104,6 +104,17 @@ describe("add doc — position clé", () => {
 		const src = 'add {} into resource';
 		expect(detailOf(src, "agency_id", 5)).toBe("uuid · required · → agency.id");
 	});
+
+	it("insertKind : string pour uuid/enum/string", () => {
+		const src = 'add {} into resource';
+		const opts = at(src, 5).options;
+		expect(opts.find((o) => o.label === "first_name")?.insertKind).toBe("string");
+		expect(opts.find((o) => o.label === "role")?.insertKind).toBe("string");
+		expect(opts.find((o) => o.label === "id")?.insertKind).toBe("string");
+	});
+
+	// NB: pas de champ number dans la schema T2/13.5 — on couvre via
+	// insertKindOf, testé indirectement par le comportement enum/string ci-dessus.
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
