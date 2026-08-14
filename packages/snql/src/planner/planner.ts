@@ -20,7 +20,13 @@ import type { Capabilities } from "./capabilities";
  */
 export type CompensationOp =
 	| { readonly op: "filter"; readonly predicate: PlanExpr }
-	| { readonly op: "project"; readonly fields: readonly PlanProjectField[] }
+	// Sprint T2/10 : unique / distinctOnKeys propagés en compensation KV.
+	| {
+			readonly op: "project";
+			readonly fields: readonly PlanProjectField[];
+			readonly unique?: true;
+			readonly distinctOnKeys?: readonly (readonly string[])[];
+	  }
 	| { readonly op: "sort"; readonly keys: readonly PlanSortKey[] }
 	| { readonly op: "limit"; readonly count: number; readonly offset?: number }
 	| {
@@ -389,7 +395,12 @@ function toCompensationOp(op: LogicalPlan): CompensationOp {
 		case "filter":
 			return { op: "filter", predicate: op.predicate };
 		case "project":
-			return { op: "project", fields: op.fields };
+			return {
+				op: "project",
+				fields: op.fields,
+				...(op.unique === true ? { unique: true as const } : {}),
+				...(op.distinctOnKeys !== undefined ? { distinctOnKeys: op.distinctOnKeys } : {})
+			};
 		case "sort":
 			return { op: "sort", keys: op.keys };
 		case "limit":

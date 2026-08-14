@@ -159,6 +159,11 @@ function appendStage(
 			pipeline.push({
 				$project: renderProject(op.fields, alias, windowSlots.slotByKey)
 			});
+			// Sprint T2/10 : DISTINCT / DISTINCT ON via $group + $first APRÈS
+			// $project (les fields projetés sont déjà top-level, plus simple).
+			if (op.unique === true || op.distinctOnKeys !== undefined) {
+				appendDistinctStages(pipeline, op);
+			}
 			return;
 		}
 		case "aggregate": {
@@ -764,6 +769,63 @@ function renderAggregatePipeline(
 	}
 
 	return { groupStage, projectStage, havingExpr, havingSlots };
+}
+
+/**
+ * Sprint T2/10 : émet les stages Mongo pour DISTINCT / DISTINCT ON après un
+ * $project. Deux variantes :
+ *
+ *  - `unique` seul (SELECT DISTINCT) : $group par TOUS les fields output,
+ *    puis $replaceRoot pour remettre à plat.
+ *  - `distinctOnKeys` (DISTINCT ON (k1, k2)) : $group par k1, k2 (accum
+ *    $first sur les autres fields — le sort en amont détermine "first"),
+ *    puis $replaceRoot avec l'objet reconstruit.
+ *
+ * Note : $group détruit l'ordre. Le sort post-DISTINCT devra re-trier si
+ * demandé — géré par le prochain stage `sort` dans la pipeline.
+ */
+function appendDistinctStages(
+	pipeline: MongoStage[],
+	op: Extract<LogicalPlan, { op: "project" }>
+): void {
+	// Récupère les noms de sortie des fields projetés (alias ou last-seg).
+	const outputNames = op.fields.map((f) => {
+		if (f.alias !== undefined) return f.alias;
+		return (f.path[f.path.length - 1] as string) ?? "";
+	});
+	if (op.distinctOnKeys !== undefined && op.distinctOnKeys.length > 0) {
+		// DISTINCT ON — group par les keys, $first sur les autres.
+		const idInner: Record<string, unknown> = {};
+		for (const k of op.distinctOnKeys) {
+			const seg = k[k.length - 1] as string;
+			idInner[seg] = `$${seg}`;
+		}
+		const groupFields: Record<string, unknown> = { _id: idInner };
+		const keySet = new Set(op.distinctOnKeys.map((k) => k[k.length - 1] as string));
+		for (const name of outputNames) {
+			if (keySet.has(name)) continue;
+			groupFields[name] = { $first: `$${name}` };
+		}
+		pipeline.push({ $group: groupFields });
+		// Reconstitue l'objet plat : keys sortent de _id, autres sont déjà top.
+		const projectBack: Record<string, unknown> = { _id: 0 };
+		for (const name of outputNames) {
+			projectBack[name] = keySet.has(name) ? `$_id.${name}` : `$${name}`;
+		}
+		pipeline.push({ $project: projectBack });
+		return;
+	}
+	// DISTINCT (unique seul) — group par TOUS les output fields.
+	const idInner: Record<string, unknown> = {};
+	for (const name of outputNames) {
+		idInner[name] = `$${name}`;
+	}
+	pipeline.push({ $group: { _id: idInner } });
+	const projectBack: Record<string, unknown> = { _id: 0 };
+	for (const name of outputNames) {
+		projectBack[name] = `$_id.${name}`;
+	}
+	pipeline.push({ $project: projectBack });
 }
 
 function renderProject(

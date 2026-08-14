@@ -214,9 +214,15 @@ export interface GroupKey {
 
 export type Stage =
 	| { readonly type: "where"; readonly predicate: Expr; readonly span: Span }
+	// Sprint T2/10 : DISTINCT via `pick unique <fields>` (dédup sur tous les
+	// fields projetés) ou `pick unique on (<keys>) <fields>` (DISTINCT ON
+	// avec keys explicites, parens obligatoires). Les 2 sont exclusifs avec
+	// `group by` (refus lower_unique_with_group).
 	| {
 			readonly type: "pick";
 			readonly fields: readonly FieldSelection[];
+			readonly unique?: true;
+			readonly distinctOnKeys?: readonly (readonly string[])[];
 			readonly span: Span;
 	  }
 	| {

@@ -28,7 +28,8 @@ export function compensate(
 	sources: JoinSources = {}
 ): Row[] {
 	let out: Row[] = [...rows];
-	for (const op of ops) {
+	for (let i = 0; i < ops.length; i += 1) {
+		const op = ops[i]!;
 		switch (op.op) {
 			case "filter":
 				out = out.filter((row) => evalBool(op.predicate, row) === true);
@@ -42,6 +43,17 @@ export function compensate(
 				out = preprocessed.rows.map((row) =>
 					projectRow(row, op.fields, preprocessed.windowSlots)
 				);
+				// Sprint T2/10 : DISTINCT / DISTINCT ON post-projection. Look-ahead
+				// vers le sort suivant : PG DISTINCT ON dédup APRÈS ORDER BY,
+				// donc on doit trier AVANT de dédup pour parité. Le lower a
+				// validé que le sort prefix matche distinctOnKeys.
+				if (op.unique === true || op.distinctOnKeys !== undefined) {
+					const nextOp = ops[i + 1];
+					if (nextOp?.op === "sort" && op.distinctOnKeys !== undefined) {
+						out = sortRows(out, nextOp.keys);
+					}
+					out = applyDistinct(out, op);
+				}
 				break;
 			}
 			case "sort":
@@ -652,6 +664,51 @@ function windowCallKvKey(expr: PlanExpr & { kind: "windowCall" }): string {
  *
  * Retourne les rows enrichies + slotByKey pour projectRow.
  */
+/**
+ * Sprint T2/10 : applique DISTINCT / DISTINCT ON sur les rows post-projection.
+ *
+ * - `unique` seul : dédup via canonicalKey sur tous les fields output,
+ *   preserving order (Set-based, 1re occurrence conservée).
+ * - `distinctOnKeys` : bucket par les keys, garde la 1re row de chaque
+ *   bucket (parité PG DISTINCT ON — l'ordre du sort en amont détermine
+ *   "first", check prefix-match au lower).
+ */
+function applyDistinct(
+	rows: readonly Row[],
+	op: { unique?: true; distinctOnKeys?: readonly (readonly string[])[] }
+): Row[] {
+	if (op.distinctOnKeys !== undefined && op.distinctOnKeys.length > 0) {
+		const seen = new Set<string>();
+		const out: Row[] = [];
+		for (const row of rows) {
+			// Key path = dernier segment (post-projection les fields sont top).
+			const keyValues = op.distinctOnKeys.map((k) => {
+				const lastSeg = k[k.length - 1] as string;
+				return row[lastSeg];
+			});
+			const key = JSON.stringify(keyValues, (_, v) =>
+				typeof v === "bigint" ? `__bi:${v.toString()}` : v
+			);
+			if (seen.has(key)) continue;
+			seen.add(key);
+			out.push(row);
+		}
+		return out;
+	}
+	// DISTINCT sur toute la row (post-projection).
+	const seen = new Set<string>();
+	const out: Row[] = [];
+	for (const row of rows) {
+		const key = JSON.stringify(row, (_, v) =>
+			typeof v === "bigint" ? `__bi:${v.toString()}` : v
+		);
+		if (seen.has(key)) continue;
+		seen.add(key);
+		out.push(row);
+	}
+	return out;
+}
+
 function preprocessWindowCalls(
 	fields: readonly PlanProjectField[],
 	rows: readonly Row[]

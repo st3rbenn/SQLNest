@@ -98,6 +98,30 @@ export function lower(query: Query, schema?: SchemaModel): LogicalPlan {
 		if (stage.type === "having") {
 			refuseWindowCallInPosition(stage.predicate, "lower_window_in_having", "having");
 		}
+		// Sprint T2/10 : check sort keys prefix-match distinctOnKeys (parité PG).
+		// Le pick précédent peut avoir posé distinctOnKeys ; ici on vérifie que
+		// les sort keys commencent par les mêmes paths (alias-stripped).
+		if (
+			stage.type === "sort" &&
+			plan.op === "project" &&
+			plan.distinctOnKeys !== undefined
+		) {
+			const onKeys = plan.distinctOnKeys;
+			const sortKeyPaths = stage.keys.map((k) =>
+				stripAlias(k.path, query.source.alias).join(".")
+			);
+			const prefixMatch = onKeys.every((k, i) => {
+				const canonical = k.join(".");
+				return sortKeyPaths[i] === canonical;
+			});
+			if (!prefixMatch) {
+				throw new SnqlError(
+					`'sort' après 'pick unique on (${onKeys.map((k) => k.join(".")).join(", ")})' doit commencer par ces keys — sinon la row conservée par groupe est indéterminée (parité PG DISTINCT ON)`,
+					"lower_unique_on_sort_prefix_mismatch",
+					stage.span
+				);
+			}
+		}
 		if (stage.type === "group") {
 			if (stage.keys.length === 0) {
 				throw new SnqlError(
@@ -1300,6 +1324,28 @@ function lowerStage(
 					stage.span
 				);
 			}
+			// Sprint T2/10 : DISTINCT / DISTINCT ON validations.
+			if ((stage.unique === true || stage.distinctOnKeys !== undefined) && groupKeys !== undefined) {
+				throw new SnqlError(
+					"'pick unique' et 'group by' non combinables — les deux dédup mais différemment ; utilise l'un ou l'autre",
+					"lower_unique_with_group",
+					stage.span
+				);
+			}
+			if ((stage.unique === true || stage.distinctOnKeys !== undefined) && hasAggregate) {
+				throw new SnqlError(
+					"'pick unique' avec aggregate non supporté — l'aggregate produit déjà une row par groupe, unique est redondant ou ambigu",
+					"lower_unique_with_aggregate",
+					stage.span
+				);
+			}
+			if ((stage.unique === true || stage.distinctOnKeys !== undefined) && hasWindowCall) {
+				throw new SnqlError(
+					"'pick unique' avec window function non supporté — les deux opèrent sur des rows différentes ; sépare en deux queries",
+					"lower_unique_with_window",
+					stage.span
+				);
+			}
 			// groupKeys are alias-stripped already. Build the lookup set from them.
 			const groupKeySet = groupKeys !== undefined
 				? new Set(groupKeys.map((k) => k.join(".")))
@@ -1328,7 +1374,41 @@ function lowerStage(
 					? { op: "aggregate", input, fields, groupKeys }
 					: { op: "aggregate", input, fields };
 			}
-			return { op: "project", input, fields };
+			// Sprint T2/10 : distinctOnKeys — strip source alias sur les paths
+			// (alignés fields projetés + sort keys). Puis check chaque key
+			// APPARAIT dans les fields projetés (parité PG DISTINCT ON — sinon
+			// la key n'a pas de valeur à comparer post-projection).
+			const strippedDistinctKeys =
+				stage.distinctOnKeys !== undefined
+					? stage.distinctOnKeys.map((k) => stripAlias(k, sourceAlias))
+					: undefined;
+			if (strippedDistinctKeys !== undefined) {
+				const fieldOutputNames = new Set(
+					fields.map((f) => f.alias ?? f.path[f.path.length - 1] ?? "")
+				);
+				for (const [i, k] of strippedDistinctKeys.entries()) {
+					const keyStr = k.join(".");
+					// La key peut matcher soit un output alias, soit le dernier
+					// segment d'un field path projeté.
+					const lastSeg = k[k.length - 1] ?? "";
+					if (!fieldOutputNames.has(keyStr) && !fieldOutputNames.has(lastSeg)) {
+						throw new SnqlError(
+							`'unique on (${keyStr})' — key '${keyStr}' absente des fields projetés ; ajoute '${keyStr}' à pick ou retire-la de 'on'`,
+							"lower_unique_on_key_not_projected",
+							stage.distinctOnKeys![i]!.length > 0
+								? stage.span
+								: stage.span
+						);
+					}
+				}
+			}
+			return {
+				op: "project",
+				input,
+				fields,
+				...(stage.unique === true ? { unique: true as const } : {}),
+				...(strippedDistinctKeys !== undefined ? { distinctOnKeys: strippedDistinctKeys } : {})
+			};
 		}
 		case "sort":
 			return { op: "sort", input, keys: stage.keys.map(lowerSortKey) };

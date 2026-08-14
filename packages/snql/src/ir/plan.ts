@@ -201,10 +201,17 @@ export type LogicalPlan =
 			readonly input: LogicalPlan;
 			readonly predicate: PlanExpr;
 	  }
+	// Sprint T2/10 : DISTINCT via `unique` flag et/ou `distinctOnKeys` explicites.
+	// `unique` seul = SELECT DISTINCT sur tous les fields projetés.
+	// `distinctOnKeys` non-vide = SELECT DISTINCT ON (keys) — la 1re row de
+	// chaque groupe (par keys) conservée, ordre défini par le sort suivant
+	// (check prefix-match au lower).
 	| {
 			readonly op: "project";
 			readonly input: LogicalPlan;
 			readonly fields: readonly PlanProjectField[];
+			readonly unique?: true;
+			readonly distinctOnKeys?: readonly (readonly string[])[];
 	  }
 	| {
 			readonly op: "sort";

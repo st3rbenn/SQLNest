@@ -169,6 +169,9 @@ interface Select {
 	// absorbé et qu'il porte des groupKeys/having. Null par défaut.
 	groupKeys: readonly (readonly string[])[] | null;
 	having: PlanExpr | null;
+	// Sprint T2/10 : DISTINCT / DISTINCT ON.
+	distinct: boolean;
+	distinctOnKeys: readonly (readonly string[])[] | null;
 	order: readonly PlanSortKey[] | null;
 	limit: number | null;
 	offset: number | null;
@@ -215,6 +218,8 @@ function emptySelect(from: string, base: string): Select {
 		project: null,
 		groupKeys: null,
 		having: null,
+		distinct: false,
+		distinctOnKeys: null,
 		order: null,
 		limit: null,
 		offset: null,
@@ -271,6 +276,9 @@ function absorb(sel: Select, op: LogicalPlan): void {
 			return;
 		case "project":
 			sel.project = op.fields;
+			// Sprint T2/10 : DISTINCT / DISTINCT ON absorbés dans le SELECT.
+			if (op.unique === true) sel.distinct = true;
+			if (op.distinctOnKeys !== undefined) sel.distinctOnKeys = op.distinctOnKeys;
 			sel.maxPhase = Math.max(sel.maxPhase, PHASE.project);
 			return;
 		case "aggregate":
@@ -302,8 +310,17 @@ function absorb(sel: Select, op: LogicalPlan): void {
 }
 
 function renderSelect(sel: Select, params: ParamList): string {
+	// Sprint T2/10 : DISTINCT / DISTINCT ON insérés entre SELECT et la liste.
+	// DISTINCT ON prend priorité si les 2 sont set (parser ne permet pas
+	// mais defense).
+	let selectPrefix = "SELECT";
+	if (sel.distinctOnKeys !== null && sel.distinctOnKeys.length > 0) {
+		selectPrefix = `SELECT DISTINCT ON (${sel.distinctOnKeys.map((k) => renderPath(k)).join(", ")})`;
+	} else if (sel.distinct) {
+		selectPrefix = "SELECT DISTINCT";
+	}
 	const parts: string[] = [
-		`SELECT ${renderSelectList(sel, params)}`,
+		`${selectPrefix} ${renderSelectList(sel, params)}`,
 		`FROM ${sel.from}`
 	];
 

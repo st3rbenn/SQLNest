@@ -458,6 +458,43 @@ function parseHaving(cursor: TokenCursor): Stage {
 
 function parsePick(cursor: TokenCursor): Stage {
 	const kw = cursor.next();
+	// Sprint T2/10 : détecte `unique` (ident soft-keyword) + optional `on (keys)`.
+	// Piège UX : un champ nommé `unique` reste valide (`pick unique` seul, sans
+	// autre field derrière — mais ambigu !). On applique la règle : `unique`
+	// SEULEMENT si suivi de `on` OU d'un ident qui n'est pas une continuation
+	// possible (comma/eof/keyword). Sinon c'est un field.
+	let unique: true | undefined;
+	let distinctOnKeys: (readonly string[])[] | undefined;
+	const p0 = cursor.peek();
+	if (p0.kind === "ident" && p0.value.toLowerCase() === "unique") {
+		const p1 = cursor.peek(1);
+		// `unique` reconnu comme modifier si :
+		//  - suivi de `on` keyword (variant DISTINCT ON), OU
+		//  - suivi d'un ident/lparen/etc qui démarre une expression (variant
+		//    DISTINCT sur les fields qui suivent).
+		const isModifier =
+			(p1.kind === "keyword" && p1.value === "on") ||
+			p1.kind === "ident" ||
+			p1.kind === "lparen" ||
+			p1.kind === "lbrace" ||
+			p1.kind === "lbracket";
+		if (isModifier) {
+			cursor.next(); // consomme ident 'unique'
+			unique = true;
+			// `on (k1, k2, ...)` — parens obligatoires, keys sont des field paths.
+			if (peekKeyword(cursor, "on")) {
+				cursor.next();
+				cursor.expect("lparen", "'(' après 'unique on' — les keys DISTINCT ON sont entre parens");
+				const keys: (readonly string[])[] = [parseFieldPath(cursor).path];
+				while (cursor.peek().kind === "comma") {
+					cursor.next();
+					keys.push(parseFieldPath(cursor).path);
+				}
+				cursor.expect("rparen", "')' pour fermer 'unique on (...)'");
+				distinctOnKeys = keys;
+			}
+		}
+	}
 	const fields: FieldSelection[] = [parseFieldSelection(cursor)];
 	while (cursor.peek().kind === "comma") {
 		cursor.next();
@@ -465,7 +502,13 @@ function parsePick(cursor: TokenCursor): Stage {
 	}
 	const last = fields[fields.length - 1];
 	const end = last ? last.span.end : kw.span.end;
-	return { type: "pick", fields, span: { start: kw.span.start, end } };
+	return {
+		type: "pick",
+		fields,
+		...(unique === true ? { unique: true as const } : {}),
+		...(distinctOnKeys !== undefined ? { distinctOnKeys } : {}),
+		span: { start: kw.span.start, end }
+	};
 }
 
 function parseFieldSelection(cursor: TokenCursor): FieldSelection {
