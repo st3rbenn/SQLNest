@@ -1,7 +1,10 @@
 import {
 	acceptCompletion,
+	closeBrackets,
+	closeBracketsKeymap,
 	completionKeymap,
-	completionStatus
+	completionStatus,
+	startCompletion
 } from "@codemirror/autocomplete";
 import {
 	defaultKeymap,
@@ -254,10 +257,16 @@ export const SnqlEditor = forwardRef<SnqlEditorHandle, SnqlEditorProps>(
 							}
 						},
 						indentWithTab,
+						...closeBracketsKeymap,
 						...completionKeymap,
 						...defaultKeymap,
 						...historyKeymap
 					]),
+					// Sprint T2/13.7 : auto-pair des `"`/`'`/`{`/`[`/`(` — quand
+					// l'user tape `"`, la fermeture est insérée et le curseur
+					// atterrit entre les deux (Backspace supprime la paire, `"`
+					// juste avant la fermeture skip au lieu de re-insérer).
+					closeBrackets(),
 					snqlHighlighting(),
 					snqlCompletion(() => schemaRef.current),
 					errorMarkers(),
@@ -265,6 +274,15 @@ export const SnqlEditor = forwardRef<SnqlEditorHandle, SnqlEditorProps>(
 					EditorView.updateListener.of((update) => {
 						if (update.docChanged) {
 							onChangeRef.current(update.state.doc.toString());
+							// Sprint T2/13.7 : après un auto-pair `""` (closeBrackets
+							// vient d'insérer `""` + placé le curseur au milieu),
+							// trigger le popup pour proposer les enum labels /
+							// autocomplete de valeur. Détection : cette transaction
+							// contient une insertion de `""` (2 chars) ET le curseur
+							// est pile au milieu.
+							if (didAutoPairQuote(update)) {
+								startCompletion(update.view);
+							}
 						}
 					}),
 					...(placeholder !== undefined ? [cmPlaceholder(placeholder)] : []),
@@ -357,3 +375,25 @@ export const SnqlEditor = forwardRef<SnqlEditorHandle, SnqlEditorProps>(
 	}
 );
 
+/**
+ * Sprint T2/13.7 : détecte qu'une transaction vient d'insérer une paire de
+ * guillemets (`""` ou `''`) via `closeBrackets` et que le curseur est au
+ * milieu. On regarde tous les changements insérés : si l'un est exactement
+ * `""` (ou `''`) et que le curseur main est pile après la 1re quote, c'est
+ * un auto-pair déclenché par l'user qui a tapé `"`.
+ */
+function didAutoPairQuote(update: import("@codemirror/view").ViewUpdate): boolean {
+	let matched = false;
+	update.changes.iterChanges((_fromA, _toA, fromB, toB, inserted) => {
+		if (matched) return;
+		const text = inserted.toString();
+		if (text !== '""' && text !== "''") return;
+		const mainHead = update.state.selection.main.head;
+		// closeBrackets place le curseur pile entre les 2 quotes → fromB + 1
+		// (toB = fromB + 2 pour une paire).
+		if (mainHead === fromB + 1 && toB === fromB + 2) {
+			matched = true;
+		}
+	});
+	return matched;
+}
