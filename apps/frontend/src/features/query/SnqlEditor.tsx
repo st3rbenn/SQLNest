@@ -152,19 +152,16 @@ const theme = EditorView.theme(
 			textDecorationThickness: "1px",
 			textUnderlineOffset: "3px"
 		},
-		// Live diagnostic (sprint T2/live-diag) : badge dans la gutter à la
-		// ligne de l'erreur compile locale. Petit rond rouge minimaliste —
-		// style VSCode marker, aligné visuellement au numéro de ligne.
+		// Live diagnostic (sprint T2/live-diag) : barre verticale rouge dans
+		// la gutter, pleine hauteur de la ligne. Style compact type IDE.
 		".sqlnest-diag-gutter-slot": {
-			width: "12px",
+			width: "3px",
 			padding: 0
 		},
 		".sqlnest-diag-gutter": {
 			display: "block",
-			width: "6px",
-			height: "6px",
-			margin: "6px auto 0",
-			borderRadius: "50%",
+			width: "3px",
+			height: "100%",
 			background: "var(--sqlnest-danger)"
 		},
 		// Tooltip au hover sur un span en erreur live — surface DS + border
