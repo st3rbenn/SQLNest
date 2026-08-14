@@ -100,12 +100,18 @@ export type PlanExpr = (
 	// Sprint T2/6 : flags optionnels pour les aggregates.
 	//  - `star` : `count(*)` — args=[]. Invariants documentés au parser/lower.
 	//  - `unique` : `count(unique x)` — args.length=1. Réservé aggregates.
+	//
+	// Sprint T2/8 : `sortKeys?` — sort intra-call pour aggregateMulti
+	// (`array_agg / string_agg / json_agg`). Codegen PG émet ORDER BY dans
+	// la fonction ; Mongo utilise $sortArray en $project ; runtime KV trie
+	// avant reduce.
 	| {
 			readonly kind: "call";
 			readonly name: string;
 			readonly args: readonly PlanExpr[];
 			readonly star?: true;
 			readonly unique?: true;
+			readonly sortKeys?: readonly PlanSortKey[];
 	  }
 	// Cast explicite. Distinct de `call` : pas dans le registre de fonctions, pas
 	// soumis à assertNoCallInWrite (déterministe + NULL propagate → autorisé en

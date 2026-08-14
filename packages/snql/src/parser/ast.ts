@@ -90,12 +90,17 @@ export type Expr =
 	//  - `star` : `count(*)` — args=[] (invariant vérifié au parser + lower).
 	//  - `unique` : `count(unique x)` — args.length=1 (invariant vérifié au
 	//    parser + lower). Réservé aux aggregates ; les scalaires refusent.
+	//
+	// Sprint T2/8 : `sortKeys?` — sort intra-call pour aggregateMulti
+	// (`string_agg(name, ", " sort name asc)`). Parser contextuel via registre :
+	// accepté uniquement si registre.get(name).kind === 'aggregateMulti'.
 	| {
 			readonly type: "call";
 			readonly name: string;
 			readonly args: readonly Expr[];
 			readonly star?: true;
 			readonly unique?: true;
+			readonly sortKeys?: readonly SortKey[];
 			readonly span: Span;
 	  }
 	// Cast explicite `cast(expr as T)` — T ∈ CAST_TARGETS. Surface distincte du

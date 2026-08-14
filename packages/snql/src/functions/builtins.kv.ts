@@ -226,3 +226,131 @@ export const kvCoalesce: EngineRenderer = (args, ctx) => {
 	}
 	return null;
 };
+
+// ─── sprint T2/8 : aggregateMulti ─────────────────────────────────────────
+
+/**
+ * Helper : collecte les values évaluées per-row, applique le sort intra-call
+ * (ctx.sortKeys) et la déduplication (ctx.unique).
+ *
+ * - Sort : trie les entries (value, row) par les keys sur la row source. Le
+ *   sort DOIT être fait AVANT la déduplication ("sort de premier apparition").
+ * - Unique : Set-based dédup preserving order (compareLoose sur value).
+ *
+ * NULL handling par mode :
+ *  - array_agg/json_agg : conserve les NULL (parité PG)
+ *  - string_agg : skip NULL (parité PG STRING_AGG)
+ */
+function collectAggMulti(
+	args: readonly unknown[],
+	ctx: {
+		readonly renderExpr: (e: unknown) => unknown;
+		readonly rows?: readonly Record<string, unknown>[];
+		readonly evalPerRow?: (
+			e: unknown,
+			r: Record<string, unknown>
+		) => unknown;
+		readonly unique?: boolean;
+		readonly sortKeys?: readonly {
+			readonly path: readonly string[];
+			readonly direction: "asc" | "desc";
+		}[];
+	},
+	options: { readonly skipNulls: boolean }
+): unknown[] {
+	const rows = ctx.rows;
+	const evalPerRow = ctx.evalPerRow;
+	if (rows === undefined || evalPerRow === undefined) {
+		throw new Error(
+			"aggregateMulti KV : ctx.rows + evalPerRow requis (bug de sync codegen/runtime)"
+		);
+	}
+	const arg = args[0];
+	// Sort keys : appliquer AVANT collecte pour respecter l'ordre demandé.
+	const orderedRows =
+		ctx.sortKeys !== undefined && ctx.sortKeys.length > 0
+			? [...rows].sort((ra, rb) => {
+					for (const k of ctx.sortKeys!) {
+						const va = getPath(ra, k.path);
+						const vb = getPath(rb, k.path);
+						const cmp = compareForSort(va, vb);
+						if (cmp !== 0) return k.direction === "desc" ? -cmp : cmp;
+					}
+					return 0;
+				})
+			: rows;
+	const values: unknown[] = [];
+	const seen = ctx.unique === true ? new Set<string>() : null;
+	for (const row of orderedRows) {
+		const v = evalPerRow(arg, row);
+		if (options.skipNulls && (v === null || v === undefined)) continue;
+		if (seen !== null) {
+			// Dedup stable — canonical string pour scalars/objects.
+			const key = canonicalKey(v);
+			if (seen.has(key)) continue;
+			seen.add(key);
+		}
+		values.push(v);
+	}
+	return values;
+}
+
+function canonicalKey(v: unknown): string {
+	if (v === null) return "\0null";
+	if (v === undefined) return "\0undefined";
+	if (typeof v === "bigint") return `\0bi:${v.toString()}`;
+	if (typeof v === "number") return `\0n:${v}`;
+	if (typeof v === "string") return `\0s:${v}`;
+	if (typeof v === "boolean") return `\0b:${v}`;
+	return `\0j:${JSON.stringify(v)}`;
+}
+
+function getPath(row: Record<string, unknown>, path: readonly string[]): unknown {
+	let cur: unknown = row;
+	for (const seg of path) {
+		if (cur === null || cur === undefined || typeof cur !== "object") return undefined;
+		cur = (cur as Record<string, unknown>)[seg];
+	}
+	return cur;
+}
+
+function compareForSort(a: unknown, b: unknown): number {
+	const an = a === null || a === undefined || (typeof a === "number" && Number.isNaN(a));
+	const bn = b === null || b === undefined || (typeof b === "number" && Number.isNaN(b));
+	if (an && bn) return 0;
+	if (an) return 1; // NULL en dernier (parité PG NULLS LAST par défaut ASC)
+	if (bn) return -1;
+	return compareLoose(a, b);
+}
+
+/**
+ * `array_agg(x [sort k])` — array de toutes les values (conserve NULL).
+ * Empty group → [] côté KV (divergence knownDivergences vs PG NULL — aligné
+ * pour éviter le null-check downstream côté JS).
+ */
+export const kvArrayAgg: EngineRenderer = (args, ctx) => {
+	return collectAggMulti(args, ctx, { skipNulls: false });
+};
+
+/**
+ * `string_agg(x, sep [sort k])` — concat des values non-null avec séparateur.
+ * `sep` est args[1] : évalué comme literal (renderExpr sans row → literal fallback).
+ * Empty → '' côté KV (parité PG STRING_AGG → NULL, choix aligné avec le
+ * projet JS-first pour éviter les null checks — knownDivergences).
+ */
+export const kvStringAgg: EngineRenderer = (args, ctx) => {
+	const values = collectAggMulti(args, ctx, { skipNulls: true });
+	// sep = args[1] : literal string évalué. Le PlanExpr literal est
+	// self-evaluable via renderExpr (compensate.evalValue le sait faire).
+	const sep = ctx.renderExpr(args[1]);
+	const sepStr = typeof sep === "string" ? sep : String(sep ?? "");
+	return values.map((v) => String(v)).join(sepStr);
+};
+
+/**
+ * `json_agg(x [sort k])` — miroir array_agg (Mongo/KV n'ont pas de type JSON
+ * distinct des arrays natifs).
+ */
+export const kvJsonAgg: EngineRenderer = (args, ctx) => {
+	return collectAggMulti(args, ctx, { skipNulls: false });
+};

@@ -15,19 +15,23 @@
 
 import { extractStaticDotPath } from "./builtins-shared";
 import {
+	kvArrayAgg,
 	kvAvg,
 	kvCoalesce,
 	kvCount,
 	kvGreatest,
 	kvIf,
+	kvJsonAgg,
 	kvLeast,
 	kvMax,
 	kvMin,
 	kvNullif,
+	kvStringAgg,
 	kvSum
 } from "./builtins.kv";
 import {
 	mongoAbs,
+	mongoArrayAgg,
 	mongoAvg,
 	mongoCeil,
 	mongoConcat,
@@ -40,6 +44,7 @@ import {
 	mongoFloor,
 	mongoGreatest,
 	mongoIf,
+	mongoJsonAgg,
 	mongoJsonGet,
 	mongoJsonGetText,
 	mongoJsonHasKey,
@@ -55,6 +60,7 @@ import {
 	mongoReplace,
 	mongoRound,
 	mongoRtrim,
+	mongoStringAgg,
 	mongoStrpos,
 	mongoSubstring,
 	mongoSum,
@@ -64,6 +70,7 @@ import {
 } from "./builtins.mongo";
 import {
 	pgAbs,
+	pgArrayAgg,
 	pgAvg,
 	pgCeil,
 	pgConcat,
@@ -76,6 +83,7 @@ import {
 	pgFloor,
 	pgGreatest,
 	pgIf,
+	pgJsonAgg,
 	pgJsonContains,
 	pgJsonGet,
 	pgJsonGetText,
@@ -92,6 +100,7 @@ import {
 	pgReplace,
 	pgRound,
 	pgRtrim,
+	pgStringAgg,
 	pgStrpos,
 	pgSubstring,
 	pgSum,
@@ -433,6 +442,43 @@ const BUILTINS: readonly FunctionEntry[] = [
 		kind: "aggregate",
 		arity: { min: 1, max: 1 },
 		engines: { postgres: pgMax, mongodb: mongoMax, kv: kvMax }
+	},
+
+	// ─── sprint T2/8 : aggregateMulti (array/string/json_agg) ─────────────
+	// Retour = collection (array/string/json). Accepte `sort <keys>` intra-call
+	// (parser contextuel via registry.kind === 'aggregateMulti'). Modifier
+	// `unique` OK (dedup). NULL parity : array/json inclut, string skip.
+	{
+		name: "array_agg",
+		kind: "aggregateMulti",
+		arity: { min: 1, max: 1 },
+		engines: {
+			postgres: pgArrayAgg,
+			mongodb: mongoArrayAgg,
+			kv: kvArrayAgg
+		}
+	},
+	{
+		name: "string_agg",
+		kind: "aggregateMulti",
+		arity: { min: 2, max: 2 },
+		// args[0] = expression à convertir en text ; args[1] = separator literal.
+		args: ["any", "string"],
+		engines: {
+			postgres: pgStringAgg,
+			mongodb: mongoStringAgg,
+			kv: kvStringAgg
+		}
+	},
+	{
+		name: "json_agg",
+		kind: "aggregateMulti",
+		arity: { min: 1, max: 1 },
+		engines: {
+			postgres: pgJsonAgg,
+			mongodb: mongoJsonAgg,
+			kv: kvJsonAgg
+		}
 	},
 
 	// ─── sprint 4 : reserved (sprint 5+) ──────────────────────────────────

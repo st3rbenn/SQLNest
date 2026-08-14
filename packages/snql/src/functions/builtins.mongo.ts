@@ -560,3 +560,48 @@ export const mongoMax: EngineRenderer = (args, ctx) => {
 	const arg = ctx.renderExpr(args[0]);
 	return { $max: arg };
 };
+
+// ─── sprint T2/8 : aggregateMulti ─────────────────────────────────────────
+
+/**
+ * Rendu du body accumulateur Mongo pour aggregateMulti — retourne toujours
+ * `{$push: <arg>}` en $group. Le sort intra-call + reduce (pour string_agg)
+ * sont appliqués en $project via un helper séparé (dispatché par le codegen
+ * mongodb.ts qui wrap la valeur du slot).
+ *
+ * `unique` : la déduplication passe par `{$addToSet: <arg>}` au lieu de $push.
+ * Compatibility Mongo native.
+ *
+ * Le sortKeys est passé au codegen via ctx.sortKeys — le renderer ici renvoie
+ * juste l'accumulator body. Le post-processing $sortArray/$reduce est fait
+ * par mongodb.ts:renderAggregatePipeline en lisant call.sortKeys directement
+ * depuis le PlanExpr.
+ */
+export const mongoArrayAgg: EngineRenderer = (args, ctx) => {
+	const arg = ctx.renderExpr(args[0]);
+	// $addToSet dédup pour `unique` ; sinon $push (préserve ordre + doublons).
+	return ctx.unique === true ? { $addToSet: arg } : { $push: arg };
+};
+
+/**
+ * `string_agg(x, sep)` — Mongo n'a pas de STRING_AGG natif. On accumule via
+ * `$push` en $group (préserve ordre) puis $reduce en $project pour concat
+ * avec sep. Le renderer retourne le body accumulator ; le codegen wrap le
+ * $reduce en post-processing (accès à sep + sort).
+ *
+ * Sémantique NULL : PG STRING_AGG skip NULL. Mongo runtime devra filter les
+ * nulls avant reduce — géré dans mongodb.ts post-processing.
+ */
+export const mongoStringAgg: EngineRenderer = (args, ctx) => {
+	const arg = ctx.renderExpr(args[0]);
+	return ctx.unique === true ? { $addToSet: arg } : { $push: arg };
+};
+
+/**
+ * `json_agg(x)` — miroir array_agg (Mongo n'a pas de type JSON distinct,
+ * les arrays BSON sont natifs). Sémantique préserve NULL comme PG.
+ */
+export const mongoJsonAgg: EngineRenderer = (args, ctx) => {
+	const arg = ctx.renderExpr(args[0]);
+	return ctx.unique === true ? { $addToSet: arg } : { $push: arg };
+};

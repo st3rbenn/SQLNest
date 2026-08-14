@@ -52,6 +52,13 @@ export interface RenderContext {
 		expr: unknown,
 		row: Record<string, unknown>
 	) => unknown;
+	// Sprint T2/8 : sort intra-call pour aggregateMulti. Propagé depuis
+	// PlanCall.sortKeys. Shape opaque {path, direction} — chaque engine
+	// wrap avec son rendu (PG ORDER BY, Mongo $sortArray, KV comparator).
+	readonly sortKeys?: readonly {
+		readonly path: readonly string[];
+		readonly direction: "asc" | "desc";
+	}[];
 }
 
 /** Renderer par engine : reçoit les args (déjà lowered en PlanExpr) + le contexte engine-spécifique. */
@@ -60,8 +67,21 @@ export type EngineRenderer = (
 	ctx: RenderContext
 ) => unknown;
 
-/** Kind d'une fonction — pilote comment le codegen la place dans le SQL/pipeline. */
-export type FunctionKind = "scalar" | "aggregate" | "window" | "reserved";
+/**
+ * Kind d'une fonction — pilote comment le codegen la place dans le SQL/pipeline.
+ *  - `scalar` : évalue per-row (upper, coalesce, if…)
+ *  - `aggregate` : fold sur un groupe → 1 scalaire (count, sum, min…)
+ *  - `aggregateMulti` : fold sur un groupe → 1 collection (array/string/json).
+ *    Accepte un `sort <keys>` intra-call pour ordonner les éléments accumulés.
+ *  - `window` : reservé pour T2/9 (windowCall)
+ *  - `reserved` : nom pris mais pas encore implémenté (hint sprint)
+ */
+export type FunctionKind =
+	| "scalar"
+	| "aggregate"
+	| "aggregateMulti"
+	| "window"
+	| "reserved";
 
 /** Nom d'engine supporté (aligné avec `capabilitiesFor`). */
 export type EngineName = "postgres" | "mongodb" | "kv";

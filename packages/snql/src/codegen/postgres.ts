@@ -519,12 +519,16 @@ function renderExpr(expr: PlanExpr, params: ParamList): string {
 				);
 			}
 			// Sprint T2/6 : propage star/unique flags aux renderers aggregates.
+			// Sprint T2/8 : propage sortKeys aux renderers aggregateMulti.
 			// Les renderers scalar existants ignorent ces flags (backward compat).
 			return entry.engines.postgres(expr.args, {
 				renderExpr: (arg) => renderExpr(arg as PlanExpr, params),
 				addParam: (v) => params.add(v as SqlValue),
 				...(expr.star === true ? { star: true } : {}),
-				...(expr.unique === true ? { unique: true } : {})
+				...(expr.unique === true ? { unique: true } : {}),
+				...(expr.sortKeys !== undefined && expr.sortKeys.length > 0
+					? { sortKeys: expr.sortKeys }
+					: {})
 			}) as string;
 		}
 		case "cast":

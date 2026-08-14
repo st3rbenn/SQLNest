@@ -317,10 +317,86 @@ function renderAggregatePipeline(
 		return { k: e.kind };
 	}
 
+	/**
+	 * Sprint T2/8 : wrap le slot d'un aggregateMulti avec le post-processing
+	 * approprié (sortArray + string_agg reduce). Appliqué en $project après
+	 * le $group.
+	 *
+	 * - array_agg / json_agg : `$__agg_N` direct, ou `{$sortArray: {input, sortBy}}`
+	 *   si sortKeys.
+	 * - string_agg : reduce avec sep, filter NULL, éventuel sortArray.
+	 */
+	function wrapAggregateMultiSlot(
+		call: PlanExpr & { kind: "call" },
+		slot: string
+	): unknown {
+		const slotRef = `$${slot}`;
+		// Sort intra-call : $sortArray (MongoDB 5.2+). sortBy = Record<string, 1|-1>.
+		// Note : les sort keys référencent des paths SUR LES DOCS DU BUCKET
+		// (pas sur la valeur pushée). Mongo permet ça via $sortArray car chaque
+		// élément est un doc/scalar dont on lit le path.
+		let base: unknown = slotRef;
+		if (call.sortKeys !== undefined && call.sortKeys.length > 0) {
+			const sortBy: Record<string, 1 | -1> = {};
+			for (const k of call.sortKeys) {
+				const path = k.path.join(".");
+				sortBy[path] = k.direction === "desc" ? -1 : 1;
+			}
+			base = { $sortArray: { input: slotRef, sortBy } };
+		}
+		// string_agg : filter NULL puis $reduce avec sep.
+		if (call.name === "string_agg") {
+			const sep = call.args[1];
+			if (sep === undefined) {
+				throw new SnqlError(
+					"string_agg attend 2 args (expr, sep) — bug lower/codegen",
+					"codegen_mongo_string_agg_arity"
+				);
+			}
+			const sepRendered = toExprOperand(sep, alias);
+			// $filter pour skip null (parité PG STRING_AGG).
+			const filtered = {
+				$filter: {
+					input: base,
+					cond: { $ne: ["$$this", null] }
+				}
+			};
+			// $reduce : join avec sep. Cast $$this en string via $toString.
+			// Init "" ; premier elem → juste sa string ; suivants → $$value + sep + $$this.
+			return {
+				$cond: {
+					if: { $eq: [{ $size: filtered }, 0] },
+					then: null,
+					else: {
+						$reduce: {
+							input: filtered,
+							initialValue: "",
+							in: {
+								$cond: [
+									{ $eq: ["$$value", ""] },
+									{ $toString: "$$this" },
+									{
+										$concat: [
+											"$$value",
+											{ $toString: sepRendered },
+											{ $toString: "$$this" }
+										]
+									}
+								]
+							}
+						}
+					}
+				}
+			};
+		}
+		// array_agg / json_agg : le slot (possibly sorted) direct.
+		return base;
+	}
+
 	function transformExpr(expr: PlanExpr, insideAggArg: boolean): unknown {
 		if (expr.kind === "call") {
 			const entry = SNQL_FUNCTIONS.get(expr.name);
-			if (entry?.kind === "aggregate") {
+			if (entry?.kind === "aggregate" || entry?.kind === "aggregateMulti") {
 				// Aggregate nested dans un arg d'agg → refusé au lower (defense).
 				if (insideAggArg) {
 					throw new SnqlError(
@@ -367,6 +443,15 @@ function renderAggregatePipeline(
 				slotCounter += 1;
 				slotByKey.set(key, slot);
 				groupStage[slot] = accBody as Record<string, unknown>;
+				// Sprint T2/8 : post-processing aggregateMulti — $sortArray si
+				// sortKeys, $reduce pour string_agg (concat), $filter pour
+				// string_agg NULL-skip.
+				if (entry.kind === "aggregateMulti") {
+					return wrapAggregateMultiSlot(
+						expr as PlanExpr & { kind: "call" },
+						slot
+					);
+				}
 				return `$${slot}`;
 			}
 			// Scalar call. Args passent via transformExpr (catch nested aggregates

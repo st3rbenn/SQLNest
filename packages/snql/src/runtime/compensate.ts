@@ -481,13 +481,24 @@ function evalAggregateExpr(
 				`Runtime KV : fonction '${expr.name}' non exécutable (planner devrait avoir rejeté)`
 			);
 		}
-		if (entry.kind === "aggregate") {
+		if (entry.kind === "aggregate" || entry.kind === "aggregateMulti") {
 			return entry.engines.kv(expr.args, {
-				renderExpr: (a) => evalAggregateExpr(a as PlanExpr, rows, groupKeyRow),
+				// Sprint T2/8 : renderExpr pour aggregateMulti sert à évaluer le
+				// literal `sep` de string_agg (via evalValue direct — pas de row).
+				// Pour les scalaires wrappés, on descend via evalAggregateExpr.
+				renderExpr: (a) =>
+					entry.kind === "aggregateMulti"
+						? evalValue(a as PlanExpr, groupKeyRow ?? ({} as Row))
+						: evalAggregateExpr(a as PlanExpr, rows, groupKeyRow),
 				rows,
 				evalPerRow: (a, r) => evalValue(a as PlanExpr, r as Row),
 				...(expr.star === true ? { star: true } : {}),
-				...(expr.unique === true ? { unique: true } : {})
+				...(expr.unique === true ? { unique: true } : {}),
+				// Sprint T2/8 : sortKeys propagé pour aggregateMulti (kvArrayAgg
+				// & co l'utilisent pour trier avant collecte).
+				...(expr.sortKeys !== undefined && expr.sortKeys.length > 0
+					? { sortKeys: expr.sortKeys }
+					: {})
 			});
 		}
 		return entry.engines.kv(expr.args, {

@@ -1,4 +1,5 @@
 import { SnqlError } from "../diagnostics";
+import { SNQL_FUNCTIONS } from "../functions";
 import type { Span, Token, TokenKind } from "../lexer/token";
 import { CAST_TARGETS, MAX_CASE_DEPTH, MAX_LITERAL_DEPTH } from "./ast";
 import type {
@@ -7,7 +8,8 @@ import type {
 	CastTarget,
 	CompareOperator,
 	Expr,
-	ObjectEntry
+	ObjectEntry,
+	SortKey
 } from "./ast";
 import type { TokenCursor } from "./cursor";
 
@@ -289,7 +291,18 @@ function parseCall(cursor: TokenCursor, rawName: string, nameSpan: Span): Expr {
 				}
 				// modifier === 'unique' → fast-path.
 				cursor.next(); // consomme ident 'unique'
-				const arg = parseExpr(cursor, 0);
+				const args: Expr[] = [parseExpr(cursor, 0)];
+				// Sprint T2/8 : aggregateMulti (string_agg) a un 2e arg
+				// (separator) après `unique`. Aggregate scalar reste mono-arg
+				// (count/sum/avg/min/max), refuse args supplémentaires.
+				const entry = SNQL_FUNCTIONS.get(name);
+				const isAggMulti = entry?.kind === "aggregateMulti";
+				if (isAggMulti) {
+					while (cursor.peek().kind === "comma") {
+						cursor.next();
+						args.push(parseExpr(cursor, 0));
+					}
+				}
 				const after = cursor.peek();
 				if (after.kind === "comma") {
 					throw new SnqlError(
@@ -298,6 +311,21 @@ function parseCall(cursor: TokenCursor, rawName: string, nameSpan: Span): Expr {
 						after.span
 					);
 				}
+				// Sprint T2/8 : sort intra-call après args, si aggregateMulti.
+				let sortKeys: SortKey[] | undefined;
+				const afterArgs = cursor.peek();
+				if (
+					isAggMulti &&
+					afterArgs.kind === "keyword" &&
+					afterArgs.value === "sort"
+				) {
+					cursor.next();
+					sortKeys = [parseIntraCallSortKey(cursor)];
+					while (cursor.peek().kind === "comma") {
+						cursor.next();
+						sortKeys.push(parseIntraCallSortKey(cursor));
+					}
+				}
 				const close = cursor.expect(
 					"rparen",
 					`')' pour fermer '${name}(unique ...)'`
@@ -305,8 +333,9 @@ function parseCall(cursor: TokenCursor, rawName: string, nameSpan: Span): Expr {
 				return {
 					type: "call",
 					name,
-					args: [arg],
+					args,
 					unique: true,
+					...(sortKeys !== undefined ? { sortKeys } : {}),
 					span: joinSpan(nameSpan, close.span)
 				};
 			}
@@ -333,13 +362,49 @@ function parseCall(cursor: TokenCursor, rawName: string, nameSpan: Span): Expr {
 			args.push(parseExpr(cursor, 0));
 		}
 	}
+	// Sprint T2/8 : sort intra-call — accepté UNIQUEMENT pour aggregateMulti
+	// (array_agg / string_agg / json_agg). Parser contextuel via registre : si
+	// le nom n'est pas déclaré aggregateMulti, la keyword `sort` reste un stage
+	// keyword classique et la parenthèse fermante manquera → erreur claire.
+	let sortKeys: SortKey[] | undefined;
+	const afterArgs = cursor.peek();
+	if (afterArgs.kind === "keyword" && afterArgs.value === "sort") {
+		const entry = SNQL_FUNCTIONS.get(name);
+		if (entry?.kind === "aggregateMulti") {
+			cursor.next(); // consomme 'sort'
+			sortKeys = [parseIntraCallSortKey(cursor)];
+			while (cursor.peek().kind === "comma") {
+				cursor.next();
+				sortKeys.push(parseIntraCallSortKey(cursor));
+			}
+		}
+	}
 	const close = cursor.expect("rparen", "')' pour fermer l'appel de fonction");
 	return {
 		type: "call",
 		name,
 		args,
+		...(sortKeys !== undefined ? { sortKeys } : {}),
 		span: joinSpan(nameSpan, close.span)
 	};
+}
+
+/**
+ * Sprint T2/8 : parse une sort key intra-call — même shape que parseSortKey
+ * du stage `sort`, mais isolé pour ne pas créer de dép cyclique parser↔parser.
+ * `<path> [asc|desc]`.
+ */
+function parseIntraCallSortKey(cursor: TokenCursor): SortKey {
+	const { path, span } = parseFieldPath(cursor);
+	let direction: "asc" | "desc" = "asc";
+	let endSpan = span;
+	const p = cursor.peek();
+	if (p.kind === "keyword" && (p.value === "asc" || p.value === "desc")) {
+		const dirTok = cursor.next();
+		direction = dirTok.value === "desc" ? "desc" : "asc";
+		endSpan = dirTok.span;
+	}
+	return { path, direction, span: joinSpan(span, endSpan) };
 }
 
 /**

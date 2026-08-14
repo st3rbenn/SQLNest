@@ -253,6 +253,34 @@ function resolveProjectField(
 				collection: ""
 			};
 		}
+		// Sprint T2/8 : aggregateMulti — types de retour forts.
+		//  - array_agg → array (nullable côté PG empty group, [] côté KV)
+		//  - string_agg → string (nullable côté PG empty group, "" côté KV)
+		//  - json_agg → json
+		if (callName === "array_agg") {
+			return {
+				name: outputName,
+				type: "array",
+				nullable: true,
+				collection: ""
+			};
+		}
+		if (callName === "string_agg") {
+			return {
+				name: outputName,
+				type: "string",
+				nullable: true,
+				collection: ""
+			};
+		}
+		if (callName === "json_agg") {
+			return {
+				name: outputName,
+				type: "json",
+				nullable: true,
+				collection: ""
+			};
+		}
 	}
 
 	// Sprint object-literals : `pick {n: r.name} as doc` ou `pick [...] as arr`

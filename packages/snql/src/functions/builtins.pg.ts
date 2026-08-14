@@ -433,3 +433,70 @@ export const pgMax: EngineRenderer = (args, ctx) => {
 	const [a] = renderArgs(args, ctx);
 	return `MAX(${a})`;
 };
+
+// ─── sprint T2/8 : aggregateMulti ─────────────────────────────────────────
+
+/**
+ * Identifiant PG quoté : whitelist stricte `[A-Za-z_][A-Za-z0-9_]*` (miroir de
+ * `codegen/postgres.ts:quoteIdent`). Impossible en pratique car parseFieldPath
+ * exige déjà un ident valide au lexer — defense-in-depth.
+ */
+const IDENT_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+function quoteIdent(name: string): string {
+	if (!IDENT_RE.test(name)) {
+		throw new Error(`Identifiant invalide '${name}'`);
+	}
+	return `"${name}"`;
+}
+
+/**
+ * Rend une clause `ORDER BY` PG à partir des sortKeys du call (T2/8). Vide
+ * si `ctx.sortKeys` absent/vide.
+ */
+function renderOrderByClause(ctx: {
+	readonly sortKeys?: readonly {
+		readonly path: readonly string[];
+		readonly direction: "asc" | "desc";
+	}[];
+}): string {
+	if (ctx.sortKeys === undefined || ctx.sortKeys.length === 0) return "";
+	const parts = ctx.sortKeys.map((k) => {
+		const path = k.path.map(quoteIdent).join(".");
+		return `${path} ${k.direction === "desc" ? "DESC" : "ASC"}`;
+	});
+	return ` ORDER BY ${parts.join(", ")}`;
+}
+
+/**
+ * `array_agg(x [sort k])` → `ARRAY_AGG(<x> [ORDER BY k])`. PG conserve NULL
+ * dans l'array (contrat SNQL) ; modifier `unique` → `ARRAY_AGG(DISTINCT x)`.
+ * Empty group → NULL (parité PG native).
+ */
+export const pgArrayAgg: EngineRenderer = (args, ctx) => {
+	const [a] = renderArgs(args, ctx);
+	const distinct = ctx.unique === true ? "DISTINCT " : "";
+	return `ARRAY_AGG(${distinct}${a}${renderOrderByClause(ctx)})`;
+};
+
+/**
+ * `string_agg(x, sep [sort k])` → `STRING_AGG(<x>::text, <sep> [ORDER BY k])`.
+ * Cast `::text` sur x pour lever `42883 function string_agg(int, text)` — PG
+ * n'a de surcharge que string_agg(text|bytea, ...). NULL-skip natif PG.
+ * Empty group → NULL. `unique` → `STRING_AGG(DISTINCT x, sep)`.
+ */
+export const pgStringAgg: EngineRenderer = (args, ctx) => {
+	const [a, sep] = renderArgs(args, ctx);
+	const distinct = ctx.unique === true ? "DISTINCT " : "";
+	return `STRING_AGG(${distinct}(${a})::text, ${sep}${renderOrderByClause(ctx)})`;
+};
+
+/**
+ * `json_agg(x [sort k])` → `JSON_AGG(<x> [ORDER BY k])`. Retour json (pas
+ * jsonb — préserve l'ordre des éléments). Empty group → NULL (PG natif).
+ * `unique` → `JSON_AGG(DISTINCT x)`.
+ */
+export const pgJsonAgg: EngineRenderer = (args, ctx) => {
+	const [a] = renderArgs(args, ctx);
+	const distinct = ctx.unique === true ? "DISTINCT " : "";
+	return `JSON_AGG(${distinct}${a}${renderOrderByClause(ctx)})`;
+};

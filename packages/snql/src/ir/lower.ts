@@ -547,7 +547,7 @@ function checkExprPathsAgainstColumns(
 function containsAggregateAst(expr: Expr): boolean {
 	if (expr.type === "call") {
 		const entry = SNQL_FUNCTIONS.get(expr.name);
-		if (entry?.kind === "aggregate") return true;
+		if (entry?.kind === "aggregate" || entry?.kind === "aggregateMulti") return true;
 		for (const arg of expr.args) if (containsAggregateAst(arg)) return true;
 		return false;
 	}
@@ -589,7 +589,7 @@ function firstAggregateSpanAst(
 ): import("../lexer/token").Span | undefined {
 	if (expr.type === "call") {
 		const entry = SNQL_FUNCTIONS.get(expr.name);
-		if (entry?.kind === "aggregate") return expr.span;
+		if (entry?.kind === "aggregate" || entry?.kind === "aggregateMulti") return expr.span;
 		for (const arg of expr.args) {
 			const s = firstAggregateSpanAst(arg);
 			if (s !== undefined) return s;
@@ -675,11 +675,11 @@ function validateInAggWrapperAst(
 ): void {
 	if (expr.type === "call") {
 		const entry = SNQL_FUNCTIONS.get(expr.name);
-		if (entry?.kind === "aggregate") {
+		if (entry?.kind === "aggregate" || entry?.kind === "aggregateMulti") {
 			// Aggregate détecté. Refus si déjà dans un agg (nested).
 			if (insideAgg) {
 				throw new SnqlError(
-					`Aggregate imbriqué '${expr.name}(...)' — window functions arrivent sprint 8+`,
+					`Aggregate imbriqué '${expr.name}(...)' — window functions arrivent sprint T2/9`,
 					"lower_agg_nested",
 					expr.span
 				);
@@ -824,7 +824,7 @@ export function firstAggregateSpan(
 ): import("../lexer/token").Span | undefined {
 	if (expr.kind === "call") {
 		const entry = SNQL_FUNCTIONS.get(expr.name);
-		if (entry?.kind === "aggregate") return expr.span;
+		if (entry?.kind === "aggregate" || entry?.kind === "aggregateMulti") return expr.span;
 		for (const arg of expr.args) {
 			const s = firstAggregateSpan(arg);
 			if (s !== undefined) return s;
@@ -1739,14 +1739,17 @@ function lowerCall(expr: Expr & { type: "call" }): PlanExpr {
 		);
 	}
 	if (expr.unique === true) {
-		if (entry.kind !== "aggregate") {
+		if (entry.kind !== "aggregate" && entry.kind !== "aggregateMulti") {
 			throw new SnqlError(
-				`'${expr.name}(unique ...)' — le modifier 'unique' est réservé aux aggregates (count/sum/avg/min/max)`,
+				`'${expr.name}(unique ...)' — le modifier 'unique' est réservé aux aggregates (count/sum/avg/min/max, array_agg/string_agg/json_agg)`,
 				"lower_call_unique_aggregate_only",
 				expr.span
 			);
 		}
-		if (expr.args.length !== 1) {
+		// aggregate mono-arg (count/sum/avg/min/max) exige 1 arg avec unique.
+		// aggregateMulti (array_agg, json_agg) : 1 arg. string_agg : 2 args.
+		// On check via arity min (déjà validée à la ligne suivante).
+		if (entry.kind === "aggregate" && expr.args.length !== 1) {
 			throw new SnqlError(
 				`'${expr.name}(unique ...)' attend exactement 1 argument, reçu ${expr.args.length} (arité mono-arg cross-engine)`,
 				"lower_call_unique_arity",
@@ -1757,6 +1760,17 @@ function lowerCall(expr: Expr & { type: "call" }): PlanExpr {
 			throw new SnqlError(
 				`'${expr.name}(unique ...)' refusé — 'unique' n'a pas d'effet sur ${expr.name} (retire 'unique')`,
 				"lower_call_unique_no_op_min_max",
+				expr.span
+			);
+		}
+	}
+	// Sprint T2/8 : sortKeys — parser filtre déjà (contextual via registry),
+	// defense-in-depth : refuse si présent sur non-aggregateMulti (bug parser).
+	if (expr.sortKeys !== undefined && expr.sortKeys.length > 0) {
+		if (entry.kind !== "aggregateMulti") {
+			throw new SnqlError(
+				`'${expr.name}(... sort ...)' — 'sort' intra-call réservé aux aggregateMulti (array_agg / string_agg / json_agg)`,
+				"lower_call_sort_aggregate_multi_only",
 				expr.span
 			);
 		}
@@ -1873,12 +1887,19 @@ function lowerCall(expr: Expr & { type: "call" }): PlanExpr {
 	}
 	// Sprint T2/6 : forward star/unique flags sur PlanCall — le codegen les
 	// consomme via ctx.star / ctx.unique.
+	// Sprint T2/8 : forward sortKeys (aggregateMulti) — le codegen les
+	// consomme via ctx.sortKeys + accès direct au PlanCall.sortKeys.
+	const loweredSortKeys =
+		expr.sortKeys !== undefined && expr.sortKeys.length > 0
+			? expr.sortKeys.map((k) => ({ path: k.path, direction: k.direction }))
+			: undefined;
 	return {
 		kind: "call",
 		name: expr.name,
 		args: expr.args.map(lowerExpr),
 		...(expr.star === true ? { star: true as const } : {}),
 		...(expr.unique === true ? { unique: true as const } : {}),
+		...(loweredSortKeys !== undefined ? { sortKeys: loweredSortKeys } : {}),
 		span: expr.span
 	};
 }
