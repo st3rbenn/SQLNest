@@ -49,8 +49,11 @@ export function compensate(
 				break;
 			case "aggregate": {
 				// Sprint T2/6 : fold sur toute la collection → 1 row output.
-				// Sprint 7 (`group by`) itérera par bucket via groupKeys.
-				out = [foldAggregate(op.fields, out)];
+				// Sprint T2/7 : groupKeys peuplé → bucket par clés puis fold
+				// chaque bucket ; having filtre les buckets output.
+				out = op.groupKeys !== undefined
+					? bucketFoldAggregate(op.fields, op.groupKeys, op.having, out)
+					: [foldAggregate(op.fields, out)];
 				break;
 			}
 		}
@@ -370,8 +373,6 @@ function foldAggregate(
 		if (field.expr !== undefined) {
 			out[aliasName] = evalAggregateExpr(field.expr, rows);
 		} else {
-			// Field bare dans pick agg — refusé au lower
-			// (planner_agg_bare_field_needs_group). Defense-in-depth.
 			throw new SnqlError(
 				`Field bare '${field.path.join(".")}' dans pick agg — bug lower/runtime sync`,
 				"runtime_agg_bare_field"
@@ -382,12 +383,97 @@ function foldAggregate(
 }
 
 /**
+ * Sprint T2/7 : bucket rows par groupKeys, fold chaque bucket, applique
+ * having (si présent), retourne les rows passantes.
+ *
+ * Clé bucket = `JSON.stringify(keyValues)` — stable et distingue
+ * `null`/`""`/`0`. Une row avec toutes ses group-key values undefined tombe
+ * dans le bucket "all-null", cohérent avec PG (NULL values group ensemble).
+ *
+ * Field bare dans pick matchant un group key → valeur directe depuis la 1re
+ * row du bucket (toutes les rows du bucket partagent la même valeur par
+ * définition du bucket).
+ */
+function bucketFoldAggregate(
+	fields: readonly PlanProjectField[],
+	groupKeys: readonly (readonly string[])[],
+	having: PlanExpr | undefined,
+	rows: readonly Row[]
+): Row[] {
+	// Bucket rows par clé JSON-stringify.
+	const buckets = new Map<string, Row[]>();
+	const keyValuesByBucket = new Map<string, unknown[]>();
+	for (const row of rows) {
+		const keyValues = groupKeys.map((k) => getPath(row, k));
+		const bucketKey = JSON.stringify(keyValues, (_, v) =>
+			typeof v === "bigint" ? `__bi:${v.toString()}` : v
+		);
+		let bucket = buckets.get(bucketKey);
+		if (bucket === undefined) {
+			bucket = [];
+			buckets.set(bucketKey, bucket);
+			keyValuesByBucket.set(bucketKey, keyValues);
+		}
+		bucket.push(row);
+	}
+	// Fold + having chaque bucket.
+	const out: Row[] = [];
+	// Group key last segments — pour resolver les path-only fields.
+	const groupKeyLastSegs = new Map<string, readonly string[]>();
+	for (const k of groupKeys) {
+		const last = k[k.length - 1];
+		if (last !== undefined) groupKeyLastSegs.set(last, k);
+	}
+	for (const [bucketKey, bucketRows] of buckets) {
+		const foldedRow: Row = {};
+		const firstRow = bucketRows[0] as Row;
+		for (const field of fields) {
+			const aliasName =
+				(field.alias ?? field.path[field.path.length - 1] ?? "") as string;
+			if (field.expr !== undefined) {
+				foldedRow[aliasName] = evalAggregateExpr(field.expr, bucketRows, firstRow);
+			} else if (field.path.length > 0) {
+				// Path-only field = group key (validé lower). Lookup direct
+				// depuis 1re row du bucket.
+				const lastSeg = field.path[field.path.length - 1] as string;
+				if (groupKeyLastSegs.has(lastSeg)) {
+					foldedRow[aliasName] = getPath(bucketRows[0] as Row, groupKeyLastSegs.get(lastSeg)!);
+				} else {
+					throw new SnqlError(
+						`Field bare '${field.path.join(".")}' dans pick agg group — bug lower/runtime sync`,
+						"runtime_agg_bare_field"
+					);
+				}
+			}
+		}
+		// Having filter — évalué via evalAggregateExpr contre bucketRows.
+		// Field bare refs matchant un group key → résolus depuis la 1re row du
+		// bucket (toutes les rows du bucket partagent la même valeur).
+		if (having !== undefined) {
+			const havingResult = evalAggregateExpr(
+				having,
+				bucketRows,
+				bucketRows[0] as Row
+			);
+			if (havingResult !== true) continue;
+		}
+		void bucketKey;
+		out.push(foldedRow);
+	}
+	return out;
+}
+
+/**
  * Évalue un PlanExpr dans le contexte d'un pick agg. Les aggregate calls
  * délèguent au renderer KV avec ctx.rows/evalPerRow. Les scalar wrappers
  * (coalesce/if/case/arith/…) descendent via evalAggregateExpr — nested
  * aggregates auraient été refusés au lower (lower_agg_nested).
  */
-function evalAggregateExpr(expr: PlanExpr, rows: readonly Row[]): unknown {
+function evalAggregateExpr(
+	expr: PlanExpr,
+	rows: readonly Row[],
+	groupKeyRow?: Row
+): unknown {
 	if (expr.kind === "call") {
 		const entry = SNQL_FUNCTIONS.get(expr.name);
 		if (entry?.engines.kv === undefined) {
@@ -397,27 +483,25 @@ function evalAggregateExpr(expr: PlanExpr, rows: readonly Row[]): unknown {
 		}
 		if (entry.kind === "aggregate") {
 			return entry.engines.kv(expr.args, {
-				// renderExpr : utilisé si un renderer aggregate évalue un arg via
-				// ctx.renderExpr (rare — la plupart lisent evalPerRow). Descente
-				// via evalAggregateExpr pour catch un nested (refusé lower).
-				renderExpr: (a) => evalAggregateExpr(a as PlanExpr, rows),
+				renderExpr: (a) => evalAggregateExpr(a as PlanExpr, rows, groupKeyRow),
 				rows,
 				evalPerRow: (a, r) => evalValue(a as PlanExpr, r as Row),
 				...(expr.star === true ? { star: true } : {}),
 				...(expr.unique === true ? { unique: true } : {})
 			});
 		}
-		// Scalar wrapper : args passent par evalAggregateExpr (sum(x) → valeur foldée,
-		// literal → literal). Les renderers KV scalar (coalesce/if/greatest/least)
-		// reçoivent des valeurs déjà foldées.
 		return entry.engines.kv(expr.args, {
-			renderExpr: (a) => evalAggregateExpr(a as PlanExpr, rows)
+			renderExpr: (a) => evalAggregateExpr(a as PlanExpr, rows, groupKeyRow)
 		});
 	}
 	if (expr.kind === "literal") return expr.value;
 	if (expr.kind === "field") {
-		// Field bare dans un scalar wrapper de pick agg → refusé au lower
-		// (lower_bare_field_in_agg_scalar_wrapper). Defense-in-depth.
+		// Sprint T2/7 : field bare dans having ou dans pick.expr peut référencer
+		// une group key — dans ce cas on résout via groupKeyRow (toutes les rows
+		// du bucket partagent la même valeur).
+		if (groupKeyRow !== undefined) {
+			return getPath(groupKeyRow, expr.path);
+		}
 		throw new SnqlError(
 			`Field bare '${expr.path.join(".")}' dans pick agg — bug lower/runtime sync`,
 			"runtime_agg_bare_field"
@@ -426,63 +510,62 @@ function evalAggregateExpr(expr: PlanExpr, rows: readonly Row[]): unknown {
 	if (expr.kind === "arith") {
 		return evalArith(
 			expr.op,
-			evalAggregateExpr(expr.left, rows),
-			evalAggregateExpr(expr.right, rows)
+			evalAggregateExpr(expr.left, rows, groupKeyRow),
+			evalAggregateExpr(expr.right, rows, groupKeyRow)
 		);
 	}
 	if (expr.kind === "cast") {
-		const inner = evalAggregateExpr(expr.operand, rows);
+		const inner = evalAggregateExpr(expr.operand, rows, groupKeyRow);
 		if (inner === null || inner === undefined) return null;
 		return castValue(expr.target, inner);
 	}
 	if (expr.kind === "object") {
 		const out: Record<string, unknown> = {};
-		for (const e of expr.entries) out[e.key] = evalAggregateExpr(e.value, rows);
+		for (const e of expr.entries) out[e.key] = evalAggregateExpr(e.value, rows, groupKeyRow);
 		return out;
 	}
 	if (expr.kind === "array") {
-		return expr.items.map((i) => evalAggregateExpr(i, rows));
+		return expr.items.map((i) => evalAggregateExpr(i, rows, groupKeyRow));
 	}
 	if (expr.kind === "case") {
 		for (const b of expr.branches) {
-			const cond = evalAggregateExpr(b.cond, rows);
-			if (cond === true) return evalAggregateExpr(b.value, rows);
+			const cond = evalAggregateExpr(b.cond, rows, groupKeyRow);
+			if (cond === true) return evalAggregateExpr(b.value, rows, groupKeyRow);
 		}
-		return evalAggregateExpr(expr.elseValue, rows);
+		return evalAggregateExpr(expr.elseValue, rows, groupKeyRow);
 	}
-	// Comparaisons/bool wrappers — évalues en bool via récursion sur left/right.
 	if (expr.kind === "compare") {
 		return evalCompare(
 			expr.op,
-			evalAggregateExpr(expr.left, rows),
-			evalAggregateExpr(expr.right, rows)
+			evalAggregateExpr(expr.left, rows, groupKeyRow),
+			evalAggregateExpr(expr.right, rows, groupKeyRow)
 		);
 	}
 	if (expr.kind === "and") {
 		return and3(
-			coerceBool(evalAggregateExpr(expr.left, rows)),
-			coerceBool(evalAggregateExpr(expr.right, rows))
+			coerceBool(evalAggregateExpr(expr.left, rows, groupKeyRow)),
+			coerceBool(evalAggregateExpr(expr.right, rows, groupKeyRow))
 		);
 	}
 	if (expr.kind === "or") {
 		return or3(
-			coerceBool(evalAggregateExpr(expr.left, rows)),
-			coerceBool(evalAggregateExpr(expr.right, rows))
+			coerceBool(evalAggregateExpr(expr.left, rows, groupKeyRow)),
+			coerceBool(evalAggregateExpr(expr.right, rows, groupKeyRow))
 		);
 	}
 	if (expr.kind === "not") {
-		const inner = coerceBool(evalAggregateExpr(expr.operand, rows));
+		const inner = coerceBool(evalAggregateExpr(expr.operand, rows, groupKeyRow));
 		return inner === null ? null : !inner;
 	}
 	if (expr.kind === "isNull") {
-		const inner = evalAggregateExpr(expr.operand, rows);
+		const inner = evalAggregateExpr(expr.operand, rows, groupKeyRow);
 		const missing = inner === null || inner === undefined;
 		return expr.negated ? !missing : missing;
 	}
 	if (expr.kind === "in") {
 		return evalIn(
-			evalAggregateExpr(expr.target, rows),
-			expr.values.map((v) => evalAggregateExpr(v, rows))
+			evalAggregateExpr(expr.target, rows, groupKeyRow),
+			expr.values.map((v) => evalAggregateExpr(v, rows, groupKeyRow))
 		);
 	}
 	throw new SnqlError(

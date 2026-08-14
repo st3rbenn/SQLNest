@@ -29,9 +29,9 @@ function sqlWithSpans(source: string): {
 }
 
 describe("codegen postgres — clauses de base", () => {
-	it("compile la requête canonique (with→where→sort→pick→limit)", () => {
+	it("compile la requête canonique (with→where→pick→sort→limit)", () => {
 		const { text, params } = sql(
-			`get users where age > 30 and status = "active" sort created_at desc pick name, email limit 10 offset 20`
+			`get users where age > 30 and status = "active" pick name, email sort created_at desc limit 10 offset 20`
 		);
 		expect(text).toBe(
 			`SELECT "name", "email" FROM "users" WHERE ("age" > $1 AND "status" = $2) ORDER BY "created_at" DESC LIMIT $3 OFFSET $4`
@@ -229,8 +229,8 @@ describe("codegen postgres — ordre canonique refuse les inversions", () => {
 		);
 	});
 
-	it("pick AVANT sort refusé par la grammaire", () => {
-		expect(() => sql("get users pick name sort age")).toThrow(/hors ordre/i);
+	it("sort AVANT pick refusé par la grammaire (nouvel ordre : pick puis sort)", () => {
+		expect(() => sql("get users sort age pick name")).toThrow(/hors ordre/i);
 	});
 
 	it("limit répété refusé par la grammaire", () => {
@@ -341,7 +341,7 @@ describe("codegen postgres — arithmétique scalaire (T1)", () => {
 		// Note : `sort` en T1 reste sur chemin simple ; sort par expression est
 		// prévu en T2 (dépend du call node pour être cohérent).
 		const { text } = sql(
-			"get orders where price + tax > 100 sort id desc pick id, price * qty as total limit 10"
+			"get orders where price + tax > 100 pick id, price * qty as total sort id desc limit 10"
 		);
 		expect(text).toBe(
 			`SELECT "id", ("price" * "qty") AS "total" FROM "orders" WHERE ("price" + "tax") > $1 ORDER BY "id" DESC LIMIT $2`

@@ -8,7 +8,7 @@ const stringify = (value: unknown): string =>
 // --- Codegen dual-moteur (Slices 1–2) ---
 console.log("=== Codegen : 1 SNQL → 2 moteurs natifs ===\n");
 const reads = [
-	`get users where age > 30 and status = "active" sort created_at desc pick name, email limit 10 offset 20`,
+	`get users where age > 30 and status = "active" pick name, email sort created_at desc limit 10 offset 20`,
 	`get users where age > 30 limit 5`,
 	`get users with orders on id = user_id pick name, orders`
 ];

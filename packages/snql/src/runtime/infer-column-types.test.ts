@@ -119,9 +119,9 @@ describe("inferResultColumns — filter/sort/limit transparents", () => {
 		]);
 	});
 
-	it("sort + pick + limit → colonnes du pick", () => {
+	it("pick + sort + limit → colonnes du pick", () => {
 		const plan = planFor(
-			"get users sort id desc pick id, email limit 10",
+			"get users pick id, email sort id desc limit 10",
 			"postgres"
 		);
 		expect(inferResultColumns(plan, SCHEMA)).toEqual([

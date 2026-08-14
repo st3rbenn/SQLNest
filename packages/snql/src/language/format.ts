@@ -11,6 +11,8 @@ import type { Token } from "../lexer/token";
 const STAGE_KEYWORDS: ReadonlySet<string> = new Set([
 	"with",
 	"where",
+	"group",
+	"having",
 	"sort",
 	"pick",
 	"limit",
@@ -134,7 +136,7 @@ function markMultiline(toks: readonly Token[]): {
 		const tok = toks[i] as Token;
 		if (
 			tok.kind !== "keyword" ||
-			(tok.value !== "pick" && tok.value !== "sort" && tok.value !== "set")
+			(tok.value !== "pick" && tok.value !== "sort" && tok.value !== "set" && tok.value !== "group")
 		) {
 			i += 1;
 			continue;

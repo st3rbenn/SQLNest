@@ -19,7 +19,7 @@ describe("format — canonique linéaire", () => {
 	});
 
 	it("idempotent : format(format(x)) == format(x)", () => {
-		const src = "find rna as r where r.id > 100 sort r.id desc pick r.id, r.upi, r.len limit 10";
+		const src = "find rna as r where r.id > 100 pick r.id, r.upi, r.len sort r.id desc limit 10";
 		const once = fmt(src);
 		const twice = fmt(once);
 		expect(twice).toBe(once);

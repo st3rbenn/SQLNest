@@ -40,6 +40,7 @@ export const KEYWORDS: ReadonlySet<string> = new Set([
 	"many",
 	"group",
 	"by",
+	"having",
 	"and",
 	"or",
 	"not",

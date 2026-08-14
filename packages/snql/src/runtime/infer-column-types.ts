@@ -207,13 +207,13 @@ function resolveProjectField(
 		};
 	}
 
-	// Sprint T2/6 : agrégats scalaires directs — signal type fort.
+	// Sprint T2/6-7 : agrégats scalaires — signal type fort.
 	//  - count → bigint (parité PG bigint natif ; KV Number sub-2^53 quand
 	//    même bigint sémantiquement, doc knownDivergences).
 	//  - sum/avg → float (cast ::double precision dans pgSum/pgAvg pour
 	//    préserver typeof number consumer JS).
-	//  - min/max → unknown v6 (résolution depuis args[0] reportée sprint 7+
-	//    quand le walker de fields sera enrichi). Le badge frontend reste "?".
+	//  - min/max → type de args[0] (résolu depuis field si path, sinon
+	//    unknown pour expressions complexes).
 	if (field.expr?.kind === "call") {
 		const callName = field.expr.name;
 		if (callName === "count") {
@@ -233,6 +233,20 @@ function resolveProjectField(
 			};
 		}
 		if (callName === "min" || callName === "max") {
+			// Résoudre le type depuis args[0] si c'est un field ref simple.
+			// Aggregate skip null → nullable:true toujours (empty group).
+			const arg = field.expr.args[0];
+			if (arg?.kind === "field") {
+				const resolved = resolveFieldType(arg.path, state, schema);
+				if (resolved !== null) {
+					return {
+						name: outputName,
+						type: resolved,
+						nullable: true,
+						collection: ""
+					};
+				}
+			}
 			return {
 				name: outputName,
 				...UNKNOWN_FIELD,
@@ -335,6 +349,37 @@ function resolveProjectField(
 	// Préfixe inconnu (chemin imbriqué Mongo `address.city` ou similaire) →
 	// on ne tente pas de résoudre en V1.
 	return { name: outputName, ...UNKNOWN_FIELD, collection: "" };
+}
+
+/**
+ * Sprint T2/7 : résout le SnqlType d'un field ref path (utilisé par min/max).
+ * Traverse alias source, alias join. Retourne null si non résolvable (nested
+ * paths, préfixe inconnu, schema pas dispo, etc).
+ */
+function resolveFieldType(
+	path: readonly string[],
+	state: InferState,
+	schema: SchemaModel
+): SnqlType | null {
+	if (path.length === 0) return null;
+	if (path.length === 1) {
+		const name = path[0]!;
+		if (state.joinAliases.has(name)) return "array";
+		const resolved = findField(schema, state.sourceCollection, name);
+		return resolved?.type ?? null;
+	}
+	const [prefix, ...rest] = path;
+	if (prefix === undefined) return null;
+	if (prefix === state.sourceAlias && rest.length === 1) {
+		const resolved = findField(schema, state.sourceCollection, rest[0]!);
+		return resolved?.type ?? null;
+	}
+	const joined = state.joinAliases.get(prefix);
+	if (joined !== undefined && rest.length === 1) {
+		const resolved = findField(schema, joined, rest[0]!);
+		return resolved?.type ?? null;
+	}
+	return null;
 }
 
 function findCollection(

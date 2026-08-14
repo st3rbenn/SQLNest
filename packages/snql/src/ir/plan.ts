@@ -228,6 +228,7 @@ export type LogicalPlan =
 			readonly input: LogicalPlan;
 			readonly fields: readonly PlanProjectField[];
 			readonly groupKeys?: readonly (readonly string[])[];
+			readonly having?: PlanExpr;
 	  };
 
 /** Une affectation de colonne dans un `update` : `column = value`. */

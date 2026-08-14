@@ -155,19 +155,53 @@ function appendStage(
 			return;
 		case "aggregate": {
 			// Sprint T2/6 : PAIRE [$group{_id:null,...accs}, $project{_id:0,...renames}]
-			// via SSA extract. Sprint 7 (`group by`) remplira op.groupKeys pour un
-			// `_id: <keys>` non-null et un $project incluant les groupKeys.
-			const { groupStage, projectStage } = renderAggregatePipeline(
-				op.fields,
-				alias
-			);
+			// via SSA extract. Sprint T2/7 : op.groupKeys peuplé → `_id: <keys>`
+			// non-null (flat object), $project inclut les groupKeys ; op.having
+			// → SSA extract sur having aussi (aggregates partagent slots avec
+			// pick), $match {$expr:...} après $project, $unset des slots
+			// having-only à la fin.
+			const { groupStage, projectStage, havingExpr, havingSlots } =
+				renderAggregatePipeline(op.fields, alias, op.groupKeys, op.having);
 			pipeline.push({ $group: groupStage });
 			pipeline.push({ $project: projectStage });
+			if (havingExpr !== undefined) {
+				pipeline.push({ $match: { $expr: havingExpr } });
+				if (havingSlots.length > 0) {
+					pipeline.push({ $unset: havingSlots });
+				}
+			}
 			return;
 		}
-		case "sort":
-			pipeline.push({ $sort: renderSort(op.keys, alias) });
+		case "sort": {
+			// Sprint T2/7 : $sort après $project doit référencer les champs projetés.
+			// Si une sort key référence un field DROPPÉ par le project précédent, on
+			// insère $sort AVANT $project — sort opère alors sur les docs sources
+			// qui contiennent encore le field (aligné SQL ORDER BY sur FROM col).
+			// Cas group/aggregate : jamais reorder ($group détruit les rows sources,
+			// sort DOIT rester après).
+			const sortStage: MongoStage = { $sort: renderSort(op.keys, alias) };
+			const prev = pipeline[pipeline.length - 1];
+			if (prev !== undefined && "$project" in prev) {
+				const projectOut = prev.$project as Record<string, unknown>;
+				const projectedFields = new Set<string>();
+				for (const key of Object.keys(projectOut)) {
+					if (key === "_id") continue;
+					if (projectOut[key] !== 0 && projectOut[key] !== false) projectedFields.add(key);
+				}
+				const sortRefsMissing = op.keys.some((k) => {
+					const path = mongoField(k.path, alias);
+					const head = path.split(".")[0]!;
+					return !projectedFields.has(head);
+				});
+				if (sortRefsMissing) {
+					// Insérer $sort avant $project (à la position du $project).
+					pipeline.splice(pipeline.length - 1, 0, sortStage);
+					return;
+				}
+			}
+			pipeline.push(sortStage);
 			return;
+		}
 		case "limit":
 			// $skip AVANT $limit : « sauter M puis prendre N » (comme LIMIT N OFFSET M).
 			if (op.offset !== undefined) {
@@ -216,13 +250,36 @@ function appendStage(
  */
 function renderAggregatePipeline(
 	fields: readonly PlanProjectField[],
-	alias: string | undefined
+	alias: string | undefined,
+	groupKeys?: readonly (readonly string[])[],
+	having?: PlanExpr
 ): {
 	groupStage: Record<string, unknown>;
 	projectStage: Record<string, unknown>;
+	havingExpr?: unknown;
+	havingSlots: readonly string[];
 } {
-	const groupStage: Record<string, unknown> = { _id: null };
+	// Sprint T2/7 : _id = null si pas de group by, sinon flat object
+	// {<lastSeg>: '$<path>'} — noms canoniques stables cross-key. Un mono-key
+	// `group by year` → `_id: {year: '$year'}`. Multi-key `group by year, code`
+	// → `_id: {year: '$year', code: '$code'}`.
+	const groupIdInner: Record<string, unknown> = {};
+	if (groupKeys !== undefined) {
+		for (const key of groupKeys) {
+			const lastSeg = key[key.length - 1] as string;
+			groupIdInner[lastSeg] = `$${mongoField(key, alias)}`;
+		}
+	}
+	const groupStage: Record<string, unknown> =
+		groupKeys !== undefined ? { _id: groupIdInner } : { _id: null };
 	const projectStage: Record<string, unknown> = { _id: 0 };
+	// Sprint T2/7 : projette les groupKeys depuis _id via `$_id.<lastSeg>`.
+	if (groupKeys !== undefined) {
+		for (const key of groupKeys) {
+			const lastSeg = key[key.length - 1] as string;
+			projectStage[lastSeg] = `$_id.${lastSeg}`;
+		}
+	}
 	const slotByKey = new Map<string, string>();
 	let slotCounter = 0;
 	let uSlotCounter = 0;
@@ -429,21 +486,191 @@ function renderAggregatePipeline(
 		);
 	}
 
+	// Sprint T2/7 : lookup rapide pour reconnaître les path-only fields comme
+	// group keys — alias-stripped, dernière-seg = clé du _id.
+	const groupKeyLastSegs = new Set<string>();
+	if (groupKeys !== undefined) {
+		for (const k of groupKeys) {
+			const last = k[k.length - 1];
+			if (last !== undefined) groupKeyLastSegs.add(last);
+		}
+	}
+	// Sprint T2/7 : map key stable (fully-qualified last-seg join) → project
+	// alias name — utile pour having qui référence les aggregates par leur
+	// alias post-$project. Peuplé au fur et à mesure de la traversée des fields.
+	const aggKeyToProjectAlias = new Map<string, string>();
+
 	for (const field of fields) {
 		const aliasName = (field.alias ?? field.path[field.path.length - 1]) as string;
 		if (field.expr !== undefined) {
+			// Enregistrer le mapping aggKey → aliasName si le top-level expr est un agg
+			// direct : permet à having de le référencer via `$<alias>`.
+			if (field.expr.kind === "call") {
+				const entry = SNQL_FUNCTIONS.get(field.expr.name);
+				if (entry?.kind === "aggregate") {
+					aggKeyToProjectAlias.set(aggKeyOf(field.expr as PlanExpr & { kind: "call" }), aliasName);
+				}
+			}
 			projectStage[aliasName] = transformExpr(field.expr, false);
+		} else if (field.path.length > 0) {
+			const stripped = mongoField(field.path, alias);
+			const lastSeg = field.path[field.path.length - 1] as string;
+			if (groupKeys !== undefined && groupKeyLastSegs.has(lastSeg)) {
+				if (aliasName !== lastSeg) {
+					projectStage[aliasName] = `$_id.${lastSeg}`;
+				}
+			} else {
+				throw new SnqlError(
+					`Field bare '${stripped}' dans un pick agg — bug de sync lower/codegen`,
+					"codegen_mongo_agg_bare_field"
+				);
+			}
 		} else {
-			// Path-only field dans pick agg — normalement refusé au lower
-			// (planner_agg_bare_field_needs_group). Defense.
 			throw new SnqlError(
-				`Field bare '${field.path.join(".")}' dans un pick agg — bug de sync lower/codegen`,
+				`Field bare vide dans un pick agg — bug de sync lower/codegen`,
 				"codegen_mongo_agg_bare_field"
 			);
 		}
 	}
 
-	return { groupStage, projectStage };
+	// Sprint T2/7 : traverse having pour extraire ses aggregates (partagent le
+	// slot map). Field refs matchant un group key → `$<lastSeg>` post-project.
+	// Aggregates avec alias existant → `$<alias>` ; sinon nouveau slot projeté
+	// nommé __hslot_N (unset après $match).
+	const havingSlots: string[] = [];
+	let havingSlotCounter = 0;
+
+	function transformHaving(expr: PlanExpr): unknown {
+		if (expr.kind === "call") {
+			const entry = SNQL_FUNCTIONS.get(expr.name);
+			if (entry?.kind === "aggregate") {
+				const key = aggKeyOf(expr as PlanExpr & { kind: "call" });
+				const existingAlias = aggKeyToProjectAlias.get(key);
+				if (existingAlias !== undefined) {
+					return `$${existingAlias}`;
+				}
+				// Force extraction dans groupStage (via transformExpr), puis assign
+				// à un slot projeté anonyme.
+				const raw = transformExpr(expr, false);
+				const hSlot = `__hslot_${havingSlotCounter}`;
+				havingSlotCounter += 1;
+				projectStage[hSlot] = raw;
+				havingSlots.push(hSlot);
+				aggKeyToProjectAlias.set(key, hSlot);
+				return `$${hSlot}`;
+			}
+			// Scalar call — args passent par transformHaving pour catcher aggregates
+			// nested (ex: coalesce(sum(x), 0) > 100 dans having).
+			if (entry?.engines.mongodb === undefined) {
+				throw new SnqlError(
+					`Fonction '${expr.name}' : renderer MongoDB absent du registre`,
+					"codegen_missing_function_mapping"
+				);
+			}
+			return entry.engines.mongodb(expr.args, {
+				renderExpr: (arg) => transformHaving(arg as PlanExpr)
+			});
+		}
+		if (expr.kind === "field") {
+			// Field bare dans having doit référencer une group key (validé lower).
+			// Après $project, la group key est top-level sous son lastSeg.
+			const lastSeg = expr.path[expr.path.length - 1] as string;
+			if (groupKeys !== undefined && groupKeyLastSegs.has(lastSeg)) {
+				return `$${lastSeg}`;
+			}
+			// Defense — arriver ici = bug lower.
+			throw new SnqlError(
+				`Field bare '${expr.path.join(".")}' dans having sans group key correspondante — bug lower/codegen`,
+				"codegen_mongo_having_bare_field"
+			);
+		}
+		if (expr.kind === "literal") {
+			const value = bsonStoreValue(expr.value);
+			return typeof value === "string" && value.startsWith("$")
+				? { $literal: value }
+				: value;
+		}
+		if (expr.kind === "arith") {
+			return {
+				[ARITH_TO_MONGO[expr.op]]: [
+					transformHaving(expr.left),
+					transformHaving(expr.right)
+				]
+			};
+		}
+		if (expr.kind === "cast") {
+			if (expr.target === "json") {
+				throw new SnqlError(
+					"cast(_ as json) non supporté sur mongodb",
+					"codegen_mongo_cast_unsupported",
+					expr.span
+				);
+			}
+			return {
+				$convert: {
+					input: transformHaving(expr.operand),
+					to: MONGO_CAST_TYPE[expr.target as Exclude<CastTarget, "json">]
+				}
+			};
+		}
+		if (expr.kind === "compare") {
+			return {
+				[MONGO_OP[expr.op]]: [
+					transformHaving(expr.left),
+					transformHaving(expr.right)
+				]
+			};
+		}
+		if (expr.kind === "and") {
+			return { $and: [transformHaving(expr.left), transformHaving(expr.right)] };
+		}
+		if (expr.kind === "or") {
+			return { $or: [transformHaving(expr.left), transformHaving(expr.right)] };
+		}
+		if (expr.kind === "not") {
+			return { $not: transformHaving(expr.operand) };
+		}
+		if (expr.kind === "isNull") {
+			const op = expr.negated ? "$ne" : "$eq";
+			return { [op]: [transformHaving(expr.operand), null] };
+		}
+		if (expr.kind === "in") {
+			return {
+				$in: [
+					transformHaving(expr.target),
+					expr.values.map((v) => transformHaving(v))
+				]
+			};
+		}
+		if (expr.kind === "case") {
+			return {
+				$switch: {
+					branches: expr.branches.map((b) => ({
+						case: transformHaving(b.cond),
+						then: transformHaving(b.value)
+					})),
+					default: transformHaving(expr.elseValue)
+				}
+			};
+		}
+		if (expr.kind === "object" || expr.kind === "array") {
+			throw new SnqlError(
+				"Object/array literal dans having non supporté",
+				"codegen_mongo_having_literal"
+			);
+		}
+		throw new SnqlError(
+			"Expression non supportée dans having Mongo",
+			"codegen_mongo_having_expr"
+		);
+	}
+
+	let havingExpr: unknown | undefined;
+	if (having !== undefined) {
+		havingExpr = transformHaving(having);
+	}
+
+	return { groupStage, projectStage, havingExpr, havingSlots };
 }
 
 function renderProject(

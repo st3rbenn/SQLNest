@@ -6,6 +6,7 @@ import type {
 	DeleteStatement,
 	Expr,
 	FieldSelection,
+	GroupKey,
 	InsertField,
 	InsertRow,
 	InsertStatement,
@@ -20,7 +21,7 @@ import { TokenCursor } from "./cursor";
 import { parseExpression, parseFieldPath, parseKeyValueEntry } from "./expression";
 
 /** Mots-clés de stage d'un select, dans l'ordre canonique imposé. */
-const SELECT_STAGE_ORDER = ["with", "where", "sort", "pick", "limit"] as const;
+const SELECT_STAGE_ORDER = ["with", "where", "group", "having", "pick", "sort", "limit"] as const;
 const SELECT_STAGE_KEYWORDS: ReadonlySet<string> = new Set(SELECT_STAGE_ORDER);
 const UPDATE_STAGE_KEYWORDS: ReadonlySet<string> = new Set(["where", "set"]);
 const DELETE_STAGE_KEYWORDS: ReadonlySet<string> = new Set(["where"]);
@@ -168,11 +169,17 @@ function parseSelect(cursor: TokenCursor, verbTok: Token): Query {
 	if (peekKeyword(cursor, "where")) {
 		stages.push(parseWhere(cursor));
 	}
-	if (peekKeyword(cursor, "sort")) {
-		stages.push(parseSort(cursor));
+	if (peekKeyword(cursor, "group")) {
+		stages.push(parseGroupBy(cursor));
+	}
+	if (peekKeyword(cursor, "having")) {
+		stages.push(parseHaving(cursor));
 	}
 	if (peekKeyword(cursor, "pick")) {
 		stages.push(parsePick(cursor));
+	}
+	if (peekKeyword(cursor, "sort")) {
+		stages.push(parseSort(cursor));
 	}
 	if (peekKeyword(cursor, "limit")) {
 		stages.push(parseLimit(cursor));
@@ -409,6 +416,41 @@ function parseWhere(cursor: TokenCursor): Stage {
 	const predicate = parseExpression(cursor);
 	return {
 		type: "where",
+		predicate,
+		span: { start: kw.span.start, end: predicate.span.end }
+	};
+}
+
+function parseGroupBy(cursor: TokenCursor): Stage {
+	const kw = cursor.next(); // 'group'
+	if (!peekKeyword(cursor, "by")) {
+		throw new SnqlError(
+			"'group' attend 'by' — écris 'group by <champ>, ...'",
+			"parse_group_missing_by",
+			cursor.peek().span
+		);
+	}
+	cursor.next(); // 'by'
+	const keys: GroupKey[] = [parseGroupKey(cursor)];
+	while (cursor.peek().kind === "comma") {
+		cursor.next();
+		keys.push(parseGroupKey(cursor));
+	}
+	const last = keys[keys.length - 1];
+	const end = last ? last.span.end : kw.span.end;
+	return { type: "group", keys, span: { start: kw.span.start, end } };
+}
+
+function parseGroupKey(cursor: TokenCursor): GroupKey {
+	const { path, span } = parseFieldPath(cursor);
+	return { path, span };
+}
+
+function parseHaving(cursor: TokenCursor): Stage {
+	const kw = cursor.next(); // 'having'
+	const predicate = parseExpression(cursor);
+	return {
+		type: "having",
 		predicate,
 		span: { start: kw.span.start, end: predicate.span.end }
 	};

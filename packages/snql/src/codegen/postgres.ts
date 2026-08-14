@@ -130,7 +130,18 @@ function renderValue(
 
 // Phases = ordre d'évaluation logique d'un SELECT. Une étape ne peut rejoindre le
 // SELECT courant que si sa phase ne « recule » pas (et si son slot est libre).
-const PHASE = { filter: 1, join: 2, project: 3, sort: 4, limit: 5 } as const;
+// Sprint T2/7 : ordre canonique SNQL aligné SQL évaluation :
+// with(join) → where(filter) → group → having → pick(project) → sort → limit.
+// Cela permet à sort de référencer les alias du pick (comme ORDER BY après SELECT en SQL).
+const PHASE = {
+	filter: 1,
+	join: 2,
+	group: 3,
+	having: 4,
+	project: 5,
+	sort: 6,
+	limit: 7
+} as const;
 
 interface JoinSpec {
 	readonly collection: string;
@@ -154,6 +165,10 @@ interface Select {
 	where: PlanExpr[];
 	joins: JoinSpec[];
 	project: readonly PlanProjectField[] | null;
+	// Sprint T2/7 : GROUP BY / HAVING slots. Peuplés quand un aggregate op est
+	// absorbé et qu'il porte des groupKeys/having. Null par défaut.
+	groupKeys: readonly (readonly string[])[] | null;
+	having: PlanExpr | null;
 	order: readonly PlanSortKey[] | null;
 	limit: number | null;
 	offset: number | null;
@@ -198,6 +213,8 @@ function emptySelect(from: string, base: string): Select {
 		where: [],
 		joins: [],
 		project: null,
+		groupKeys: null,
+		having: null,
 		order: null,
 		limit: null,
 		offset: null,
@@ -253,12 +270,23 @@ function absorb(sel: Select, op: LogicalPlan): void {
 			sel.maxPhase = Math.max(sel.maxPhase, PHASE.join);
 			return;
 		case "project":
+			sel.project = op.fields;
+			sel.maxPhase = Math.max(sel.maxPhase, PHASE.project);
+			return;
 		case "aggregate":
 			// Sprint T2/6 : aggregate rend une SELECT-list comme project pour PG
-			// (implicit grouping sans GROUP BY quand aucun field bare — sprint 6
-			// contract). Sprint 7 ajoutera GROUP BY explicit quand op.groupKeys
-			// non-empty.
+			// (implicit grouping sans GROUP BY quand aucun field bare).
+			// Sprint T2/7 : GROUP BY explicit quand op.groupKeys non-empty ;
+			// HAVING quand op.having présent.
 			sel.project = op.fields;
+			if (op.groupKeys !== undefined) {
+				sel.groupKeys = op.groupKeys;
+				sel.maxPhase = Math.max(sel.maxPhase, PHASE.group);
+			}
+			if (op.having !== undefined) {
+				sel.having = op.having;
+				sel.maxPhase = Math.max(sel.maxPhase, PHASE.having);
+			}
 			sel.maxPhase = Math.max(sel.maxPhase, PHASE.project);
 			return;
 		case "sort":
@@ -292,6 +320,12 @@ function renderSelect(sel: Select, params: ParamList): string {
 		parts.push(
 			`WHERE ${sel.where.map((f) => renderExpr(f, params)).join(" AND ")}`
 		);
+	}
+	if (sel.groupKeys && sel.groupKeys.length > 0) {
+		parts.push(`GROUP BY ${sel.groupKeys.map((k) => renderPath(k)).join(", ")}`);
+	}
+	if (sel.having) {
+		parts.push(`HAVING ${renderExpr(sel.having, params)}`);
 	}
 	if (sel.order && sel.order.length > 0) {
 		parts.push(`ORDER BY ${sel.order.map(renderSortKey).join(", ")}`);

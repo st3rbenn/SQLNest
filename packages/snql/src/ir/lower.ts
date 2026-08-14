@@ -73,30 +73,110 @@ export function lower(query: Query, schema?: SchemaModel): LogicalPlan {
 	// Idem si la source n'est pas dans le schéma OU si ses `fields` sont
 	// vides (Mongo pré-sampling, stale post-DDL) — permissif via `null`.
 	const sourceColumns = resolveSourceColumns(schema, query.source.collection);
+	// Sprint T2/7 : group by / having accumulation. Les stages `group` et
+	// `having` ne produisent pas d'op IR directement — ils alimentent le `pick`
+	// qui suit (groupKeys sur l'aggregate op, having comme filtre post-agg).
+	let groupKeys: readonly (readonly string[])[] | undefined;
+	let groupKeySpans: readonly import("../lexer/token").Span[] | undefined;
+	let havingExpr: Expr | undefined;
+	let havingSpan: import("../lexer/token").Span | undefined;
+	let hasGroupStage = false;
 	for (const stage of query.stages) {
-		checkColumnsAvailable(stage, available);
+		checkColumnsAvailable(stage, available, sourceColumns);
 		if (stage.type !== "with") {
 			checkNoEmbedAliasDeref(stage, embedAliases);
 		}
 		if (sourceColumns !== null) {
 			checkAliasDefined(stage, knownAliases, sourceColumns, query.source);
 		}
-		plan = lowerStage(plan, stage, query.source.collection, query.source.alias, schema);
+		if (stage.type === "group") {
+			if (stage.keys.length === 0) {
+				throw new SnqlError(
+					"'group by' attend au moins un champ",
+					"lower_group_empty",
+					stage.span
+				);
+			}
+			// Strip source alias — `group by u.year` avec source `find users as u`
+			// devient `group by year` en IR (aligné sort/pick paths).
+			groupKeys = stage.keys.map((k) => stripAlias(k.path, query.source.alias));
+			groupKeySpans = stage.keys.map((k) => k.span);
+			// Dédup — `group by x, x` = erreur claire au lower.
+			const seen = new Set<string>();
+			for (const key of groupKeys) {
+				const canonical = key.join(".");
+				if (seen.has(canonical)) {
+					throw new SnqlError(
+						`Clé '${canonical}' dupliquée dans 'group by'`,
+						"lower_group_duplicate_key",
+						stage.span
+					);
+				}
+				seen.add(canonical);
+			}
+			hasGroupStage = true;
+			continue;
+		}
+		if (stage.type === "having") {
+			if (!hasGroupStage) {
+				throw new SnqlError(
+					"'having' exige un 'group by' en amont — écris 'group by <champ> having <condition>'",
+					"lower_having_without_group",
+					stage.span
+				);
+			}
+			havingExpr = stage.predicate;
+			havingSpan = stage.span;
+			continue;
+		}
+		plan = lowerStage(
+			plan, stage, query.source.collection, query.source.alias,
+			schema, groupKeys
+		);
 		if (stage.type === "pick") {
+			// Sprint T2/7 : si having accumulé, l'injecter dans l'op aggregate.
+			// having exige un group by (validé plus haut) → plan racine est
+			// forcément un aggregate avec groupKeys ici.
+			if (havingExpr !== undefined) {
+				if (plan.op !== "aggregate") {
+					throw new SnqlError(
+						"'having' exige que le 'pick' contienne un aggregate — utilise 'where' pour filtrer sur des scalaires",
+						"lower_having_without_aggregate",
+						havingSpan
+					);
+				}
+				const groupKeySet = groupKeys !== undefined
+					? new Set(groupKeys.map((k) => k.join(".")))
+					: undefined;
+				validateHavingAst(havingExpr, groupKeySet, query.source.alias);
+				const loweredHaving = lowerExpr(havingExpr);
+				plan = {
+					op: "aggregate",
+					input: plan.input,
+					fields: plan.fields,
+					...(plan.groupKeys !== undefined ? { groupKeys: plan.groupKeys } : {}),
+					having: loweredHaving
+				};
+				havingExpr = undefined;
+			}
 			available = projectionKeys(stage.fields);
 		} else if (stage.type === "with") {
-			// Le join ajoute un champ imbriqué (`as`) aux colonnes disponibles.
 			if (available !== null) {
 				available = new Set([...available, stage.alias ?? stage.collection]);
 			}
-			// Le kind vient d'être décidé dans lowerStage — le plan racine est
-			// forcément un `join` maintenant.
 			if (plan.op === "join" && plan.kind === "embed") {
 				embedAliases.add(stage.alias ?? stage.collection);
 			}
-			// L'alias `with` devient valide pour tout stage suivant.
 			knownAliases.add(stage.alias ?? stage.collection);
 		}
+	}
+	// Sprint T2/7 : group by requires pick.
+	if (hasGroupStage && !query.stages.some((s) => s.type === "pick")) {
+		throw new SnqlError(
+			"'group by' exige un 'pick' — écris 'group by <champ> pick <champ>, <aggregate> as <alias>'",
+			"lower_group_without_pick",
+			groupKeySpans?.[0]
+		);
 	}
 	return plan;
 }
@@ -117,6 +197,7 @@ function checkNoEmbedAliasDeref(
 	const referenced: (readonly string[])[] = [];
 	switch (stage.type) {
 		case "where":
+		case "having":
 			collectExprFields(stage.predicate, referenced);
 			break;
 		case "sort":
@@ -124,6 +205,9 @@ function checkNoEmbedAliasDeref(
 			break;
 		case "pick":
 			for (const field of stage.fields) referenced.push(field.path);
+			break;
+		case "group":
+			for (const key of stage.keys) referenced.push(key.path);
 			break;
 		case "limit":
 			return;
@@ -168,6 +252,7 @@ function checkAliasDefined(
 	}[] = [];
 	switch (stage.type) {
 		case "where":
+		case "having":
 			collectExprFieldsWithSpans(stage.predicate, referenced);
 			break;
 		case "sort":
@@ -177,13 +262,16 @@ function checkAliasDefined(
 			break;
 		case "pick":
 			for (const field of stage.fields) {
-				// Un `pick` peut porter une expression (arith, call) sans path direct —
-				// on descend dans son expr pour collecter les field refs internes.
 				if (field.expr !== undefined) {
 					collectExprFieldsWithSpans(field.expr, referenced);
 				} else if (field.path.length > 0) {
 					referenced.push({ path: field.path, span: field.span });
 				}
+			}
+			break;
+		case "group":
+			for (const key of stage.keys) {
+				referenced.push({ path: key.path, span: key.span });
 			}
 			break;
 		case "with": {
@@ -362,7 +450,7 @@ export function lowerMutation(
 			refuseAggregateInPosition(
 				predicate,
 				"lower_agg_in_where",
-				"Aggregate dans 'where' d'update non supporté — 'having' arrive sprint 7"
+				"Aggregate dans 'where' d'update interdit — un aggregate produit une valeur globale, pas un prédicat par row ; utilise une sous-requête (T2/11) ou matérialise le count côté application"
 			);
 			assertNoCallInWrite(predicate);
 		}
@@ -390,7 +478,7 @@ export function lowerMutation(
 		refuseAggregateInPosition(
 			predicate,
 			"lower_agg_in_delete_predicate",
-			"Aggregate dans 'where' de delete non supporté — 'having' arrive sprint 7"
+			"Aggregate dans 'where' de delete interdit — un aggregate produit une valeur globale, pas un prédicat par row ; utilise une sous-requête (T2/11) ou matérialise le count côté application"
 		);
 		assertNoCallInWrite(predicate);
 	}
@@ -557,16 +645,34 @@ function firstAggregateSpanAst(
  * les 8 refus positions internes + bare-field-hors-agg. Descente contextuelle :
  *  - Dans les args d'un aggregate direct : agg nested REFUS, fields bare OK.
  *  - Dans un scalar wrapper (coalesce/greatest/least/cast/arith/compare) :
- *    agg comme arg direct OK, fields bare REFUS (sprint 7 group by débloquera).
+ *    agg comme arg direct OK, fields bare REFUS (sauf s'ils matchent un
+ *    groupKey — accepté sprint T2/7).
  *  - Dans if/case cond OU branch : agg REFUS (patterns SQL canoniques
  *    sum(if(cond,x,0))). Fields bare toujours REFUS hors agg direct.
  *  - Object/array literal : agg REFUS (scalar wrappers only).
  */
-function validateAggregatePickFieldAst(expr: Expr): void {
-	validateInAggWrapperAst(expr, false);
+function validateAggregatePickFieldAst(
+	expr: Expr,
+	groupKeySet?: ReadonlySet<string>,
+	sourceAlias?: string
+): void {
+	validateInAggWrapperAst(expr, false, groupKeySet, sourceAlias);
 }
 
-function validateInAggWrapperAst(expr: Expr, insideAgg: boolean): void {
+function validateHavingAst(
+	expr: Expr,
+	groupKeySet?: ReadonlySet<string>,
+	sourceAlias?: string
+): void {
+	validateInAggWrapperAst(expr, false, groupKeySet, sourceAlias);
+}
+
+function validateInAggWrapperAst(
+	expr: Expr,
+	insideAgg: boolean,
+	groupKeySet?: ReadonlySet<string>,
+	sourceAlias?: string
+): void {
 	if (expr.type === "call") {
 		const entry = SNQL_FUNCTIONS.get(expr.name);
 		if (entry?.kind === "aggregate") {
@@ -578,13 +684,10 @@ function validateInAggWrapperAst(expr: Expr, insideAgg: boolean): void {
 					expr.span
 				);
 			}
-			// Descendre dans les args de l'agg — fields bare OK dedans (agg les consomme).
-			for (const arg of expr.args) validateInAggWrapperAst(arg, true);
+			for (const arg of expr.args) validateInAggWrapperAst(arg, true, groupKeySet, sourceAlias);
 			return;
 		}
-		// Scalar call. Le nom détermine la sémantique wrapper.
 		if (expr.name === "if" && expr.args.length === 3) {
-			// cond scalar per-row, branches refusent agg (pattern sum(if) impose)
 			const condSpan = firstAggregateSpanAst(expr.args[0]!);
 			if (condSpan !== undefined) {
 				throw new SnqlError(
@@ -593,7 +696,7 @@ function validateInAggWrapperAst(expr: Expr, insideAgg: boolean): void {
 					condSpan
 				);
 			}
-			validateInAggWrapperAst(expr.args[0]!, insideAgg);
+			validateInAggWrapperAst(expr.args[0]!, insideAgg, groupKeySet, sourceAlias);
 			for (const branchIdx of [1, 2]) {
 				const branch = expr.args[branchIdx]!;
 				const branchAggSpan = firstAggregateSpanAst(branch);
@@ -604,24 +707,27 @@ function validateInAggWrapperAst(expr: Expr, insideAgg: boolean): void {
 						branchAggSpan
 					);
 				}
-				validateInAggWrapperAst(branch, insideAgg);
+				validateInAggWrapperAst(branch, insideAgg, groupKeySet, sourceAlias);
 			}
 			return;
 		}
-		// Autres scalar wrappers (coalesce/greatest/least/…) : agg autorisé
-		// comme arg direct, descente normale pour le reste.
-		for (const arg of expr.args) validateInAggWrapperAst(arg, insideAgg);
+		for (const arg of expr.args) validateInAggWrapperAst(arg, insideAgg, groupKeySet, sourceAlias);
 		return;
 	}
 	switch (expr.type) {
 		case "literal":
 			return;
 		case "field": {
-			// Fields bare hors d'un arg d'agg → refus (pas de group by sprint 6).
 			if (!insideAgg) {
+				const strippedPath = stripAlias(expr.path, sourceAlias).join(".");
+				if (groupKeySet !== undefined && groupKeySet.has(strippedPath)) {
+					return;
+				}
 				const pathStr = expr.path.join(".");
 				throw new SnqlError(
-					`Champ '${pathStr}' hors argument d'un aggregate — sprint 7 (group by) débloquera ; d'ici là, wrappe en min(${pathStr}) ou déplace-le dans un arg d'agg`,
+					groupKeySet !== undefined
+						? `Champ '${pathStr}' n'est ni une clé de group by ni dans un aggregate — ajoute '${pathStr}' à group by ou wrappe en min(${pathStr})`
+						: `Champ '${pathStr}' hors argument d'un aggregate — utilise 'group by ${pathStr}' ou wrappe en min(${pathStr})`,
 					"lower_bare_field_in_agg_scalar_wrapper",
 					expr.span
 				);
@@ -631,22 +737,20 @@ function validateInAggWrapperAst(expr: Expr, insideAgg: boolean): void {
 		case "compare":
 		case "logical":
 		case "arith":
-			validateInAggWrapperAst(expr.left, insideAgg);
-			validateInAggWrapperAst(expr.right, insideAgg);
+			validateInAggWrapperAst(expr.left, insideAgg, groupKeySet, sourceAlias);
+			validateInAggWrapperAst(expr.right, insideAgg, groupKeySet, sourceAlias);
 			return;
 		case "not":
-			validateInAggWrapperAst(expr.operand, insideAgg);
+			validateInAggWrapperAst(expr.operand, insideAgg, groupKeySet, sourceAlias);
 			return;
 		case "in":
-			validateInAggWrapperAst(expr.target, insideAgg);
-			for (const v of expr.values) validateInAggWrapperAst(v, insideAgg);
+			validateInAggWrapperAst(expr.target, insideAgg, groupKeySet, sourceAlias);
+			for (const v of expr.values) validateInAggWrapperAst(v, insideAgg, groupKeySet, sourceAlias);
 			return;
 		case "cast":
-			// cast(count(*) as float) accepté — cast fait partie du scalar wrapper.
-			validateInAggWrapperAst(expr.operand, insideAgg);
+			validateInAggWrapperAst(expr.operand, insideAgg, groupKeySet, sourceAlias);
 			return;
 		case "object": {
-			// Object literal dans un pick agg field → refus si contient agg.
 			for (const e of expr.entries) {
 				const aggSpan = firstAggregateSpanAst(e.value);
 				if (aggSpan !== undefined) {
@@ -656,7 +760,7 @@ function validateInAggWrapperAst(expr: Expr, insideAgg: boolean): void {
 						aggSpan
 					);
 				}
-				validateInAggWrapperAst(e.value, insideAgg);
+				validateInAggWrapperAst(e.value, insideAgg, groupKeySet, sourceAlias);
 			}
 			return;
 		}
@@ -670,7 +774,7 @@ function validateInAggWrapperAst(expr: Expr, insideAgg: boolean): void {
 						aggSpan
 					);
 				}
-				validateInAggWrapperAst(item, insideAgg);
+				validateInAggWrapperAst(item, insideAgg, groupKeySet, sourceAlias);
 			}
 			return;
 		}
@@ -684,7 +788,7 @@ function validateInAggWrapperAst(expr: Expr, insideAgg: boolean): void {
 						condSpan
 					);
 				}
-				validateInAggWrapperAst(b.cond, insideAgg);
+				validateInAggWrapperAst(b.cond, insideAgg, groupKeySet, sourceAlias);
 				const branchSpan = firstAggregateSpanAst(b.value);
 				if (branchSpan !== undefined) {
 					throw new SnqlError(
@@ -693,7 +797,7 @@ function validateInAggWrapperAst(expr: Expr, insideAgg: boolean): void {
 						branchSpan
 					);
 				}
-				validateInAggWrapperAst(b.value, insideAgg);
+				validateInAggWrapperAst(b.value, insideAgg, groupKeySet, sourceAlias);
 			}
 			const elseSpan = firstAggregateSpanAst(expr.elseValue);
 			if (elseSpan !== undefined) {
@@ -703,7 +807,7 @@ function validateInAggWrapperAst(expr: Expr, insideAgg: boolean): void {
 					elseSpan
 				);
 			}
-			validateInAggWrapperAst(expr.elseValue, insideAgg);
+			validateInAggWrapperAst(expr.elseValue, insideAgg, groupKeySet, sourceAlias);
 			return;
 		}
 	}
@@ -775,7 +879,7 @@ export function firstAggregateSpan(
 /**
  * Refuse un aggregate dans une position non-projection. Émet le code d'erreur
  * spécifique à la position (where/set/delete/…) avec un hint actionnable
- * pointant vers group by (sprint 7) ou le pattern SQL canonique.
+ * pointant vers le pattern SQL canonique.
  *
  * Ordre CRITIQUE dans un contexte write : appeler AVANT `assertNoCallInWrite`
  * — sinon un `set y = count(*)` remonte le générique `lower_call_null_write`
@@ -988,20 +1092,34 @@ function projectionKeys(
  */
 function checkColumnsAvailable(
 	stage: Stage,
-	available: ReadonlySet<string> | null
+	available: ReadonlySet<string> | null,
+	sourceColumns: ReadonlySet<string> | null
 ): void {
 	if (available === null) {
-		return; // avant tout `pick`, toutes les colonnes sont disponibles
+		return;
+	}
+	// Sprint T2/7 : sort après pick peut référencer une colonne source droppée
+	// par le pick — aligné avec SQL (ORDER BY accepte les colonnes de FROM même
+	// non-sélectionnées). En Mongo, cette pattern reste indéfinie côté runtime
+	// (divergence documentée) ; PG l'accepte nativement.
+	if (stage.type === "sort") {
+		if (sourceColumns === null) return;
+		for (const key of stage.keys) {
+			const column = key.path[0] ?? "";
+			if (!available.has(column) && !sourceColumns.has(column)) {
+				throw new SnqlError(
+					`La colonne '${column}' n'existe pas dans le pick précédent ni dans la source — vérifie l'orthographe ou ajoute-la au pick.`,
+					"lower_column_unavailable"
+				);
+			}
+		}
+		return;
 	}
 	const referenced: (readonly string[])[] = [];
 	switch (stage.type) {
 		case "where":
+		case "having":
 			collectExprFields(stage.predicate, referenced);
-			break;
-		case "sort":
-			for (const key of stage.keys) {
-				referenced.push(key.path);
-			}
 			break;
 		case "pick":
 			for (const field of stage.fields) {
@@ -1012,8 +1130,13 @@ function checkColumnsAvailable(
 				}
 			}
 			break;
+		case "group":
+			for (const key of stage.keys) {
+				referenced.push(key.path);
+			}
+			break;
 		case "with":
-			referenced.push(stage.localField); // le champ distant vient de la collection jointe
+			referenced.push(stage.localField);
 			break;
 		case "limit":
 			return;
@@ -1088,46 +1211,53 @@ function lowerStage(
 	stage: Stage,
 	sourceCollection: string,
 	sourceAlias: string | undefined,
-	schema: SchemaModel | undefined
+	schema: SchemaModel | undefined,
+	groupKeys?: readonly (readonly string[])[]
 ): LogicalPlan {
 	switch (stage.type) {
 		case "where": {
 			assertNoBareCallPredicate(stage.predicate);
 			const predicate = lowerExpr(stage.predicate);
-			// Sprint T2/6 : aggregate refusé dans where — reporté à having sprint 7.
 			refuseAggregateInPosition(
 				predicate,
 				"lower_agg_in_where",
-				"Aggregate dans 'where' non supporté — 'having' arrive sprint 7 (filtre post-agg)"
+				"Aggregate dans 'where' non supporté — utilise 'having' après 'group by' pour filtrer les groupes"
 			);
 			return { op: "filter", input, predicate };
 		}
 		case "pick": {
 			const fields = stage.fields.map(lowerField);
 			assertUniqueProjectionKeys(fields);
-			// Sprint T2/6 : bascule op='aggregate' si au moins un field contient
-			// un call kind='aggregate'. Valide alors chaque field (position stricte
-			// + refus bare-field hors agg — sprint 7 apportera group by).
 			const hasAggregate = stage.fields.some(
 				(f) => f.expr !== undefined && containsAggregateAst(f.expr)
 			);
-			if (hasAggregate) {
+			// groupKeys are alias-stripped already. Build the lookup set from them.
+			const groupKeySet = groupKeys !== undefined
+				? new Set(groupKeys.map((k) => k.join(".")))
+				: undefined;
+			if (hasAggregate || groupKeys !== undefined) {
 				for (const f of stage.fields) {
 					if (f.expr !== undefined) {
-						validateAggregatePickFieldAst(f.expr);
+						validateAggregatePickFieldAst(f.expr, groupKeySet, sourceAlias);
 					} else if (f.path.length > 0) {
-						// Field bare (path) dans un pick contenant agg = mix
-						// field/agg sans group by → refus sprint 6 (sprint 7 avec
-						// group by débloquera).
+						// Strip source alias so `u.year` matches groupKey `year`.
+						const strippedPath = stripAlias(f.path, sourceAlias).join(".");
+						if (groupKeySet !== undefined && groupKeySet.has(strippedPath)) {
+							continue;
+						}
 						const pathStr = f.path.join(".");
 						throw new SnqlError(
-							`Champ '${pathStr}' hors argument d'un aggregate — sprint 7 (group by) débloquera ; d'ici là, wrappe en min(${pathStr}) ou retire du pick`,
+							groupKeys !== undefined
+								? `Champ '${pathStr}' n'est ni une clé de group by ni dans un aggregate — ajoute '${pathStr}' à group by ou wrappe en min(${pathStr})`
+								: `Champ '${pathStr}' hors argument d'un aggregate — utilise 'group by ${pathStr}' ou wrappe en min(${pathStr})`,
 							"planner_agg_bare_field_needs_group",
 							f.span
 						);
 					}
 				}
-				return { op: "aggregate", input, fields };
+				return groupKeys !== undefined
+					? { op: "aggregate", input, fields, groupKeys }
+					: { op: "aggregate", input, fields };
 			}
 			return { op: "project", input, fields };
 		}
@@ -1162,6 +1292,14 @@ function lowerStage(
 				kind
 			};
 		}
+		case "group":
+		case "having":
+			// Sprint T2/7 : ces stages sont consommés dans la boucle lower() —
+			// n'arrivent jamais ici (defense-in-depth pour l'exhaustivité TS).
+			throw new SnqlError(
+				`Stage '${stage.type}' consommé en amont — bug lower/parser sync`,
+				"lower_stage_leaked"
+			);
 	}
 }
 

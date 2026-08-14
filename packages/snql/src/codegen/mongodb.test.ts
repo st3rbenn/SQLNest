@@ -13,9 +13,11 @@ function mongo(source: string): {
 }
 
 describe("codegen mongodb — pipeline de base", () => {
-	it("compile la requête canonique (with→where→sort→pick→limit)", () => {
+	it("compile la requête canonique (with→where→pick→sort→limit)", () => {
+		// Sprint T2/7 : sort par colonne DROPPÉE par pick → auto-reorder $sort
+		// avant $project pour préserver l'accès à la col source (aligné PG lax).
 		const { collection, pipeline } = mongo(
-			`get users where age > 30 and status = "active" sort created_at desc pick name, email limit 10 offset 20`
+			`get users where age > 30 and status = "active" pick name, email sort created_at desc limit 10 offset 20`
 		);
 		expect(collection).toBe("users");
 		expect(pipeline).toEqual([

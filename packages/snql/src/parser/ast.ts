@@ -188,6 +188,11 @@ export interface SortKey {
 	readonly span: Span;
 }
 
+export interface GroupKey {
+	readonly path: readonly string[];
+	readonly span: Span;
+}
+
 export type Stage =
 	| { readonly type: "where"; readonly predicate: Expr; readonly span: Span }
 	| {
@@ -218,6 +223,16 @@ export type Stage =
 			 * Sert d'escape hatch quand l'inférence rate ou n'a pas de schéma.
 			 */
 			readonly multiplicity?: "one" | "many";
+			readonly span: Span;
+	  }
+	| {
+			readonly type: "group";
+			readonly keys: readonly GroupKey[];
+			readonly span: Span;
+	  }
+	| {
+			readonly type: "having";
+			readonly predicate: Expr;
 			readonly span: Span;
 	  };
 

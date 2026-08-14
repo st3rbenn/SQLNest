@@ -32,11 +32,12 @@ export type CompensationOp =
 	  }
 	// Sprint T2/6 : agrégation scalaire fold. Runtime KV implémente via
 	// foldAggregate (1 row output sprint 6). groupKeys undefined = fold sur
-	// toute la collection ; sprint 7 le peuplera.
+	// toute la collection ; sprint 7 le peuple pour bucket + having.
 	| {
 			readonly op: "aggregate";
 			readonly fields: readonly PlanProjectField[];
 			readonly groupKeys?: readonly (readonly string[])[];
+			readonly having?: PlanExpr;
 	  };
 
 /**
@@ -180,6 +181,7 @@ function visitPlanCalls(plan: LogicalPlan, visit: (name: string) => void): void 
 			for (const field of plan.fields) {
 				if (field.expr !== undefined) visitExprCalls(field.expr, visit);
 			}
+			if (plan.having !== undefined) visitExprCalls(plan.having, visit);
 			visitPlanCalls(plan.input, visit);
 			return;
 		case "sort":
@@ -284,6 +286,7 @@ function visitPlanCasts(
 			for (const field of plan.fields) {
 				if (field.expr !== undefined) visitExprCasts(field.expr, visit);
 			}
+			if (plan.having !== undefined) visitExprCasts(plan.having, visit);
 			visitPlanCasts(plan.input, visit);
 			return;
 		case "sort":
@@ -393,9 +396,12 @@ function toCompensationOp(op: LogicalPlan): CompensationOp {
 				foreignField: op.foreignField
 			};
 		case "aggregate":
-			return op.groupKeys !== undefined
-				? { op: "aggregate", fields: op.fields, groupKeys: op.groupKeys }
-				: { op: "aggregate", fields: op.fields };
+			return {
+				op: "aggregate",
+				fields: op.fields,
+				...(op.groupKeys !== undefined ? { groupKeys: op.groupKeys } : {}),
+				...(op.having !== undefined ? { having: op.having } : {})
+			};
 		case "scan":
 			throw new SnqlError(
 				"Un 'scan' ne peut pas être compensé",
@@ -556,6 +562,7 @@ function visitPlanExprs(
 			for (const field of plan.fields) {
 				if (field.expr !== undefined) visitExprsIn(field.expr, visit);
 			}
+			if (plan.having !== undefined) visitExprsIn(plan.having, visit);
 			visitPlanExprs(plan.input, visit);
 			return;
 		case "sort":
