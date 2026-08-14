@@ -435,6 +435,40 @@ export function assertMutationUpsertSupported(
 	);
 }
 
+/**
+ * Sprint T2/14 : refuse `update t with one X on l=f set …` si l'engine cible
+ * n'a pas la capability `write-join`. Message actionable : PG natif via
+ * `UPDATE ... FROM` ; Mongo passe par `aggregate + $merge` (à réévaluer plus
+ * tard), KV n'a pas la notion de join.
+ */
+export function assertMutationWriteJoinSupported(
+	plan: MutationPlan,
+	capabilities: Capabilities
+): void {
+	if (plan.op !== "update" || plan.joins === undefined || plan.joins.length === 0) return;
+	if (capabilities.supports.has("write-join")) return;
+	throw new SnqlError(
+		`'update … with one …' non supporté sur '${capabilities.engine}' — capability 'write-join' absente. Pour Postgres, cette syntaxe cible UPDATE ... FROM natif ; les autres engines matérialisent le join côté application.`,
+		"planner_write_join_unsupported"
+	);
+}
+
+/**
+ * Sprint T2/14 : refuse `add (find …) into t` si l'engine cible n'a pas la
+ * capability `insert-select`. PG natif via `INSERT INTO ... SELECT`.
+ */
+export function assertMutationInsertSelectSupported(
+	plan: MutationPlan,
+	capabilities: Capabilities
+): void {
+	if (plan.op !== "insert" || plan.sourcePlan === undefined) return;
+	if (capabilities.supports.has("insert-select")) return;
+	throw new SnqlError(
+		`'add (find …) into t' non supporté sur '${capabilities.engine}' — capability 'insert-select' absente. Pour Postgres, cette syntaxe cible INSERT ... SELECT natif ; les autres engines matérialisent le select côté application avant d'insérer.`,
+		"planner_insert_select_unsupported"
+	);
+}
+
 function toCompensationOp(op: LogicalPlan): CompensationOp {
 	switch (op.op) {
 		case "filter":

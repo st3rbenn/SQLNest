@@ -9,7 +9,9 @@ import type {
 } from "@sqlnest/snql";
 import {
 	assertMutationCastTargetsSupported,
+	assertMutationInsertSelectSupported,
 	assertMutationUpsertSupported,
+	assertMutationWriteJoinSupported,
 	capabilitiesFor,
 	collectIdentSpans,
 	compensate,
@@ -76,6 +78,8 @@ export async function runQuery(
 		const mutation = lowerMutation(statement, schema);
 		assertMutationCastTargetsSupported(mutation, capabilities);
 		assertMutationUpsertSupported(mutation, capabilities);
+		assertMutationWriteJoinSupported(mutation, capabilities);
+		assertMutationInsertSelectSupported(mutation, capabilities);
 		const native = withIdentSpans(mapper.mapMutation(mutation), identSpans);
 		return { ...(await connection.execute(native)), written: true };
 	}

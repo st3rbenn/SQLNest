@@ -557,19 +557,25 @@ export function lowerMutation(
 	const sourceColumns = resolveSourceColumns(schema, statement.collection);
 	if (statement.operation === "update") {
 		assertUniqueAssignments(statement.assignments);
+		// Sprint T2/14 : joins mutation — refus `with many`, résolution alias +
+		// keys, validation contre schema.
+		const loweredJoins = lowerUpdateJoins(statement, schema);
+		const allowedAliases = collectMutationAliases(statement, loweredJoins);
 		if (sourceColumns !== null) {
 			for (const a of statement.assignments) {
 				checkExprPathsAgainstColumns(
 					a.value,
 					sourceColumns,
-					statement.collection
+					statement.collection,
+					allowedAliases
 				);
 			}
 			if (statement.predicate !== undefined) {
 				checkExprPathsAgainstColumns(
 					statement.predicate,
 					sourceColumns,
-					statement.collection
+					statement.collection,
+					allowedAliases
 				);
 			}
 		}
@@ -613,15 +619,26 @@ export function lowerMutation(
 			assertNoCallInWrite(predicate);
 		}
 		const rrc = statement.returnRowCount === true ? { returnRowCount: true as const } : {};
+		const aliasOpt = statement.alias !== undefined ? { alias: statement.alias } : {};
+		const joinsOpt = loweredJoins.length > 0 ? { joins: loweredJoins } : {};
 		return predicate !== undefined
 			? {
 					op: "update",
 					collection: statement.collection,
+					...aliasOpt,
+					...joinsOpt,
 					assignments,
 					predicate,
 					...rrc
 				}
-			: { op: "update", collection: statement.collection, assignments, ...rrc };
+			: {
+					op: "update",
+					collection: statement.collection,
+					...aliasOpt,
+					...joinsOpt,
+					assignments,
+					...rrc
+				};
 	}
 	if (sourceColumns !== null && statement.predicate !== undefined) {
 		checkExprPathsAgainstColumns(
@@ -680,11 +697,17 @@ function resolveSourceColumns(
  * pas d'alias déclaré, donc tout `path.length ≥ 2` dont le head n'est pas
  * une colonne document est un alias fantôme. Descend récursivement dans
  * les sous-expressions (arith, call, compare, and/or/not/in).
+ *
+ * Sprint T2/14 : `allowedAliases` autorise en plus (a) l'alias source d'un
+ * `update t as a` et (b) chaque alias de `with one X` joint. Un head qui
+ * n'est ni une col source, ni le nom de la table, ni un alias autorisé =
+ * fantôme.
  */
 function checkExprPathsAgainstColumns(
 	expr: Expr,
 	sourceColumns: ReadonlySet<string>,
-	collection: string
+	collection: string,
+	allowedAliases: ReadonlySet<string> = new Set()
 ): void {
 	const referenced: {
 		readonly path: readonly string[];
@@ -695,6 +718,7 @@ function checkExprPathsAgainstColumns(
 		if (path.length < 2) continue;
 		const head = path[0] ?? "";
 		if (sourceColumns.has(head)) continue;
+		if (allowedAliases.has(head)) continue;
 		const rest = path.slice(1).join(".");
 		const suggestion =
 			head === collection
@@ -706,6 +730,66 @@ function checkExprPathsAgainstColumns(
 			span
 		);
 	}
+}
+
+/**
+ * Sprint T2/14 : abaisse la liste des `with one X on l=f` d'un update. Refuse
+ * `with many` (`lower_write_join_many` — évite un UPDATE cartésien silencieux),
+ * valide que chaque local field est une col de la source, retourne la liste
+ * PlanUpdateJoin prête pour le codegen. Les cross-refs entre joins (join B
+ * référence l'alias de join A) sont autorisées via allowedAliases.
+ */
+function lowerUpdateJoins(
+	statement: UpdateStatement,
+	schema: SchemaModel | undefined
+): readonly import("./plan").PlanUpdateJoin[] {
+	if (statement.joins === undefined || statement.joins.length === 0) return [];
+	const sourceColumns = resolveSourceColumns(schema, statement.collection);
+	const out: import("./plan").PlanUpdateJoin[] = [];
+	for (const stage of statement.joins) {
+		if (stage.type !== "with") continue; // defense parse invariant
+		if (stage.multiplicity === "many") {
+			throw new SnqlError(
+				"'with many' interdit dans un update (produit un UPDATE cartésien silencieux) — utilise 'with one X on l=f' pour un join 1-1.",
+				"lower_write_join_many",
+				stage.span
+			);
+		}
+		// Validate local field is a source column (schema disponible).
+		if (sourceColumns !== null) {
+			const localHead = stage.localField[0];
+			if (localHead !== undefined && !sourceColumns.has(localHead) && localHead !== statement.collection && localHead !== statement.alias) {
+				// Autorise cross-ref à un alias déjà déclaré côté joins précédents
+				const priorAliases = new Set(out.map((j) => j.as));
+				if (!priorAliases.has(localHead)) {
+					throw new SnqlError(
+						`'with one ${stage.collection} on ${stage.localField.join(".")} = …' — la colonne '${localHead}' n'appartient ni à '${statement.collection}' ni à un alias déjà déclaré.`,
+						"lower_write_join_unknown_local",
+						stage.span
+					);
+				}
+			}
+		}
+		out.push({
+			collection: stage.collection,
+			as: stage.alias ?? stage.collection,
+			localField: stage.localField,
+			foreignField: stage.foreignField
+		});
+	}
+	return out;
+}
+
+/** Sprint T2/14 : ensemble des alias autorisés dans set/where d'un update. */
+function collectMutationAliases(
+	statement: UpdateStatement,
+	joins: readonly import("./plan").PlanUpdateJoin[]
+): ReadonlySet<string> {
+	const out = new Set<string>();
+	if (statement.alias !== undefined) out.add(statement.alias);
+	out.add(statement.collection);
+	for (const j of joins) out.add(j.as);
+	return out;
 }
 
 /**
@@ -1181,6 +1265,13 @@ function assertNoCallInWrite(expr: PlanExpr): void {
  * fautive sur unique/FK violation).
  */
 function lowerInsert(statement: InsertStatement, schema?: SchemaModel): MutationPlan {
+	// Sprint T2/14 : INSERT SELECT — `add (find … pick a, b) into t`.
+	// Le mapping cols cibles est inféré du `pick` (`x as tgt_col` → tgt_col,
+	// sinon dernier segment du path). Refus si pas de pick, si onConflict
+	// combiné (v1), si engine != PG (au planner).
+	if (statement.sourceQuery !== undefined) {
+		return lowerInsertSelect(statement, schema);
+	}
 	const firstRow = statement.rows[0];
 	if (firstRow === undefined) {
 		throw new SnqlError("'add' sans document", "lower_insert_empty");
@@ -1465,6 +1556,90 @@ function rewriteUpsertNew(
  * Les autres kinds (field, arith, call, cast) restent refusés — un insert
  * n'est pas un select.
  */
+/**
+ * Sprint T2/14 : abaisse `add (find … pick a, b as tgt) into t` — le pick
+ * est OBLIGATOIRE (mapping cols cibles inféré : `pick x as tgt_col` →
+ * tgt_col ; sinon dernier segment du path).
+ *  - Refus si pas de pick → lower_insert_select_no_pick
+ *  - Refus pick avec `unique` / `distinctOnKeys` (v1, à réévaluer)
+ *  - Refus onConflict combiné avec sourceQuery (v1)
+ *  - Validation cols cibles existent dans schema (si dispo)
+ * Le sourcePlan est abaissé via `lower()` récursif (qui gère alias + joins).
+ */
+function lowerInsertSelect(
+	statement: InsertStatement,
+	schema: SchemaModel | undefined
+): MutationPlan {
+	const sourceQuery = statement.sourceQuery!;
+	if (statement.onConflict !== undefined) {
+		throw new SnqlError(
+			"'add (find …) into t on conflict …' non supporté v1 — sépare l'INSERT SELECT et l'upsert.",
+			"lower_insert_select_with_on_conflict",
+			statement.span
+		);
+	}
+	const pickStage = sourceQuery.stages.find((s) => s.type === "pick");
+	if (pickStage === undefined || pickStage.type !== "pick") {
+		throw new SnqlError(
+			"'add (find … pick …) into t' — la sub-query source exige un `pick` (mapping cols cibles inféré).",
+			"lower_insert_select_no_pick",
+			statement.span
+		);
+	}
+	if (pickStage.unique === true || pickStage.distinctOnKeys !== undefined) {
+		throw new SnqlError(
+			"'add (find … pick unique …) into t' non supporté v1 — utilise un `pick` classique.",
+			"lower_insert_select_unique_pick",
+			pickStage.span
+		);
+	}
+	const columns = pickStage.fields.map((f) => {
+		if (f.alias !== undefined) return f.alias;
+		return f.path[f.path.length - 1] ?? "";
+	});
+	const dupCol = findDuplicate(columns);
+	if (dupCol !== null) {
+		throw new SnqlError(
+			`'add (find … pick …) into t' — colonne cible '${dupCol}' dupliquée dans le mapping. Utilise 'pick x as tgt' pour renommer.`,
+			"lower_insert_select_duplicate_column",
+			pickStage.span
+		);
+	}
+	if (schema !== undefined) {
+		const sourceCols = resolveSourceColumns(schema, statement.collection);
+		if (sourceCols !== null) {
+			for (const col of columns) {
+				if (!sourceCols.has(col)) {
+					throw new SnqlError(
+						`'add (find … pick …) into ${statement.collection}' — colonne cible '${col}' inconnue. Renomme via 'pick x as ${col}' ou aligne le pick sur les cols de la target.`,
+						"lower_insert_select_unknown_target",
+						pickStage.span
+					);
+				}
+			}
+		}
+	}
+	const sourcePlan = lower(sourceQuery, schema);
+	const rrc = statement.returnRowCount === true ? { returnRowCount: true as const } : {};
+	return {
+		op: "insert",
+		collection: statement.collection,
+		columns,
+		rows: [],
+		sourcePlan,
+		...rrc
+	};
+}
+
+function findDuplicate(items: readonly string[]): string | null {
+	const seen = new Set<string>();
+	for (const it of items) {
+		if (seen.has(it)) return it;
+		seen.add(it);
+	}
+	return null;
+}
+
 function literalOf(value: Expr, column: string): PlanRowValue {
 	if (value.type === "literal") {
 		return { kind: "scalar", value: literalToValue(value.value) };
@@ -3158,6 +3333,9 @@ function typecheckQuery(query: Query, schema: SchemaModel | undefined): void {
 
 /**
  * Walker mutation — typecheck du predicate + valeurs de set.
+ * Sprint T2/14 : propage l'alias source d'un `update t as a` pour que
+ * `resolveFieldTypeInAst` puisse résoudre `a.col` proprement. Les cross-alias
+ * joins retournent `unknown` (safe fallback — pas de fausse erreur).
  */
 function typecheckMutation(
 	stmt: InsertStatement | UpdateStatement | DeleteStatement,
@@ -3165,7 +3343,10 @@ function typecheckMutation(
 ): void {
 	if (schema === undefined) return;
 	if (stmt.operation === "insert") return; // pas d'expressions typables
-	const source = { collection: stmt.collection };
+	const source: { collection: string; alias?: string } =
+		stmt.operation === "update" && stmt.alias !== undefined
+			? { collection: stmt.collection, alias: stmt.alias }
+			: { collection: stmt.collection };
 	if (stmt.predicate !== undefined) {
 		typecheckExprTypes(stmt.predicate, source, schema);
 	}

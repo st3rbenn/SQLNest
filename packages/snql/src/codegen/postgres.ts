@@ -74,6 +74,14 @@ function renderMutation(plan: MutationPlan, params: ParamList): string {
 	switch (plan.op) {
 		case "insert": {
 			const cols = plan.columns.map(quoteIdent).join(", ");
+			const returning = plan.returnRowCount === true ? "" : " RETURNING *";
+			// Sprint T2/14 : INSERT SELECT — pas de VALUES, on injecte le
+			// SELECT rendu depuis sourcePlan. Les $N sont partagés avec le
+			// ParamList courant (bindés séquentiellement, ordre préservé).
+			if (plan.sourcePlan !== undefined) {
+				const selectText = renderPlan(plan.sourcePlan, params);
+				return `INSERT INTO ${quoteIdent(plan.collection)} (${cols}) ${selectText}${returning}`;
+			}
 			// Phase 3c : threader cellSpans[rowIdx][colIdx] au ParamList pour que
 			// chaque `$N` bindé porte le span de son littéral source.
 			const rows = plan.rows
@@ -89,16 +97,29 @@ function renderMutation(plan: MutationPlan, params: ParamList): string {
 			const onConflict = plan.onConflict !== undefined
 				? ` ${renderOnConflict(plan.onConflict, plan.collection, params)}`
 				: "";
-			const returning = plan.returnRowCount === true ? "" : " RETURNING *";
 			return `INSERT INTO ${quoteIdent(plan.collection)} (${cols}) VALUES ${rows}${onConflict}${returning}`;
 		}
 		case "update": {
 			const set = plan.assignments
 				.map((a) => `${quoteIdent(a.column)} = ${renderExpr(a.value, params)}`)
 				.join(", ");
-			const where = renderWhere(plan.predicate, params);
+			// Sprint T2/14 : `UPDATE t [AS a] [SET ...] [FROM x AS b, y AS c]
+			// [WHERE (join keys) AND (predicate)]`.
+			const target = plan.alias !== undefined
+				? `${quoteIdent(plan.collection)} AS ${quoteIdent(plan.alias)}`
+				: quoteIdent(plan.collection);
+			const joins = plan.joins ?? [];
+			const fromClause = joins.length > 0
+				? ` FROM ${joins.map((j) => `${quoteIdent(j.collection)} AS ${quoteIdent(j.as)}`).join(", ")}`
+				: "";
+			const joinPreds = joins.map((j) =>
+				`${renderJoinPath(j.localField, plan.alias ?? plan.collection)} = ${renderJoinPath(j.foreignField, j.as)}`
+			);
+			const userPred = plan.predicate !== undefined ? renderExpr(plan.predicate, params) : "";
+			const allPreds = [...joinPreds, ...(userPred !== "" ? [userPred] : [])];
+			const where = allPreds.length > 0 ? ` WHERE ${allPreds.join(" AND ")}` : "";
 			const returning = plan.returnRowCount === true ? "" : " RETURNING *";
-			return `UPDATE ${quoteIdent(plan.collection)} SET ${set}${where}${returning}`;
+			return `UPDATE ${target} SET ${set}${fromClause}${where}${returning}`;
 		}
 		case "delete": {
 			const where = renderWhere(plan.predicate, params);
@@ -744,6 +765,16 @@ function renderFrom(collection: string, alias: string | undefined): string {
 
 function renderPath(path: readonly string[]): string {
 	return path.map(quoteIdent).join(".");
+}
+
+/**
+ * Sprint T2/14 : rend un path pour une clé de join mutation. Si le path
+ * n'a qu'un segment (col bare), on préfixe avec `alias` pour éviter les
+ * ambiguïtés (`t.col = x.col`). Sinon on rend tel quel (path déjà qualifié).
+ */
+function renderJoinPath(path: readonly string[], alias: string): string {
+	if (path.length === 1) return `${quoteIdent(alias)}.${quoteIdent(path[0]!)}`;
+	return renderPath(path);
 }
 
 const IDENT_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;

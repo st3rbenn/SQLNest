@@ -329,11 +329,20 @@ export interface OnConflictClause {
 	readonly span: Span;
 }
 
-/** `update <coll> [where <pred>] set <affectations> [pick count]`. `where` optionnel : sans lui, toutes les lignes. */
+/** `update <coll> [as <alias>] [with one X on l=f]* [where <pred>] set <affectations> [pick count]`. `where` optionnel : sans lui, toutes les lignes. */
 export interface UpdateStatement {
 	readonly operation: "update";
 	readonly verb: string;
 	readonly collection: string;
+	// Sprint T2/14 : alias source `update t as a set …` — permet à `set`/`where`
+	// de référencer les cols de la source via `a.col` en cohabitant avec les
+	// joins qui ont leurs propres alias.
+	readonly alias?: string;
+	// Sprint T2/14 : joins mutation `update t with one X on l=f set …`. Réutilise
+	// la variante `Stage.with` (multiplicity/alias/foreignField portés dedans).
+	// `with many` est rejeté au lower (`lower_write_join_many`) pour éviter
+	// UPDATE cartésien silencieux ; seul `with one` est autorisé.
+	readonly joins?: readonly Stage[];
 	readonly predicate?: Expr;
 	readonly assignments: readonly Assignment[];
 	// Sprint T2/13 : `pick count` — drop `RETURNING *` côté codegen, ne renvoie
@@ -365,12 +374,20 @@ export interface InsertRow {
 	readonly span: Span;
 }
 
-/** `add {doc} into <coll> [on conflict (keys) ...] [pick count]` ou `add [{…}, {…}] into <coll>`. */
+/**
+ * `add {doc} into <coll> [on conflict (keys) …] [pick count]` (rows literal)
+ * OU `add (find … pick a, b as c) into <coll> [pick count]` (INSERT SELECT).
+ * Les 2 formes sont mutuellement exclusives : `rows` est peuplé pour les
+ * documents literals, `sourceQuery` pour l'INSERT SELECT. Sprint T2/14 :
+ * `sourceQuery` mapping cols inféré du `pick` (`x as tgt_col` → tgt_col).
+ */
 export interface InsertStatement {
 	readonly operation: "insert";
 	readonly verb: string;
 	readonly collection: string;
 	readonly rows: readonly InsertRow[];
+	/** Sprint T2/14 : INSERT SELECT — mutuellement exclusif avec `rows` non vide. */
+	readonly sourceQuery?: Query;
 	readonly onConflict?: OnConflictClause;
 	readonly returnRowCount?: true;
 	readonly span: Span;

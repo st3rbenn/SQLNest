@@ -26,7 +26,15 @@ export type Capability =
 	// PG only v1 (INSERT ... ON CONFLICT natif). Mongo/KV refusés (sémantique
 	// upsert Mongo est différente — updateOne(upsert:true) sur un full doc,
 	// pas de WHERE côté conflict, à réévaluer plus tard).
-	| "upsert";
+	| "upsert"
+	// Sprint T2/14 : `update t with one X on l=f set …` — UPDATE ... FROM natif
+	// PG. Mongo/KV refusés v1 (Mongo n'a pas de write-join natif ; passe par
+	// aggregation + $merge dans les versions récentes, à réévaluer plus tard).
+	| "write-join"
+	// Sprint T2/14 : `add (find … pick a, b) into t` — INSERT INTO ... SELECT
+	// natif PG. Mongo passe par aggregate + $merge $out, KV pas de select-
+	// then-insert atomique — refusés v1.
+	| "insert-select";
 
 /**
  * Décimal **exact** : on garde le texte brut. Les colonnes NUMERIC/DECIMAL de
@@ -336,6 +344,18 @@ export interface PlanOnConflict {
 	readonly action: PlanOnConflictAction;
 }
 
+/**
+ * Sprint T2/14 : join lowered pour un `update t with one X on l=f`. `kind`
+ * verrouillé à `"join"` (many = refusé au lower). `as` = alias effectif de
+ * la table jointe (soit user-specified, soit égal à `collection` sinon).
+ */
+export interface PlanUpdateJoin {
+	readonly collection: string;
+	readonly as: string;
+	readonly localField: readonly string[];
+	readonly foreignField: readonly string[];
+}
+
 export type MutationPlan =
 	| {
 			readonly op: "insert";
@@ -355,10 +375,25 @@ export type MutationPlan =
 			readonly onConflict?: PlanOnConflict;
 			// Sprint T2/13 : `pick count` → drop `RETURNING *` côté codegen.
 			readonly returnRowCount?: true;
+			/**
+			 * Sprint T2/14 : INSERT SELECT — quand présent, `rows` est vide et
+			 * `columns` porte les noms cibles inférés du `pick` de la sub-query
+			 * (`pick x as tgt_col` → tgt_col). Le codegen émet `INSERT INTO t
+			 * (cols) SELECT … FROM …` en réutilisant renderPlan sur sourcePlan.
+			 * Exige capability `insert-select` (PG only v1).
+			 */
+			readonly sourcePlan?: LogicalPlan;
 	  }
 	| {
 			readonly op: "update";
 			readonly collection: string;
+			// Sprint T2/14 : alias source `update t as a set …`. Utilisé par le
+			// codegen pour émettre `UPDATE t AS a SET …` et résoudre `a.col`
+			// dans set/where sans FROM-clause fantôme.
+			readonly alias?: string;
+			// Sprint T2/14 : joins de mutation `update t with one X on l=f set …`.
+			// PG only (capability `write-join`). `with many` refusé au lower.
+			readonly joins?: readonly PlanUpdateJoin[];
 			readonly assignments: readonly PlanColumnValue[];
 			// Absent = toutes les lignes (write non filtré, assumé).
 			readonly predicate?: PlanExpr;

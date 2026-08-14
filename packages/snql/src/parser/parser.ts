@@ -30,7 +30,7 @@ import {
 /** Mots-clés de stage d'un select, dans l'ordre canonique imposé. */
 const SELECT_STAGE_ORDER = ["with", "where", "group", "having", "pick", "sort", "limit"] as const;
 const SELECT_STAGE_KEYWORDS: ReadonlySet<string> = new Set(SELECT_STAGE_ORDER);
-const UPDATE_STAGE_KEYWORDS: ReadonlySet<string> = new Set(["where", "set"]);
+const UPDATE_STAGE_KEYWORDS: ReadonlySet<string> = new Set(["with", "where", "set"]);
 const DELETE_STAGE_KEYWORDS: ReadonlySet<string> = new Set(["where"]);
 
 function peekKeyword(cursor: TokenCursor, value: string, ahead = 0): boolean {
@@ -79,6 +79,7 @@ function parseStatement(cursor: TokenCursor): Statement {
 
 function parseInsert(cursor: TokenCursor, verbTok: Token): InsertStatement {
 	const rows: InsertRow[] = [];
+	let sourceQuery: Query | undefined;
 	const opener = cursor.peek();
 	if (opener.kind === "lbracket") {
 		cursor.next();
@@ -90,9 +91,13 @@ function parseInsert(cursor: TokenCursor, verbTok: Token): InsertStatement {
 		cursor.expect("rbracket", "']' pour fermer la liste de documents");
 	} else if (opener.kind === "lbrace") {
 		rows.push(parseDocument(cursor));
+	} else if (opener.kind === "lparen") {
+		// Sprint T2/14 : INSERT SELECT — `add (find … pick a, b) into t`. Le
+		// mapping cols est inféré du pick au lower (`pick x as tgt` → tgt).
+		sourceQuery = parseInsertSourceQuery(cursor);
 	} else {
 		throw new SnqlError(
-			"'add' attend un document { … } ou une liste [ { … }, … ]",
+			"'add' attend un document { … }, une liste [ { … }, … ] ou une sub-query ( find … pick … )",
 			"parse_insert_expected_doc",
 			opener.span
 		);
@@ -113,6 +118,9 @@ function parseInsert(cursor: TokenCursor, verbTok: Token): InsertStatement {
 	// Sprint T2/13 : `on conflict (k1, k2) [ignore | edit set ... [where ...]]`.
 	let onConflict: OnConflictClause | undefined;
 	if (peekKeyword(cursor, "on") && peekKeyword(cursor, "conflict", 1)) {
+		// Sprint T2/14 : refus `on conflict` combiné avec INSERT SELECT v1 —
+		// sémantique plus complexe (DO UPDATE référence EXCLUDED depuis un
+		// SELECT, PG supporte mais mapping non-trivial). Bloqué au lower.
 		onConflict = parseOnConflict(cursor);
 		end = onConflict.span.end;
 	}
@@ -126,10 +134,40 @@ function parseInsert(cursor: TokenCursor, verbTok: Token): InsertStatement {
 		verb: verbTok.value,
 		collection: nameTok.value,
 		rows,
+		...(sourceQuery !== undefined ? { sourceQuery } : {}),
 		...(onConflict !== undefined ? { onConflict } : {}),
 		...(returnRowCount !== undefined ? { returnRowCount: true as const } : {}),
 		span
 	};
+}
+
+/**
+ * Sprint T2/14 : parse `(find … pick a, b)` en position source d'un `add`.
+ * Réutilise le hook subquery de T2/11 (setSubqueryParser). La validation
+ * `pick` présent + exactement 1..N fields est faite au lower.
+ */
+function parseInsertSourceQuery(cursor: TokenCursor): Query {
+	cursor.expect("lparen", "'(' pour ouvrir la sub-query source d'un INSERT SELECT");
+	const verbTok = cursor.peek();
+	if (verbTok.kind !== "verb") {
+		throw new SnqlError(
+			"'add (…) into t' — la sub-query source doit commencer par un verbe de lecture (find/get)",
+			"parse_insert_source_expected_verb",
+			verbTok.span
+		);
+	}
+	const op = verbOperation(verbTok.value);
+	if (op !== "select") {
+		throw new SnqlError(
+			`'add (…) into t' — la sub-query source doit être une lecture (find/get), pas '${verbTok.value}'`,
+			"parse_insert_source_not_select",
+			verbTok.span
+		);
+	}
+	cursor.next();
+	const query = parseSelect(cursor, verbTok);
+	cursor.expect("rparen", "')' pour fermer la sub-query source");
+	return query;
 }
 
 /**
@@ -327,9 +365,28 @@ function rejectTrailingStage(
 
 function parseUpdate(cursor: TokenCursor, verbTok: Token): UpdateStatement {
 	const nameTok = cursor.expect("ident", "un nom de collection après 'update'");
-	let predicate: Expr | undefined;
 	let end = nameTok.span.end;
 
+	// Sprint T2/14 : `update t as a` — alias source optionnel pour référencer
+	// les cols via `a.col` en cohabitation avec les alias joins.
+	let alias: string | undefined;
+	if (peekKeyword(cursor, "as")) {
+		cursor.next();
+		const aliasTok = cursor.expect("ident", "un alias après 'as'");
+		alias = aliasTok.value;
+		end = aliasTok.span.end;
+	}
+
+	// Sprint T2/14 : `with one X on l=f [and ...]` — joins optionnels avant
+	// where/set. Réutilise parseWiths qui gère la chaîne `and`.
+	let joins: Stage[] | undefined;
+	if (peekKeyword(cursor, "with")) {
+		joins = parseWiths(cursor);
+		const lastJoin = joins[joins.length - 1];
+		if (lastJoin !== undefined) end = lastJoin.span.end;
+	}
+
+	let predicate: Expr | undefined;
 	if (peekKeyword(cursor, "where")) {
 		cursor.next();
 		predicate = parseExpression(cursor);
@@ -356,11 +413,16 @@ function parseUpdate(cursor: TokenCursor, verbTok: Token): UpdateStatement {
 	const rrc = tryConsumePickCount(cursor);
 	if (rrc !== undefined) end = rrc.end;
 
-	rejectTrailingStage(cursor, UPDATE_STAGE_KEYWORDS, ["where", "set"]);
+	rejectTrailingStage(cursor, UPDATE_STAGE_KEYWORDS, ["with", "where", "set"]);
 
 	// `where` optionnel : sans lui, l'update porte sur toutes les lignes (assumé).
 	const span = { start: verbTok.span.start, end };
 	const returnRowCount = rrc !== undefined ? { returnRowCount: true as const } : {};
+	const optional = {
+		...(alias !== undefined ? { alias } : {}),
+		...(joins !== undefined && joins.length > 0 ? { joins } : {}),
+		...returnRowCount
+	};
 	return predicate !== undefined
 		? {
 				operation: "update",
@@ -368,7 +430,7 @@ function parseUpdate(cursor: TokenCursor, verbTok: Token): UpdateStatement {
 				collection: nameTok.value,
 				predicate,
 				assignments,
-				...returnRowCount,
+				...optional,
 				span
 			}
 		: {
@@ -376,7 +438,7 @@ function parseUpdate(cursor: TokenCursor, verbTok: Token): UpdateStatement {
 				verb: verbTok.value,
 				collection: nameTok.value,
 				assignments,
-				...returnRowCount,
+				...optional,
 				span
 			};
 }

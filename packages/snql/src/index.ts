@@ -163,7 +163,9 @@ export type {
 } from "./planner/planner";
 export {
 	assertMutationCastTargetsSupported,
+	assertMutationInsertSelectSupported,
 	assertMutationUpsertSupported,
+	assertMutationWriteJoinSupported,
 	plan
 } from "./planner/planner";
 export type { JoinSources, Row } from "./runtime/compensate";

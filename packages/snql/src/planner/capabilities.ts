@@ -38,10 +38,12 @@ function caps(
  * Sprint T2/11 : 'subquery' ajouté — sub-queries inline (`in (find ...)` /
  * `exists (find ...)`) natives PG (nested SELECT).
  * Sprint T2/13 : 'upsert' ajouté — `add {…} into t on conflict (col) [ignore |
- * edit set …]` via `INSERT ... ON CONFLICT` natif PG. */
+ * edit set …]` via `INSERT ... ON CONFLICT` natif PG.
+ * Sprint T2/14 : 'write-join' + 'insert-select' ajoutés — `update … with one`
+ * via `UPDATE ... FROM` et `add (find …) into t` via `INSERT ... SELECT`. */
 export const POSTGRES_CAPABILITIES: Capabilities = caps(
 	"postgres",
-	["scan", "filter", "project", "join", "aggregate", "sort", "paginate", "mutate", "subquery", "upsert"],
+	["scan", "filter", "project", "join", "aggregate", "sort", "paginate", "mutate", "subquery", "upsert", "write-join", "insert-select"],
 	["int", "float", "text", "bool", "date", "timestamp", "json"]
 );
 
