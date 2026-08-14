@@ -37,6 +37,7 @@ import { ConsoleResultsPanel } from "./ConsoleResultsPanel";
 import { SnqlEditor, type SnqlEditorHandle } from "./SnqlEditor";
 import { openConsoleInPopout, useIsPopout } from "./usePopoutWindow";
 import { useConsoleTabs } from "./useConsoleTabs";
+import { useLiveDiagnostics } from "./useLiveDiagnostics";
 import { type SerializedSpan, SnqlRuntimeError, useRunQuery } from "./useRunQuery";
 
 /**
@@ -163,6 +164,14 @@ export function ConsolePage({
 
 	const activeTabId = tabs.activeTab.id;
 	const activeSource = tabs.activeTab.source;
+
+	// Live diagnostic : compile local debounced pendant la frappe. Passé à
+	// l'éditeur pour squigglies + gutter badge + tooltip au hover. Zero I/O.
+	const liveDiagnostic = useLiveDiagnostics(
+		activeSource,
+		engine,
+		schemaQuery.data ?? undefined
+	);
 
 	const [lastRunAt, setLastRunAt] = useState<number | undefined>(undefined);
 	const [timingMs, setTimingMs] = useState<number | undefined>(undefined);
@@ -385,6 +394,7 @@ export function ConsolePage({
 							schema={schemaQuery.data ?? null}
 							placeholder="get <table> pick <fields>"
 							errorSpans={errorSpans}
+							liveDiagnostic={liveDiagnostic}
 						/>
 					</div>
 				</div>

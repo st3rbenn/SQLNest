@@ -22,7 +22,12 @@ import {
 	useMemo,
 	useRef
 } from "react";
-import { errorMarkers, setErrorSpans } from "./errorMarkers";
+import {
+	errorMarkers,
+	type LiveDiagnostic,
+	setErrorSpans,
+	setLiveDiagnostic
+} from "./errorMarkers";
 import { snqlCompletion, snqlHighlighting } from "./snql-language";
 import type { SerializedSpan } from "./useRunQuery";
 
@@ -39,6 +44,12 @@ interface SnqlEditorProps {
 	 * toutes les décorations existantes. `[]` clear.
 	 */
 	readonly errorSpans?: readonly SerializedSpan[];
+	/**
+	 * Diagnostic live (sprint T2/live-diag) : erreur compile SNQL découverte
+	 * pendant la frappe. Squiggly + badge gutter + tooltip au hover. `null`
+	 * clear (query valide ou pas d'erreur détectée).
+	 */
+	readonly liveDiagnostic?: LiveDiagnostic | null;
 }
 
 /**
@@ -140,6 +151,41 @@ const theme = EditorView.theme(
 			textDecoration: "underline wavy var(--sqlnest-danger)",
 			textDecorationThickness: "1px",
 			textUnderlineOffset: "3px"
+		},
+		// Live diagnostic (sprint T2/live-diag) : badge dans la gutter à la
+		// ligne de l'erreur compile locale. Petit rond rouge minimaliste —
+		// style VSCode marker, aligné visuellement au numéro de ligne.
+		".sqlnest-diag-gutter-slot": {
+			width: "12px",
+			padding: 0
+		},
+		".sqlnest-diag-gutter": {
+			display: "block",
+			width: "6px",
+			height: "6px",
+			margin: "6px auto 0",
+			borderRadius: "50%",
+			background: "var(--sqlnest-danger)"
+		},
+		// Tooltip au hover sur un span en erreur live — surface DS + border
+		// danger discret, monospace pour aligner avec le code.
+		".sqlnest-diag-tooltip": {
+			maxWidth: "480px",
+			padding: "8px 10px",
+			background: "var(--sqlnest-surface)",
+			color: "var(--sqlnest-text-primary)",
+			border: "1px solid var(--sqlnest-danger-border)",
+			borderRadius: "6px",
+			boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
+			fontSize: "12px",
+			lineHeight: "1.5",
+			fontFamily: "var(--mantine-font-family-monospace)",
+			whiteSpace: "pre-wrap",
+			wordBreak: "break-word"
+		},
+		".cm-tooltip.cm-tooltip-hover": {
+			background: "transparent",
+			border: "none"
 		}
 	},
 	{ dark: true }
@@ -160,7 +206,7 @@ const theme = EditorView.theme(
  */
 export const SnqlEditor = forwardRef<SnqlEditorHandle, SnqlEditorProps>(
 	function SnqlEditor(
-		{ value, onChange, onRun, schema, placeholder, errorSpans },
+		{ value, onChange, onRun, schema, placeholder, errorSpans, liveDiagnostic },
 		ref
 	) {
 		const host = useRef<HTMLDivElement>(null);
@@ -257,6 +303,18 @@ export const SnqlEditor = forwardRef<SnqlEditorHandle, SnqlEditorProps>(
 			if (editor === null) return;
 			editor.dispatch({ effects: setErrorSpans.of(errorSpans ?? []) });
 		}, [spansKey, errorSpans]);
+
+		// Sync liveDiagnostic → StateField dédié (squiggly + gutter + tooltip).
+		// Clé stable pour éviter re-dispatch sur ref différente à chaque render.
+		const diagKey = useMemo(() => {
+			if (!liveDiagnostic) return "";
+			return `${liveDiagnostic.span[0]}:${liveDiagnostic.span[1]}:${liveDiagnostic.message}`;
+		}, [liveDiagnostic]);
+		useEffect(() => {
+			const editor = view.current;
+			if (editor === null) return;
+			editor.dispatch({ effects: setLiveDiagnostic.of(liveDiagnostic ?? null) });
+		}, [diagKey, liveDiagnostic]);
 
 		useImperativeHandle(
 			ref,
