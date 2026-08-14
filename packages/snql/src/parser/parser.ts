@@ -65,6 +65,11 @@ function parseStatement(cursor: TokenCursor): Statement {
 	if (first.kind === "ident" && first.value.toLowerCase() === "list") {
 		return parseIntrospectList(cursor);
 	}
+	// Sprint T3/2 : `describe <table>` — même stratégie soft-keyword. Une
+	// col nommée `describe` reste utilisable ailleurs (pick/where/set).
+	if (first.kind === "ident" && first.value.toLowerCase() === "describe") {
+		return parseIntrospectDescribe(cursor);
+	}
 	const verbTok = first;
 	if (verbTok.kind !== "verb") {
 		throw new SnqlError(
@@ -116,6 +121,31 @@ function parseIntrospectList(cursor: TokenCursor): IntrospectStatement {
 		"parse_introspect_unknown_list",
 		sub.span
 	);
+}
+
+/**
+ * Sprint T3/2 : `describe <table>` — introspection colonnes.
+ * Retourne un shape stable {name, type, nullable, default, is_primary_key,
+ * foreign_key} — cohérent PG/Mongo pour que l'UI n'ait pas à brancher
+ * sur l'engine.
+ */
+function parseIntrospectDescribe(cursor: TokenCursor): IntrospectStatement {
+	const descTok = cursor.next(); // `describe`
+	const target = cursor.peek();
+	if (target.kind !== "ident") {
+		throw new SnqlError(
+			`'describe' attend un nom de table, trouvé '${target.value}'`,
+			"parse_introspect_describe_missing_target",
+			target.span
+		);
+	}
+	cursor.next();
+	return {
+		operation: "introspect",
+		kind: "describe-table",
+		target: target.value,
+		span: { start: descTok.span.start, end: target.span.end }
+	};
 }
 
 /**

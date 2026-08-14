@@ -21,9 +21,22 @@ import {
 	EngineExecutionError
 } from "../errors";
 import { describeMongoConfig } from "./config";
-import { introspectMongo } from "./introspect";
+import { inferCollection, introspectMongo, type SampledDoc } from "./introspect";
 
 const SERVER_SELECTION_TIMEOUT_MS = 10_000;
+
+/**
+ * Sprint T3/2 : shape stable rendu par `describe <table>`. Identique côté PG
+ * (le SQL produit ces mêmes colonnes) → l'UI n'a pas à brancher sur l'engine.
+ */
+const DESCRIBE_COLUMNS: readonly ResultColumn[] = [
+	{ name: "name", type: "string", nullable: false },
+	{ name: "type", type: "string", nullable: false },
+	{ name: "nullable", type: "bool", nullable: false },
+	{ name: "default", type: "string", nullable: true },
+	{ name: "is_primary_key", type: "bool", nullable: false },
+	{ name: "foreign_key", type: "string", nullable: true }
+];
 
 /**
  * Normalise une valeur BSON en scalaire portable, pour respecter le contrat de
@@ -319,6 +332,32 @@ class MongoConnection implements Connection {
 					rows,
 					rowCount: rows.length
 				};
+			}
+			if (query.plan.kind === "describe-table") {
+				const target = query.plan.target;
+				if (target === undefined) {
+					throw new EngineExecutionError(
+						"'describe' sans collection cible (bug parser)"
+					);
+				}
+				// Sample-based : Mongo n'a pas de schéma déclaratif. On réutilise
+				// inferCollection (même heuristique que #executeIntrospect global)
+				// pour rester cohérent — un `describe` doit reporter la même vue
+				// des fields que la SchemaModel remontée au CLI.
+				const docs = await db
+					.collection(target)
+					.aggregate([{ $sample: { size: this.#sampleSize } }])
+					.toArray();
+				const inferred = inferCollection(target, docs as SampledDoc[]);
+				const rows: Row[] = inferred.fields.map((field) => ({
+					name: field.name,
+					type: field.type,
+					nullable: field.nullable,
+					default: null,
+					is_primary_key: field.name === "_id",
+					foreign_key: null
+				}));
+				return { columns: DESCRIBE_COLUMNS, rows, rowCount: rows.length };
 			}
 			throw new EngineExecutionError(
 				`Introspect kind '${query.plan.kind}' non supporté par l'adapter Mongo v1`

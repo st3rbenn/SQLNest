@@ -1,10 +1,11 @@
 /**
- * Sprint T3/1 — Introspection tier-1 : `list tables`.
+ * Sprint T3/1+T3/2 — Introspection tier-1 : `list tables` + `describe <t>`.
  *
  * Couvre :
- *  - parser  : `list tables` détecté avant check verb, refus sous-commande inconnue
+ *  - parser  : `list tables` / `describe t` détectés avant check verb,
+ *              refus sous-commande inconnue, refus describe sans target
  *  - lower   : IntrospectPlan {kind, target?}
- *  - codegen : PG SqlQuery via information_schema (namespace bindé $1),
+ *  - codegen : PG SqlQuery via information_schema (namespace + table bindés),
  *              Mongo shape mongo-introspect (dispatch adapter)
  *  - planner : capability introspect PG + Mongo (KV refusé)
  *  - refus   : sub-commande inconnue, introspect dans transaction
@@ -126,5 +127,82 @@ describe("planner — capability 'introspect'", () => {
 			() => assertIntrospectSupported(planned, KV_CAPABILITIES),
 			"planner_introspect_unsupported"
 		);
+	});
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// T3/2 — describe <table>
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("parser — describe <table>", () => {
+	it("parse `describe users` en IntrospectStatement", () => {
+		const stmt = parse(tokenize("describe users"));
+		if (stmt.operation !== "introspect") throw new Error("attendu introspect");
+		expect(stmt.kind).toBe("describe-table");
+		expect(stmt.target).toBe("users");
+	});
+
+	it("refus `describe` sans target", () => {
+		expectCode(
+			() => parse(tokenize("describe")),
+			"parse_introspect_describe_missing_target"
+		);
+	});
+
+	it("refus `describe` dans transaction", () => {
+		expectCode(
+			() => parse(tokenize("transaction { describe users }")),
+			"parse_introspect_in_transaction"
+		);
+	});
+
+	it("`describe` reste utilisable comme col (soft-keyword)", () => {
+		// Régression : `describe` en position ident (col/alias) doit passer.
+		// Ex: pick x as describe. Parse verb `find`, pas `describe`.
+		const stmt = parse(tokenize("find t pick x as describe"));
+		if (stmt.operation !== "select") throw new Error("select attendu");
+	});
+});
+
+describe("codegen PG — describe <table>", () => {
+	it("produit SELECT information_schema avec namespace + table bindés", () => {
+		const stmt = parse(tokenize("describe users"));
+		if (stmt.operation !== "introspect") throw new Error();
+		const planned = lowerIntrospect(stmt);
+		const mapper = getMapper("postgres");
+		if (mapper.mapIntrospect === undefined) throw new Error("no mapIntrospect");
+		const native = mapper.mapIntrospect(planned, { namespace: "apollon_schema" });
+		if (native.kind !== "sql") throw new Error("kind sql attendu");
+		expect(native.text).toContain("information_schema.columns");
+		expect(native.text).toContain("PRIMARY KEY");
+		expect(native.text).toContain("FOREIGN KEY");
+		expect(native.text).toContain("$1");
+		expect(native.text).toContain("$2");
+		expect(native.params).toEqual(["apollon_schema", "users"]);
+	});
+
+	it("fallback namespace = 'public'", () => {
+		const stmt = parse(tokenize("describe users"));
+		if (stmt.operation !== "introspect") throw new Error();
+		const planned = lowerIntrospect(stmt);
+		const mapper = getMapper("postgres");
+		const native = mapper.mapIntrospect!(planned);
+		if (native.kind !== "sql") throw new Error();
+		expect(native.params).toEqual(["public", "users"]);
+	});
+});
+
+describe("codegen Mongo — describe <table>", () => {
+	it("produit mongo-introspect avec plan.target", () => {
+		const stmt = parse(tokenize("describe users"));
+		if (stmt.operation !== "introspect") throw new Error();
+		const planned = lowerIntrospect(stmt);
+		const mapper = getMapper("mongodb");
+		if (mapper.mapIntrospect === undefined) throw new Error();
+		const native = mapper.mapIntrospect(planned);
+		expect(native.kind).toBe("mongo-introspect");
+		if (native.kind !== "mongo-introspect") throw new Error();
+		expect(native.plan.kind).toBe("describe-table");
+		expect(native.plan.target).toBe("users");
 	});
 });

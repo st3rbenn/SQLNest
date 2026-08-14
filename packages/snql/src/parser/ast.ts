@@ -445,7 +445,8 @@ export interface TransactionStatement {
  * projection user (contrat SNQL : introspection retourne un shape stable).
  */
 export type IntrospectKind =
-	| "list-tables"; // T3/1 — v1 : liste plate des tables du schéma courant
+	| "list-tables" // T3/1 — v1 : liste plate des tables du schéma courant
+	| "describe-table"; // T3/2 — colonnes d'une table (name/type/nullable/default/PK/FK)
 
 export interface IntrospectStatement {
 	readonly operation: "introspect";

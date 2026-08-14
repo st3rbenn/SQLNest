@@ -103,6 +103,21 @@ export const postgresMapper: Mapper = {
 				paramSpans: [undefined]
 			};
 		}
+		if (plan.kind === "describe-table") {
+			if (plan.target === undefined) {
+				throw new SnqlError(
+					"'describe' sans table cible (bug parser)",
+					"codegen_introspect_missing_target"
+				);
+			}
+			return {
+				engine: "postgres",
+				kind: "sql",
+				text: describeTableSql(),
+				params: [namespace, plan.target],
+				paramSpans: [undefined, undefined]
+			};
+		}
 		throw new SnqlError(
 			`Introspect kind '${plan.kind}' non supporté par le codegen Postgres v1`,
 			"codegen_introspect_unsupported"
@@ -158,6 +173,56 @@ function renderWriteAsSqlQuery(plan: MutationPlan): SqlQuery {
  * Sprint T2/13 : `returnRowCount === true` droppe le `RETURNING *` — le
  * driver renvoie alors seulement rowCount (rows = []).
  */
+/**
+ * Sprint T3/2 : SQL de `describe <table>`. Un seul SELECT — LEFT JOIN sur
+ * les vues d'information_schema pour agréger PK et FK dans la même ligne
+ * que la colonne. `$1` = schéma (search_path), `$2` = nom de table.
+ *
+ * Note sur FK sur clé composite : `constraint_column_usage` liste UNE ligne
+ * par col PK cible ; sur PK composite ça duplique — v1 accepte, on garde
+ * la première (STRING_AGG une prochaine version si vraiment gênant).
+ */
+function describeTableSql(): string {
+	return (
+		`SELECT ` +
+			`c.column_name AS name, ` +
+			`c.data_type AS type, ` +
+			`(c.is_nullable = 'YES') AS nullable, ` +
+			`c.column_default AS "default", ` +
+			`COALESCE(pk.is_primary_key, FALSE) AS is_primary_key, ` +
+			`fk.foreign_key AS foreign_key ` +
+		`FROM information_schema.columns c ` +
+		`LEFT JOIN (` +
+			`SELECT kcu.column_name, TRUE AS is_primary_key ` +
+			`FROM information_schema.table_constraints tc ` +
+			`JOIN information_schema.key_column_usage kcu ` +
+				`ON kcu.constraint_name = tc.constraint_name ` +
+				`AND kcu.table_schema = tc.table_schema ` +
+				`AND kcu.table_name = tc.table_name ` +
+			`WHERE tc.constraint_type = 'PRIMARY KEY' ` +
+				`AND tc.table_schema = $1 AND tc.table_name = $2` +
+		`) pk ON pk.column_name = c.column_name ` +
+		`LEFT JOIN (` +
+			`SELECT DISTINCT ON (kcu.column_name) ` +
+				`kcu.column_name, ` +
+				`(ccu.table_name || '.' || ccu.column_name) AS foreign_key ` +
+			`FROM information_schema.table_constraints tc ` +
+			`JOIN information_schema.key_column_usage kcu ` +
+				`ON kcu.constraint_name = tc.constraint_name ` +
+				`AND kcu.table_schema = tc.table_schema ` +
+				`AND kcu.table_name = tc.table_name ` +
+			`JOIN information_schema.constraint_column_usage ccu ` +
+				`ON ccu.constraint_name = tc.constraint_name ` +
+				`AND ccu.table_schema = tc.table_schema ` +
+			`WHERE tc.constraint_type = 'FOREIGN KEY' ` +
+				`AND tc.table_schema = $1 AND tc.table_name = $2 ` +
+			`ORDER BY kcu.column_name, ccu.table_name, ccu.column_name` +
+		`) fk ON fk.column_name = c.column_name ` +
+		`WHERE c.table_schema = $1 AND c.table_name = $2 ` +
+		`ORDER BY c.ordinal_position`
+	);
+}
+
 function renderMutation(plan: MutationPlan, params: ParamList): string {
 	switch (plan.op) {
 		case "insert": {
