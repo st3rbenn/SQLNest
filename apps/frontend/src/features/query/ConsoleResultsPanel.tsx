@@ -201,10 +201,16 @@ export function ConsoleResultsPanel({
 					<>
 						<span>·</span>
 						<span>
-							{totalRows} ligne{totalRows > 1 ? "s" : ""}
-							{filter && rows.length !== totalRows
-								? ` (sur ${rows.length} filtrées)`
-								: ""}
+							{/* Sprint T2/13 : `pick count` droppe RETURNING → rows=[] mais
+							    rowCount reflète les lignes affectées. On lit rowCount
+							    quand on est en écriture sans payload de rows. */}
+							{result.written && rows.length === 0
+								? `${result.rowCount} ligne${result.rowCount > 1 ? "s" : ""} affectée${result.rowCount > 1 ? "s" : ""}`
+								: `${totalRows} ligne${totalRows > 1 ? "s" : ""}${
+										filter && rows.length !== totalRows
+											? ` (sur ${rows.length} filtrées)`
+											: ""
+									}`}
 						</span>
 					</>
 				) : null}
