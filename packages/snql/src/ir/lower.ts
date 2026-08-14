@@ -2815,7 +2815,10 @@ function snqlTypeGroup(t: SnqlType): TypeGroup {
 	if (t === "int" || t === "bigint" || t === "float" || t === "decimal") {
 		return "numeric";
 	}
-	if (t === "string" || t === "uuid") return "string";
+	// Sprint T2/13.5 : `enum` groupé avec `string` — l'enum PG accepte les
+	// littéraux string compatibles (`role = "field_expert"`). Un typecheck plus
+	// strict (whitelist des labels) sera fait par un walker dédié plus tard.
+	if (t === "string" || t === "uuid" || t === "enum") return "string";
 	if (t === "bool") return "bool";
 	if (t === "date") return "date";
 	if (t === "json") return "json";

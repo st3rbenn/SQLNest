@@ -5,7 +5,9 @@
  * Voir le vault : `07 - Reader/SchemaModel`.
  */
 
-/** Vocabulaire de types unifié, mappé depuis chaque moteur. Aligné sur `SqlValue`. */
+/** Vocabulaire de types unifié, mappé depuis chaque moteur. Aligné sur `SqlValue`.
+ * `enum` = type énuméré natif (PG). Les labels valides sont dans `Field.enumValues`.
+ * Autres engines : mappé sur `string` (enum PG only pour l'instant). */
 export type SnqlType =
 	| "string"
 	| "int"
@@ -17,6 +19,7 @@ export type SnqlType =
 	| "json"
 	| "array"
 	| "uuid"
+	| "enum"
 	| "unknown";
 
 /** `declared` = lu d'un schéma explicite (PG) ; `inferred` = déduit (sampling Mongo). */
@@ -34,6 +37,21 @@ export interface Field {
 	readonly source: SchemaSource;
 	/** 0..1 pour l'inféré (fréquence d'apparition en sampling). Absent = certain. */
 	readonly confidence?: number;
+	/**
+	 * Sprint T2/13.5 : true si la colonne a un DEFAULT côté DB. Combiné avec
+	 * `nullable`, permet à l'autocomplete de distinguer :
+	 *   - `nullable: false && !hasDefault` → OBLIGATOIRE (l'user DOIT fournir la valeur)
+	 *   - autre → facultatif (nullable ou default couvre l'absence)
+	 * Absent = considéré `false` (conservateur : marque comme obligatoire si NOT NULL).
+	 */
+	readonly hasDefault?: boolean;
+	/**
+	 * Sprint T2/13.5 : labels valides pour un type enum. Peuplé par
+	 * l'introspection PG (pg_enum). Utilisé par le complete (suggestions
+	 * après `col:`) et un futur typecheck lower (refus tôt des invalides).
+	 * Absent quand `type !== "enum"`.
+	 */
+	readonly enumValues?: readonly string[];
 }
 
 export interface Collection {

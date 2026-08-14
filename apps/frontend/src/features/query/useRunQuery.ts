@@ -18,6 +18,7 @@ export type SnqlColumnType =
 	| "json"
 	| "array"
 	| "uuid"
+	| "enum"
 	| "unknown";
 
 export interface QueryResultColumn {

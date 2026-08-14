@@ -15,6 +15,16 @@ interface ColumnRow {
 	readonly column_name: string;
 	readonly data_type: string;
 	readonly is_nullable: string;
+	/** Sprint T2/13.5 : NULL si aucun DEFAULT. Utilisé pour `Field.hasDefault`. */
+	readonly column_default: string | null;
+	/** Sprint T2/13.5 : nom du type user-defined pour data_type='USER-DEFINED'
+	 *  (typiquement un enum). Lookup dans EnumRow pour peupler `enumValues`. */
+	readonly udt_name: string;
+}
+
+interface EnumRow {
+	readonly typname: string;
+	readonly enumlabel: string;
 }
 
 interface PkRow {
@@ -42,10 +52,24 @@ const TABLES_SQL = `
 	ORDER BY table_name`;
 
 const COLUMNS_SQL = `
-	SELECT table_name, column_name, data_type, is_nullable
+	SELECT table_name, column_name, data_type, is_nullable, column_default, udt_name
 	FROM information_schema.columns
 	WHERE table_schema = $1
 	ORDER BY table_name, ordinal_position`;
+
+/**
+ * Sprint T2/13.5 : lit les labels de tous les enums du schéma cible via
+ * pg_type + pg_enum. `enumsortorder` préserve l'ordre déclaré (important
+ * pour affichage cohérent en autocomplete). typname est le nom du type
+ * (matched par ColumnRow.udt_name côté colonnes USER-DEFINED).
+ */
+const ENUMS_SQL = `
+	SELECT t.typname, e.enumlabel
+	FROM pg_type t
+	JOIN pg_enum e ON e.enumtypid = t.oid
+	JOIN pg_namespace ns ON ns.oid = t.typnamespace
+	WHERE ns.nspname = $1
+	ORDER BY t.typname, e.enumsortorder`;
 
 const PK_SQL = `
 	SELECT tc.table_name, kcu.column_name
@@ -132,16 +156,33 @@ export function buildSchemaModel(
 	tables: readonly string[],
 	columns: readonly ColumnRow[],
 	pks: readonly PkRow[],
-	fks: readonly FkRow[]
+	fks: readonly FkRow[],
+	enums: readonly EnumRow[] = []
 ): SchemaModel {
+	const enumLabelsByType = new Map<string, string[]>();
+	for (const e of enums) {
+		const list = enumLabelsByType.get(e.typname) ?? [];
+		list.push(e.enumlabel);
+		enumLabelsByType.set(e.typname, list);
+	}
+
 	const fieldsByTable = new Map<string, Field[]>();
 	for (const col of columns) {
 		const list = fieldsByTable.get(col.table_name) ?? [];
+		const hasDefault = col.column_default !== null && col.column_default !== undefined;
+		// `data_type === "USER-DEFINED"` + udt_name présent dans les enums = type enum.
+		// Sinon on retombe sur le mapping data_type standard.
+		const enumLabels = col.data_type === "USER-DEFINED"
+			? enumLabelsByType.get(col.udt_name)
+			: undefined;
+		const type = enumLabels !== undefined ? ("enum" as const) : mapPgType(col.data_type);
 		list.push({
 			name: col.column_name,
-			type: mapPgType(col.data_type),
+			type,
 			nullable: col.is_nullable === "YES",
-			source: "declared"
+			source: "declared",
+			...(hasDefault ? { hasDefault: true as const } : {}),
+			...(enumLabels !== undefined ? { enumValues: enumLabels } : {})
 		});
 		fieldsByTable.set(col.table_name, list);
 	}
@@ -212,17 +253,19 @@ export async function introspectPostgres(
 ): Promise<SchemaModel> {
 	try {
 		const params = [schema];
-		const [tables, columns, pks, fks] = await Promise.all([
+		const [tables, columns, pks, fks, enums] = await Promise.all([
 			pool.query<{ table_name: string }>(TABLES_SQL, params),
 			pool.query<ColumnRow>(COLUMNS_SQL, params),
 			pool.query<PkRow>(PK_SQL, params),
-			pool.query<FkRow>(FK_SQL, params)
+			pool.query<FkRow>(FK_SQL, params),
+			pool.query<EnumRow>(ENUMS_SQL, params)
 		]);
 		return buildSchemaModel(
 			tables.rows.map((row) => row.table_name),
 			columns.rows,
 			pks.rows,
-			fks.rows
+			fks.rows,
+			enums.rows
 		);
 	} catch (cause) {
 		throw new EngineIntrospectionError("Introspection Postgres échouée", {
