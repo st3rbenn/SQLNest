@@ -2,6 +2,7 @@ import { SnqlError } from "../diagnostics";
 import { checkArity, SNQL_FUNCTIONS } from "../functions";
 import { CAST_TARGETS } from "../parser/ast";
 import type {
+	Assignment,
 	CastTarget,
 	CompareOperator,
 	DeleteStatement,
@@ -9,6 +10,7 @@ import type {
 	FieldSelection,
 	InsertStatement,
 	LiteralValue,
+	OnConflictClause,
 	Query,
 	SortKey,
 	Stage,
@@ -19,7 +21,9 @@ import type {
 	CompareOp,
 	LogicalPlan,
 	MutationPlan,
+	PlanColumnValue,
 	PlanExpr,
+	PlanOnConflict,
 	PlanProjectField,
 	PlanRowValue,
 	PlanSortKey,
@@ -546,7 +550,7 @@ export function lowerMutation(
 	schema?: SchemaModel
 ): MutationPlan {
 	if (statement.operation === "insert") {
-		return lowerInsert(statement);
+		return lowerInsert(statement, schema);
 	}
 	// Sprint T2/11.5 : typecheck predicate + set values si schema dispo.
 	typecheckMutation(statement, schema);
@@ -608,14 +612,16 @@ export function lowerMutation(
 			);
 			assertNoCallInWrite(predicate);
 		}
+		const rrc = statement.returnRowCount === true ? { returnRowCount: true as const } : {};
 		return predicate !== undefined
 			? {
 					op: "update",
 					collection: statement.collection,
 					assignments,
-					predicate
+					predicate,
+					...rrc
 				}
-			: { op: "update", collection: statement.collection, assignments };
+			: { op: "update", collection: statement.collection, assignments, ...rrc };
 	}
 	if (sourceColumns !== null && statement.predicate !== undefined) {
 		checkExprPathsAgainstColumns(
@@ -643,13 +649,15 @@ export function lowerMutation(
 		);
 		assertNoCallInWrite(predicate);
 	}
+	const rrcDelete = statement.returnRowCount === true ? { returnRowCount: true as const } : {};
 	return predicate !== undefined
 		? {
 				op: "delete",
 				collection: statement.collection,
-				predicate
+				predicate,
+				...rrcDelete
 			}
-		: { op: "delete", collection: statement.collection };
+		: { op: "delete", collection: statement.collection, ...rrcDelete };
 }
 
 /**
@@ -1172,7 +1180,7 @@ function assertNoCallInWrite(expr: PlanExpr): void {
  * paramétrer avec span, et remontés dans le pgError pour cibler une row
  * fautive sur unique/FK violation).
  */
-function lowerInsert(statement: InsertStatement): MutationPlan {
+function lowerInsert(statement: InsertStatement, schema?: SchemaModel): MutationPlan {
 	const firstRow = statement.rows[0];
 	if (firstRow === undefined) {
 		throw new SnqlError("'add' sans document", "lower_insert_empty");
@@ -1224,14 +1232,230 @@ function lowerInsert(statement: InsertStatement): MutationPlan {
 		return values;
 	});
 
+	// Sprint T2/13 : on-conflict clause.
+	const sourceColumns = resolveSourceColumns(schema, statement.collection);
+	const onConflict = statement.onConflict !== undefined
+		? lowerOnConflict(statement.onConflict, columnSet, sourceColumns, statement.collection)
+		: undefined;
+	const returnRowCount = statement.returnRowCount === true ? { returnRowCount: true as const } : {};
+
 	return {
 		op: "insert",
 		collection: statement.collection,
 		columns,
 		rows,
 		rowSpans,
-		cellSpans
+		cellSpans,
+		...(onConflict !== undefined ? { onConflict } : {}),
+		...returnRowCount
 	};
+}
+
+/**
+ * Sprint T2/13 : abaisse un `on conflict (keys) [ignore | edit set …]`.
+ *  - Valide que chaque `key` est un ident insérable (dans `columnSet`) et,
+ *    si schema présent, une colonne réelle de la source. Sans key réelle sur
+ *    la table (contrainte UNIQUE / PK), PG lèvera un `42P10 there is no
+ *    unique or exclusion constraint matching` au runtime — le lower ne peut
+ *    pas anticiper ça sans introspection des contraintes.
+ *  - Pour l'action `update`, abaisse chaque assignment et le where en
+ *    transformant les `field {path:["new", col]}` en `PlanExpr.upsertNew`.
+ */
+function lowerOnConflict(
+	clause: OnConflictClause,
+	insertColumns: ReadonlySet<string>,
+	sourceColumns: ReadonlySet<string> | null,
+	collection: string
+): PlanOnConflict {
+	// Sanity : keys non vides + keys uniques + keys existent.
+	if (clause.keys.length === 0) {
+		throw new SnqlError(
+			"'on conflict (…)' attend au moins une colonne clé",
+			"lower_on_conflict_empty_keys",
+			clause.span
+		);
+	}
+	const seenKeys = new Set<string>();
+	for (const k of clause.keys) {
+		if (seenKeys.has(k)) {
+			throw new SnqlError(
+				`Colonne '${k}' dupliquée dans 'on conflict (…)'`,
+				"lower_on_conflict_duplicate_key",
+				clause.span
+			);
+		}
+		seenKeys.add(k);
+		if (sourceColumns !== null && !sourceColumns.has(k)) {
+			throw new SnqlError(
+				`Colonne '${k}' de 'on conflict (…)' inconnue dans '${collection}'`,
+				"lower_on_conflict_unknown_key",
+				clause.span
+			);
+		}
+	}
+
+	if (clause.action.kind === "ignore") {
+		return { keys: clause.keys, action: { kind: "ignore" } };
+	}
+
+	// Action `update` : valider assignments (uniques + colonnes existent), abaisser
+	// les valeurs avec rewrite `new.x` → upsertNew, valider aussi le where.
+	const assignments: Assignment[] = [...clause.action.assignments];
+	assertUniqueAssignments(assignments);
+	if (sourceColumns !== null) {
+		for (const a of assignments) {
+			if (!sourceColumns.has(a.column)) {
+				throw new SnqlError(
+					`Colonne '${a.column}' d''edit set' inconnue dans '${collection}'`,
+					"lower_on_conflict_unknown_set_column",
+					a.span
+				);
+			}
+		}
+	}
+	const loweredAssignments: PlanColumnValue[] = assignments.map((a) => ({
+		column: a.column,
+		value: lowerUpsertExpr(a.value, insertColumns, sourceColumns, collection)
+	}));
+	const where = clause.action.where !== undefined
+		? lowerUpsertExpr(clause.action.where, insertColumns, sourceColumns, collection)
+		: undefined;
+	// Refus aggregate/window/subquery/call-null-write dans les upsert exprs
+	// (parité update ordinaire).
+	for (const [i, a] of loweredAssignments.entries()) {
+		refuseWindowCallInPosition(
+			clause.action.assignments[i]!.value,
+			"lower_window_in_set",
+			`on conflict edit set ${a.column}`
+		);
+		refuseAggregateInPosition(
+			a.value,
+			"lower_agg_in_set",
+			`'edit set ${a.column} = <aggregate>' non supporté dans 'on conflict'`
+		);
+		assertNoCallInWrite(a.value);
+	}
+	if (where !== undefined) {
+		refuseAggregateInPosition(
+			where,
+			"lower_agg_in_where",
+			"Aggregate dans 'on conflict … where' interdit"
+		);
+		assertNoCallInWrite(where);
+	}
+
+	return {
+		keys: clause.keys,
+		action: {
+			kind: "update",
+			assignments: loweredAssignments,
+			...(where !== undefined ? { where } : {})
+		}
+	};
+}
+
+/**
+ * Sprint T2/13 : abaisse une expression du scope on-conflict edit-set/where.
+ * D'abord lower normal, puis rewrite `field {path:["new", col]}` en
+ * `upsertNew {column: col}`. Valide le shape (2 segments exactement, col dans
+ * insertColumns). Les path bare (`updated_at`) et `<table>.col` réfèrent la
+ * row existante et restent field — PG les résout naturellement au nom de la
+ * table cible.
+ */
+function lowerUpsertExpr(
+	expr: Expr,
+	insertColumns: ReadonlySet<string>,
+	sourceColumns: ReadonlySet<string> | null,
+	collection: string
+): PlanExpr {
+	const lowered = lowerExpr(expr);
+	return rewriteUpsertNew(lowered, insertColumns, sourceColumns, collection);
+}
+
+function rewriteUpsertNew(
+	node: PlanExpr,
+	insertColumns: ReadonlySet<string>,
+	sourceColumns: ReadonlySet<string> | null,
+	collection: string
+): PlanExpr {
+	const rec = (n: PlanExpr): PlanExpr =>
+		rewriteUpsertNew(n, insertColumns, sourceColumns, collection);
+	switch (node.kind) {
+		case "field": {
+			const [head, ...tail] = node.path;
+			if (head === "new") {
+				if (tail.length !== 1) {
+					throw new SnqlError(
+						"'new.<col>' attend un unique segment (ex: 'new.updated_at') — les paths nested ne sont pas supportés",
+						"lower_upsert_new_path_shape",
+						node.span
+					);
+				}
+				const col = tail[0]!;
+				if (!insertColumns.has(col)) {
+					throw new SnqlError(
+						`'new.${col}' — la colonne '${col}' n'est pas dans le document inséré`,
+						"lower_upsert_new_column_missing",
+						node.span
+					);
+				}
+				return node.span !== undefined
+					? { kind: "upsertNew", column: col, span: node.span }
+					: { kind: "upsertNew", column: col };
+			}
+			// path bare `col` ou `<collection>.col` réfère la row existante en DB.
+			// PG résout naturellement au nom de la table cible.
+			if (sourceColumns !== null && head !== undefined && node.path.length >= 2 && head !== collection) {
+				throw new SnqlError(
+					`'${head}' n'est ni 'new' ni '${collection}' dans '${node.path.join(".")}' — dans 'on conflict', seuls le champ bare (row existante) et 'new.col' (row proposée) sont autorisés`,
+					"lower_unknown_alias",
+					node.span
+				);
+			}
+			return node;
+		}
+		case "literal":
+		case "upsertNew":
+			return node;
+		case "compare":
+			return { ...node, left: rec(node.left), right: rec(node.right) };
+		case "and":
+		case "or":
+			return { ...node, left: rec(node.left), right: rec(node.right) };
+		case "not":
+		case "isNull":
+			return { ...node, operand: rec(node.operand) };
+		case "in":
+			return { ...node, target: rec(node.target), values: node.values.map(rec) };
+		case "arith":
+			return { ...node, left: rec(node.left), right: rec(node.right) };
+		case "call":
+			return { ...node, args: node.args.map(rec) };
+		case "cast":
+			return { ...node, operand: rec(node.operand) };
+		case "object":
+			return {
+				...node,
+				entries: node.entries.map((e) => ({ key: e.key, value: rec(e.value) }))
+			};
+		case "array":
+			return { ...node, items: node.items.map(rec) };
+		case "case":
+			return {
+				...node,
+				branches: node.branches.map((b) => ({
+					cond: rec(b.cond),
+					value: rec(b.value)
+				})),
+				elseValue: rec(node.elseValue)
+			};
+		case "windowCall":
+		case "subquery":
+		case "exists":
+			// Refus attrapés en amont : refuseAggregateInPosition / refuseWindow
+			// pour aggregate/window, lower_subquery_in_write pour subquery.
+			return node;
+	}
 }
 
 /**

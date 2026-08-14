@@ -161,7 +161,11 @@ export type {
 	PhysicalPlan,
 	PlanOptions
 } from "./planner/planner";
-export { assertMutationCastTargetsSupported, plan } from "./planner/planner";
+export {
+	assertMutationCastTargetsSupported,
+	assertMutationUpsertSupported,
+	plan
+} from "./planner/planner";
 export type { JoinSources, Row } from "./runtime/compensate";
 export { compensate } from "./runtime/compensate";
 export { inferResultColumns } from "./runtime/infer-column-types";

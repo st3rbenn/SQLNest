@@ -21,7 +21,12 @@ export type Capability =
 	| "graph"
 	// Sprint T2/11 : support des sub-queries inline (`in (find ...)` /
 	// `exists (find ...)`). PG only v1 (natif SQL) ; Mongo/KV refusés.
-	| "subquery";
+	| "subquery"
+	// Sprint T2/13 : `add {…} into t on conflict (col) [ignore | edit set …]`.
+	// PG only v1 (INSERT ... ON CONFLICT natif). Mongo/KV refusés (sémantique
+	// upsert Mongo est différente — updateOne(upsert:true) sur un full doc,
+	// pas de WHERE côté conflict, à réévaluer plus tard).
+	| "upsert";
 
 /**
  * Décimal **exact** : on garde le texte brut. Les colonnes NUMERIC/DECIMAL de
@@ -178,6 +183,16 @@ export type PlanExpr = (
 			readonly kind: "exists";
 			readonly subplan: LogicalPlan;
 	  }
+	// Sprint T2/13 : `new.<col>` — référence la row proposée d'un upsert.
+	// Valide UNIQUEMENT dans le scope `on conflict (…) edit set / where` d'un
+	// insert. Le lower transforme `Expr.field {path:["new", col]}` en cette
+	// variant seulement à l'intérieur du scope upsert ; ailleurs, `new` reste
+	// un ident ordinaire (colonne réelle nommée `new` supportée). Codegen PG
+	// émet `EXCLUDED."<column>"`.
+	| {
+			readonly kind: "upsertNew";
+			readonly column: string;
+	  }
 ) & { readonly span?: Span };
 
 /** Entry d'un `PlanExpr.object` — key canonique + value lowered. */
@@ -301,6 +316,26 @@ export type PlanRowValue =
  * ce n'est pas une chaîne d'opérateurs linéaire : chaque mutation porte sa cible,
  * son prédicat, ses valeurs. Exige la capacité `mutate`.
  */
+/**
+ * Sprint T2/13 : action sur conflit d'un upsert lowered.
+ *  - `ignore` : `ON CONFLICT (...) DO NOTHING`.
+ *  - `update` : `ON CONFLICT (...) DO UPDATE SET c = expr [WHERE p]`. Les
+ *    `assignments.value` peuvent contenir des `PlanExpr.upsertNew` (réfs
+ *    `EXCLUDED.<col>` côté PG) ; le predicate `where` peut aussi.
+ */
+export type PlanOnConflictAction =
+	| { readonly kind: "ignore" }
+	| {
+			readonly kind: "update";
+			readonly assignments: readonly PlanColumnValue[];
+			readonly where?: PlanExpr;
+	  };
+
+export interface PlanOnConflict {
+	readonly keys: readonly string[];
+	readonly action: PlanOnConflictAction;
+}
+
 export type MutationPlan =
 	| {
 			readonly op: "insert";
@@ -316,6 +351,10 @@ export type MutationPlan =
 			 */
 			readonly rowSpans?: readonly (Span | undefined)[];
 			readonly cellSpans?: readonly (readonly (Span | undefined)[])[];
+			// Sprint T2/13 : clause upsert. Exige capability `upsert` (PG only v1).
+			readonly onConflict?: PlanOnConflict;
+			// Sprint T2/13 : `pick count` → drop `RETURNING *` côté codegen.
+			readonly returnRowCount?: true;
 	  }
 	| {
 			readonly op: "update";
@@ -323,11 +362,13 @@ export type MutationPlan =
 			readonly assignments: readonly PlanColumnValue[];
 			// Absent = toutes les lignes (write non filtré, assumé).
 			readonly predicate?: PlanExpr;
+			readonly returnRowCount?: true;
 	  }
 	| {
 			readonly op: "delete";
 			readonly collection: string;
 			readonly predicate?: PlanExpr;
+			readonly returnRowCount?: true;
 	  };
 
 /** Un plan complet : lecture ou mutation. */

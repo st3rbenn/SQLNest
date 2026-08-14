@@ -1104,6 +1104,14 @@ function renderMatch(
 				"codegen_mongo_subquery_unsupported",
 				expr.span
 			);
+		case "upsertNew":
+			// Sprint T2/13 : upsert refusé au planner sur Mongo (capability upsert
+			// absente). Defense — jamais atteint normalement.
+			throw new SnqlError(
+				"'new.<col>' Mongo non supporté (upsert refusé au planner)",
+				"codegen_mongo_upsert_unsupported",
+				expr.span
+			);
 	}
 }
 
@@ -1199,6 +1207,12 @@ function negateMatch(
 			throw new SnqlError(
 				"Négation d'une sub-query Mongo non supportée",
 				"codegen_mongo_subquery_unsupported",
+				expr.span
+			);
+		case "upsertNew":
+			throw new SnqlError(
+				"'new.<col>' Mongo non supporté (upsert refusé au planner)",
+				"codegen_mongo_upsert_unsupported",
 				expr.span
 			);
 	}

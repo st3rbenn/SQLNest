@@ -206,6 +206,14 @@ function evalValue(expr: PlanExpr, row: Row): unknown {
 			"runtime_subquery_unsupported"
 		);
 	}
+	if (expr.kind === "upsertNew") {
+		// Sprint T2/13 : upsert refusé au planner (KV n'a pas la capability
+		// upsert). Defense — jamais atteint normalement.
+		throw new SnqlError(
+			`Runtime KV : 'new.<col>' rencontré — capability 'upsert' absente (bug de sync)`,
+			"runtime_upsert_unsupported"
+		);
+	}
 	// Expression booléenne utilisée comme valeur.
 	return evalBool(expr, row);
 }
@@ -318,6 +326,7 @@ function evalBool(expr: PlanExpr, row: Row): boolean | null {
 		case "windowCall":
 		case "subquery":
 		case "exists":
+		case "upsertNew":
 			return coerceBool(evalValue(expr, row));
 	}
 }

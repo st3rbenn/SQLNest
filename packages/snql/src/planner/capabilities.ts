@@ -36,10 +36,12 @@ function caps(
 
 /** Relationnel complet (lecture). Tous les casts canoniques supportés.
  * Sprint T2/11 : 'subquery' ajouté — sub-queries inline (`in (find ...)` /
- * `exists (find ...)`) natives PG (nested SELECT). */
+ * `exists (find ...)`) natives PG (nested SELECT).
+ * Sprint T2/13 : 'upsert' ajouté — `add {…} into t on conflict (col) [ignore |
+ * edit set …]` via `INSERT ... ON CONFLICT` natif PG. */
 export const POSTGRES_CAPABILITIES: Capabilities = caps(
 	"postgres",
-	["scan", "filter", "project", "join", "aggregate", "sort", "paginate", "mutate", "subquery"],
+	["scan", "filter", "project", "join", "aggregate", "sort", "paginate", "mutate", "subquery", "upsert"],
 	["int", "float", "text", "bool", "date", "timestamp", "json"]
 );
 

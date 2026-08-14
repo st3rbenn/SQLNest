@@ -259,6 +259,9 @@ function visitExprCalls(expr: PlanExpr, visit: (name: string) => void): void {
 		case "exists":
 			visitPlanCalls(expr.subplan, visit);
 			return;
+		case "upsertNew":
+			// Sprint T2/13 : leaf, aucune fn à visiter.
+			return;
 	}
 }
 
@@ -374,6 +377,8 @@ function visitExprCasts(
 		case "exists":
 			visitPlanCasts(expr.subplan, visit);
 			return;
+		case "upsertNew":
+			return;
 	}
 }
 
@@ -397,6 +402,11 @@ export function assertMutationCastTargetsSupported(
 		if (plan.predicate !== undefined) visitExprCasts(plan.predicate, visitor);
 	} else if (plan.op === "delete") {
 		if (plan.predicate !== undefined) visitExprCasts(plan.predicate, visitor);
+	} else if (plan.op === "insert" && plan.onConflict?.action.kind === "update") {
+		for (const a of plan.onConflict.action.assignments) visitExprCasts(a.value, visitor);
+		if (plan.onConflict.action.where !== undefined) {
+			visitExprCasts(plan.onConflict.action.where, visitor);
+		}
 	}
 	if (unsupported.size === 0) return;
 	const [target, span] = [...unsupported.entries()][0]!;
@@ -405,6 +415,24 @@ export function assertMutationCastTargetsSupported(
 			? "cast(_ as json) non supporté sur mongodb — les documents Mongo sont déjà des BSON, aucun cast nécessaire"
 			: `cast(_ as ${target}) non supporté sur '${capabilities.engine}'`;
 	throw new SnqlError(message, "planner_cast_target_unsupported", span);
+}
+
+/**
+ * Sprint T2/13 : refuse `add {…} into t on conflict (…) …` si l'engine cible
+ * n'a pas la capability `upsert`. Message actionable : Mongo a un upsert
+ * natif mais sémantique différente (updateOne(upsert:true) sur un full doc),
+ * pas de v1 côté SQLNest.
+ */
+export function assertMutationUpsertSupported(
+	plan: MutationPlan,
+	capabilities: Capabilities
+): void {
+	if (plan.op !== "insert" || plan.onConflict === undefined) return;
+	if (capabilities.supports.has("upsert")) return;
+	throw new SnqlError(
+		`'on conflict (…)' non supporté sur '${capabilities.engine}' — capability 'upsert' absente. Pour Postgres, cette syntaxe cible ON CONFLICT natif ; les autres engines matérialisent l'upsert côté application.`,
+		"planner_upsert_unsupported"
+	);
 }
 
 function toCompensationOp(op: LogicalPlan): CompensationOp {
@@ -679,6 +707,8 @@ function visitExprsIn(expr: PlanExpr, visit: (e: PlanExpr) => void): void {
 			return;
 		case "exists":
 			visitPlanExprs(expr.subplan, visit);
+			return;
+		case "upsertNew":
 			return;
 	}
 }

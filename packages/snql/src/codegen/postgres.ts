@@ -67,6 +67,8 @@ export const postgresMapper: Mapper = {
 /**
  * Codegen des mutations. Valeurs TOUJOURS paramétrées, identifiants quotés.
  * `RETURNING *` : `execute` récupère les lignes affectées (et leur nombre).
+ * Sprint T2/13 : `returnRowCount === true` droppe le `RETURNING *` — le
+ * driver renvoie alors seulement rowCount (rows = []).
  */
 function renderMutation(plan: MutationPlan, params: ParamList): string {
 	switch (plan.op) {
@@ -84,20 +86,49 @@ function renderMutation(plan: MutationPlan, params: ParamList): string {
 							.join(", ")})`
 				)
 				.join(", ");
-			return `INSERT INTO ${quoteIdent(plan.collection)} (${cols}) VALUES ${rows} RETURNING *`;
+			const onConflict = plan.onConflict !== undefined
+				? ` ${renderOnConflict(plan.onConflict, plan.collection, params)}`
+				: "";
+			const returning = plan.returnRowCount === true ? "" : " RETURNING *";
+			return `INSERT INTO ${quoteIdent(plan.collection)} (${cols}) VALUES ${rows}${onConflict}${returning}`;
 		}
 		case "update": {
 			const set = plan.assignments
 				.map((a) => `${quoteIdent(a.column)} = ${renderExpr(a.value, params)}`)
 				.join(", ");
 			const where = renderWhere(plan.predicate, params);
-			return `UPDATE ${quoteIdent(plan.collection)} SET ${set}${where} RETURNING *`;
+			const returning = plan.returnRowCount === true ? "" : " RETURNING *";
+			return `UPDATE ${quoteIdent(plan.collection)} SET ${set}${where}${returning}`;
 		}
 		case "delete": {
 			const where = renderWhere(plan.predicate, params);
-			return `DELETE FROM ${quoteIdent(plan.collection)}${where} RETURNING *`;
+			const returning = plan.returnRowCount === true ? "" : " RETURNING *";
+			return `DELETE FROM ${quoteIdent(plan.collection)}${where}${returning}`;
 		}
 	}
+}
+
+/**
+ * Sprint T2/13 : rend une clause ON CONFLICT PG. `ignore` → `DO NOTHING`.
+ * `update` → `DO UPDATE SET c = expr [WHERE p]`. Les `new.<col>` sont déjà
+ * lowered en PlanExpr.upsertNew → renderExpr émet `EXCLUDED."col"`.
+ */
+function renderOnConflict(
+	clause: import("../ir/plan").PlanOnConflict,
+	_collection: string,
+	params: ParamList
+): string {
+	const keys = clause.keys.map(quoteIdent).join(", ");
+	if (clause.action.kind === "ignore") {
+		return `ON CONFLICT (${keys}) DO NOTHING`;
+	}
+	const set = clause.action.assignments
+		.map((a) => `${quoteIdent(a.column)} = ${renderExpr(a.value, params)}`)
+		.join(", ");
+	const where = clause.action.where !== undefined
+		? ` WHERE ${renderExpr(clause.action.where, params)}`
+		: "";
+	return `ON CONFLICT (${keys}) DO UPDATE SET ${set}${where}`;
 }
 
 /** Clause WHERE d'une mutation, ou chaîne vide si le prédicat est absent (toutes les lignes). */
@@ -642,6 +673,10 @@ function renderExpr(expr: PlanExpr, params: ParamList): string {
 			// Sprint T2/11 : `EXISTS (SELECT ... )`. Idem — sous-plan inline.
 			return `EXISTS (${renderPlan(expr.subplan, params)})`;
 		}
+		case "upsertNew":
+			// Sprint T2/13 : `new.<col>` dans `on conflict edit set/where` → PG
+			// binde la row proposée sous l'alias `EXCLUDED`.
+			return `EXCLUDED.${quoteIdent(expr.column)}`;
 	}
 }
 

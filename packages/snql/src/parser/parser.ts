@@ -10,6 +10,8 @@ import type {
 	InsertField,
 	InsertRow,
 	InsertStatement,
+	OnConflictAction,
+	OnConflictClause,
 	Query,
 	SortKey,
 	Source,
@@ -31,8 +33,8 @@ const SELECT_STAGE_KEYWORDS: ReadonlySet<string> = new Set(SELECT_STAGE_ORDER);
 const UPDATE_STAGE_KEYWORDS: ReadonlySet<string> = new Set(["where", "set"]);
 const DELETE_STAGE_KEYWORDS: ReadonlySet<string> = new Set(["where"]);
 
-function peekKeyword(cursor: TokenCursor, value: string): boolean {
-	const tok = cursor.peek();
+function peekKeyword(cursor: TokenCursor, value: string, ahead = 0): boolean {
+	const tok = cursor.peek(ahead);
 	return tok.kind === "keyword" && tok.value === value;
 }
 
@@ -107,13 +109,113 @@ function parseInsert(cursor: TokenCursor, verbTok: Token): InsertStatement {
 	cursor.next();
 	const nameTok = cursor.expect("ident", "un nom de collection après 'into'");
 
+	let end = nameTok.span.end;
+	// Sprint T2/13 : `on conflict (k1, k2) [ignore | edit set ... [where ...]]`.
+	let onConflict: OnConflictClause | undefined;
+	if (peekKeyword(cursor, "on") && peekKeyword(cursor, "conflict", 1)) {
+		onConflict = parseOnConflict(cursor);
+		end = onConflict.span.end;
+	}
+	// Sprint T2/13 : `pick count` — retourne seulement rowCount, pas les rows.
+	const returnRowCount = tryConsumePickCount(cursor);
+	if (returnRowCount !== undefined) end = returnRowCount.end;
+
+	const span = { start: verbTok.span.start, end };
 	return {
 		operation: "insert",
 		verb: verbTok.value,
 		collection: nameTok.value,
 		rows,
-		span: { start: verbTok.span.start, end: nameTok.span.end }
+		...(onConflict !== undefined ? { onConflict } : {}),
+		...(returnRowCount !== undefined ? { returnRowCount: true as const } : {}),
+		span
 	};
+}
+
+/**
+ * Sprint T2/13 : lit `on conflict (k1, k2) [ignore | edit set c = expr, ... [where pred]]`.
+ * `edit` est le verbe alias pour `update` — ici c'est un mot contextuel après
+ * `on conflict (…)` (soft-keyword post-parens, pas de conflit avec le verb en
+ * début de statement puisqu'on est déjà dans un `add`).
+ */
+function parseOnConflict(cursor: TokenCursor): OnConflictClause {
+	const onTok = cursor.next(); // 'on'
+	cursor.next(); // 'conflict'
+	cursor.expect("lparen", "'(' après 'on conflict' — les keys sont entre parens");
+	const keys: string[] = [cursor.expect("ident", "un nom de colonne").value];
+	while (cursor.peek().kind === "comma") {
+		cursor.next();
+		keys.push(cursor.expect("ident", "un nom de colonne").value);
+	}
+	const rparen = cursor.expect("rparen", "')' pour fermer 'on conflict (...)'");
+	let action: OnConflictAction;
+	let endOffset = rparen.span.end;
+
+	const next = cursor.peek();
+	if (next.kind === "keyword" && next.value === "ignore") {
+		const ignTok = cursor.next();
+		action = { kind: "ignore", span: ignTok.span };
+		endOffset = ignTok.span.end;
+	} else {
+		// Attendu : `edit set ...` — le verb `edit` (alias update) sert de
+		// mot-clé contextuel après `on conflict (…)`. Erreur claire sinon.
+		const editTok = cursor.peek();
+		if (!(editTok.kind === "verb" && editTok.value === "edit")) {
+			throw new SnqlError(
+				"'on conflict (...)' attend 'ignore' ou 'edit set <col> = <expr> [where <pred>]'",
+				"parse_on_conflict_action",
+				editTok.span
+			);
+		}
+		cursor.next(); // 'edit'
+		if (!peekKeyword(cursor, "set")) {
+			throw new SnqlError(
+				"'edit' dans 'on conflict' attend 'set <col> = <expr>'",
+				"parse_on_conflict_edit_set",
+				cursor.peek().span
+			);
+		}
+		cursor.next(); // 'set'
+		const assignments = parseAssignments(cursor);
+		let end = assignments[assignments.length - 1]?.span.end ?? endOffset;
+		let where: Expr | undefined;
+		if (peekKeyword(cursor, "where")) {
+			cursor.next();
+			where = parseExpression(cursor);
+			end = where.span.end;
+		}
+		action = {
+			kind: "update",
+			assignments,
+			...(where !== undefined ? { where } : {}),
+			span: { start: editTok.span.start, end }
+		};
+		endOffset = end;
+	}
+	return {
+		keys,
+		action,
+		span: { start: onTok.span.start, end: endOffset }
+	};
+}
+
+/**
+ * Sprint T2/13 : consomme `pick count` si présent. `count` reste un ident
+ * (soft-keyword contextuel après `pick` en position mutation, pas de conflit
+ * avec la fonction `count()` qui exige `(` derrière). Renvoie le span consommé
+ * ou undefined.
+ */
+function tryConsumePickCount(cursor: TokenCursor): { end: import("../lexer/token").Position } | undefined {
+	if (!peekKeyword(cursor, "pick")) return undefined;
+	const p1 = cursor.peek(1);
+	if (!(p1.kind === "ident" && p1.value.toLowerCase() === "count")) return undefined;
+	const p2 = cursor.peek(2);
+	// `count(` = fonction (interdite en mutation de toute façon, mais on ne
+	// veut pas capturer ici pour laisser l'erreur remonter proprement).
+	if (p2.kind === "lparen") return undefined;
+	cursor.next(); // 'pick'
+	const countTok = cursor.next(); // 'count' ident
+	return { end: countTok.span.end };
 }
 
 function parseDocument(cursor: TokenCursor): InsertRow {
@@ -248,10 +350,17 @@ function parseUpdate(cursor: TokenCursor, verbTok: Token): UpdateStatement {
 		end = lastAssign.span.end;
 	}
 
+	// Sprint T2/13 : `pick count` — dropRETURNING côté PG, ne renvoie que
+	// rowCount. Consommé avant le trailing-stage guard (`pick` n'est pas dans
+	// UPDATE_STAGE_KEYWORDS, il aurait fini `parse_unexpected`).
+	const rrc = tryConsumePickCount(cursor);
+	if (rrc !== undefined) end = rrc.end;
+
 	rejectTrailingStage(cursor, UPDATE_STAGE_KEYWORDS, ["where", "set"]);
 
 	// `where` optionnel : sans lui, l'update porte sur toutes les lignes (assumé).
 	const span = { start: verbTok.span.start, end };
+	const returnRowCount = rrc !== undefined ? { returnRowCount: true as const } : {};
 	return predicate !== undefined
 		? {
 				operation: "update",
@@ -259,6 +368,7 @@ function parseUpdate(cursor: TokenCursor, verbTok: Token): UpdateStatement {
 				collection: nameTok.value,
 				predicate,
 				assignments,
+				...returnRowCount,
 				span
 			}
 		: {
@@ -266,6 +376,7 @@ function parseUpdate(cursor: TokenCursor, verbTok: Token): UpdateStatement {
 				verb: verbTok.value,
 				collection: nameTok.value,
 				assignments,
+				...returnRowCount,
 				span
 			};
 }
@@ -290,22 +401,29 @@ function parseDelete(cursor: TokenCursor, verbTok: Token): DeleteStatement {
 		end = predicate.span.end;
 	}
 
+	// Sprint T2/13 : `pick count` — dropRETURNING côté PG.
+	const rrc = tryConsumePickCount(cursor);
+	if (rrc !== undefined) end = rrc.end;
+
 	rejectTrailingStage(cursor, DELETE_STAGE_KEYWORDS, ["where"]);
 
 	// `where` optionnel : sans lui, le remove porte sur toutes les lignes (assumé).
 	const span = { start: verbTok.span.start, end };
+	const returnRowCount = rrc !== undefined ? { returnRowCount: true as const } : {};
 	return predicate !== undefined
 		? {
 				operation: "delete",
 				verb: verbTok.value,
 				collection: nameTok.value,
 				predicate,
+				...returnRowCount,
 				span
 			}
 		: {
 				operation: "delete",
 				verb: verbTok.value,
 				collection: nameTok.value,
+				...returnRowCount,
 				span
 			};
 }

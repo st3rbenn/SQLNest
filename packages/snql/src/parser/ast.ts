@@ -301,22 +301,54 @@ export interface Assignment {
 	readonly span: Span;
 }
 
-/** `update <coll> [where <pred>] set <affectations>`. `where` optionnel : sans lui, toutes les lignes. */
+/**
+ * Sprint T2/13 : action à effectuer quand l'insert entre en conflit sur les
+ * `keys` de l'upsert.
+ *  - `ignore` : `INSERT ... ON CONFLICT (...) DO NOTHING`.
+ *  - `update` : `INSERT ... ON CONFLICT (...) DO UPDATE SET c = expr [WHERE ...]`.
+ *    Les `assignments` peuvent référencer la row proposée via le pseudo-alias
+ *    `new.<col>` (transformé en PlanExpr.upsertNew au lower) et la row existante
+ *    via le champ bare (ou `<table>.<col>` — PG résout naturellement).
+ */
+export type OnConflictAction =
+	| { readonly kind: "ignore"; readonly span: Span }
+	| {
+			readonly kind: "update";
+			readonly assignments: readonly Assignment[];
+			readonly where?: Expr;
+			readonly span: Span;
+	  };
+
+/**
+ * Sprint T2/13 : clause `on conflict (k1, k2) [ignore | edit set ... [where ...]]`
+ * portée par un `add {…} into t`. Le sprint reste PG-only (capability `upsert`).
+ */
+export interface OnConflictClause {
+	readonly keys: readonly string[];
+	readonly action: OnConflictAction;
+	readonly span: Span;
+}
+
+/** `update <coll> [where <pred>] set <affectations> [pick count]`. `where` optionnel : sans lui, toutes les lignes. */
 export interface UpdateStatement {
 	readonly operation: "update";
 	readonly verb: string;
 	readonly collection: string;
 	readonly predicate?: Expr;
 	readonly assignments: readonly Assignment[];
+	// Sprint T2/13 : `pick count` — drop `RETURNING *` côté codegen, ne renvoie
+	// que rowCount (le front lit `rowCount` sans payload de rows).
+	readonly returnRowCount?: true;
 	readonly span: Span;
 }
 
-/** `remove from <coll> [| where <pred>]`. `where` optionnel : sans lui, toutes les lignes. */
+/** `remove from <coll> [| where <pred>] [pick count]`. `where` optionnel : sans lui, toutes les lignes. */
 export interface DeleteStatement {
 	readonly operation: "delete";
 	readonly verb: string;
 	readonly collection: string;
 	readonly predicate?: Expr;
+	readonly returnRowCount?: true;
 	readonly span: Span;
 }
 
@@ -333,12 +365,14 @@ export interface InsertRow {
 	readonly span: Span;
 }
 
-/** `add {doc} into <coll>` ou `add [{…}, {…}] into <coll>`. */
+/** `add {doc} into <coll> [on conflict (keys) ...] [pick count]` ou `add [{…}, {…}] into <coll>`. */
 export interface InsertStatement {
 	readonly operation: "insert";
 	readonly verb: string;
 	readonly collection: string;
 	readonly rows: readonly InsertRow[];
+	readonly onConflict?: OnConflictClause;
+	readonly returnRowCount?: true;
 	readonly span: Span;
 }
 
