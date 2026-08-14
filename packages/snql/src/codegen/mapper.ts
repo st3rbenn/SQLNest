@@ -1,4 +1,5 @@
-import type { LogicalPlan, MutationPlan } from "../ir/plan";
+import type { LogicalPlan, MutationPlan, TransactionPlan } from "../ir/plan";
+import type { IsolationLevel } from "../parser/ast";
 
 /** Une étape de pipeline d'agrégation MongoDB (ex. `{ $match: … }`). */
 export type MongoStage = Record<string, unknown>;
@@ -83,8 +84,27 @@ export type MongoWriteQuery = {
 	  }
 );
 
+/**
+ * Sprint T2/15 : bloc transaction PG. `statements` = liste plate (pas de
+ * nesting) de statements pré-rendus + directives structurelles pour les
+ * savepoints. L'engine émet un `BEGIN` + boucle sur les directives puis
+ * `COMMIT` (ou `ROLLBACK` sur erreur). Params sont par statement (chaque
+ * SqlQuery garde son propre paramètre count `$1..$N`).
+ */
+export type SqlTransactionStep =
+	| { readonly kind: "statement"; readonly query: SqlQuery }
+	| { readonly kind: "savepoint-begin"; readonly name: string }
+	| { readonly kind: "savepoint-release"; readonly name: string };
+
+export interface SqlTransaction {
+	readonly engine: string;
+	readonly kind: "transaction";
+	readonly isolation?: IsolationLevel;
+	readonly steps: readonly SqlTransactionStep[];
+}
+
 /** Requête native produite pour un moteur donné. */
-export type NativeQuery = SqlQuery | MongoQuery | MongoWriteQuery;
+export type NativeQuery = SqlQuery | MongoQuery | MongoWriteQuery | SqlTransaction;
 
 /** Contrat de codegen par moteur : plan → requête native. Pur, sans I/O. */
 export interface Mapper {
@@ -93,4 +113,6 @@ export interface Mapper {
 	map(plan: LogicalPlan): NativeQuery;
 	/** Écriture : Mutation Plan → requête native. */
 	mapMutation(plan: MutationPlan): NativeQuery;
+	/** Sprint T2/15 : transaction PG-only. Absent = engine sans support. */
+	mapTransaction?(plan: TransactionPlan): SqlTransaction;
 }

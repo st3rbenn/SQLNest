@@ -196,6 +196,11 @@ class PostgresConnection implements Connection {
 	}
 
 	async execute(query: NativeQuery): Promise<ResultSet> {
+		if (query.kind === "transaction") {
+			// Sprint T2/15 : bloc atomique — BEGIN [ISOLATION LEVEL X], loop
+			// steps (SAVEPOINT/RELEASE inclus), COMMIT (ROLLBACK sur error).
+			return this.#executeTransaction(query);
+		}
 		if (query.kind !== "sql") {
 			throw new EngineExecutionError(
 				`Adapter Postgres : requête native '${query.kind}' non supportée (SQL attendu)`
@@ -239,6 +244,79 @@ class PostgresConnection implements Connection {
 		}
 	}
 
+	/**
+	 * Sprint T2/15 : exécute un SqlTransaction en isolation client-scope. Un
+	 * seul PoolClient acquis pour toute la transaction (nécessaire pour que
+	 * BEGIN/COMMIT partagent l'état). ROLLBACK best-effort sur toute erreur.
+	 * Renvoie le résultat du dernier statement du body pour cohérence UI (le
+	 * user voit ce qu'il a écrit en dernier). Si aucun statement (txn vide de
+	 * savepoints), renvoie un ResultSet vide.
+	 */
+	async #executeTransaction(
+		query: import("@sqlnest/snql").SqlTransaction
+	): Promise<ResultSet> {
+		const pool = this.#requirePool();
+		let client: PoolClient;
+		try {
+			client = await pool.connect();
+		} catch (cause) {
+			throw new EngineConnectionError(
+				"Exécution Postgres : acquisition d'une connexion échouée pour transaction",
+				{ cause }
+			);
+		}
+		const beginSql = query.isolation !== undefined
+			? `BEGIN ISOLATION LEVEL ${isolationSql(query.isolation)}`
+			: "BEGIN";
+		let lastResult: ResultSet = { columns: [], rows: [], rowCount: 0 };
+		try {
+			await client.query(beginSql);
+			for (const step of query.steps) {
+				if (step.kind === "savepoint-begin") {
+					await client.query(`SAVEPOINT ${quoteSpName(step.name)}`);
+				} else if (step.kind === "savepoint-release") {
+					await client.query(`RELEASE SAVEPOINT ${quoteSpName(step.name)}`);
+				} else {
+					const r = await client.query(
+						step.query.text,
+						Array.from(step.query.params)
+					);
+					lastResult = {
+						columns: r.fields.map((f) => ({
+							name: f.name,
+							type: "unknown" as const,
+							nullable: true
+						})),
+						rows: r.rows as Row[],
+						rowCount: r.rowCount ?? r.rows.length
+					};
+				}
+			}
+			await client.query("COMMIT");
+			return lastResult;
+		} catch (cause) {
+			// ROLLBACK best-effort — si le rollback lui-même échoue, on garde
+			// l'erreur d'origine (plus utile pour l'user).
+			try {
+				await client.query("ROLLBACK");
+			} catch {
+				// swallow — surface l'erreur d'origine
+			}
+			// Trouve la SqlQuery fautive pour pgError (best-effort : dernier
+			// statement step visité, sinon undefined).
+			const failedQuery = findFailedQueryStep(query.steps);
+			const pgError = failedQuery !== undefined
+				? extractPgErrorInfo(cause, failedQuery)
+				: undefined;
+			throw new EngineExecutionError(describePgExecutionError(cause), {
+				cause,
+				...(pgError !== undefined ? { pgError } : {})
+			});
+		} finally {
+			client.release();
+		}
+	}
+
 	async close(): Promise<void> {
 		const pool = this.#pool;
 		if (pool === undefined) {
@@ -254,6 +332,49 @@ class PostgresConnection implements Connection {
 		}
 		return this.#pool;
 	}
+}
+
+/**
+ * Sprint T2/15 : mapping IsolationLevel SNQL → mot-clé PG. Le nom exact est
+ * imposé par PG (`READ COMMITTED`, `REPEATABLE READ`, `SERIALIZABLE`).
+ * Whitelist stricte — jamais d'interpolation user (isolation vient de
+ * l'IR = enum fermé côté parser).
+ */
+function isolationSql(level: import("@sqlnest/snql").IsolationLevel): string {
+	switch (level) {
+		case "read_committed":
+			return "READ COMMITTED";
+		case "repeatable_read":
+			return "REPEATABLE READ";
+		case "serializable":
+			return "SERIALIZABLE";
+	}
+}
+
+const SP_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/** Quote un nom de savepoint — refuse tout ident non-safe. */
+function quoteSpName(name: string): string {
+	if (!SP_NAME_RE.test(name)) {
+		throw new EngineExecutionError(
+			`Nom de savepoint invalide '${name}' (attend un identifiant SQL)`
+		);
+	}
+	return `"${name}"`;
+}
+
+/**
+ * Best-effort : trouve la première SqlQuery dans les steps (utile pour le
+ * pgError extraction — au moins un contexte de statement, même si l'erreur
+ * peut venir d'un autre step ultérieur).
+ */
+function findFailedQueryStep(
+	steps: readonly import("@sqlnest/snql").SqlTransactionStep[]
+): import("@sqlnest/snql").SqlQuery | undefined {
+	for (const step of steps) {
+		if (step.kind === "statement") return step.query;
+	}
+	return undefined;
 }
 
 /** Adapter Postgres (couche connexion). Voir [[Engine Adapter Interface]]. */

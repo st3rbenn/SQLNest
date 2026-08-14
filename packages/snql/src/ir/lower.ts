@@ -545,6 +545,41 @@ function collectExprFieldsWithSpans(
  * `missing FROM-clause entry for table "x"` opaque au runtime. Symétrique du
  * garde côté lecture.
  */
+/**
+ * Sprint T2/15 : abaisse un `transaction [isolation …] { … }` en
+ * TransactionPlan. Chaque item du body est lowered via `lower()` (read)
+ * ou `lowerMutation()` (write). Les savepoints récursent. Le typecheck
+ * mutation appliqué par lowerMutation reste valide (chaque write item
+ * garde son propre scope).
+ */
+export function lowerTransaction(
+	statement: import("../parser/ast").TransactionStatement,
+	schema?: SchemaModel
+): import("./plan").TransactionPlan {
+	const body = statement.body.map((item) => lowerTransactionItem(item, schema));
+	return statement.isolation !== undefined
+		? { op: "transaction", isolation: statement.isolation, body }
+		: { op: "transaction", body };
+}
+
+function lowerTransactionItem(
+	item: import("../parser/ast").TransactionBodyItem,
+	schema: SchemaModel | undefined
+): import("./plan").TransactionPlanItem {
+	if (item.operation === "savepoint") {
+		return {
+			kind: "savepoint",
+			name: item.name,
+			body: item.body.map((sub) => lowerTransactionItem(sub, schema))
+		};
+	}
+	if (item.operation === "select") {
+		return { kind: "read", plan: lower(item, schema) };
+	}
+	// insert / update / delete
+	return { kind: "write", plan: lowerMutation(item, schema) };
+}
+
 export function lowerMutation(
 	statement: InsertStatement | UpdateStatement | DeleteStatement,
 	schema?: SchemaModel

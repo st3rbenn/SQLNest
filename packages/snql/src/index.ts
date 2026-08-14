@@ -90,10 +90,12 @@ export type {
 	MongoWriteQuery,
 	NativeQuery,
 	SerializedSpan,
-	SqlQuery
+	SqlQuery,
+	SqlTransaction,
+	SqlTransactionStep
 } from "./codegen/mapper";
 export { SnqlError } from "./diagnostics";
-export { lower, lowerMutation } from "./ir/lower";
+export { lower, lowerMutation, lowerTransaction } from "./ir/lower";
 export type {
 	Capability,
 	CompareOp,
@@ -138,12 +140,16 @@ export type {
 	InsertField,
 	InsertRow,
 	InsertStatement,
+	IsolationLevel,
 	LiteralValue,
 	Query,
+	SavepointStatement,
 	SortKey,
 	Source,
 	Stage,
 	Statement,
+	TransactionBodyItem,
+	TransactionStatement,
 	UpdateStatement
 } from "./parser/ast";
 export { CAST_TARGETS } from "./parser/ast";
@@ -166,6 +172,7 @@ export {
 	assertMutationInsertSelectSupported,
 	assertMutationUpsertSupported,
 	assertMutationWriteJoinSupported,
+	assertTransactionSupported,
 	plan
 } from "./planner/planner";
 export type { JoinSources, Row } from "./runtime/compensate";

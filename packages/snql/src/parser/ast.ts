@@ -393,9 +393,54 @@ export interface InsertStatement {
 	readonly span: Span;
 }
 
-/** Racine de l'AST : lecture (`Query`) ou mutation. */
+/**
+ * Sprint T2/15 : niveau d'isolation Postgres. Cast direct au codegen —
+ * `BEGIN ISOLATION LEVEL READ COMMITTED` etc. Absent = default du serveur
+ * (READ COMMITTED sur PG standard).
+ */
+export type IsolationLevel = "read_committed" | "repeatable_read" | "serializable";
+
+/**
+ * Sprint T2/15 : élément du body d'une transaction — soit un statement
+ * classique (select/insert/update/delete), soit un sous-bloc savepoint.
+ * Une transaction ne peut PAS contenir une transaction imbriquée (refus
+ * parse).
+ */
+export type TransactionBodyItem =
+	| Query
+	| InsertStatement
+	| UpdateStatement
+	| DeleteStatement
+	| SavepointStatement;
+
+/**
+ * Sprint T2/15 : `savepoint <name> { stmt; stmt; ... }` — bloc atomique
+ * dans une transaction. Rollback partiel au savepoint sur erreur, sans
+ * casser la transaction englobante.
+ */
+export interface SavepointStatement {
+	readonly operation: "savepoint";
+	readonly name: string;
+	readonly body: readonly TransactionBodyItem[];
+	readonly span: Span;
+}
+
+/**
+ * Sprint T2/15 : `transaction [isolation <level>] { stmt; stmt; ... }` — bloc
+ * atomique multi-statements. PG only v1 (capability `transaction`). Le
+ * séparateur `;` est OBLIGATOIRE entre statements (robuste au copier-coller).
+ */
+export interface TransactionStatement {
+	readonly operation: "transaction";
+	readonly isolation?: IsolationLevel;
+	readonly body: readonly TransactionBodyItem[];
+	readonly span: Span;
+}
+
+/** Racine de l'AST : lecture (`Query`), mutation, ou transaction (T2/15). */
 export type Statement =
 	| Query
 	| InsertStatement
 	| UpdateStatement
-	| DeleteStatement;
+	| DeleteStatement
+	| TransactionStatement;

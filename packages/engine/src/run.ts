@@ -12,6 +12,7 @@ import {
 	assertMutationInsertSelectSupported,
 	assertMutationUpsertSupported,
 	assertMutationWriteJoinSupported,
+	assertTransactionSupported,
 	capabilitiesFor,
 	collectIdentSpans,
 	compensate,
@@ -19,6 +20,7 @@ import {
 	inferResultColumns,
 	lower,
 	lowerMutation,
+	lowerTransaction,
 	parse,
 	plan,
 	type SupportedEngine,
@@ -68,6 +70,21 @@ export async function runQuery(
 	// niveau AST. Attaché à la requête native pour que l'adapter le remonte
 	// dans le pgError → résolution `column "X" does not exist` → span source.
 	const identSpans = collectIdentSpans(statement);
+
+	// Sprint T2/15 : transaction bloc atomique. Le mapper.mapTransaction est
+	// absent sur les engines sans support (Mongo/KV) — assertTransactionSupported
+	// remonte l'erreur claire avant que TypeError explose.
+	if (statement.operation === "transaction") {
+		const txPlan = lowerTransaction(statement, schema);
+		assertTransactionSupported(txPlan, capabilities);
+		if (mapper.mapTransaction === undefined) {
+			throw new EngineExecutionError(
+				`Aucun codegen 'transaction' pour le moteur '${engine}'`
+			);
+		}
+		const native = withIdentSpans(mapper.mapTransaction(txPlan), identSpans);
+		return { ...(await connection.execute(native)), written: true };
+	}
 
 	if (statement.operation !== "select") {
 		if (!capabilities.supports.has("mutate")) {

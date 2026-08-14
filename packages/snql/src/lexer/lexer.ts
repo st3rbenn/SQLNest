@@ -18,6 +18,7 @@ const SINGLE: Readonly<Record<string, TokenKind>> = {
 	"{": "lbrace",
 	"}": "rbrace",
 	":": "colon",
+	";": "semicolon", // Sprint T2/15 : séparateur `transaction { s; s }`
 	"+": "plus",
 	// Sprint T2/5 : `-` retiré de SINGLE, géré dans scanOperator avec lookahead
 	// sur `>` pour émettre `arrow` (2-char token, symétrique aux !=/<=/>=).

@@ -10,13 +10,17 @@ import type {
 	InsertField,
 	InsertRow,
 	InsertStatement,
+	IsolationLevel,
 	OnConflictAction,
 	OnConflictClause,
 	Query,
+	SavepointStatement,
 	SortKey,
 	Source,
 	Stage,
 	Statement,
+	TransactionBodyItem,
+	TransactionStatement,
 	UpdateStatement
 } from "./ast";
 import { TokenCursor } from "./cursor";
@@ -47,10 +51,17 @@ export function parse(tokens: readonly Token[]): Statement {
 }
 
 function parseStatement(cursor: TokenCursor): Statement {
-	const verbTok = cursor.peek();
+	// Sprint T2/15 : `transaction [isolation …] { … }` — bloc atomique
+	// multi-statements. Détection avant le check verb (transaction est un
+	// keyword, pas un verb).
+	const first = cursor.peek();
+	if (first.kind === "keyword" && first.value === "transaction") {
+		return parseTransaction(cursor);
+	}
+	const verbTok = first;
 	if (verbTok.kind !== "verb") {
 		throw new SnqlError(
-			`Une requête doit commencer par un verbe (get, find, add, update, remove…), trouvé '${verbTok.value}'`,
+			`Une requête doit commencer par un verbe (get, find, add, update, remove…) ou 'transaction', trouvé '${verbTok.value}'`,
 			"parse_expected_verb",
 			verbTok.span
 		);
@@ -75,6 +86,170 @@ function parseStatement(cursor: TokenCursor): Statement {
 		case "insert":
 			return parseInsert(cursor, verbTok);
 	}
+}
+
+/**
+ * Sprint T2/15 : `transaction [isolation <level>] { stmt; stmt; ... }`.
+ * `;` obligatoire entre statements (robuste au copier-coller). `{}` vide
+ * refusé (transaction sans op = no-op silencieuse, pas de valeur ajoutée).
+ */
+function parseTransaction(cursor: TokenCursor): TransactionStatement {
+	const txTok = cursor.next(); // `transaction`
+	let isolation: IsolationLevel | undefined;
+	if (peekKeyword(cursor, "isolation")) {
+		cursor.next();
+		isolation = parseIsolationLevel(cursor);
+	}
+	cursor.expect("lbrace", "'{' pour ouvrir le bloc transaction");
+	const body: TransactionBodyItem[] = [];
+	if (cursor.peek().kind === "rbrace") {
+		throw new SnqlError(
+			"'transaction { }' vide refusé — un bloc atomique doit contenir au moins un statement.",
+			"parse_transaction_empty",
+			cursor.peek().span
+		);
+	}
+	for (;;) {
+		body.push(parseTransactionItem(cursor));
+		const sep = cursor.peek();
+		if (sep.kind === "semicolon") {
+			cursor.next();
+			// `;` suivi de `}` = trailing ; toléré (comme JS).
+			if (cursor.peek().kind === "rbrace") break;
+			continue;
+		}
+		if (sep.kind === "rbrace") {
+			// Dernier stmt sans `;` trailing — accepté (le `;` n'est
+			// obligatoire qu'ENTRE stmts, pas en fin de bloc).
+			break;
+		}
+		throw new SnqlError(
+			"';' attendu entre statements d'un bloc transaction (robuste au copier-coller).",
+			"parse_transaction_missing_semicolon",
+			sep.span
+		);
+	}
+	const close = cursor.expect("rbrace", "'}' pour fermer le bloc transaction");
+	const span = { start: txTok.span.start, end: close.span.end };
+	return isolation !== undefined
+		? { operation: "transaction", isolation, body, span }
+		: { operation: "transaction", body, span };
+}
+
+/**
+ * Sprint T2/15 : lit `isolation <level>` post-keyword. Levels : `read
+ * committed`, `repeatable read`, `serializable` (case-insensitive côté
+ * lexer). `read` est ident soft-keyword ici (pas de reserved word global
+ * pour ne pas casser les cols nommées `read`).
+ */
+function parseIsolationLevel(cursor: TokenCursor): IsolationLevel {
+	const first = cursor.next();
+	const firstVal = first.value.toLowerCase();
+	if (first.kind === "keyword" && first.value === "serializable") {
+		return "serializable";
+	}
+	if (first.kind === "keyword" && first.value === "repeatable") {
+		const next = cursor.next();
+		if (
+			(next.kind === "ident" && next.value.toLowerCase() === "read") ||
+			(next.kind === "keyword" && next.value === "read")
+		) {
+			return "repeatable_read";
+		}
+		throw new SnqlError(
+			`'isolation repeatable' attend 'read' (repeatable read), trouvé '${next.value}'`,
+			"parse_isolation_level",
+			next.span
+		);
+	}
+	// `isolation read committed` : `read` peut être ident ou keyword.
+	if (firstVal === "read") {
+		const next = cursor.next();
+		if (next.kind === "keyword" && next.value === "committed") {
+			return "read_committed";
+		}
+		throw new SnqlError(
+			`'isolation read' attend 'committed' (read committed), trouvé '${next.value}'`,
+			"parse_isolation_level",
+			next.span
+		);
+	}
+	throw new SnqlError(
+		`'isolation' attend 'read committed', 'repeatable read' ou 'serializable', trouvé '${first.value}'`,
+		"parse_isolation_level",
+		first.span
+	);
+}
+
+/**
+ * Sprint T2/15 : un item de body de transaction. Soit un statement classique
+ * (select/insert/update/delete), soit un savepoint bloc. Refus transaction
+ * nested (parseStatement pourrait recurser sinon).
+ */
+function parseTransactionItem(cursor: TokenCursor): TransactionBodyItem {
+	const first = cursor.peek();
+	if (first.kind === "keyword" && first.value === "transaction") {
+		throw new SnqlError(
+			"Transactions imbriquées interdites — utilise `savepoint <name> { ... }` pour un rollback partiel.",
+			"parse_transaction_nested",
+			first.span
+		);
+	}
+	if (first.kind === "keyword" && first.value === "savepoint") {
+		return parseSavepoint(cursor);
+	}
+	const stmt = parseStatement(cursor);
+	// parseStatement pour un verb retourne un Statement — filtre les savepoints
+	// (impossible : savepoint n'est pas un verb) et transactions (déjà bloquées
+	// ci-dessus). TS narrowing garanti.
+	if (stmt.operation === "transaction") {
+		throw new SnqlError(
+			"Transactions imbriquées interdites (bug parseStatement — devrait avoir été bloqué).",
+			"parse_transaction_nested",
+			first.span
+		);
+	}
+	return stmt;
+}
+
+/**
+ * Sprint T2/15 : `savepoint <name> { stmt; stmt; ... }`. Réutilise la logique
+ * de séparateur `;` obligatoire. Savepoints imbriqués autorisés (utile pour
+ * rollback multi-niveaux).
+ */
+function parseSavepoint(cursor: TokenCursor): SavepointStatement {
+	const spTok = cursor.next(); // `savepoint`
+	const nameTok = cursor.expect("ident", "un nom de savepoint après 'savepoint'");
+	cursor.expect("lbrace", "'{' pour ouvrir le bloc savepoint");
+	const body: TransactionBodyItem[] = [];
+	if (cursor.peek().kind === "rbrace") {
+		throw new SnqlError(
+			"'savepoint " + nameTok.value + " { }' vide refusé — le savepoint doit contenir au moins un statement.",
+			"parse_savepoint_empty",
+			cursor.peek().span
+		);
+	}
+	for (;;) {
+		body.push(parseTransactionItem(cursor));
+		const sep = cursor.peek();
+		if (sep.kind === "semicolon") {
+			cursor.next();
+			if (cursor.peek().kind === "rbrace") break;
+			continue;
+		}
+		if (sep.kind === "rbrace") {
+			// Dernier stmt sans `;` trailing — accepté (parité transaction).
+			break;
+		}
+		throw new SnqlError(
+			"';' attendu entre statements d'un bloc savepoint (parité transaction).",
+			"parse_savepoint_missing_semicolon",
+			sep.span
+		);
+	}
+	const close = cursor.expect("rbrace", "'}' pour fermer le bloc savepoint");
+	const span = { start: spTok.span.start, end: close.span.end };
+	return { operation: "savepoint", name: nameTok.value, body, span };
 }
 
 function parseInsert(cursor: TokenCursor, verbTok: Token): InsertStatement {

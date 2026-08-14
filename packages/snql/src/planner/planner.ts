@@ -469,6 +469,23 @@ export function assertMutationInsertSelectSupported(
 	);
 }
 
+/**
+ * Sprint T2/15 : refuse `transaction { … }` si l'engine cible n'a pas la
+ * capability `transaction`. PG only v1 (BEGIN/COMMIT natif). Mongo/KV
+ * hors scope — Mongo a des transactions multi-doc en replica set mais
+ * sémantique différente (session-scoped), à réévaluer plus tard.
+ */
+export function assertTransactionSupported(
+	_plan: import("../ir/plan").TransactionPlan,
+	capabilities: Capabilities
+): void {
+	if (capabilities.supports.has("transaction")) return;
+	throw new SnqlError(
+		`'transaction { … }' non supporté sur '${capabilities.engine}' — capability 'transaction' absente. Pour Postgres, cette syntaxe cible BEGIN/COMMIT natif ; les autres engines exécutent les statements individuellement.`,
+		"planner_transaction_unsupported"
+	);
+}
+
 function toCompensationOp(op: LogicalPlan): CompensationOp {
 	switch (op.op) {
 		case "filter":

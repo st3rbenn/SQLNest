@@ -34,7 +34,11 @@ export type Capability =
 	// Sprint T2/14 : `add (find … pick a, b) into t` — INSERT INTO ... SELECT
 	// natif PG. Mongo passe par aggregate + $merge $out, KV pas de select-
 	// then-insert atomique — refusés v1.
-	| "insert-select";
+	| "insert-select"
+	// Sprint T2/15 : `transaction [isolation …] { stmt; stmt }` bloc atomique
+	// multi-statements. PG only v1 (BEGIN/COMMIT/ROLLBACK natif). Mongo/KV
+	// hors scope pour l'instant.
+	| "transaction";
 
 /**
  * Décimal **exact** : on garde le texte brut. Les colonnes NUMERIC/DECIMAL de
@@ -406,8 +410,34 @@ export type MutationPlan =
 			readonly returnRowCount?: true;
 	  };
 
-/** Un plan complet : lecture ou mutation. */
-export type Plan = LogicalPlan | MutationPlan;
+/**
+ * Sprint T2/15 : item de body d'un TransactionPlan — soit une lecture
+ * (LogicalPlan wrapped), soit une mutation (MutationPlan wrapped), soit
+ * un sous-bloc savepoint récursif.
+ */
+export type TransactionPlanItem =
+	| { readonly kind: "read"; readonly plan: LogicalPlan }
+	| { readonly kind: "write"; readonly plan: MutationPlan }
+	| {
+			readonly kind: "savepoint";
+			readonly name: string;
+			readonly body: readonly TransactionPlanItem[];
+	  };
+
+/**
+ * Sprint T2/15 : plan d'une transaction. Exige capability `transaction`
+ * (PG only v1). Le codegen produit un `SqlTransaction` avec statements
+ * pré-rendus, l'engine wrap avec BEGIN [ISOLATION LEVEL X] / COMMIT /
+ * ROLLBACK et gère les SAVEPOINT / RELEASE.
+ */
+export interface TransactionPlan {
+	readonly op: "transaction";
+	readonly isolation?: import("../parser/ast").IsolationLevel;
+	readonly body: readonly TransactionPlanItem[];
+}
+
+/** Un plan complet : lecture, mutation ou transaction (T2/15). */
+export type Plan = LogicalPlan | MutationPlan | TransactionPlan;
 
 export type PlanOp = LogicalPlan["op"];
 

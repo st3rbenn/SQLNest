@@ -9,11 +9,20 @@ import type {
 	PlanProjectField,
 	PlanRowValue,
 	PlanSortKey,
-	SqlValue
+	SqlValue,
+	TransactionPlan,
+	TransactionPlanItem
 } from "../ir/plan";
 import { isSqlDecimal, linearize } from "../ir/plan";
 import type { Span } from "../lexer/token";
-import type { Mapper, NativeQuery, SerializedSpan } from "./mapper";
+import type {
+	Mapper,
+	NativeQuery,
+	SerializedSpan,
+	SqlQuery,
+	SqlTransaction,
+	SqlTransactionStep
+} from "./mapper";
 
 /**
  * Mapper Postgres — pur, génère SQL + paramètres bindés ($1, $2…).
@@ -61,8 +70,62 @@ export const postgresMapper: Mapper = {
 			paramSpans: params.allSpans(),
 			...(rowSpans !== undefined ? { rowSpans } : {})
 		};
+	},
+	/**
+	 * Sprint T2/15 : rend un TransactionPlan en SqlTransaction pré-flat avec
+	 * savepoints. Chaque statement porte sa propre ParamList (les $1..$N sont
+	 * scopés au statement — l'engine bind par statement).
+	 */
+	mapTransaction(plan: TransactionPlan): SqlTransaction {
+		const steps: SqlTransactionStep[] = [];
+		flattenTransactionBody(plan.body, steps);
+		return plan.isolation !== undefined
+			? { engine: "postgres", kind: "transaction", isolation: plan.isolation, steps }
+			: { engine: "postgres", kind: "transaction", steps };
 	}
 };
+
+function flattenTransactionBody(
+	body: readonly TransactionPlanItem[],
+	out: SqlTransactionStep[]
+): void {
+	for (const item of body) {
+		if (item.kind === "read") {
+			out.push({ kind: "statement", query: renderReadAsSqlQuery(item.plan) });
+		} else if (item.kind === "write") {
+			out.push({ kind: "statement", query: renderWriteAsSqlQuery(item.plan) });
+		} else {
+			// savepoint
+			out.push({ kind: "savepoint-begin", name: item.name });
+			flattenTransactionBody(item.body, out);
+			out.push({ kind: "savepoint-release", name: item.name });
+		}
+	}
+}
+
+function renderReadAsSqlQuery(plan: LogicalPlan): SqlQuery {
+	const params = new ParamList();
+	const text = renderPlan(plan, params);
+	return {
+		engine: "postgres",
+		kind: "sql",
+		text,
+		params: params.all(),
+		paramSpans: params.allSpans()
+	};
+}
+
+function renderWriteAsSqlQuery(plan: MutationPlan): SqlQuery {
+	const params = new ParamList();
+	const text = renderMutation(plan, params);
+	return {
+		engine: "postgres",
+		kind: "sql",
+		text,
+		params: params.all(),
+		paramSpans: params.allSpans()
+	};
+}
 
 /**
  * Codegen des mutations. Valeurs TOUJOURS paramétrées, identifiants quotés.

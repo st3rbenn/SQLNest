@@ -34,6 +34,7 @@ export type TokenKind =
 	| "lbrace" // {
 	| "rbrace" // }
 	| "colon" // :
+	| "semicolon" // ; (sprint T2/15, séparateur `transaction { s; s; s }`)
 	| "arrow" // -> (sprint T2/5, séparateur `case { c -> v }`)
 	| "eof";
 

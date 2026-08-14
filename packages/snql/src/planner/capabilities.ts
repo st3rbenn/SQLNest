@@ -40,10 +40,12 @@ function caps(
  * Sprint T2/13 : 'upsert' ajouté — `add {…} into t on conflict (col) [ignore |
  * edit set …]` via `INSERT ... ON CONFLICT` natif PG.
  * Sprint T2/14 : 'write-join' + 'insert-select' ajoutés — `update … with one`
- * via `UPDATE ... FROM` et `add (find …) into t` via `INSERT ... SELECT`. */
+ * via `UPDATE ... FROM` et `add (find …) into t` via `INSERT ... SELECT`.
+ * Sprint T2/15 : 'transaction' ajouté — `transaction { s; s }` bloc atomique
+ * via `BEGIN [ISOLATION LEVEL X] / COMMIT / ROLLBACK` + SAVEPOINT natifs. */
 export const POSTGRES_CAPABILITIES: Capabilities = caps(
 	"postgres",
-	["scan", "filter", "project", "join", "aggregate", "sort", "paginate", "mutate", "subquery", "upsert", "write-join", "insert-select"],
+	["scan", "filter", "project", "join", "aggregate", "sort", "paginate", "mutate", "subquery", "upsert", "write-join", "insert-select", "transaction"],
 	["int", "float", "text", "bool", "date", "timestamp", "json"]
 );
 
