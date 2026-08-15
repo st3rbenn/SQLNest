@@ -268,8 +268,23 @@ export async function introspectPostgres(
 			enums.rows
 		);
 	} catch (cause) {
-		throw new EngineIntrospectionError("Introspection Postgres échouée", {
-			cause
-		});
+		// Surface la vraie cause PG (message + sqlstate) plutôt qu'un message
+		// générique — permet au front de diagnoser (droits catalog absents,
+		// schema inaccessible, query système bloquée…).
+		const detail = describePgIntrospectError(cause);
+		throw new EngineIntrospectionError(
+			`Introspection Postgres échouée — ${detail}`,
+			{ cause }
+		);
 	}
+}
+
+function describePgIntrospectError(cause: unknown): string {
+	if (cause instanceof Error) {
+		const code = (cause as { code?: unknown }).code;
+		return typeof code === "string" && code.length > 0
+			? `${cause.message} (SQLSTATE ${code})`
+			: cause.message;
+	}
+	return "cause inconnue";
 }
