@@ -5,6 +5,7 @@ import type {
 	SchemaModel,
 	SerializedSpan
 } from "@sqlnest/snql";
+import { createHash } from "node:crypto";
 import { POSTGRES_CAPABILITIES } from "@sqlnest/snql";
 import type { Pool as PgPool, PoolClient, PoolConfig } from "pg";
 import pg from "pg";
@@ -198,6 +199,63 @@ class PostgresConnection implements Connection {
 		// `async` pour que `#requirePool()` (connexion fermée) rejette la promesse
 		// au lieu de lever de façon synchrone — contrat uniforme avec ping/execute.
 		return introspectPostgres(this.#requirePool(), this.#schema);
+	}
+
+	/**
+	 * Sprint T4/1 : fingerprint via `system_identifier` de pg_control_system.
+	 * Bigint unique par cluster PG, posé au `initdb`, stable pour la vie de
+	 * l'instance (même après restart/restore/upgrade in-place). Inclut aussi
+	 * le nom de la database pour distinguer 2 bases sur le même cluster.
+	 * Format : `pg:<system_identifier>/<database_name>`.
+	 */
+	async fingerprint(): Promise<string> {
+		const pool = this.#requirePool();
+		try {
+			const result = await pool.query<{
+				system_identifier: string;
+				current_database: string;
+			}>(
+				"SELECT system_identifier::text, current_database() FROM pg_control_system()"
+			);
+			const row = result.rows[0];
+			if (row === undefined) {
+				throw new EngineExecutionError("pg_control_system() n'a renvoyé aucune ligne");
+			}
+			return `pg:${row.system_identifier}/${row.current_database}`;
+		} catch (cause) {
+			// pg_control_system() peut être refusé sur des rôles read-only stricts
+			// (SQLSTATE 42501). Fallback : composé host/db/port canonique — moins
+			// fiable (change si le user connecte via IP vs hostname vs VPN) mais
+			// permet quand même une identification par défaut.
+			const err = cause as { code?: string };
+			if (err.code === "42501") {
+				return this.#fallbackFingerprint();
+			}
+			throw new EngineExecutionError(
+				`Fingerprint Postgres impossible : ${(cause as Error).message}`,
+				{ cause }
+			);
+		}
+	}
+
+	/**
+	 * Fallback quand `pg_control_system()` est refusé (droit manquant sur
+	 * rôles read-only stricts, ex. RNAcentral). SHA256 du triplet (host,
+	 * port, db) tiré des options du pool — jamais loggé, jamais exposé, juste
+	 * hashé. Instable si l'user connecte via des hostnames différents
+	 * (LAN vs VPN), mais mieux qu'un throw qui casse tout le pairing.
+	 */
+	#fallbackFingerprint(): string {
+		const pool = this.#requirePool();
+		// `pool.options` typé par @types/pg — host/port/database peuvent être
+		// undefined (config Unix socket / env vars). Fallback strings pour
+		// avoir toujours un fingerprint stable même si partiellement inconnu.
+		const opts = (pool as unknown as {
+			options: { host?: string; port?: number; database?: string };
+		}).options;
+		const material = `${opts.host ?? "?"}:${opts.port ?? "?"}/${opts.database ?? "?"}`;
+		const hash = createHash("sha256").update(material).digest("hex");
+		return `pg-fallback:${hash.slice(0, 32)}`;
 	}
 
 	async execute(query: NativeQuery): Promise<ResultSet> {

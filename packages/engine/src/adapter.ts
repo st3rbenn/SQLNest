@@ -40,6 +40,19 @@ export interface Connection {
 	introspect(): Promise<SchemaModel>;
 	/** Exécute une requête native (le pushdown) et renvoie un ResultSet normalisé. */
 	execute(query: NativeQuery): Promise<ResultSet>;
+	/**
+	 * Sprint T4/1 : identifiant opaque **stable** de l'instance DB, indépendant
+	 * du device qui s'y connecte. Le backend l'utilise pour ré-associer un
+	 * même canvas d'un Mac vers un Windows (ou après un revoke/re-add local).
+	 *
+	 * Contract : deux CLI qui pointent la MÊME instance DB (même serveur,
+	 * même database) retournent le MÊME string. Deux instances distinctes
+	 * retournent des strings différents.
+	 *
+	 * Format : `<engine>:<opaque>` — ex `pg:7331234...`, `mongo:a1b2c3...`.
+	 * Le préfixe évite les collisions cross-engine hypothétiques.
+	 */
+	fingerprint(): Promise<string>;
 	/** Ferme le pool et libère les ressources. Idempotent. */
 	close(): Promise<void>;
 }

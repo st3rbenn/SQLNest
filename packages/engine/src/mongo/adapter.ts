@@ -5,6 +5,7 @@ import type {
 	Row,
 	SchemaModel
 } from "@sqlnest/snql";
+import { createHash } from "node:crypto";
 import { isSqlDecimal, MONGODB_CAPABILITIES } from "@sqlnest/snql";
 import type { Db, Document } from "mongodb";
 import { Decimal128, Long, MongoClient, ObjectId } from "mongodb";
@@ -252,6 +253,47 @@ class MongoConnection implements Connection {
 
 	async introspect(): Promise<SchemaModel> {
 		return introspectMongo(this.#requireDb(), this.#sampleSize);
+	}
+
+	/**
+	 * Sprint T4/1 : fingerprint MongoDB. Mongo n'a pas de `system_identifier`
+	 * comme PG — le mieux qu'on ait de stable :
+	 *  1. `replSetGetStatus.set` (nom du replica set) — dispo si l'user est
+	 *     dans un cluster répliqué (RS) ou sharded. Stable, unique par cluster.
+	 *  2. Fallback : SHA256(host:port/dbname) — instable si l'user connecte via
+	 *     différents hostnames (LAN vs VPN), mais mieux qu'un throw qui casse
+	 *     le pairing complet. Standalone Mongo = pas de RS name → fallback.
+	 * Format : `mongo:<rs_name>/<db>` OU `mongo-fallback:<hash>/<db>`.
+	 */
+	async fingerprint(): Promise<string> {
+		const client = this.#requireClient();
+		const db = this.#requireDb();
+		try {
+			const status = (await client
+				.db("admin")
+				.command({ replSetGetStatus: 1 })) as { set?: unknown };
+			if (typeof status.set === "string" && status.set.length > 0) {
+				return `mongo:${status.set}/${db.databaseName}`;
+			}
+		} catch {
+			// Standalone Mongo → replSetGetStatus lève NotYetInitialized (94) ou
+			// NoReplicationEnabled (76). Auth insuffisante → 13. Dans tous les
+			// cas on tombe en fallback SHA256, silencieux.
+		}
+		// Fallback : hash des hosts + dbname. `topology.s.description.setName`
+		// (souvent utilisé), sinon on prend le premier host connu.
+		const opts = client.options as unknown as {
+			hosts?: readonly { host: string; port: number }[];
+		};
+		const hostStr = opts.hosts && opts.hosts.length > 0
+			? opts.hosts
+				.map((h) => `${h.host}:${h.port}`)
+				.sort()
+				.join(",")
+			: "unknown";
+		const material = `${hostStr}/${db.databaseName}`;
+		const hash = createHash("sha256").update(material).digest("hex");
+		return `mongo-fallback:${hash.slice(0, 32)}/${db.databaseName}`;
 	}
 
 	async execute(query: NativeQuery): Promise<ResultSet> {

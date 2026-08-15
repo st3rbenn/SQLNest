@@ -57,6 +57,15 @@ export interface UpsertConnectionOptions {
 	 *  fingerprint match. */
 	readonly name: string;
 	readonly engine: string;
+	/**
+	 * T4/1 : fingerprint de l'INSTANCE DB (indépendant du CLI). Absent
+	 * quand le CLI est legacy (<= T3) ou quand la DSN n'a pas encore été
+	 * ouverte au moment de l'upsert. Si présent :
+	 *  - stocké sur la db_connection créée/matchée (backfill si absent).
+	 *  - v2 : lookup prioritaire `(team, db_fingerprint)` pour switch
+	 *    cross-device automatique. V1 : juste backfill.
+	 */
+	readonly dbFingerprint?: string | null;
 }
 
 export type UpsertConnectionResult =
@@ -101,13 +110,23 @@ export async function upsertDbConnectionByFingerprint(
 			);
 		}
 		// UPDATE activeSince + lastSeenAt — le user vient de re-pair, on
-		// signale que le tunnel est actif.
+		// signale que le tunnel est actif. T4/1 : backfill dbFingerprint
+		// s'il est fourni ET absent — les vieilles db_connection gagnent
+		// leur fingerprint au premier connect du CLI T4-aware.
+		const patch: {
+			activeSince: ReturnType<typeof sql>;
+			lastSeenAt: ReturnType<typeof sql>;
+			dbFingerprint?: string;
+		} = {
+			activeSince: sql`now()`,
+			lastSeenAt: sql`now()`
+		};
+		if (opts.dbFingerprint !== undefined && opts.dbFingerprint !== null) {
+			patch.dbFingerprint = opts.dbFingerprint;
+		}
 		await tx
 			.update(dbSchema.dbConnection)
-			.set({
-				activeSince: sql`now()`,
-				lastSeenAt: sql`now()`
-			})
+			.set(patch)
 			.where(eq(dbSchema.dbConnection.id, row.id));
 		return { ok: true, connectionId: row.id, wasCreated: false };
 	}
@@ -137,7 +156,12 @@ export async function upsertDbConnectionByFingerprint(
 			teamId: opts.teamId,
 			name: opts.name,
 			cliFingerprint: fingerprint,
-			engine: opts.engine
+			engine: opts.engine,
+			// T4/1 : peut être undefined (Drizzle → col NULL) pour les CLIs
+			// legacy ou quand la DSN n'a pas encore été ouverte au pairing.
+			...(opts.dbFingerprint !== undefined && opts.dbFingerprint !== null
+				? { dbFingerprint: opts.dbFingerprint }
+				: {})
 		})
 		.returning({ id: dbSchema.dbConnection.id });
 

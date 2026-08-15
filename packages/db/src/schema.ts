@@ -450,6 +450,15 @@ export const dbConnection = pgTable(
 		// pub complète vit dans `tunnel_pairing` (jusqu'au consume) puis dans
 		// la session tunnel active (Bloc 2).
 		cliFingerprint: text("cli_fingerprint").notNull(),
+		// T4/1 : fingerprint de l'INSTANCE DB (indépendant du CLI qui s'y
+		// connecte). Format `<engine>:<opaque>` — ex `pg:7331234/apollon`,
+		// `mongo:rs0/prod`, `pg-fallback:abc.../db` si pg_control_system
+		// refusé. Permet à un user de retrouver son canvas depuis un 2e
+		// device (Mac + Windows) — le backend match `(team, db_fingerprint)`
+		// avant de retomber sur `(team, cli_fingerprint)`. Nullable pour
+		// rétro-compat : les vieilles db_connection sont backfillées au
+		// premier connect qui l'envoie.
+		dbFingerprint: text("db_fingerprint"),
 		// Ex "postgres". Enum côté app, texte libre côté DB pour permettre
 		// l'ajout de Mongo (v1.1) sans migration.
 		engine: text("engine").notNull(),
@@ -492,6 +501,13 @@ export const dbConnection = pgTable(
 		index("db_connection_team_id_idx").on(t.teamId),
 		// Retrouver toutes les connexions liées à un CLI (reconnect, audit).
 		index("db_connection_fingerprint_idx").on(t.cliFingerprint),
+		// T4/1 : lookup rapide au pairing par instance DB (team + db_fingerprint).
+		// Non-unique volontairement : la même DB depuis 2 CLIs distincts crée
+		// 2 rows (chaque CLI a son cli_fingerprint). V2 : proposer merge UX.
+		index("db_connection_team_db_fingerprint_idx").on(
+			t.teamId,
+			t.dbFingerprint
+		),
 		// List du user (audit historique : "quels CLIs ce user a-t-il
 		// pair-é dans toutes ses teams ?"). Non-unique — un même user
 		// peut avoir N db_connection réparties sur ses teams.
