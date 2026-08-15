@@ -8,6 +8,7 @@ package-lock.json
 # build outputs
 build
 dist
+*.tsbuildinfo
 
 # secrets / local env (garder .env.example)
 .env
