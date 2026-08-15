@@ -181,7 +181,21 @@ export async function runQuery(
 
 	// Le schéma pilote l'inférence de multiplicité des joins `with` (many-to-one
 	// → LEFT JOIN, one-to-many → embed array). Sans schéma, fallback embed.
-	const physical = plan(lower(statement, schema), capabilities);
+	// T3/6.2 v2 B : subquery `in (find ...)` / `exists (find ...)` — si l'engine
+	// n'a pas la capability native (Mongo/KV), on matérialise chaque subquery
+	// puis on la remplace par un array literal / bool literal dans le plan
+	// avant de mapper. Idem "porter les features SQL manquantes".
+	let logicalForPlan = lower(statement, schema);
+	if (!capabilities.supports.has("subquery")) {
+		logicalForPlan = await resolveSubqueries(
+			logicalForPlan,
+			connection,
+			schema,
+			capabilities,
+			mapper
+		);
+	}
+	const physical = plan(logicalForPlan, capabilities);
 	const native = withIdentSpans(mapper.map(physical.pushdown), identSpans);
 
 	const pushed = await connection.execute(native);
@@ -239,59 +253,407 @@ async function materializeLet(
 	capabilities: import("@sqlnest/snql").Capabilities,
 	engine: string
 ): Promise<QueryOutcome> {
-	if (statement.body.operation !== "select") {
-		throw new EngineExecutionError(
-			`Le body d'un 'let' sur '${engine}' doit être 'find' — les mutations avec CTE nécessitent la capability native (PG uniquement v1).`
-		);
-	}
-	const bodySourceName = statement.body.source.collection;
-	const cteNames = new Set(statement.bindings.map((b) => b.name));
-	if (!cteNames.has(bodySourceName)) {
-		throw new EngineExecutionError(
-			`Le body du 'let' doit scan directement un CTE (nommé ${[...cteNames].map((n) => `'${n}'`).join(", ")}) sur '${engine}' — le join CTE ↔ vraie collection nécessite la capability native.`
-		);
-	}
-	// Bindings : chacun doit scan une vraie collection (chainage CTE v2).
-	for (const binding of statement.bindings) {
-		if (cteNames.has(binding.query.source.collection)) {
-			throw new EngineExecutionError(
-				`Chainage 'let' non supporté sur '${engine}' v1 : '${binding.name}' référence '${binding.query.source.collection}'. Réécris en une seule query find, ou passe sur un engine avec cte native.`
-			);
-		}
-	}
-	// Étape 1 : exécute chaque binding via le pipeline natif de l'engine.
-	//   lower(bindingQuery) → plan → mapper.map → connection.execute → compensate
-	// C'est exactement ce que fait la branche `select` de runQuery ci-dessus,
-	// mais on peut le faire ici sans re-parser puisqu'on a déjà le AST.
 	const mapper = getMapper(engine as SupportedEngine);
 	if (mapper === undefined) {
 		throw new EngineExecutionError(`Aucun codegen pour le moteur '${engine}'`);
 	}
+	// Étape 1 : matérialise chaque binding dans l'ordre. Un binding qui scan
+	//   - une vraie collection → pipeline engine natif (mapper.map + execute)
+	//   - un CTE déjà matérialisé (chainage v2) → compensate pur sur les rows
+	//     du CTE précédent
+	// L'ordre séquentiel garantit qu'un binding ne peut voir qu'un CTE défini
+	// plus haut dans la même liste (dépendance topologique respectée).
 	const materialized = new Map<string, readonly Row[]>();
 	for (const binding of statement.bindings) {
-		const physical = plan(lower(binding.query, schema), capabilities);
-		const native = mapper.map(physical.pushdown);
-		const pushed = await connection.execute(native);
-		const rows = physical.compensation.length === 0
-			? pushed.rows
-			: compensate(physical.compensation, pushed.rows);
+		const rows = await runQueryOnCte(
+			binding.query,
+			schema,
+			connection,
+			capabilities,
+			mapper,
+			materialized
+		);
 		materialized.set(binding.name, rows);
 	}
-	// Étape 2 : compensate le body sur les rows matérialisées. On construit
-	// un plan pour le body avec un scan virtuel (`__cte__`) et on extrait
-	// les ops post-scan comme ce que fait lowerIntrospectStages T3/2.3.
-	const bodyPlan = lower(statement.body, schema);
-	const linear = linearize(bodyPlan);
-	// linear[0] est le scan du CTE (bodySourceName). On drop et compense les autres.
-	const compensationOps = linear.slice(1).map((op) => toCompensationOp(op));
-	const inputRows = materialized.get(bodySourceName) ?? [];
-	const outputRows = compensate(compensationOps, [...inputRows]);
-	return {
-		columns: columnsFromRows(outputRows, []),
-		rows: outputRows,
-		rowCount: outputRows.length,
-		written: false
+	const cteNames = [...materialized.keys()];
+	// Étape 2 : exécute le body selon son type.
+	if (statement.body.operation === "select") {
+		// Body = find. Doit scan directement un CTE (les subqueries pouvant
+		// référencer un CTE sont hors scope Mongo v1 — refusé par le refus
+		// subquery natif).
+		if (!materialized.has(statement.body.source.collection)) {
+			throw new EngineExecutionError(
+				`Le body du 'let' doit scan un CTE (parmi ${cteNames.map((n) => `'${n}'`).join(", ")}) sur '${engine}' — le join CTE ↔ vraie collection n'est pas supporté v2.`
+			);
+		}
+		const rows = await runQueryOnCte(
+			statement.body,
+			schema,
+			connection,
+			capabilities,
+			mapper,
+			materialized
+		);
+		return {
+			columns: columnsFromRows(rows, []),
+			rows,
+			rowCount: rows.length,
+			written: false
+		};
+	}
+	// Body = mutation (add/update/remove). Cas v2 :
+	//   - `add (find cte pick a, b) into t` : matérialise sourceQuery via CTE,
+	//     construit un INSERT rows-literal, exécute nativement sur t.
+	//   - Autres mutations : refus (v3 pour update/remove avec sub CTE).
+	if (statement.body.operation === "insert" && statement.body.sourceQuery !== undefined) {
+		const sourceRows = await runQueryOnCte(
+			statement.body.sourceQuery,
+			schema,
+			connection,
+			capabilities,
+			mapper,
+			materialized
+		);
+		return await runInsertFromRows(
+			statement.body,
+			sourceRows,
+			schema,
+			connection,
+			mapper
+		);
+	}
+	throw new EngineExecutionError(
+		`Body '${statement.body.operation}' avec CTE non supporté v2 sur '${engine}' — seuls 'find' (sur CTE direct) et 'add (find cte pick …) into t' sont portés via matérialisation. Le reste demande la capability native (PG).`
+	);
+}
+
+/**
+ * Exécute une Query soit nativement (source = vraie collection), soit via
+ * compensate (source = CTE déjà matérialisé). Central pour le chainage et
+ * pour le body find.
+ */
+async function runQueryOnCte(
+	query: import("@sqlnest/snql").Query,
+	schema: SchemaModel | undefined,
+	connection: Connection,
+	capabilities: import("@sqlnest/snql").Capabilities,
+	mapper: ReturnType<typeof getMapper>,
+	materialized: Map<string, readonly Row[]>
+): Promise<readonly Row[]> {
+	const sourceName = query.source.collection;
+	if (materialized.has(sourceName)) {
+		// Source = CTE matérialisé → compensate pur.
+		const lp = lower(query, schema);
+		const linear = linearize(lp);
+		const ops = linear.slice(1).map((op) => toCompensationOp(op));
+		return compensate(ops, [...(materialized.get(sourceName) ?? [])]);
+	}
+	// Source = vraie collection → pipeline engine natif.
+	const physical = plan(lower(query, schema), capabilities);
+	const native = mapper.map(physical.pushdown);
+	const pushed = await connection.execute(native);
+	return physical.compensation.length === 0
+		? pushed.rows
+		: compensate(physical.compensation, pushed.rows);
+}
+
+/**
+ * INSERT SELECT via CTE matérialisé : les rows sont déjà en RAM (résultat
+ * de la sourceQuery post-compensate). On les reformate en documents dans
+ * l'ordre du pick de la sourceQuery, puis on appelle l'adapter avec un
+ * MongoWriteQuery insert. Pour PG on ne devrait jamais tomber ici (capability
+ * native), ce chemin est exclusivement engines sans cte.
+ */
+async function runInsertFromRows(
+	insert: import("@sqlnest/snql").InsertStatement,
+	sourceRows: readonly Row[],
+	schema: SchemaModel | undefined,
+	connection: Connection,
+	mapper: ReturnType<typeof getMapper>
+): Promise<QueryOutcome> {
+	if (insert.sourceQuery === undefined) {
+		throw new EngineExecutionError(
+			"runInsertFromRows: sourceQuery attendu (bug appelant)"
+		);
+	}
+	// Extrait les cols cibles depuis le pick de la sourceQuery (même logique
+	// que lowerInsertSelect pour PG). `pick a as x, b` → cols cibles = [x, b].
+	const pickStage = insert.sourceQuery.stages?.find((s) => s.type === "pick");
+	if (pickStage === undefined || pickStage.type !== "pick") {
+		throw new EngineExecutionError(
+			"Le sourceQuery d'un 'add (find …) into t' doit avoir un pick explicite (mapping cols cibles)."
+		);
+	}
+	const targetCols = pickStage.fields.map((f) => {
+		if (f.alias !== undefined) return f.alias;
+		if (f.path.length > 0) return f.path[f.path.length - 1] as string;
+		throw new EngineExecutionError("pick field sans path ni alias");
+	});
+	// Construit les rows literal à insérer. sourceRows a déjà les bons noms
+	// de cols (le pick a été appliqué via compensate) → mapping direct.
+	const rowsLiteral = sourceRows.map((r) => targetCols.map((c) => r[c] ?? null));
+	if (rowsLiteral.length === 0) {
+		return { columns: [], rows: [], rowCount: 0, written: true };
+	}
+	const rebuiltInsert: import("@sqlnest/snql").InsertStatement = {
+		operation: "insert",
+		verb: insert.verb,
+		collection: insert.collection,
+		rows: rowsLiteral.map((values, rowIdx) => ({
+			fields: targetCols.map((col, colIdx) => ({
+				column: col,
+				value: literalOf(values[colIdx] ?? null),
+				span: insert.span
+			})),
+			span: insert.rows[rowIdx]?.span ?? insert.span
+		})),
+		span: insert.span
 	};
+	const mutationPlan = lowerMutation(rebuiltInsert, schema);
+	const native = mapper.mapMutation(mutationPlan);
+	const executed = await connection.execute(native);
+	return { ...executed, written: true };
+}
+
+/**
+ * Convertit une valeur JS scalaire en Expr littéral pour reconstruire un
+ * InsertStatement AST. Utilisé par runInsertFromRows après matérialisation
+ * CTE. Le span n'a plus de source utile (row d'un CTE, pas d'origine dans
+ * le SNQL de l'user) — on met un span vide.
+ */
+function literalOf(value: unknown): import("@sqlnest/snql").Expr {
+	const zeroSpan = { start: { offset: 0, line: 1, column: 1 }, end: { offset: 0, line: 1, column: 1 } } as const;
+	if (value === null || value === undefined) {
+		return { type: "literal", value: { kind: "null" }, span: zeroSpan };
+	}
+	if (typeof value === "string") {
+		return { type: "literal", value: { kind: "string", value }, span: zeroSpan };
+	}
+	if (typeof value === "number") {
+		return { type: "literal", value: { kind: "number", raw: String(value) }, span: zeroSpan };
+	}
+	if (typeof value === "boolean") {
+		return { type: "literal", value: { kind: "boolean", value }, span: zeroSpan };
+	}
+	if (typeof value === "bigint") {
+		return { type: "literal", value: { kind: "number", raw: value.toString() }, span: zeroSpan };
+	}
+	// Fallback : stringify (Date, Object, etc.). Pour Mongo insert, l'adapter
+	// hydrate en BSON via hydrateBson.
+	return { type: "literal", value: { kind: "string", value: String(value) }, span: zeroSpan };
+}
+
+/**
+ * T3/6.2 v2 B : porter les subqueries `in (find …)` / `exists (find …)`
+ * vers les engines qui n'ont pas la capability `subquery` (Mongo/KV) via
+ * matérialisation. Walker sur le LogicalPlan : chaque subquery rencontrée
+ * dans un predicate est exécutée récursivement (native + compensate),
+ * puis remplacée par une valeur littérale équivalente :
+ *  - `x in (find ...)` → `x in [v1, v2, v3, ...]` (Expr.in avec array literal)
+ *  - `exists (find ...)` → `true`/`false` selon rows.length
+ *
+ * Correlated subqueries : hors scope v2 (chaque row outer aurait un contexte
+ * différent → N+1 avec potentiellement des milliers de round-trips). Les
+ * subqueries corrélées PG sont déjà refusées côté Mongo au lower T2/12.
+ */
+async function resolveSubqueries(
+	logicalPlan: import("@sqlnest/snql").LogicalPlan,
+	connection: Connection,
+	schema: SchemaModel | undefined,
+	capabilities: import("@sqlnest/snql").Capabilities,
+	mapper: ReturnType<typeof getMapper>
+): Promise<import("@sqlnest/snql").LogicalPlan> {
+	// Walker récursif sur les ops. Seuls filter (where) et aggregate.having
+	// portent des predicates capables de contenir des subqueries. Les autres
+	// ops (scan/project/sort/limit/join) n'en ont pas.
+	const walkOp = async (
+		op: import("@sqlnest/snql").LogicalPlan
+	): Promise<import("@sqlnest/snql").LogicalPlan> => {
+		switch (op.op) {
+			case "scan":
+				return op;
+			case "filter":
+				return {
+					...op,
+					input: await walkOp(op.input),
+					predicate: await walkExpr(op.predicate)
+				};
+			case "project":
+				return { ...op, input: await walkOp(op.input) };
+			case "join":
+				return { ...op, input: await walkOp(op.input) };
+			case "sort":
+				return { ...op, input: await walkOp(op.input) };
+			case "limit":
+				return { ...op, input: await walkOp(op.input) };
+			case "aggregate":
+				return op.having !== undefined
+					? { ...op, input: await walkOp(op.input), having: await walkExpr(op.having) }
+					: { ...op, input: await walkOp(op.input) };
+		}
+	};
+
+	const walkExpr = async (
+		expr: import("@sqlnest/snql").PlanExpr
+	): Promise<import("@sqlnest/snql").PlanExpr> => {
+		switch (expr.kind) {
+			case "subquery": {
+				// Exécute le sous-plan récursivement (peut contenir lui-même des
+				// subqueries, gérées par la récursion sur walkOp).
+				const rows = await executeInnerSelect(expr.plan);
+				// Une subquery en position `values` d'un `in` est enveloppée juste
+				// en dessous — mais on ne le sait pas ici. On remplace par un array
+				// literal, et le walker parent (`in`) sait extraire les scalaires
+				// via `flattenInSubqueryValues`. Ici on retourne une array literal
+				// avec un item par row (chaque row = un objet à 1 col).
+				return {
+					kind: "array",
+					items: rows.map((r) => rowToLiteralExpr(r))
+				};
+			}
+			case "exists": {
+				const rows = await executeInnerSelect(expr.subplan);
+				return { kind: "literal", value: rows.length > 0 };
+			}
+			case "in":
+				return {
+					kind: "in",
+					target: await walkExpr(expr.target),
+					values: await flattenInSubqueryValues(expr.values)
+				};
+			case "and":
+			case "or":
+				return {
+					kind: expr.kind,
+					left: await walkExpr(expr.left),
+					right: await walkExpr(expr.right)
+				};
+			case "compare":
+				return {
+					...expr,
+					left: await walkExpr(expr.left),
+					right: await walkExpr(expr.right)
+				};
+			case "arith":
+				return {
+					...expr,
+					left: await walkExpr(expr.left),
+					right: await walkExpr(expr.right)
+				};
+			case "not":
+				return { kind: "not", operand: await walkExpr(expr.operand) };
+			case "isNull":
+				return { ...expr, operand: await walkExpr(expr.operand) };
+			case "cast":
+				return { ...expr, operand: await walkExpr(expr.operand) };
+			case "call":
+				return {
+					...expr,
+					args: await Promise.all(expr.args.map(walkExpr))
+				};
+			case "case":
+				return {
+					kind: "case",
+					branches: await Promise.all(
+						expr.branches.map(async (b) => ({
+							cond: await walkExpr(b.cond),
+							value: await walkExpr(b.value)
+						}))
+					),
+					elseValue: await walkExpr(expr.elseValue)
+				};
+			case "object":
+				return {
+					kind: "object",
+					entries: await Promise.all(
+						expr.entries.map(async (e) => ({
+							...e,
+							value: await walkExpr(e.value)
+						}))
+					)
+				};
+			case "array":
+				return {
+					kind: "array",
+					items: await Promise.all(expr.items.map(walkExpr))
+				};
+			case "windowCall":
+				return {
+					...expr,
+					args: await Promise.all(expr.args.map(walkExpr))
+				};
+			// Feuilles sans sub-Expr.
+			case "literal":
+			case "field":
+			case "upsertNew":
+				return expr;
+		}
+	};
+
+	// Cas spécial : `in [subquery]` — les rows de la subquery deviennent
+	// directement les scalars du `in`, pas un array-of-arrays. Chaque row =
+	// un objet à 1 col (le pick), on extrait cette valeur.
+	const flattenInSubqueryValues = async (
+		values: readonly import("@sqlnest/snql").PlanExpr[]
+	): Promise<readonly import("@sqlnest/snql").PlanExpr[]> => {
+		if (values.length === 1 && values[0]?.kind === "subquery") {
+			const rows = await executeInnerSelect(values[0].plan);
+			return rows.map((r) => {
+				const keys = Object.keys(r);
+				const firstKey = keys[0];
+				const raw = firstKey !== undefined ? r[firstKey] : null;
+				return rowToLiteralExpr({ v: raw });
+			});
+		}
+		// Sinon walk normalement (liste hétérogène).
+		return Promise.all(values.map(walkExpr));
+	};
+
+	// Exécute un LogicalPlan sub-select nativement + compensate. Utilisé pour
+	// les subqueries matérialisées. Peut contenir lui-même des subqueries →
+	// résolue par la récursion (on rappelle resolveSubqueries d'abord).
+	const executeInnerSelect = async (
+		subPlan: import("@sqlnest/snql").LogicalPlan
+	): Promise<readonly Row[]> => {
+		const resolved = await resolveSubqueries(
+			subPlan,
+			connection,
+			schema,
+			capabilities,
+			mapper
+		);
+		const physical = plan(resolved, capabilities);
+		const native = mapper.map(physical.pushdown);
+		const pushed = await connection.execute(native);
+		return physical.compensation.length === 0
+			? pushed.rows
+			: compensate(physical.compensation, pushed.rows);
+	};
+
+	return walkOp(logicalPlan);
+}
+
+/**
+ * Convertit une row (objet à 1+ cols) en PlanExpr littéral. Pour les
+ * subqueries `in`, la row a une seule col — on extrait la valeur. Pour les
+ * exists on retourne juste un bool. Cette version travaille avec un objet
+ * `{ v: value }` pour uniformité.
+ */
+function rowToLiteralExpr(row: Row): import("@sqlnest/snql").PlanExpr {
+	const keys = Object.keys(row);
+	const firstKey = keys[0];
+	const value = firstKey !== undefined ? row[firstKey] : null;
+	if (value === null || value === undefined) {
+		return { kind: "literal", value: null };
+	}
+	if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+		return { kind: "literal", value };
+	}
+	if (typeof value === "bigint") {
+		return { kind: "literal", value };
+	}
+	// Fallback : stringify (Date, ObjectId, etc.).
+	return { kind: "literal", value: String(value) };
 }
 
 /**
