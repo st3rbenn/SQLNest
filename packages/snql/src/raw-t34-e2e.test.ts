@@ -124,6 +124,22 @@ describe("codegen Mongo — raw", () => {
 		});
 	});
 
+	it("keys avec `$` acceptées (operators Mongo natifs)", () => {
+		// Cas fréquent : raw {aggregate: "u", pipeline: [{$count: "n"}]} —
+		// le lexer doit tokeniser $count comme ident (opérateur Mongo natif).
+		const stmt = parse(
+			tokenize('raw {aggregate: "users", pipeline: [{$count: "n"}]}')
+		);
+		if (stmt.operation !== "raw") throw new Error();
+		const planned = lowerRaw(stmt);
+		const native = getMapper("mongodb").mapRaw!(planned);
+		if (native.kind !== "mongo-raw") throw new Error();
+		expect(native.command).toEqual({
+			aggregate: "users",
+			pipeline: [{ $count: "n" }]
+		});
+	});
+
 	it("field ref dans un raw Mongo refusé (non-literal)", () => {
 		const stmt = parse(tokenize("raw {filter: some_col}"));
 		if (stmt.operation !== "raw") throw new Error();

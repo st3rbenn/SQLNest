@@ -119,6 +119,14 @@ export function formatSnql(source: string): string {
 			suppressNextSpace = true;
 			continue;
 		}
+		if (tok.kind === "semicolon" && containerDepth === 0) {
+			// Sprint T3/6 : `;` top-level d'un CTE `let x = …; let y = …; body`
+			// — colle le `;` au stmt précédent, puis newline sans indent (le
+			// prochain `let`/body démarre en tête de ligne).
+			parts.push(";\n");
+			suppressNextSpace = true;
+			continue;
+		}
 		if (containerCloseIndent !== undefined) {
 			// Sprint T2/15 : `}` d'un container — newline + indent parent avant.
 			parts.push(`\n${containerCloseIndent}${tok.value}`);

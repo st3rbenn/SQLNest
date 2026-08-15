@@ -924,10 +924,24 @@ function renderProject(
 			}
 			continue;
 		}
+		// Path nested (`pick users.email`) : Mongo interprète `{ "users.email": 1 }`
+		// comme "projette le sous-champ" et retourne `{ users: { email: ... } }`.
+		// Le contrat cross-engine SQL est un col top-level `email` (PG :
+		// `SELECT users.email FROM ...` → col `email`). Pour parité, on rewrite :
+		// path multi-segment sans alias → key = dernier segment, value = `$path`
+		// (extraction explicite). Path single-segment reste `{ col: 1 }`.
+		const isNestedNoAlias =
+			field.alias === undefined && field.path.length > 1;
 		const key =
-			field.alias !== undefined ? field.alias : mongoField(field.path, alias);
+			field.alias !== undefined
+				? field.alias
+				: isNestedNoAlias
+					? (field.path[field.path.length - 1] as string)
+					: mongoField(field.path, alias);
 		out[key] =
-			field.alias !== undefined ? `$${mongoField(field.path, alias)}` : 1;
+			field.alias !== undefined || isNestedNoAlias
+				? `$${mongoField(field.path, alias)}`
+				: 1;
 		if (key === "_id") {
 			picksId = true;
 		}

@@ -4,7 +4,7 @@ import type { Position, Span, Token, TokenKind } from "./token";
 
 const isDigit = (c: string): boolean => c >= "0" && c <= "9";
 const isIdentStart = (c: string): boolean =>
-	(c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || c === "_";
+	(c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || c === "_" || c === "$";
 const isIdentPart = (c: string): boolean => isIdentStart(c) || isDigit(c);
 
 /** Ponctuation / opérateurs mono-caractère → kind de token. */

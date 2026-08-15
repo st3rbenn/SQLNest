@@ -257,3 +257,27 @@ describe("format — on-conflict edit action reste inline", () => {
 		);
 	});
 });
+
+describe("format — let CTE (T3/6)", () => {
+	it("un let + body — `;` en fin de ligne, body sur nouvelle ligne", () => {
+		expect(fmt('let x = find users; find x pick email')).toBe(
+			'let x = find users;\nfind x\n  pick email'
+		);
+	});
+
+	it("plusieurs let — chaque `;` split", () => {
+		expect(fmt('let a = find users; let b = find a; find b pick id')).toBe(
+			'let a = find users;\nlet b = find a;\nfind b\n  pick id'
+		);
+	});
+
+	it("body avec stages multi-ligne — chaque stage indenté", () => {
+		expect(
+			fmt(
+				'let jazz = find genre where name = "Jazz"; find track where genre_id in (find jazz pick genre_id) pick name, milliseconds sort milliseconds desc limit 10'
+			)
+		).toBe(
+			'let jazz = find genre\n  where name = "Jazz";\nfind track\n  where genre_id in (find jazz pick genre_id)\n  pick name, milliseconds\n  sort milliseconds desc\n  limit 10'
+		);
+	});
+});
