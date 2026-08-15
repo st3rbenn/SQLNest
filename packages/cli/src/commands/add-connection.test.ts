@@ -321,10 +321,11 @@ describe("addConnection — coexistence entrées", () => {
 });
 
 describe("addConnection — engine mongodb", () => {
-	test("select mongodb → DSN mongodb:// avec port par défaut acceptable", async () => {
+	test("select mongodb + authSource vide → DSN sans query (default=db)", async () => {
 		const prompter = mockPrompter({
 			engine: "mongodb",
-			lines: ["localhost", "27017", "test", "myuser"],
+			// Ordre : host, port, database, user, [password], authSource (vide)
+			lines: ["localhost", "27017", "test", "myuser", ""],
 			password: "pw"
 		});
 		await addConnection({
@@ -338,10 +339,27 @@ describe("addConnection — engine mongodb", () => {
 		);
 	});
 
-	test("mongodb + user vide → DSN anonyme (mongodb://host:port/db)", async () => {
+	test("mongodb + authSource=admin → ?authSource=admin dans la DSN", async () => {
 		const prompter = mockPrompter({
 			engine: "mongodb",
-			lines: ["localhost", "27017", "test", ""] // user vide → skip password
+			lines: ["localhost", "27017", "sqlnest_demo", "sqlnest", "admin"],
+			password: "sqlnest"
+		});
+		await addConnection({
+			name: "mongo-admin",
+			prompter,
+			stdout: (l) => out.push(l)
+		});
+		const file = loadLocalConnections();
+		expect(file?.connections[0]?.url).toBe(
+			"mongodb://sqlnest:sqlnest@localhost:27017/sqlnest_demo?authSource=admin"
+		);
+	});
+
+	test("mongodb + user vide → DSN anonyme, pas de prompt authSource", async () => {
+		const prompter = mockPrompter({
+			engine: "mongodb",
+			lines: ["localhost", "27017", "test", ""] // user vide → skip password + skip authSource
 		});
 		await addConnection({
 			name: "mongo-anon",
@@ -357,7 +375,7 @@ describe("addConnection — engine mongodb", () => {
 	test("port vide → default du engine (27017 pour mongo)", async () => {
 		const prompter = mockPrompter({
 			engine: "mongodb",
-			lines: ["localhost", "", "test", ""] // port vide
+			lines: ["localhost", "", "test", ""] // port vide, user vide (skip pw + authSource)
 		});
 		await addConnection({
 			name: "mongo-default-port",

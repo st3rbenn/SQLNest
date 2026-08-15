@@ -132,11 +132,27 @@ export async function addConnection(
 		if (!password) throw new AddConnectionError("invalid-input", "Password vide");
 	}
 
+	// Mongo : les root users créés via MONGO_INITDB_ROOT_USERNAME vivent
+	// dans la DB `admin`, pas dans la DB cible. Le driver s'authentifie
+	// par défaut contre la DB du path — un prompt optionnel permet à
+	// l'user d'indiquer `admin` (ou autre) sans devoir éditer la DSN.
+	// Ignoré pour Postgres (l'auth est toujours contre la DB du path).
+	let authSource = "";
+	if (engine === "mongodb" && user) {
+		authSource = (await opts.prompter.line(
+			`Auth source [${database}]: `
+		)).trim();
+	}
+
 	const scheme = engine === "postgres" ? "postgres" : "mongodb";
 	const auth = user
 		? `${encodeURIComponent(user)}:${encodeURIComponent(password)}@`
 		: "";
-	const url = `${scheme}://${auth}${host}:${port}/${encodeURIComponent(database)}`;
+	const query =
+		authSource && authSource !== database
+			? `?authSource=${encodeURIComponent(authSource)}`
+			: "";
+	const url = `${scheme}://${auth}${host}:${port}/${encodeURIComponent(database)}${query}`;
 
 	addLocalConnection({ name: opts.name, url });
 
