@@ -23,11 +23,15 @@ interface MockResponses {
 	lines?: string[];
 	password?: string;
 	confirms?: boolean[];
+	/** Engine renvoyé par le prompt select. Par défaut postgres (backward
+	 *  compat avec les tests écrits avant l'ajout du prompt engine). */
+	engine?: "postgres" | "mongodb";
 }
 
 function mockPrompter(responses: MockResponses): Prompter {
 	const lineQueue = [...(responses.lines ?? [])];
 	const confirmQueue = [...(responses.confirms ?? [])];
+	const engine = responses.engine ?? "postgres";
 	return {
 		line: vi.fn(async () => {
 			const next = lineQueue.shift();
@@ -44,9 +48,7 @@ function mockPrompter(responses: MockResponses): Prompter {
 			}
 			return next;
 		}),
-		select: vi.fn(async () => {
-			throw new Error("mockPrompter: select non stubé pour ce test");
-		})
+		select: vi.fn(async () => engine)
 	};
 }
 
@@ -315,5 +317,68 @@ describe("addConnection — coexistence entrées", () => {
 			"prod",
 			"staging"
 		]);
+	});
+});
+
+describe("addConnection — engine mongodb", () => {
+	test("select mongodb → DSN mongodb:// avec port par défaut acceptable", async () => {
+		const prompter = mockPrompter({
+			engine: "mongodb",
+			lines: ["localhost", "27017", "test", "myuser"],
+			password: "pw"
+		});
+		await addConnection({
+			name: "mongo-dev",
+			prompter,
+			stdout: (l) => out.push(l)
+		});
+		const file = loadLocalConnections();
+		expect(file?.connections[0]?.url).toBe(
+			"mongodb://myuser:pw@localhost:27017/test"
+		);
+	});
+
+	test("mongodb + user vide → DSN anonyme (mongodb://host:port/db)", async () => {
+		const prompter = mockPrompter({
+			engine: "mongodb",
+			lines: ["localhost", "27017", "test", ""] // user vide → skip password
+		});
+		await addConnection({
+			name: "mongo-anon",
+			prompter,
+			stdout: (l) => out.push(l)
+		});
+		const file = loadLocalConnections();
+		expect(file?.connections[0]?.url).toBe("mongodb://localhost:27017/test");
+		// Password non demandé quand user est vide.
+		expect(prompter.password).not.toHaveBeenCalled();
+	});
+
+	test("port vide → default du engine (27017 pour mongo)", async () => {
+		const prompter = mockPrompter({
+			engine: "mongodb",
+			lines: ["localhost", "", "test", ""] // port vide
+		});
+		await addConnection({
+			name: "mongo-default-port",
+			prompter,
+			stdout: (l) => out.push(l)
+		});
+		const file = loadLocalConnections();
+		expect(file?.connections[0]?.url).toBe("mongodb://localhost:27017/test");
+	});
+
+	test("postgres + user vide → refus (user obligatoire)", async () => {
+		const prompter = mockPrompter({
+			engine: "postgres",
+			lines: ["localhost", "5432", "db", ""]
+		});
+		await expect(
+			addConnection({
+				name: "pg-anon",
+				prompter,
+				stdout: (l) => out.push(l)
+			})
+		).rejects.toBeInstanceOf(AddConnectionError);
 	});
 });

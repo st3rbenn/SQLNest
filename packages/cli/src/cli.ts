@@ -39,6 +39,7 @@ import {
 } from "./commands/add-connection";
 import { ConnectError, connect as defaultConnect } from "./commands/connect";
 import { connectWithToken as defaultConnectWithToken } from "./commands/connect-token";
+import { listConnections as defaultListConnections } from "./commands/list-connections";
 import { logout as defaultLogout } from "./commands/logout";
 import { ping as defaultPing } from "./commands/ping";
 import {
@@ -82,6 +83,7 @@ export interface CliIO {
 	readonly pingFn?: typeof defaultPing;
 	readonly serveTunnelFn?: typeof defaultServeTunnel;
 	readonly addConnectionFn?: typeof defaultAddConnection;
+	readonly listConnectionsFn?: typeof defaultListConnections;
 	readonly revokeConnectionFn?: typeof defaultRevokeConnection;
 	// Prompter injectable (test). Par défaut = `defaultPrompter()`.
 	readonly prompter?: Prompter;
@@ -116,6 +118,8 @@ export async function runCli(argv: string[], io: CliIO = {}): Promise<number> {
 			return runPing(rest, { stdout, stderr, env, io });
 		case "add-connection":
 			return runAddConnection(rest, { stdout, stderr, io });
+		case "list-connections":
+			return runListConnections(rest, { stdout, stderr, io });
 		case "revoke-connection":
 			return runRevokeConnection(rest, { stdout, stderr, io });
 		default:
@@ -568,6 +572,26 @@ async function runAddConnection(
 	}
 }
 
+function runListConnections(
+	args: string[],
+	ctx: RunSyncContext
+): number {
+	if (args.length > 0) {
+		ctx.stderr(
+			`sqlnest list-connections: aucun argument attendu, reçu « ${args.join(" ")} »`
+		);
+		return 2;
+	}
+	const fn = ctx.io.listConnectionsFn ?? defaultListConnections;
+	try {
+		fn({ stdout: ctx.stdout });
+		return 0;
+	} catch (err) {
+		ctx.stderr(`✗ ${(err as Error).message}`);
+		return 1;
+	}
+}
+
 async function runRevokeConnection(
 	args: string[],
 	ctx: RunSyncContext
@@ -662,9 +686,10 @@ Usage :
   sqlnest logout --all                     Retire tous les tunnels locaux
   sqlnest logout --tunnel <id>             Retire un tunnel local
   sqlnest ping --tunnel <name>             Ping local DSN (diagnostic)
-  sqlnest add-connection --name <n>        Ajoute une DSN locale (prompts interactifs)
+  sqlnest add-connection --name <n>        Ajoute une DSN locale (menu engine + prompts interactifs)
   sqlnest add-connection --name <n> --url <dsn>  DSN inline (⚠ visible dans ps aux / historique shell)
   sqlnest add-connection --name <n> --force  Écrase sans demander confirmation
+  sqlnest list-connections                 Liste les DSN locales (sans les credentials)
   sqlnest revoke-connection --name <n>     Retire une DSN locale (avec confirm)
   sqlnest revoke-connection --name <n> --yes  Skip la confirmation
   sqlnest --help                           Affiche cette aide

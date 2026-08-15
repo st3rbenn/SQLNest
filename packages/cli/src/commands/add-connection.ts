@@ -87,10 +87,22 @@ export async function addConnection(
 		return { name: opts.name, overwritten: alreadyExists };
 	}
 
+	// Sélection de l'engine en tête — le port default + le scheme DSN
+	// dépendent de ce choix. Sur non-TTY, le prompter.select throw : le
+	// caller peut fallback sur `--url` (mode scriptable).
+	const engine = await opts.prompter.select<"postgres" | "mongodb">({
+		message: "Engine",
+		choices: [
+			{ value: "postgres", label: "PostgreSQL", description: "port 5432 par défaut" },
+			{ value: "mongodb", label: "MongoDB", description: "port 27017 par défaut" }
+		]
+	});
+	const defaultPort = engine === "postgres" ? "5432" : "27017";
+
 	const host = (await opts.prompter.line("Host: ")).trim();
 	if (!host) throw new AddConnectionError("invalid-input", "Host vide");
 
-	const portStr = (await opts.prompter.line("Port: ")).trim();
+	const portStr = ((await opts.prompter.line(`Port [${defaultPort}]: `)).trim() || defaultPort);
 	if (!PORT_RE.test(portStr)) {
 		throw new AddConnectionError(
 			"invalid-input",
@@ -105,15 +117,26 @@ export async function addConnection(
 	const database = (await opts.prompter.line("Database: ")).trim();
 	if (!database) throw new AddConnectionError("invalid-input", "Database vide");
 
-	const user = (await opts.prompter.line("User: ")).trim();
-	if (!user) throw new AddConnectionError("invalid-input", "User vide");
+	// Mongo autorise les connexions anonymes (mongodb://host:port/db) — user
+	// et password vides sont valides. Postgres non — user obligatoire.
+	const user = (await opts.prompter.line(
+		engine === "mongodb" ? "User (vide pour anonyme): " : "User: "
+	)).trim();
+	if (engine === "postgres" && !user) {
+		throw new AddConnectionError("invalid-input", "User vide");
+	}
 
-	const password = await opts.prompter.password("Password: ");
-	if (!password) throw new AddConnectionError("invalid-input", "Password vide");
+	let password = "";
+	if (user) {
+		password = await opts.prompter.password("Password: ");
+		if (!password) throw new AddConnectionError("invalid-input", "Password vide");
+	}
 
-	const url = `postgres://${encodeURIComponent(user)}:${encodeURIComponent(
-		password
-	)}@${host}:${port}/${encodeURIComponent(database)}`;
+	const scheme = engine === "postgres" ? "postgres" : "mongodb";
+	const auth = user
+		? `${encodeURIComponent(user)}:${encodeURIComponent(password)}@`
+		: "";
+	const url = `${scheme}://${auth}${host}:${port}/${encodeURIComponent(database)}`;
 
 	addLocalConnection({ name: opts.name, url });
 
