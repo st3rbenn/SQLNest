@@ -9,6 +9,7 @@
 		"db:reset": "docker compose -f infra/docker-compose.yml down -v && docker compose -f infra/docker-compose.yml up -d",
 		"db:logs": "docker compose -f infra/docker-compose.yml logs -f",
 		"db:seed:shop": "node infra/scripts/seed-shop.mjs",
+		"db:seed:chinook": "bash infra/scripts/seed-chinook.sh",
 		"app:db:generate": "pnpm --filter @sqlnest/db db:generate",
 		"app:db:migrate": "pnpm --filter @sqlnest/db db:migrate",
 		"app:db:studio": "pnpm --filter @sqlnest/db db:studio",
