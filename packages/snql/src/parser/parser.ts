@@ -15,6 +15,7 @@ import type {
 	OnConflictAction,
 	OnConflictClause,
 	Query,
+	RawStatement,
 	SavepointStatement,
 	SortKey,
 	Source,
@@ -69,6 +70,11 @@ function parseStatement(cursor: TokenCursor): Statement {
 	// col nommée `describe` reste utilisable ailleurs (pick/where/set).
 	if (first.kind === "ident" && first.value.toLowerCase() === "describe") {
 		return parseIntrospectDescribe(cursor);
+	}
+	// Sprint T3/4 : `raw "sql"` (PG) ou `raw {...}` (Mongo) — escape hatch.
+	// Soft-keyword pour ne pas casser une col nommée `raw` ailleurs.
+	if (first.kind === "ident" && first.value.toLowerCase() === "raw") {
+		return parseRaw(cursor);
 	}
 	const verbTok = first;
 	if (verbTok.kind !== "verb") {
@@ -177,6 +183,56 @@ function parseIntrospectList(cursor: TokenCursor): IntrospectStatement {
 		`'list' attend une sous-commande connue (tables / schemas / indexes), trouvé '${sub.value}'`,
 		"parse_introspect_unknown_list",
 		sub.span
+	);
+}
+
+/**
+ * Sprint T3/4 : `raw "SQL"` (PG) ou `raw {...}` (Mongo command). Le payload
+ * lève l'ambiguïté PG-vs-Mongo par shape : string → SQL, object literal →
+ * Mongo command. Aucun stage n'est autorisé après (raw = statement complet).
+ * L'accord engine-payload est vérifié par le mapper (refus cross-shape).
+ */
+function parseRaw(cursor: TokenCursor): RawStatement {
+	const rawTok = cursor.next(); // `raw`
+	const payloadTok = cursor.peek();
+	if (payloadTok.kind === "string") {
+		cursor.next();
+		return {
+			operation: "raw",
+			payload: {
+				kind: "sql",
+				text: payloadTok.value,
+				textSpan: payloadTok.span
+			},
+			span: { start: rawTok.span.start, end: payloadTok.span.end }
+		};
+	}
+	if (payloadTok.kind === "lbrace") {
+		// Object literal SNQL — l'expression parseur le lit sous forme Expr.object,
+		// qu'on garde tel quel dans le payload. Le codegen Mongo l'évalue en
+		// document littéral au moment du mapping.
+		const objectExpr = parseExpression(cursor);
+		if (objectExpr.type !== "object") {
+			throw new SnqlError(
+				`'raw {' attend un object literal Mongo, forme reçue '${objectExpr.type}'`,
+				"parse_raw_expected_object",
+				objectExpr.span
+			);
+		}
+		return {
+			operation: "raw",
+			payload: {
+				kind: "mongo",
+				command: objectExpr,
+				commandSpan: objectExpr.span
+			},
+			span: { start: rawTok.span.start, end: objectExpr.span.end }
+		};
+	}
+	throw new SnqlError(
+		`'raw' attend un texte SQL ("...") ou une command Mongo ({...}), trouvé '${payloadTok.value}'`,
+		"parse_raw_missing_payload",
+		payloadTok.span
 	);
 }
 
@@ -429,6 +485,17 @@ function parseTransactionItem(cursor: TokenCursor): TransactionBodyItem {
 		throw new SnqlError(
 			"Introspection ('list', 'describe') interdite dans une transaction — exécute-la à part.",
 			"parse_introspect_in_transaction",
+			first.span
+		);
+	}
+	// Sprint T3/4 : `raw` interdit dans une transaction — SNQL ne parse pas
+	// le contenu du raw, donc ne peut pas garantir l'atomicité de son effet
+	// vs les autres stmts. L'user peut wrapper son SQL brut avec BEGIN/COMMIT
+	// dans la chaîne s'il en a besoin.
+	if (stmt.operation === "raw") {
+		throw new SnqlError(
+			"'raw' interdit dans une transaction — SNQL ne parse pas le contenu, l'atomicité n'est pas garantie. Utilise BEGIN/COMMIT directement dans le SQL brut.",
+			"parse_raw_in_transaction",
 			first.span
 		);
 	}

@@ -22,6 +22,7 @@ import {
 	lower,
 	lowerIntrospect,
 	lowerMutation,
+	lowerRaw,
 	lowerTransaction,
 	parse,
 	plan,
@@ -108,6 +109,23 @@ export async function runQuery(
 			};
 		}
 		return { ...executed, written: false };
+	}
+
+	// Sprint T3/4 : escape hatch `raw`. Bypass complet du pipeline SNQL —
+	// PG passe le text SQL brut, Mongo passe le command à db.runCommand().
+	// L'user assume la sémantique + les droits DB. Une lecture peut se
+	// transformer en écriture (`raw "DELETE ..."`) → written=true safe-side
+	// pour que l'UI n'affiche pas des rows fantômes.
+	if (statement.operation === "raw") {
+		const rawPlan = lowerRaw(statement);
+		if (mapper.mapRaw === undefined) {
+			throw new EngineExecutionError(
+				`Aucun codegen 'raw' pour le moteur '${engine}'`
+			);
+		}
+		const native = mapper.mapRaw(rawPlan);
+		const executed = await connection.execute(native);
+		return { ...executed, written: true };
 	}
 
 	// Sprint T2/15 : transaction bloc atomique. Le mapper.mapTransaction est

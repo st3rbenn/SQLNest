@@ -10,6 +10,7 @@ import type {
 	PlanExpr,
 	PlanProjectField,
 	PlanSortKey,
+	RawPlan,
 	SqlValue
 } from "../ir/plan";
 import { isSqlDecimal, linearize } from "../ir/plan";
@@ -79,8 +80,67 @@ export const mongoMapper: Mapper = {
 	 */
 	mapIntrospect(plan: IntrospectPlan): NativeQuery {
 		return { engine: "mongodb", kind: "mongo-introspect", plan };
+	},
+	/**
+	 * Sprint T3/4 : `raw {...}` Mongo → MongoRawQuery pour db.runCommand().
+	 * L'Expr.object est évalué en Record<string, unknown> — refuse toute
+	 * expression non-literal (field, call, etc. n'ont pas de sens dans une
+	 * command). Refus explicit d'un `raw "SQL"` (payload PG sur engine Mongo).
+	 */
+	mapRaw(plan: RawPlan): NativeQuery {
+		if (plan.payload.kind !== "mongo") {
+			throw new SnqlError(
+				"'raw \"...\"' est du SQL — sur MongoDB utilise 'raw {command: \"...\"}'.",
+				"codegen_raw_shape_mismatch"
+			);
+		}
+		return {
+			engine: "mongodb",
+			kind: "mongo-raw",
+			command: evalObjectLiteral(plan.payload.command)
+		};
 	}
 };
+
+/**
+ * Évalue récursivement un Expr.object en Record littéral pour un raw Mongo.
+ * Refuse tout non-literal (field, call, subquery, cast) — un command Mongo
+ * doit être 100% autonome, aucune référence à une col ou fn SNQL.
+ */
+function evalObjectLiteral(
+	expr: import("../parser/ast").Expr
+): Record<string, unknown> {
+	if (expr.type !== "object") {
+		throw new SnqlError(
+			"'raw' Mongo attend un object literal — pas de field/call/expression",
+			"codegen_raw_non_literal"
+		);
+	}
+	const out: Record<string, unknown> = {};
+	for (const entry of expr.entries) {
+		out[entry.key] = evalLiteralValue(entry.value);
+	}
+	return out;
+}
+
+function evalLiteralValue(
+	expr: import("../parser/ast").Expr
+): unknown {
+	if (expr.type === "literal") {
+		const v = expr.value;
+		if (v.kind === "number") return Number(v.raw);
+		if (v.kind === "string") return v.value;
+		if (v.kind === "boolean") return v.value;
+		return null;
+	}
+	if (expr.type === "object") return evalObjectLiteral(expr);
+	if (expr.type === "array") return expr.items.map(evalLiteralValue);
+	throw new SnqlError(
+		`'raw' Mongo : expression '${expr.type}' non literal — command doit être autonome`,
+		"codegen_raw_non_literal",
+		expr.span
+	);
+}
 
 /** Lignes d'un insert (colonnes homogènes) → documents BSON. */
 function renderDocuments(

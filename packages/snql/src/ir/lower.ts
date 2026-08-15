@@ -589,6 +589,17 @@ function lowerTransactionItem(
  * ops post-scan et convertis en CompensationOp. PG les inline dans un SELECT
  * wrapper, Mongo les applique via compensate() côté engine.
  */
+/**
+ * Sprint T3/4 : `raw "SQL"` / `raw {...}` — pass-through direct. Aucun
+ * typecheck ni capability check ; c'est un escape hatch, l'utilisateur
+ * assume la sémantique.
+ */
+export function lowerRaw(
+	statement: import("../parser/ast").RawStatement
+): import("./plan").RawPlan {
+	return { op: "raw", payload: statement.payload };
+}
+
 export function lowerIntrospect(
 	statement: import("../parser/ast").IntrospectStatement,
 	_schema?: SchemaModel

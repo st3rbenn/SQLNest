@@ -63,7 +63,9 @@ const PRIMARY_VERBS: readonly {
 	// T3 introspection : soft-keywords, taggés `keyword` (pas verb CRUD) —
 	// affichés avec l'icône keyword mais dans la même palette top-level.
 	{ label: "list", detail: "introspection", type: "keyword" },
-	{ label: "describe", detail: "introspection", type: "keyword" }
+	{ label: "describe", detail: "introspection", type: "keyword" },
+	// T3/4 : `raw` escape hatch — dernier recours documenté.
+	{ label: "raw", detail: "escape hatch (SQL/Mongo brut)", type: "keyword" }
 ];
 
 /** Sous-commandes reconnues après `list` (T3/1 + T3/3). */

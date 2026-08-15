@@ -77,7 +77,9 @@ export const INTROSPECT_VERBS: ReadonlySet<string> = new Set([
 	"describe",
 	// T3/2.4 : `for` — filter shortcut. Highlight comme keyword, mais reste
 	// soft-keyword (utilisable en ident hors introspect).
-	"for"
+	"for",
+	// T3/4 : `raw` escape hatch — highlight bleu. Soft-keyword aussi.
+	"raw"
 ]);
 
 /**

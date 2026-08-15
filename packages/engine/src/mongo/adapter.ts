@@ -181,6 +181,27 @@ function describeMongoExecutionError(cause: unknown): string {
  * `inferResultColumns` se fait dans `run.ts` quand un SchemaModel est
  * disponible côté caller.
  */
+/**
+ * Sprint T3/4 : normalise le résultat d'un db.runCommand() en Row[]. Les
+ * commands Mongo retournent des shapes hétérogènes — on inspecte les champs
+ * courants qui portent un batch de docs (`cursor.firstBatch` pour aggregate/
+ * find, `values` pour distinct, `results` pour explain). Sinon on renvoie
+ * le document entier comme une seule row (le user écrit sa command, il sait).
+ */
+function extractRowsFromRawResponse(raw: Record<string, unknown>): Row[] {
+	const cursor = raw["cursor"];
+	if (
+		cursor !== null &&
+		typeof cursor === "object" &&
+		Array.isArray((cursor as { firstBatch?: unknown }).firstBatch)
+	) {
+		return (cursor as { firstBatch: Row[] }).firstBatch;
+	}
+	if (Array.isArray(raw["values"])) return (raw["values"] as unknown[]).map((v) => ({ value: v }));
+	if (Array.isArray(raw["results"])) return raw["results"] as Row[];
+	return [raw as Row];
+}
+
 function columnsOf(rows: readonly Row[]): ResultColumn[] {
 	const names: string[] = [];
 	const seen = new Set<string>();
@@ -239,6 +260,9 @@ class MongoConnection implements Connection {
 		}
 		if (query.kind === "mongo-introspect") {
 			return this.#executeIntrospect(query);
+		}
+		if (query.kind === "mongo-raw") {
+			return this.#executeRaw(query);
 		}
 		if (query.kind !== "mongo") {
 			throw new EngineExecutionError(
@@ -421,6 +445,37 @@ class MongoConnection implements Connection {
 			if (cause instanceof EngineExecutionError) throw cause;
 			throw new EngineExecutionError(
 				`Introspection MongoDB échouée — ${describeMongoExecutionError(cause)}`,
+				{ cause }
+			);
+		}
+	}
+
+	/**
+	 * Sprint T3/4 : escape hatch `raw {...}` Mongo → db.runCommand(document).
+	 * Le résultat est aplati en Row[] : on inspecte les champs classiques d'une
+	 * réponse Mongo (`cursor.firstBatch`, `results`, `values`) pour extraire
+	 * des rows ; sinon on renvoie le document brut comme une seule row. Aucun
+	 * shape stable — c'est l'user qui écrit la command et lit le résultat.
+	 */
+	async #executeRaw(
+		query: Extract<NativeQuery, { kind: "mongo-raw" }>
+	): Promise<ResultSet> {
+		const db = this.#requireDb();
+		try {
+			const raw = (await db.command(query.command as Document)) as Record<
+				string,
+				unknown
+			>;
+			const rows = extractRowsFromRawResponse(raw);
+			const normalized = rows.map((doc) => normalizeBson(doc) as Row);
+			return {
+				columns: columnsOf(normalized),
+				rows: normalized,
+				rowCount: normalized.length
+			};
+		} catch (cause) {
+			throw new EngineExecutionError(
+				`raw MongoDB échouée — ${describeMongoExecutionError(cause)}`,
 				{ cause }
 			);
 		}

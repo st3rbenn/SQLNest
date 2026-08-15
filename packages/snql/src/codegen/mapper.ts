@@ -121,6 +121,17 @@ export interface MongoIntrospectQuery {
 }
 
 /**
+ * Sprint T3/4 : native shape pour un `raw {...}` Mongo — command native
+ * exécutée via db.runCommand(). Le document est déjà évalué en clé/valeur
+ * scalaires par le codegen (Expr.object → Record<string, unknown>).
+ */
+export interface MongoRawQuery {
+	readonly engine: string;
+	readonly kind: "mongo-raw";
+	readonly command: Record<string, unknown>;
+}
+
+/**
  * Sprint T3/1 : options passées aux méthodes du Mapper qui ont besoin du
  * contexte runtime. Aujourd'hui : namespace (PG schema / Mongo DB name)
  * pour l'introspection. Extensible pour d'autres options futures sans
@@ -136,7 +147,8 @@ export type NativeQuery =
 	| MongoQuery
 	| MongoWriteQuery
 	| SqlTransaction
-	| MongoIntrospectQuery;
+	| MongoIntrospectQuery
+	| MongoRawQuery;
 
 /** Contrat de codegen par moteur : plan → requête native. Pur, sans I/O. */
 export interface Mapper {
@@ -149,4 +161,6 @@ export interface Mapper {
 	mapTransaction?(plan: TransactionPlan): SqlTransaction;
 	/** Sprint T3/1 : introspection (list/describe/etc.). PG et Mongo v1. */
 	mapIntrospect?(plan: IntrospectPlan, ctx?: MapperContext): NativeQuery;
+	/** Sprint T3/4 : escape hatch raw (SQL brut / Mongo command). */
+	mapRaw?(plan: import("../ir/plan").RawPlan): NativeQuery;
 }

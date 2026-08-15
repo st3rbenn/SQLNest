@@ -10,6 +10,7 @@ import type {
 	PlanProjectField,
 	PlanRowValue,
 	PlanSortKey,
+	RawPlan,
 	SqlValue,
 	TransactionPlan,
 	TransactionPlanItem
@@ -133,6 +134,25 @@ export const postgresMapper: Mapper = {
 			text,
 			params: params.all(),
 			paramSpans: params.allSpans()
+		};
+	},
+	/**
+	 * Sprint T3/4 : `raw "SQL"` → SqlQuery text-only, params vides. Refus
+	 * explicit d'un `raw {...}` (payload Mongo sur engine PG).
+	 */
+	mapRaw(plan: RawPlan): NativeQuery {
+		if (plan.payload.kind !== "sql") {
+			throw new SnqlError(
+				"'raw {...}' est un document Mongo — sur Postgres utilise 'raw \"SELECT ...\"'.",
+				"codegen_raw_shape_mismatch"
+			);
+		}
+		return {
+			engine: "postgres",
+			kind: "sql",
+			text: plan.payload.text,
+			params: [],
+			paramSpans: []
 		};
 	}
 };

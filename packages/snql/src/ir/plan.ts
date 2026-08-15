@@ -461,8 +461,23 @@ export interface IntrospectPlan {
 	readonly postOps?: readonly import("../planner/planner").CompensationOp[];
 }
 
-/** Un plan complet : lecture, mutation, transaction (T2/15) ou introspect (T3/1). */
-export type Plan = LogicalPlan | MutationPlan | TransactionPlan | IntrospectPlan;
+/**
+ * Sprint T3/4 : plan `raw` — pass-through du payload AST. Le mapper vérifie
+ * la compatibilité shape/engine (raw sql sur PG, raw object sur Mongo) et
+ * refuse le cross avec un message dédié.
+ */
+export interface RawPlan {
+	readonly op: "raw";
+	readonly payload: import("../parser/ast").RawPayload;
+}
+
+/** Un plan complet : lecture, mutation, transaction (T2/15), introspect (T3/1) ou raw (T3/4). */
+export type Plan =
+	| LogicalPlan
+	| MutationPlan
+	| TransactionPlan
+	| IntrospectPlan
+	| RawPlan;
 
 export type PlanOp = LogicalPlan["op"];
 

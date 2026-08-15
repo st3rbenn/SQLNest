@@ -465,11 +465,42 @@ export interface IntrospectStatement {
 	readonly span: Span;
 }
 
-/** Racine de l'AST : lecture (`Query`), mutation, transaction (T2/15), ou introspection (T3/1). */
+/**
+ * Sprint T3/4 : escape hatch `raw`. Payload est un texte SQL brut (PG) OU
+ * un document JSON qui devient une command MongoDB via db.runCommand.
+ * L'ambiguïté PG-vs-Mongo se résout à l'engine cible : le mapper refuse
+ * le shape qui n'est pas le sien avec un message dédié.
+ */
+export type RawPayload =
+	| {
+			readonly kind: "sql";
+			readonly text: string;
+			readonly textSpan: Span;
+	  }
+	| {
+			readonly kind: "mongo";
+			readonly command: Expr; // Expr.object au parser — évalué au lower.
+			readonly commandSpan: Span;
+	  };
+
+/**
+ * Sprint T3/4 : `raw "SELECT ..."` (PG) ou `raw {aggregate: "u", ...}` (Mongo).
+ * Bypass le pipeline SNQL — aucun stage n'est autorisé après. Contract :
+ * l'utilisateur assume la sécurité (pas de bind auto v1), les capabilities
+ * du rôle DB gouvernent read/write (SNQL ne re-check pas).
+ */
+export interface RawStatement {
+	readonly operation: "raw";
+	readonly payload: RawPayload;
+	readonly span: Span;
+}
+
+/** Racine de l'AST : lecture (`Query`), mutation, transaction (T2/15), introspection (T3/1) ou raw escape hatch (T3/4). */
 export type Statement =
 	| Query
 	| InsertStatement
 	| UpdateStatement
 	| DeleteStatement
 	| TransactionStatement
-	| IntrospectStatement;
+	| IntrospectStatement
+	| RawStatement;

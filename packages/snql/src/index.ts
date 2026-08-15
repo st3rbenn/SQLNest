@@ -97,7 +97,13 @@ export type {
 	SqlTransactionStep
 } from "./codegen/mapper";
 export { SnqlError } from "./diagnostics";
-export { lower, lowerIntrospect, lowerMutation, lowerTransaction } from "./ir/lower";
+export {
+	lower,
+	lowerIntrospect,
+	lowerMutation,
+	lowerRaw,
+	lowerTransaction
+} from "./ir/lower";
 export type {
 	Capability,
 	CompareOp,
