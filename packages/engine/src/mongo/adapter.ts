@@ -189,6 +189,19 @@ function describeMongoExecutionError(cause: unknown): string {
  * find, `values` pour distinct, `results` pour explain). Sinon on renvoie
  * le document entier comme une seule row (le user écrit sa command, il sait).
  */
+/**
+ * Sprint T3/4 : Mongo exige `cursor` sur les commandes streamées. Sans lui,
+ * `db.command({aggregate: ..., pipeline: [...]})` échoue avec « The 'cursor'
+ * option is required, except for aggregate with the explain argument ».
+ * Whitelist des commandes concernées — pour les autres (drop, insert, count
+ * simple, buildInfo, isMaster…), on n'injecte rien.
+ */
+function needsCursor(command: Record<string, unknown>): boolean {
+	return (
+		"aggregate" in command || "find" in command || "listCollections" in command || "listIndexes" in command
+	);
+}
+
 function extractRowsFromRawResponse(raw: Record<string, unknown>): Row[] {
 	const cursor = raw["cursor"];
 	if (
@@ -504,10 +517,16 @@ class MongoConnection implements Connection {
 	): Promise<ResultSet> {
 		const db = this.#requireDb();
 		try {
-			const raw = (await db.command(query.command as Document)) as Record<
-				string,
-				unknown
-			>;
+			// Mongo exige `cursor: {}` pour toute commande qui streame des
+			// résultats (aggregate, find, listCollections, listIndexes…). L'user
+			// qui écrit `raw {aggregate: "u", pipeline: [...]}` s'attend à ce
+			// que ça marche direct — on inject un cursor vide si absent (safe,
+			// override user si présent).
+			const command = { ...(query.command as Document) };
+			if (needsCursor(command) && !("cursor" in command)) {
+				command["cursor"] = {};
+			}
+			const raw = (await db.command(command)) as Record<string, unknown>;
 			const rows = extractRowsFromRawResponse(raw);
 			const normalized = rows.map((doc) => normalizeBson(doc) as Row);
 			return {
