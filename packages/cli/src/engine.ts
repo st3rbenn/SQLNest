@@ -19,6 +19,8 @@ import {
 	type Connection,
 	connect as engineConnect,
 	type PingResult,
+	type ResolvedEngineConfig,
+	resolveMongoConfig,
 	type ResultSet,
 	resolvePostgresConfig,
 	runQuery,
@@ -46,7 +48,28 @@ export async function openConnectionForTunnel(
 	env: NodeJS.ProcessEnv = process.env
 ): Promise<Connection> {
 	const url = resolveLocalConnectionUrl(tunnelName, env);
-	return engineConnect(resolvePostgresConfig({ url }));
+	return engineConnect(resolveEngineConfigFromUrl(url));
+}
+
+/**
+ * Détecte l'engine cible depuis le scheme de la DSN et route vers le bon
+ * resolver. Support v1 : postgres/postgresql → PG, mongodb/mongodb+srv →
+ * Mongo. Tout autre scheme = engine non supporté (message clair).
+ */
+function resolveEngineConfigFromUrl(url: string): ResolvedEngineConfig {
+	// Parse le scheme sans exposer la DSN complète en erreur (aucun log de
+	// l'URL). Le colon `:` termine le scheme dans une URL standard.
+	const colonIdx = url.indexOf(":");
+	const scheme = colonIdx > 0 ? url.slice(0, colonIdx).toLowerCase() : "";
+	if (scheme === "postgres" || scheme === "postgresql") {
+		return resolvePostgresConfig({ url });
+	}
+	if (scheme === "mongodb" || scheme === "mongodb+srv") {
+		return resolveMongoConfig({ url });
+	}
+	throw new Error(
+		`Scheme de DSN non supporté ('${scheme}:'). Attendu : postgres / postgresql / mongodb / mongodb+srv.`
+	);
 }
 
 /**
