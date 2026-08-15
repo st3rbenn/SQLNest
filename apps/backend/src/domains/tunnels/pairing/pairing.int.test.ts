@@ -890,6 +890,262 @@ describe.skipIf(!DATABASE_URL)("/api/tunnels — device flow", () => {
 			expect((clearHits[0]! as { n: number }).n).toBe(0);
 		});
 
+		test("T4/1 : dbFingerprint fourni → stocké sur la db_connection", async () => {
+			const { userId } = await createTestUser(
+				app,
+				"fp-new@example.com",
+				"fpnew-fpnew-fpnew-fpnew-fp"
+			);
+			const { pubkeyHex, sign } = makeCliKeypair();
+			await seedPairing(app, {
+				code: "FPNEW001",
+				cliPubkeyEd25519: pubkeyHex,
+				userId,
+				deviceName: "fp-mac",
+				approvedAt: new Date()
+			});
+			const res = await app.inject({
+				method: "POST",
+				url: "/api/tunnels/authenticate",
+				headers: { "content-type": "application/json" },
+				payload: {
+					code: "FPNEW-001",
+					signature: sign("FPNEW001"),
+					dbFingerprint: "postgres:9876543210/chinook"
+				}
+			});
+			expect(res.statusCode).toBe(200);
+			const body = res.json() as { connectionId: string };
+			const conns = await app.db
+				.select({ dbFingerprint: schema.dbConnection.dbFingerprint })
+				.from(schema.dbConnection)
+				.where(eq(schema.dbConnection.id, body.connectionId));
+			// biome-ignore lint/style/noNonNullAssertion: length checked
+			expect(conns[0]!.dbFingerprint).toBe("postgres:9876543210/chinook");
+		});
+
+		test("T4/1 : dbFingerprint omis → col reste NULL (rétro-compat CLI legacy)", async () => {
+			const { userId } = await createTestUser(
+				app,
+				"fpomit@example.com",
+				"fpomit-fpomit-fpomit-fpomi"
+			);
+			const { pubkeyHex, sign } = makeCliKeypair();
+			await seedPairing(app, {
+				code: "FPNAKED1",
+				cliPubkeyEd25519: pubkeyHex,
+				userId,
+				deviceName: "fp-omit-mac",
+				approvedAt: new Date()
+			});
+			const res = await app.inject({
+				method: "POST",
+				url: "/api/tunnels/authenticate",
+				headers: { "content-type": "application/json" },
+				payload: {
+					code: "FPNAKED-1",
+					signature: sign("FPNAKED1")
+				}
+			});
+			expect(res.statusCode).toBe(200);
+			const body = res.json() as { connectionId: string };
+			const conns = await app.db
+				.select({ dbFingerprint: schema.dbConnection.dbFingerprint })
+				.from(schema.dbConnection)
+				.where(eq(schema.dbConnection.id, body.connectionId));
+			// biome-ignore lint/style/noNonNullAssertion: length checked
+			expect(conns[0]!.dbFingerprint).toBeNull();
+		});
+
+		test("T4/3 : 2 CLI distincts sur même db_fingerprint → 2 connections, canvas cloné du 1er sur le 2e", async () => {
+			const { userId } = await createTestUser(
+				app,
+				"cross-dev@example.com",
+				"crossdev-crossdev-crossde"
+			);
+			const dbFp = "pg:7600431566186733602/apollon-db";
+
+			// Device 1 (Mac) — pair + canvas custom.
+			const { pubkeyHex: mac, sign: signMac } = makeCliKeypair();
+			await seedPairing(app, {
+				code: "MACDEV01",
+				cliPubkeyEd25519: mac,
+				userId,
+				deviceName: "apollon-mac",
+				approvedAt: new Date()
+			});
+			const macAuth = await app.inject({
+				method: "POST",
+				url: "/api/tunnels/authenticate",
+				headers: { "content-type": "application/json" },
+				payload: {
+					code: "MACDEV-01",
+					signature: signMac("MACDEV01"),
+					dbFingerprint: dbFp
+				}
+			});
+			expect(macAuth.statusCode).toBe(200);
+			const macBody = macAuth.json() as {
+				connectionId: string;
+				clonedFrom?: unknown;
+			};
+			// 1er device : rien à cloner (aucune connection existante).
+			expect(macBody.clonedFrom).toBeUndefined();
+
+			// Poser un canvas custom sur la connection Mac.
+			await app.db.insert(schema.canvasState).values({
+				userId,
+				connectionId: macBody.connectionId,
+				payload: { positions: { artist: { x: 100, y: 200 } } }
+			});
+
+			// Device 2 (Windows) — pair sur MÊME db_fingerprint.
+			const { pubkeyHex: win, sign: signWin } = makeCliKeypair();
+			await seedPairing(app, {
+				code: "WNDEV001",
+				cliPubkeyEd25519: win,
+				userId,
+				deviceName: "apollon-win",
+				approvedAt: new Date()
+			});
+			const winAuth = await app.inject({
+				method: "POST",
+				url: "/api/tunnels/authenticate",
+				headers: { "content-type": "application/json" },
+				payload: {
+					code: "WNDEV-001",
+					signature: signWin("WNDEV001"),
+					dbFingerprint: dbFp
+				}
+			});
+			expect(winAuth.statusCode).toBe(200);
+			const winBody = winAuth.json() as {
+				connectionId: string;
+				clonedFrom?: { connectionId: string; name: string };
+			};
+
+			// Nouvelle connection (pas la même que Mac).
+			expect(winBody.connectionId).not.toBe(macBody.connectionId);
+			// clonedFrom pointe vers la connection Mac.
+			expect(winBody.clonedFrom).toEqual({
+				connectionId: macBody.connectionId,
+				name: "apollon-mac"
+			});
+			// Canvas Windows a la MÊME payload que Mac (cloné).
+			const winCanvas = await app.db
+				.select({ payload: schema.canvasState.payload })
+				.from(schema.canvasState)
+				.where(eq(schema.canvasState.connectionId, winBody.connectionId));
+			expect((winCanvas[0]?.payload as { positions?: unknown })?.positions).toEqual({
+				artist: { x: 100, y: 200 }
+			});
+		});
+
+		test("T4/3 : re-pair MÊME CLI (idempotent) → PAS de clonedFrom même si db_fingerprint match", async () => {
+			const { userId } = await createTestUser(
+				app,
+				"idem-fp@example.com",
+				"idemfp-idemfp-idemfp-idemf"
+			);
+			const dbFp = "pg:1111111111/idem-db";
+			const { pubkeyHex, sign } = makeCliKeypair();
+			await seedPairing(app, {
+				code: "DEMFP001",
+				cliPubkeyEd25519: pubkeyHex,
+				userId,
+				deviceName: "idem-mac",
+				approvedAt: new Date()
+			});
+			await app.inject({
+				method: "POST",
+				url: "/api/tunnels/authenticate",
+				headers: { "content-type": "application/json" },
+				payload: {
+					code: "DEMFP-001",
+					signature: sign("DEMFP001"),
+					dbFingerprint: dbFp
+				}
+			});
+			// 2e pair MÊME cli_pubkey → idempotent path (étape 1 dans upsert).
+			await seedPairing(app, {
+				code: "DEMFP002",
+				cliPubkeyEd25519: pubkeyHex,
+				userId,
+				deviceName: "idem-mac",
+				approvedAt: new Date()
+			});
+			const second = await app.inject({
+				method: "POST",
+				url: "/api/tunnels/authenticate",
+				headers: { "content-type": "application/json" },
+				payload: {
+					code: "DEMFP-002",
+					signature: sign("DEMFP002"),
+					dbFingerprint: dbFp
+				}
+			});
+			expect(second.statusCode).toBe(200);
+			const body = second.json() as { clonedFrom?: unknown };
+			// Match cli_fingerprint direct → path idempotent, PAS de clone.
+			expect(body.clonedFrom).toBeUndefined();
+		});
+
+		test("T4/1 : re-authenticate avec dbFingerprint sur connection existante → backfill", async () => {
+			const { userId } = await createTestUser(
+				app,
+				"fp-back@example.com",
+				"fpback-fpback-fpback-fpbac"
+			);
+			const { pubkeyHex, sign } = makeCliKeypair();
+			// 1er authenticate sans fingerprint → col NULL.
+			await seedPairing(app, {
+				code: "FPBAK001",
+				cliPubkeyEd25519: pubkeyHex,
+				userId,
+				deviceName: "fp-back-mac",
+				approvedAt: new Date()
+			});
+			const first = await app.inject({
+				method: "POST",
+				url: "/api/tunnels/authenticate",
+				headers: { "content-type": "application/json" },
+				payload: { code: "FPBAK-001", signature: sign("FPBAK001") }
+			});
+			expect(first.statusCode).toBe(200);
+			const firstBody = first.json() as { connectionId: string };
+
+			// 2e pairing avec MÊME pubkey (idempotent) + dbFingerprint fourni
+			// → backfill sur la row existante.
+			await seedPairing(app, {
+				code: "FPBAK002",
+				cliPubkeyEd25519: pubkeyHex,
+				userId,
+				deviceName: "fp-back-mac",
+				approvedAt: new Date()
+			});
+			const second = await app.inject({
+				method: "POST",
+				url: "/api/tunnels/authenticate",
+				headers: { "content-type": "application/json" },
+				payload: {
+					code: "FPBAK-002",
+					signature: sign("FPBAK002"),
+					dbFingerprint: "mongo:rs0/chinook"
+				}
+			});
+			expect(second.statusCode).toBe(200);
+			const secondBody = second.json() as { connectionId: string };
+			// Idempotent : même row réutilisée.
+			expect(secondBody.connectionId).toBe(firstBody.connectionId);
+			// Backfill effectué : fingerprint maintenant présent.
+			const conns = await app.db
+				.select({ dbFingerprint: schema.dbConnection.dbFingerprint })
+				.from(schema.dbConnection)
+				.where(eq(schema.dbConnection.id, firstBody.connectionId));
+			// biome-ignore lint/style/noNonNullAssertion: length checked
+			expect(conns[0]!.dbFingerprint).toBe("mongo:rs0/chinook");
+		});
+
 		test("re-pairing avec même pubkey → réutilise db_connection (idempotent C.6)", async () => {
 			const { userId } = await createTestUser(
 				app,
@@ -1066,5 +1322,157 @@ describe.skipIf(!DATABASE_URL)("/api/tunnels — device flow", () => {
 	// directe pour éviter l'oubli si le format change.
 	test("`formatPairingCode` produit toujours `XXXX-XXXX`", () => {
 		expect(formatPairingCode("ABCD1234")).toBe("ABCD-1234");
+	});
+
+	// ═══════════════════════════════════════════════════════════════
+	// POST /heartbeat — T4/1.5
+	// ═══════════════════════════════════════════════════════════════
+	describe("POST /heartbeat", () => {
+		async function pairAndGetToken(code: string, email: string, pw: string) {
+			const { userId } = await createTestUser(app, email, pw);
+			const { pubkeyHex, sign } = makeCliKeypair();
+			await seedPairing(app, {
+				code,
+				cliPubkeyEd25519: pubkeyHex,
+				userId,
+				deviceName: `hb-${email.split("@")[0]}`,
+				approvedAt: new Date()
+			});
+			const res = await app.inject({
+				method: "POST",
+				url: "/api/tunnels/authenticate",
+				headers: { "content-type": "application/json" },
+				payload: { code, signature: sign(code) }
+			});
+			expect(res.statusCode).toBe(200);
+			return res.json() as {
+				token: string;
+				tunnelId: string;
+				connectionId: string;
+			};
+		}
+
+		test("happy path — backfill dbFingerprint + dbSchemaChecksum sur connection existante", async () => {
+			const auth = await pairAndGetToken(
+				"HBEATFP1",
+				"hb-fp@example.com",
+				"hbfp-hbfp-hbfp-hbfp-hbfp"
+			);
+			const res = await app.inject({
+				method: "POST",
+				url: "/api/tunnels/heartbeat",
+				headers: {
+					"content-type": "application/json",
+					authorization: `Bearer ${auth.token}`
+				},
+				payload: {
+					dbFingerprint: "pg:7600431566186733602/apollon",
+					dbSchemaChecksum: "postgres:abc123def456"
+				}
+			});
+			expect(res.statusCode).toBe(200);
+			expect(res.json()).toEqual({
+				ok: true,
+				connectionId: auth.connectionId
+			});
+			const conn = await app.db
+				.select({
+					dbFingerprint: schema.dbConnection.dbFingerprint,
+					dbSchemaChecksum: schema.dbConnection.dbSchemaChecksum
+				})
+				.from(schema.dbConnection)
+				.where(eq(schema.dbConnection.id, auth.connectionId));
+			// biome-ignore lint/style/noNonNullAssertion: length checked
+			expect(conn[0]!.dbFingerprint).toBe("pg:7600431566186733602/apollon");
+			// biome-ignore lint/style/noNonNullAssertion: length checked
+			expect(conn[0]!.dbSchemaChecksum).toBe("postgres:abc123def456");
+		});
+
+		test("body vide → 200 (juste bump last_seen_at)", async () => {
+			const auth = await pairAndGetToken(
+				"HBEATBP1",
+				"hb-empty@example.com",
+				"hbempty-hbempty-hbempty-hb"
+			);
+			const res = await app.inject({
+				method: "POST",
+				url: "/api/tunnels/heartbeat",
+				headers: {
+					"content-type": "application/json",
+					authorization: `Bearer ${auth.token}`
+				},
+				payload: {}
+			});
+			expect(res.statusCode).toBe(200);
+			// Colonnes restent NULL (rien à backfill fourni).
+			const conn = await app.db
+				.select({
+					dbFingerprint: schema.dbConnection.dbFingerprint,
+					dbSchemaChecksum: schema.dbConnection.dbSchemaChecksum
+				})
+				.from(schema.dbConnection)
+				.where(eq(schema.dbConnection.id, auth.connectionId));
+			// biome-ignore lint/style/noNonNullAssertion: length checked
+			expect(conn[0]!.dbFingerprint).toBeNull();
+			// biome-ignore lint/style/noNonNullAssertion: length checked
+			expect(conn[0]!.dbSchemaChecksum).toBeNull();
+		});
+
+		test("Bearer manquant → 401", async () => {
+			const res = await app.inject({
+				method: "POST",
+				url: "/api/tunnels/heartbeat",
+				headers: { "content-type": "application/json" },
+				payload: { dbFingerprint: "pg:1/foo" }
+			});
+			expect(res.statusCode).toBe(401);
+		});
+
+		test("token bidon → 401", async () => {
+			const res = await app.inject({
+				method: "POST",
+				url: "/api/tunnels/heartbeat",
+				headers: {
+					"content-type": "application/json",
+					authorization: `Bearer tn_${"0".repeat(64)}`
+				},
+				payload: { dbFingerprint: "pg:1/foo" }
+			});
+			expect(res.statusCode).toBe(401);
+		});
+
+		test("2 heartbeats successifs → fingerprint updated si changé (DB restore)", async () => {
+			const auth = await pairAndGetToken(
+				"HBEATRP1",
+				"hb-upd@example.com",
+				"hbupd-hbupd-hbupd-hbupd-hb"
+			);
+			// 1er heartbeat.
+			await app.inject({
+				method: "POST",
+				url: "/api/tunnels/heartbeat",
+				headers: {
+					"content-type": "application/json",
+					authorization: `Bearer ${auth.token}`
+				},
+				payload: { dbFingerprint: "pg:1111111111/db-v1" }
+			});
+			// 2nd heartbeat avec fingerprint DIFFÉRENT (simule DB restore).
+			await app.inject({
+				method: "POST",
+				url: "/api/tunnels/heartbeat",
+				headers: {
+					"content-type": "application/json",
+					authorization: `Bearer ${auth.token}`
+				},
+				payload: { dbFingerprint: "pg:2222222222/db-v2" }
+			});
+			const conn = await app.db
+				.select({ dbFingerprint: schema.dbConnection.dbFingerprint })
+				.from(schema.dbConnection)
+				.where(eq(schema.dbConnection.id, auth.connectionId));
+			// biome-ignore lint/style/noNonNullAssertion: length checked
+			expect(conn[0]!.dbFingerprint).toBe("pg:2222222222/db-v2");
+		});
 	});
 });

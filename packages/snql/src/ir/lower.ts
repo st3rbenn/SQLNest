@@ -699,6 +699,15 @@ export function lowerMutation(
 		const allowedAliases = collectMutationAliases(statement, loweredJoins);
 		if (sourceColumns !== null) {
 			for (const a of statement.assignments) {
+				// v3.1 : check la col cible (LHS) contre le schema — `set unknown_col
+				// = "x"` passait silencieux jusqu'à runtime.
+				if (!sourceColumns.has(a.column)) {
+					const hint = closestColumnHint(a.column, sourceColumns);
+					throw new SnqlError(
+						`'${a.column}' n'est pas une colonne de '${statement.collection}'${hint}.`,
+						"lower_unknown_column"
+					);
+				}
 				checkExprPathsAgainstColumns(
 					a.value,
 					sourceColumns,
@@ -851,7 +860,20 @@ function checkExprPathsAgainstColumns(
 	}[] = [];
 	collectExprFieldsWithSpans(expr, referenced);
 	for (const { path, span } of referenced) {
-		if (path.length < 2) continue;
+		if (path.length === 1) {
+			// Ident nu (`col`) : doit être une col source. Détecte les typos type
+			// `remove from artist where bad_col = 1` qui passait silencieux jusqu'à
+			// runtime (PG remontait alors `column "bad_col" does not exist`, cryptique).
+			const col = path[0] ?? "";
+			if (sourceColumns.has(col)) continue;
+			if (allowedAliases.has(col)) continue;
+			const closest = closestColumnHint(col, sourceColumns);
+			throw new SnqlError(
+				`'${col}' n'est pas une colonne de '${collection}'${closest}.`,
+				"lower_unknown_column",
+				span
+			);
+		}
 		const head = path[0] ?? "";
 		if (sourceColumns.has(head)) continue;
 		if (allowedAliases.has(head)) continue;
@@ -866,6 +888,48 @@ function checkExprPathsAgainstColumns(
 			span
 		);
 	}
+}
+
+/**
+ * Suggère la col la plus proche via Levenshtein simple — évite une phrase
+ * vide et guide l'user vers le typo probable. Skip si aucune col n'est
+ * proche (distance > 2 sur tous les candidats).
+ */
+function closestColumnHint(
+	typed: string,
+	sourceColumns: ReadonlySet<string>
+): string {
+	let best: string | null = null;
+	let bestDist = 3;
+	for (const c of sourceColumns) {
+		const d = levenshtein(typed, c);
+		if (d < bestDist) {
+			bestDist = d;
+			best = c;
+		}
+	}
+	return best !== null ? ` — voulais-tu dire '${best}' ?` : "";
+}
+
+function levenshtein(a: string, b: string): number {
+	const m = a.length;
+	const n = b.length;
+	if (m === 0) return n;
+	if (n === 0) return m;
+	const dp: number[] = new Array(n + 1);
+	for (let j = 0; j <= n; j += 1) dp[j] = j;
+	for (let i = 1; i <= m; i += 1) {
+		let prev = dp[0]!;
+		dp[0] = i;
+		for (let j = 1; j <= n; j += 1) {
+			const tmp = dp[j]!;
+			dp[j] = a[i - 1] === b[j - 1]
+				? prev
+				: 1 + Math.min(prev, dp[j]!, dp[j - 1]!);
+			prev = tmp;
+		}
+	}
+	return dp[n]!;
 }
 
 /**
@@ -1461,6 +1525,19 @@ function lowerInsert(statement: InsertStatement, schema?: SchemaModel): Mutation
 
 	// Sprint T2/13 : on-conflict clause.
 	const sourceColumns = resolveSourceColumns(schema, statement.collection);
+	// v3.1 : check les keys du doc contre le schema — un typo `bad_col` remontait
+	// silencieux jusqu'à PG (`column "bad_col" does not exist`) et pas du tout côté
+	// Mongo (créait un doc avec un champ inconnu). Live diag remontera maintenant.
+	if (sourceColumns !== null) {
+		for (const col of columns) {
+			if (sourceColumns.has(col)) continue;
+			const hint = closestColumnHint(col, sourceColumns);
+			throw new SnqlError(
+				`'${col}' n'est pas une colonne de '${statement.collection}'${hint}.`,
+				"lower_unknown_column"
+			);
+		}
+	}
 	const onConflict = statement.onConflict !== undefined
 		? lowerOnConflict(statement.onConflict, columnSet, sourceColumns, statement.collection)
 		: undefined;
@@ -1841,7 +1918,13 @@ function checkColumnsAvailable(
 	if (stage.type === "sort") {
 		if (sourceColumns === null) return;
 		for (const key of stage.keys) {
-			const column = key.path[0] ?? "";
+			// Ident préfixé (path.length > 1, ex: `ar.name`) : le pick a projeté
+			// le dernier segment (`name`) comme col output — check contre ça.
+			// Sans ce fallback, un `sort ar.name` après `pick a.title, ar.name`
+			// refuse à tort car path[0]='ar' n'est pas une col de la source.
+			const column = key.path.length > 1
+				? key.path[key.path.length - 1] ?? ""
+				: key.path[0] ?? "";
 			if (!available.has(column) && !sourceColumns.has(column)) {
 				throw new SnqlError(
 					`La colonne '${column}' n'existe pas dans le pick précédent ni dans la source — vérifie l'orthographe ou ajoute-la au pick.`,
@@ -1878,7 +1961,12 @@ function checkColumnsAvailable(
 			return;
 	}
 	for (const path of referenced) {
-		const column = path[0] ?? "";
+		// Même règle qu'au sort : path préfixé (`ar.name`) → check contre le
+		// dernier segment (col output après pick). Une col nue conserve
+		// l'ancien comportement.
+		const column = path.length > 1
+			? path[path.length - 1] ?? ""
+			: path[0] ?? "";
 		if (!available.has(column)) {
 			throw new SnqlError(
 				`La colonne '${column}' a été retirée par un 'pick' précédent — placez 'pick' après cette étape.`,

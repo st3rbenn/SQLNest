@@ -7,7 +7,7 @@ import { resolveMongoConfig } from "./config";
 /**
  * Tests d'intégration : nécessitent un vrai MongoDB.
  * Lancer `pnpm db:up`, puis exporter
- * `SNQL_TEST_MONGO_URL=mongodb://sqlnest:sqlnest@localhost:27017/sqlnest_demo?authSource=admin`.
+ * `SNQL_TEST_MONGO_URL=mongodb://localhost:27017/sqlnest_demo?directConnection=true`.
  * Sans cette variable, tout le bloc est **sauté**.
  */
 const MONGO_URL = process.env.SNQL_TEST_MONGO_URL ?? "";

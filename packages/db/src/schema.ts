@@ -459,6 +459,15 @@ export const dbConnection = pgTable(
 		// rétro-compat : les vieilles db_connection sont backfillées au
 		// premier connect qui l'envoie.
 		dbFingerprint: text("db_fingerprint"),
+		// T4/2 : checksum de la STRUCTURE (schéma) — hash déterministe des
+		// cols/FKs/types. Change si migration (ADD COLUMN, etc.), stable si
+		// pas de diff. Complémentaire de dbFingerprint (identité INSTANCE) :
+		// même DB + schéma modifié = même fingerprint + checksum différent.
+		// Débloque : invalidation cache SchemaModel côté CLI/frontend,
+		// alerte "structure changée", diff des versions. Nullable pour
+		// rétro-compat + CLIs qui ne le remontent pas encore. Format :
+		// `<engine>:<hex>` — ex `pg:md5deadbeef...`, `mongo:sha256abc...`.
+		dbSchemaChecksum: text("db_schema_checksum"),
 		// Ex "postgres". Enum côté app, texte libre côté DB pour permettre
 		// l'ajout de Mongo (v1.1) sans migration.
 		engine: text("engine").notNull(),

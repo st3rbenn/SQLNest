@@ -247,15 +247,16 @@ describe("codegen PG — SqlTransaction steps", () => {
 // Planner : capability transaction
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe("planner — capability 'transaction' PG only", () => {
-	it("Mongo refuse transaction", () => {
+describe("planner — capability 'transaction'", () => {
+	// TxMongo : Mongo a la capability 'transaction' (via replica set côté serveur),
+	// donc la vérification passe — plus de refus au planner.
+	it("Mongo accepte transaction (RS required côté serveur)", () => {
 		const stmt = parse(tokenize("transaction { find users pick id }"));
 		if (stmt.operation !== "transaction") throw new Error();
 		const planned = lowerTransaction(stmt);
-		expectCode(
-			() => assertTransactionSupported(planned, MONGODB_CAPABILITIES),
-			"planner_transaction_unsupported"
-		);
+		expect(() =>
+			assertTransactionSupported(planned, MONGODB_CAPABILITIES)
+		).not.toThrow();
 	});
 
 	it("KV refuse transaction", () => {

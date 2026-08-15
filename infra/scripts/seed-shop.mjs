@@ -18,7 +18,7 @@ const PG_ADMIN_URL =
 	"postgres://sqlnest:sqlnest@localhost:5433/postgres";
 const MONGO_URL =
 	process.env.SEED_MONGO_URL ??
-	"mongodb://sqlnest:sqlnest@localhost:27017/?authSource=admin";
+	"mongodb://localhost:27017/?directConnection=true";
 const DB = "sqlnest_shop";
 
 // --- PRNG déterministe (reproductible) ---

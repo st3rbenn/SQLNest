@@ -74,12 +74,17 @@ services:
       timeout: 3s
       retries: 15
 
+  # Mongo dev : replica set single-node — requis pour les TRANSACTIONS
+  # (mongod standalone ne les supporte pas). Init du RS via 00-init-rs.js dans
+  # /docker-entrypoint-initdb.d, avant les seeds de données. Auth désactivée en
+  # local (dev only) — évite le keyFile ceremony du RS. Les clients doivent
+  # se connecter avec `?directConnection=true` pour cibler ce membre unique
+  # sans découverte de topologie.
   mongo:
     image: mongo:7
     container_name: sqlnest-mongo
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
     environment:
-      MONGO_INITDB_ROOT_USERNAME: sqlnest
-      MONGO_INITDB_ROOT_PASSWORD: sqlnest
       MONGO_INITDB_DATABASE: sqlnest_demo
     ports:
       - "27017:27017"
@@ -87,10 +92,10 @@ services:
       - mongodata:/data/db
       - ./mongo/seed:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      test: ["CMD", "mongosh", "--quiet", "--eval", "rs.status().ok || rs.initiate({_id:'rs0',members:[{_id:0,host:'localhost:27017'}]}).ok"]
       interval: 3s
-      timeout: 3s
-      retries: 15
+      timeout: 5s
+      retries: 30
 
 volumes:
   pgdata:

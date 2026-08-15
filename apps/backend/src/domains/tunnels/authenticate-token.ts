@@ -51,6 +51,11 @@ export type AuthenticateTokenResult =
 			readonly tunnelId: string;
 			readonly connectionId: string;
 			readonly expiresAt: Date;
+			/** T4/3 : voir authenticatePairing.clonedFrom. */
+			readonly clonedFrom?: {
+				readonly connectionId: string;
+				readonly name: string;
+			};
 	  }
 	| {
 			readonly ok: false;
@@ -63,7 +68,8 @@ export async function authenticateTunnelWithToken(
 	cliPubkeyEd25519: string,
 	deviceName: string,
 	cliConnectionName: string | null = null,
-	nowMs: number = Date.now()
+	nowMs: number = Date.now(),
+	dbFingerprint: string | null = null
 ): Promise<AuthenticateTokenResult> {
 	// Étape 1 — valider le Bearer et bumper last_used_at.
 	const auth = await authenticateBearer(db, clearBearerToken, nowMs);
@@ -92,7 +98,9 @@ export async function authenticateTunnelWithToken(
 			cliPubkey: cliPubkeyEd25519,
 			cliConnectionName,
 			name: deviceName,
-			engine: DEFAULT_ENGINE
+			engine: DEFAULT_ENGINE,
+			// T4/1 Step 6 — voir authenticatePairing pour la sémantique.
+			dbFingerprint
 		});
 		if (!upsert.ok) {
 			return { ok: false as const, reason: upsert.reason };
@@ -122,7 +130,10 @@ export async function authenticateTunnelWithToken(
 			token,
 			tunnelId: sess.id,
 			connectionId: conn.id,
-			expiresAt
+			expiresAt,
+			...(upsert.clonedFrom !== undefined
+				? { clonedFrom: upsert.clonedFrom }
+				: {})
 		};
 	});
 }

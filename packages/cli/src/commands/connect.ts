@@ -51,6 +51,7 @@ import {
 	generateSalt,
 	signMessage
 } from "../crypto";
+import { computeTunnelFingerprint } from "../engine";
 import { openBrowser } from "../open-browser";
 
 /** Regex hissée top-level (règle Biome `useTopLevelRegex`). */
@@ -89,6 +90,17 @@ export interface ConnectResult {
 	 *  `session_token` existant dans `config.tunnels[]` (skip du device
 	 *  flow). `false` si device flow interactif complet a été effectué. */
 	readonly resumed: boolean;
+	/**
+	 * T4/3 : cross-device auto — le backend a détecté que la DB visée était
+	 * déjà pair-ée depuis un autre CLI (même db_fingerprint dans la team)
+	 * et a cloné son canvas vers cette nouvelle connection. Le wrapper CLI
+	 * peut afficher "✓ Canvas repris depuis « <name> »" pour clarifier.
+	 * Absent quand pair vierge OU idempotent.
+	 */
+	readonly clonedFrom?: {
+		readonly connectionId: string;
+		readonly name: string;
+	};
 }
 
 /** Info affichable côté user à la 1re étape. */
@@ -211,9 +223,29 @@ export async function connect(opts: ConnectOptions): Promise<ConnectResult> {
 	}
 
 	// ─── 5. Sign + authenticate ───────────────────────────────────────
+	// T4/1 Step 6 : calcule le fingerprint de l'INSTANCE DB via
+	// `computeTunnelFingerprint`. Best-effort — si la DSN n'est pas
+	// configurée ou que le server ne répond pas, on continue sans (le
+	// backend backfill au prochain connect). L'authenticate reste
+	// fonctionnel même sans fingerprint (rétro-compat CLI legacy).
+	const dbFingerprint = opts.cliConnectionName
+		? await computeTunnelFingerprint(opts.cliConnectionName)
+		: null;
+	if (process.env.NODE_ENV === "development") {
+		// Trace dev-only : facilite le debug du flow T4/1 (sans polluer la
+		// prod). Format compact, aucune donnée sensible (fingerprint = hash
+		// dérivé de system_identifier PG / replSet Mongo).
+		process.stderr.write(
+			`[sqlnest dev] cliConnectionName=${JSON.stringify(opts.cliConnectionName)} dbFingerprint=${JSON.stringify(dbFingerprint)}\n`
+		);
+	}
 	const canonical = pairing.code.replace("-", "");
 	const signature = signMessage(canonical, privateKeyHex);
-	const auth = await api.authenticatePairing(pairing.code, signature);
+	const auth = await api.authenticatePairing(
+		pairing.code,
+		signature,
+		dbFingerprint
+	);
 
 	// ─── 6. Persist tunnel entry dans config ──────────────────────────
 	// Le `deviceLabel` sert d'affichage dans la config locale + la config
@@ -248,7 +280,8 @@ export async function connect(opts: ConnectOptions): Promise<ConnectResult> {
 		sessionToken: auth.token,
 		expiresAt: new Date(auth.expiresAt),
 		connectionName: localConnectionName,
-		resumed: false
+		resumed: false,
+		...(auth.clonedFrom !== undefined ? { clonedFrom: auth.clonedFrom } : {})
 	};
 }
 

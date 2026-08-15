@@ -19,7 +19,19 @@
  * en mémoire, provenance CLI). Zero surface d'attaque.
  */
 
-import { compile, SnqlError, type SchemaModel } from "@sqlnest/snql";
+import {
+	capabilitiesFor,
+	lower,
+	lowerIntrospect,
+	lowerLet,
+	lowerMutation,
+	lowerRaw,
+	lowerTransaction,
+	parse,
+	SnqlError,
+	tokenize,
+	type SchemaModel
+} from "@sqlnest/snql";
 import { useEffect, useState } from "react";
 import type { LiveDiagnostic } from "./errorMarkers";
 import type { SerializedSpan } from "./useRunQuery";
@@ -46,7 +58,7 @@ export function useLiveDiagnostics(
 		}
 		const handle = setTimeout(() => {
 			try {
-				compile(source, { engine, schema });
+				validateSnql(source, engine, schema);
 				setDiag(null); // valide
 			} catch (err) {
 				if (err instanceof SnqlError && err.span !== undefined) {
@@ -68,6 +80,54 @@ export function useLiveDiagnostics(
 	}, [source, engine, schema]);
 
 	return diag;
+}
+
+/**
+ * Valide un statement SNQL sans produire de native — dispatch selon operation.
+ * `compile()` était read-only (throw sur mutation) : le live diag était donc
+ * SILENCIEUX sur add/update/remove/upsert/transaction, exactement les cas les
+ * plus enclins à des typos (keys de doc, cols de where). Ici on rejoue le
+ * bon lower pour chaque type — les erreurs typées SNQL (span porté) remontent
+ * telles quelles et déclenchent la squiggly + tooltip.
+ */
+function validateSnql(
+	source: string,
+	engine: string,
+	schema: SchemaModel | undefined
+): void {
+	const statement = parse(tokenize(source));
+	switch (statement.operation) {
+		case "select":
+			lower(statement, schema);
+			return;
+		case "insert":
+		case "update":
+		case "delete":
+			lowerMutation(statement, schema);
+			return;
+		case "transaction":
+			lowerTransaction(statement, schema);
+			return;
+		case "introspect":
+			lowerIntrospect(statement, schema);
+			return;
+		case "raw":
+			lowerRaw(statement);
+			return;
+		case "let":
+			lowerLet(statement, schema);
+			return;
+		case "savepoint":
+			// Standalone `savepoint` (hors transaction) n'est pas exécutable —
+			// mais le parser l'accepte comme statement. Rien à valider ici.
+			return;
+	}
+	// Défense : capability check symbolique pour un engine inconnu (au cas où
+	// on route sur un mauvais moteur — refuse au niveau live diag avec un
+	// message actionable).
+	if (capabilitiesFor(engine) === undefined) {
+		throw new SnqlError(`Moteur inconnu '${engine}'`, "unknown_engine");
+	}
 }
 
 /**

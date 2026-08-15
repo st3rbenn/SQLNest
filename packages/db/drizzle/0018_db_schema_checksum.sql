@@ -1,0 +1,1 @@
+ALTER TABLE "db_connection" ADD COLUMN "db_schema_checksum" text;

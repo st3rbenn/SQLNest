@@ -1,0 +1,2 @@
+ALTER TABLE "db_connection" ADD COLUMN "db_fingerprint" text;--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "db_connection_team_db_fingerprint_idx" ON "db_connection" USING btree ("team_id","db_fingerprint");

@@ -7,7 +7,7 @@ import type {
 } from "@sqlnest/snql";
 import { createHash } from "node:crypto";
 import { isSqlDecimal, MONGODB_CAPABILITIES } from "@sqlnest/snql";
-import type { Db, Document } from "mongodb";
+import type { ClientSession, Db, Document } from "mongodb";
 import { Decimal128, Long, MongoClient, ObjectId } from "mongodb";
 import type {
 	Connection,
@@ -319,6 +319,9 @@ class MongoConnection implements Connection {
 		if (query.kind === "mongo-raw") {
 			return this.#executeRaw(query);
 		}
+		if (query.kind === "mongo-transaction") {
+			return this.#executeTransaction(query);
+		}
 		if (query.kind !== "mongo") {
 			throw new EngineExecutionError(
 				`Adapter MongoDB : requête native '${query.kind}' non supportée (pipeline attendu)`
@@ -391,6 +394,30 @@ class MongoConnection implements Connection {
 					: (hydrateBson(query.update, false) as Document);
 				const result = await collection.updateMany(filter, update);
 				return { columns: [], rows: [], rowCount: result.matchedCount };
+			}
+			if (query.op === "upsert") {
+				// Sprint v3 Mongo : bulkWrite d'updateOne+upsert (atomicité côté
+				// serveur par bulk, pas par transaction). `rowCount` = docs matched
+				// (edit) + docs upserted (insert), analogue au RETURNING PG mais
+				// sans les docs (l'user avait un upsert, pas un fetch).
+				const bulkOps = query.operations.map((op) => {
+					const filter = hydrateBson(op.filter, true) as Document;
+					const update: Document = {};
+					if (op.set !== undefined) {
+						update["$set"] = hydrateBson(op.set, false) as Document;
+					}
+					update["$setOnInsert"] = hydrateBson(
+						op.setOnInsert,
+						true
+					) as Document;
+					return { updateOne: { filter, update, upsert: true } };
+				});
+				const result = await collection.bulkWrite(bulkOps);
+				return {
+					columns: [],
+					rows: [],
+					rowCount: result.matchedCount + result.upsertedCount
+				};
 			}
 			const filter = hydrateBson(query.filter, true) as Document;
 			const result = await collection.deleteMany(filter);
@@ -542,6 +569,133 @@ class MongoConnection implements Connection {
 		}
 	}
 
+	/**
+	 * Sprint TxMongo : bloc `transaction { … }` sur Mongo (requiert un replica
+	 * set côté serveur). Une session unique porte startTransaction → commit ou
+	 * abort. Chaque step reçoit `{ session }` — sans ça, le driver exécute
+	 * la commande hors transaction et le rollback ne réagira pas dessus.
+	 *
+	 * Renvoie le dernier ResultSet du body (parité PG). Un body vide renvoie
+	 * un ResultSet vide — pas d'appel Mongo. Sur erreur du body : abort
+	 * best-effort puis re-throw ; l'erreur d'origine prime toujours sur une
+	 * éventuelle erreur d'abort.
+	 *
+	 * Mongo lève `TransactionNotSupported` (code 20) sur un mongod standalone —
+	 * on laisse remonter, avec le hint que le serveur doit être en RS.
+	 */
+	async #executeTransaction(
+		query: Extract<NativeQuery, { kind: "mongo-transaction" }>
+	): Promise<ResultSet> {
+		const client = this.#requireClient();
+		const db = this.#requireDb();
+		const session = client.startSession();
+		let lastResult: ResultSet = { columns: [], rows: [], rowCount: 0 };
+		const txOptions = mongoTransactionOptions(query.isolation);
+		try {
+			session.startTransaction(txOptions);
+			for (const step of query.steps) {
+				if (step.kind === "query") {
+					const pipeline = hydrateBson(
+						[...step.query.pipeline],
+						true
+					) as Document[];
+					const docs = await db
+						.collection(step.query.collection)
+						.aggregate(pipeline, { session })
+						.toArray();
+					const rows = docs.map((doc) => normalizeBson(doc) as Row);
+					lastResult = {
+						columns: columnsOf(rows),
+						rows,
+						rowCount: rows.length
+					};
+				} else {
+					lastResult = await this.#executeWriteInSession(step.write, session);
+				}
+			}
+			await session.commitTransaction();
+			return lastResult;
+		} catch (cause) {
+			try {
+				await session.abortTransaction();
+			} catch {
+				// abort peut échouer si la tx est déjà avortée par le serveur (ex.
+				// WriteConflict qui auto-abort) — on avale, l'erreur d'origine porte
+				// l'info utile.
+			}
+			throw new EngineExecutionError(
+				`Transaction MongoDB échouée — ${describeMongoExecutionError(cause)}`,
+				{ cause }
+			);
+		} finally {
+			await session.endSession();
+		}
+	}
+
+	/**
+	 * Sprint TxMongo : variante scopée session de #executeWrite. Duplique
+	 * volontairement la logique de dispatch (insert/update/delete) pour passer
+	 * `{ session }` au driver — impossible à factoriser proprement sans
+	 * complexifier la signature publique. L'atomicité de la transaction rend
+	 * `writeErrorMessage` moins pertinent (partial insert impossible dans une
+	 * tx qui rollback), mais on garde le format pour homogénéité.
+	 */
+	async #executeWriteInSession(
+		query: Extract<NativeQuery, { kind: "mongo-write" }>,
+		session: ClientSession
+	): Promise<ResultSet> {
+		const collection = this.#requireDb().collection(query.collection);
+		try {
+			if (query.op === "insert") {
+				const documents = query.documents.map(
+					(doc) => hydrateBson(doc, true) as Document
+				);
+				const result = await collection.insertMany(documents, { session });
+				const rows = documents.map((doc) => normalizeBson(doc) as Row);
+				return {
+					columns: columnsOf(rows),
+					rows,
+					rowCount: result.insertedCount
+				};
+			}
+			if (query.op === "update") {
+				const filter = hydrateBson(query.filter, true) as Document;
+				const update = Array.isArray(query.update)
+					? (hydrateBson([...query.update], false) as Document[])
+					: (hydrateBson(query.update, false) as Document);
+				const result = await collection.updateMany(filter, update, { session });
+				return { columns: [], rows: [], rowCount: result.matchedCount };
+			}
+			if (query.op === "upsert") {
+				const bulkOps = query.operations.map((op) => {
+					const filter = hydrateBson(op.filter, true) as Document;
+					const update: Document = {};
+					if (op.set !== undefined) {
+						update["$set"] = hydrateBson(op.set, false) as Document;
+					}
+					update["$setOnInsert"] = hydrateBson(
+						op.setOnInsert,
+						true
+					) as Document;
+					return { updateOne: { filter, update, upsert: true } };
+				});
+				const result = await collection.bulkWrite(bulkOps, { session });
+				return {
+					columns: [],
+					rows: [],
+					rowCount: result.matchedCount + result.upsertedCount
+				};
+			}
+			const filter = hydrateBson(query.filter, true) as Document;
+			const result = await collection.deleteMany(filter, { session });
+			return { columns: [], rows: [], rowCount: result.deletedCount };
+		} catch (cause) {
+			throw new EngineExecutionError(writeErrorMessage(query.op, cause), {
+				cause
+			});
+		}
+	}
+
 	async close(): Promise<void> {
 		const client = this.#client;
 		if (client === undefined) {
@@ -564,6 +718,29 @@ class MongoConnection implements Connection {
 		}
 		return this.#client;
 	}
+}
+
+/**
+ * Sprint TxMongo : mapping IsolationLevel SNQL → options de transaction Mongo
+ * (`readConcern` + `writeConcern`). Absence d'isolation → défauts Mongo
+ * (snapshot read + local write) — l'user n'a rien demandé, on ne surspécifie
+ * pas. IsolationLevel SNQL a 3 valeurs (parser-enum fermé) : pas de default
+ * case, la switch est exhaustive.
+ */
+function mongoTransactionOptions(
+	iso: import("@sqlnest/snql").IsolationLevel | undefined
+): {
+	readConcern?: { level: "snapshot" | "majority" };
+	writeConcern?: { w: "majority" };
+} {
+	if (iso === undefined) return {};
+	if (iso === "serializable" || iso === "repeatable_read") {
+		return {
+			readConcern: { level: "snapshot" },
+			writeConcern: { w: "majority" }
+		};
+	}
+	return { readConcern: { level: "majority" }, writeConcern: { w: "majority" } };
 }
 
 /** Adapter MongoDB (couche connexion). Voir [[Engine Adapter Interface]]. */

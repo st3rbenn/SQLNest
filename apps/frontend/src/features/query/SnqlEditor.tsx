@@ -280,7 +280,16 @@ export const SnqlEditor = forwardRef<SnqlEditorHandle, SnqlEditorProps>(
 							// autocomplete de valeur. Détection : cette transaction
 							// contient une insertion de `""` (2 chars) ET le curseur
 							// est pile au milieu.
-							if (didAutoPairQuote(update)) {
+							//
+							// Guard IME (bug user 2026-08 : après delete, les
+							// caractères se répétaient) : startCompletion pendant
+							// une composition IME peut verrouiller le state
+							// composition du browser. On skip si compositionend
+							// n'a pas encore été fire.
+							if (
+								didAutoPairQuote(update) &&
+								!update.view.composing
+							) {
 								startCompletion(update.view);
 							}
 						}

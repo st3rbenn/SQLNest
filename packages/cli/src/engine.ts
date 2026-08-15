@@ -15,6 +15,7 @@
  * simplement exécuté sur la machine du user avec ses creds.
  */
 
+import { createHash } from "node:crypto";
 import {
 	type Connection,
 	connect as engineConnect,
@@ -102,6 +103,102 @@ export async function introspectTunnel(
 	} finally {
 		await conn.close();
 	}
+}
+
+/**
+ * T4/1 Step 6 : calcule le fingerprint de l'INSTANCE DB visée par cette DSN
+ * locale. Ouvre une connexion éphémère, appelle `Connection.fingerprint()`,
+ * la referme. Best-effort : retourne `null` si la DSN n'est pas configurée
+ * ou que le serveur ne répond pas — l'authenticate continue sans fingerprint
+ * (le backend backfill au prochain succès).
+ *
+ * Rôle du fingerprint : c'est l'identité stable et cross-machine de la DB
+ * (system_identifier PG / replSet Mongo — voir adapters). Deux CLI configurés
+ * différemment (DSN via VPN vs LAN, user différent) qui pointent sur la MÊME
+ * DB produisent le MÊME fingerprint → le backend peut re-associer un canvas
+ * existant à un pairing depuis un autre device.
+ */
+export async function computeTunnelFingerprint(
+	tunnelName: string,
+	env: NodeJS.ProcessEnv = process.env
+): Promise<string | null> {
+	try {
+		const conn = await openConnectionForTunnel(tunnelName, env);
+		try {
+			return await conn.fingerprint();
+		} finally {
+			await conn.close();
+		}
+	} catch {
+		// DSN absente / server injoignable / auth refusée : silencieux — le
+		// backend accepte l'authenticate sans fingerprint et fera un backfill
+		// au prochain connect qui réussit.
+		return null;
+	}
+}
+
+/**
+ * T4/2 : calcule le CHECKSUM de la STRUCTURE (schéma) de la DB visée.
+ * Complémentaire du fingerprint (identité INSTANCE) : deux DBs avec le
+ * même schéma mais différentes (staging vs prod) auront le même checksum
+ * mais des fingerprints différents. Une même DB après migration
+ * (ADD COLUMN, etc.) garde son fingerprint mais change de checksum.
+ *
+ * Approche v1 : réutilise `conn.introspect()` (déjà appelé au boot du
+ * serve loop pour le SchemaModel) et hash la représentation canonique
+ * (collections triées, fields triés par nom, format `name:type:nullable`).
+ * Best-effort : retourne `null` sur erreur — le backend backfill au
+ * prochain heartbeat qui réussit.
+ *
+ * Format : `<engine>:<sha256[..32]>` — ex `postgres:0f2a...`, `mongodb:9b1c...`.
+ */
+export async function computeTunnelSchemaChecksum(
+	tunnelName: string,
+	env: NodeJS.ProcessEnv = process.env
+): Promise<string | null> {
+	try {
+		const conn = await openConnectionForTunnel(tunnelName, env);
+		try {
+			const schema = await conn.introspect();
+			return checksumOfSchema(schema);
+		} finally {
+			await conn.close();
+		}
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Sérialisation canonique du SchemaModel + hash SHA256 tronqué à 32 hex.
+ * L'ordre déterministe est CRUCIAL : deux appels sur la même DB doivent
+ * produire le même hash. On trie collections + fields par nom + relations
+ * par key (from-side lex).
+ */
+function checksumOfSchema(schema: SchemaModel): string {
+	const collections = schema.collections
+		.slice()
+		.sort((a, b) => a.name.localeCompare(b.name))
+		.map((c) => ({
+			name: c.name,
+			pk: (c.primaryKey ?? []).slice().sort(),
+			fields: c.fields
+				.slice()
+				.sort((a, b) => a.name.localeCompare(b.name))
+				.map(
+					(f) => `${f.name}:${f.type}:${f.nullable === true ? "1" : "0"}`
+				)
+		}));
+	const relations = schema.relations
+		.slice()
+		.map(
+			(r) =>
+				`${r.kind}:${r.from.collection}(${r.from.fields.join(",")})->${r.to.collection}(${r.to.fields.join(",")})`
+		)
+		.sort();
+	const canonical = JSON.stringify({ collections, relations });
+	const hex = createHash("sha256").update(canonical).digest("hex").slice(0, 32);
+	return `${schema.engine}:${hex}`;
 }
 
 /**

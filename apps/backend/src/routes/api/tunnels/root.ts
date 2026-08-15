@@ -6,6 +6,7 @@ import {
 	requireUser
 } from "../../../domains/auth/require";
 import { authenticateTunnelWithToken } from "../../../domains/tunnels/authenticate-token";
+import { heartbeatTunnel } from "../../../domains/tunnels/heartbeat";
 import { approvePairing } from "../../../domains/tunnels/pairing/approve";
 import { authenticatePairing } from "../../../domains/tunnels/pairing/authenticate";
 import { createPairing } from "../../../domains/tunnels/pairing/create";
@@ -19,6 +20,8 @@ import {
 	AuthenticateTokenResponse,
 	CreatePairingBody,
 	CreatePairingResponse,
+	HeartbeatBody,
+	HeartbeatResponse,
 	PairingCodeParams,
 	StatusPairingResponse,
 	TunnelsErrorResponse
@@ -107,6 +110,15 @@ const RATE_LIMIT_AUTHENTICATE = {
  * limite l'impact d'un DoS sur la DB (chaque req fait 2 INSERTs). */
 const RATE_LIMIT_AUTHENTICATE_TOKEN = {
 	max: 10,
+	timeWindow: "1 minute"
+} as const;
+
+/** Rate-limit sur /heartbeat — cap 60/min/IP. Le CLI l'appelle au boot
+ * + périodiquement (fréquence à déf côté CLI, ordre de la minute). Le
+ * token clair (256 bits) rend le brute-force impossible ; ce cap protège
+ * juste contre un CLI mal configuré qui spammerait. */
+const RATE_LIMIT_HEARTBEAT = {
+	max: 60,
 	timeWindow: "1 minute"
 } as const;
 
@@ -278,7 +290,9 @@ export default function tunnelsRoute(fastify: FastifyInstance) {
 			const result = await authenticatePairing(
 				fastify.db,
 				canonical,
-				request.body.signature
+				request.body.signature,
+				undefined,
+				request.body.dbFingerprint ?? null
 			);
 
 			if (result.ok) {
@@ -286,7 +300,10 @@ export default function tunnelsRoute(fastify: FastifyInstance) {
 					token: result.token,
 					tunnelId: result.tunnelId,
 					connectionId: result.connectionId,
-					expiresAt: result.expiresAt.toISOString()
+					expiresAt: result.expiresAt.toISOString(),
+					...(result.clonedFrom !== undefined
+						? { clonedFrom: result.clonedFrom }
+						: {})
 				};
 			}
 
@@ -343,7 +360,9 @@ export default function tunnelsRoute(fastify: FastifyInstance) {
 				clearBearer,
 				request.body.cliPubkeyEd25519,
 				request.body.deviceName,
-				request.body.cliConnectionName ?? null
+				request.body.cliConnectionName ?? null,
+				undefined,
+				request.body.dbFingerprint ?? null
 			);
 
 			if (result.ok) {
@@ -351,7 +370,10 @@ export default function tunnelsRoute(fastify: FastifyInstance) {
 					token: result.token,
 					tunnelId: result.tunnelId,
 					connectionId: result.connectionId,
-					expiresAt: result.expiresAt.toISOString()
+					expiresAt: result.expiresAt.toISOString(),
+					...(result.clonedFrom !== undefined
+						? { clonedFrom: result.clonedFrom }
+						: {})
 				};
 			}
 
@@ -366,6 +388,52 @@ export default function tunnelsRoute(fastify: FastifyInstance) {
 							"Une connexion avec ce nom existe déjà. Choisis un autre nom ou révoque la connexion existante."
 					});
 			}
+		}
+	);
+
+	// ─── POST /heartbeat (backfill fingerprint / checksum sur resumed) ─
+	// T4/1.5 : résout le trou où findResumableTunnel skip authenticate.
+	// Le CLI POST ici au boot du serve loop (et périodiquement) avec le
+	// token du tunnel + fingerprint DB + checksum schéma.
+	instance.post(
+		"/heartbeat",
+		{
+			config: { rateLimit: RATE_LIMIT_HEARTBEAT },
+			schema: {
+				body: HeartbeatBody,
+				response: {
+					200: HeartbeatResponse,
+					401: TunnelsErrorResponse
+				}
+			}
+		},
+		async (request, reply) => {
+			// Le heartbeat utilise un token de session tunnel (`tn_...`), pas
+			// un API token (`sn_...`) — parseBearerHeader accepte uniquement
+			// le préfixe sn_, on parse à la main ici. Format attendu :
+			// `Authorization: Bearer tn_<hex>`.
+			const authHeader = request.headers.authorization;
+			const clearBearer =
+				typeof authHeader === "string" &&
+				authHeader.toLowerCase().startsWith("bearer ")
+					? authHeader.slice("bearer ".length).trim()
+					: null;
+			if (clearBearer === null || !clearBearer.startsWith("tn_")) {
+				return reply.code(401).send({
+					message: "Header `Authorization: Bearer tn_...` requis"
+				});
+			}
+			const result = await heartbeatTunnel(
+				fastify.db,
+				clearBearer,
+				request.body.dbFingerprint ?? null,
+				request.body.dbSchemaChecksum ?? null
+			);
+			if (result.ok) {
+				return { ok: true as const, connectionId: result.connectionId };
+			}
+			// invalid_token — même message générique que les autres routes.
+			return reply.code(401).send({ message: "Authentification refusée" });
 		}
 	);
 }

@@ -87,6 +87,21 @@ export type MongoWriteQuery = {
 			readonly op: "delete";
 			readonly filter: Record<string, unknown>;
 	  }
+	| {
+			/**
+			 * Sprint v3 Mongo : upsert = `add {…} into t on conflict (k) [ignore |
+			 * edit set …]`. Une entrée par row du batch — chacune porte son propre
+			 * filter (les valeurs des key cols) + $set (si action=edit) +
+			 * $setOnInsert (les autres cols de la row). L'adapter émet bulkWrite
+			 * pour atomicité serveur-side.
+			 */
+			readonly op: "upsert";
+			readonly operations: readonly {
+				readonly filter: Record<string, unknown>;
+				readonly set?: Record<string, unknown>;
+				readonly setOnInsert: Record<string, unknown>;
+			}[];
+	  }
 );
 
 /**
@@ -121,6 +136,24 @@ export interface MongoIntrospectQuery {
 }
 
 /**
+ * Sprint TxMongo : bloc transaction Mongo. Séquence linéaire de steps
+ * pré-rendus — pas de savepoints (Mongo ne les supporte pas ; refusés au
+ * codegen). L'isolation SNQL est mappée par l'adapter en `readConcern` +
+ * `writeConcern` sur la session (`serializable` → snapshot+majority,
+ * `read_committed` → majority, `read_uncommitted` → refusé au codegen).
+ */
+export type MongoTransactionStep =
+	| { readonly kind: "query"; readonly query: MongoQuery }
+	| { readonly kind: "write"; readonly write: MongoWriteQuery };
+
+export interface MongoTransaction {
+	readonly engine: string;
+	readonly kind: "mongo-transaction";
+	readonly isolation?: IsolationLevel;
+	readonly steps: readonly MongoTransactionStep[];
+}
+
+/**
  * Sprint T3/4 : native shape pour un `raw {...}` Mongo — command native
  * exécutée via db.runCommand(). Le document est déjà évalué en clé/valeur
  * scalaires par le codegen (Expr.object → Record<string, unknown>).
@@ -147,6 +180,7 @@ export type NativeQuery =
 	| MongoQuery
 	| MongoWriteQuery
 	| SqlTransaction
+	| MongoTransaction
 	| MongoIntrospectQuery
 	| MongoRawQuery;
 
@@ -157,8 +191,11 @@ export interface Mapper {
 	map(plan: LogicalPlan): NativeQuery;
 	/** Écriture : Mutation Plan → requête native. */
 	mapMutation(plan: MutationPlan): NativeQuery;
-	/** Sprint T2/15 : transaction PG-only. Absent = engine sans support. */
-	mapTransaction?(plan: TransactionPlan): SqlTransaction;
+	/**
+	 * Sprint T2/15 : transaction PG natif ; sprint TxMongo : Mongo via RS.
+	 * Absent = engine sans support.
+	 */
+	mapTransaction?(plan: TransactionPlan): SqlTransaction | MongoTransaction;
 	/** Sprint T3/1 : introspection (list/describe/etc.). PG et Mongo v1. */
 	mapIntrospect?(plan: IntrospectPlan, ctx?: MapperContext): NativeQuery;
 	/** Sprint T3/4 : escape hatch raw (SQL brut / Mongo command). */

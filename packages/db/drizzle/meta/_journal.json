@@ -120,6 +120,20 @@
       "when": 1786151170795,
       "tag": "0016_team_is_personal",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1786810270646,
+      "tag": "0017_db_fingerprint",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1786821135661,
+      "tag": "0018_db_schema_checksum",
+      "breakpoints": true
     }
   ]
 }

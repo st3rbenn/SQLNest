@@ -70,7 +70,13 @@ const FRONTEND_URL =
 	process.env.NODE_ENV === "development"
 		? "http://localhost:3000"
 		: "https://dev.sqlnest.io";
-const CLI_VERSION = "0.0.1"; // TODO Bloc 10 : lire depuis package.json au build.
+// Injecté par esbuild au build via `--define:__SQLNEST_CLI_VERSION__=<version>`
+// (script `build` dans packages/cli/package.json). En dev via tsx, le fallback
+// (`__SQLNEST_CLI_VERSION__` = undefined) → on lit dynamiquement depuis le
+// package.json à côté du fichier compilé. Aucun hardcoded qui dérive.
+declare const __SQLNEST_CLI_VERSION__: string | undefined;
+const CLI_VERSION: string =
+	typeof __SQLNEST_CLI_VERSION__ === "string" ? __SQLNEST_CLI_VERSION__ : "dev";
 
 export interface CliIO {
 	readonly stdout?: (line: string) => void;
@@ -239,6 +245,13 @@ async function runConnect(args: string[], ctx: RunContext): Promise<number> {
 				ctx.stdout(
 					`✓ Pairing OK : « ${result.connectionName} » — ${result.tunnelId}`
 				);
+				// T4/3 : signale à l'user que son canvas apparaîtra pré-rempli
+				// (cloné depuis une db_connection existante sur la même DB).
+				if (result.clonedFrom) {
+					ctx.stdout(
+						`  ↪ Canvas repris depuis « ${result.clonedFrom.name} »`
+					);
+				}
 			}
 			sessionId = result.tunnelId;
 			token = result.sessionToken;

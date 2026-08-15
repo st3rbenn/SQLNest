@@ -11,10 +11,20 @@ import type {
 	PlanProjectField,
 	PlanSortKey,
 	RawPlan,
-	SqlValue
+	SqlValue,
+	TransactionPlan,
+	TransactionPlanItem
 } from "../ir/plan";
 import { isSqlDecimal, linearize } from "../ir/plan";
-import type { Mapper, MongoStage, NativeQuery } from "./mapper";
+import type {
+	Mapper,
+	MongoQuery,
+	MongoStage,
+	MongoTransaction,
+	MongoTransactionStep,
+	MongoWriteQuery,
+	NativeQuery
+} from "./mapper";
 
 /**
  * Mapper MongoDB — pur, génère une aggregation pipeline.
@@ -60,6 +70,15 @@ export const mongoMapper: Mapper = {
 		} as const;
 		switch (plan.op) {
 			case "insert":
+				// Sprint v3 Mongo : upsert = insert + onConflict → op séparé côté
+				// native (dispatch bulkWrite adapter-side vs insertMany).
+				if (plan.onConflict !== undefined) {
+					return {
+						...base,
+						op: "upsert",
+						operations: renderUpsertOperations(plan)
+					};
+				}
 				return { ...base, op: "insert", documents: renderDocuments(plan) };
 			case "update":
 				return {
@@ -82,6 +101,21 @@ export const mongoMapper: Mapper = {
 		return { engine: "mongodb", kind: "mongo-introspect", plan };
 	},
 	/**
+	 * Sprint TxMongo : bloc `transaction { … }` sur Mongo (requiert un replica
+	 * set côté serveur). Refus explicit des `savepoint` (Mongo n'en a pas ; on
+	 * ne les simule pas — un savepoint qui "rollback juste ma sous-section"
+	 * demanderait de re-jouer le reste, sémantique dangereuse). Les isolation
+	 * levels SNQL (read_committed / repeatable_read / serializable) sont
+	 * mappés côté adapter en readConcern + writeConcern sur la session.
+	 */
+	mapTransaction(plan: TransactionPlan): MongoTransaction {
+		const steps: MongoTransactionStep[] = [];
+		flattenMongoTransactionBody(plan.body, steps);
+		return plan.isolation !== undefined
+			? { engine: "mongodb", kind: "mongo-transaction", isolation: plan.isolation, steps }
+			: { engine: "mongodb", kind: "mongo-transaction", steps };
+	},
+	/**
 	 * Sprint T3/4 : `raw {...}` Mongo → MongoRawQuery pour db.runCommand().
 	 * L'Expr.object est évalué en Record<string, unknown> — refuse toute
 	 * expression non-literal (field, call, etc. n'ont pas de sens dans une
@@ -101,6 +135,36 @@ export const mongoMapper: Mapper = {
 		};
 	}
 };
+
+/**
+ * Sprint TxMongo : aplatit un body TransactionPlan en steps Mongo pré-rendus.
+ * Réutilise `mongoMapper.map` / `mongoMapper.mapMutation` pour éviter la
+ * duplication de la logique de codegen — chaque item est mappé exactement
+ * comme s'il était isolé, l'adapter passe juste la `session` au driver au
+ * moment d'exécuter. Refus explicit d'un savepoint : Mongo n'a pas d'API
+ * pour rollback partiel — le simuler exige de re-jouer les steps précédents
+ * hors transaction, avec une sémantique de conflit ingérable.
+ */
+function flattenMongoTransactionBody(
+	body: readonly TransactionPlanItem[],
+	out: MongoTransactionStep[]
+): void {
+	for (const item of body) {
+		if (item.kind === "read") {
+			out.push({ kind: "query", query: mongoMapper.map(item.plan) as MongoQuery });
+		} else if (item.kind === "write") {
+			out.push({
+				kind: "write",
+				write: mongoMapper.mapMutation(item.plan) as MongoWriteQuery
+			});
+		} else {
+			throw new SnqlError(
+				`savepoint '${item.name}' non supporté sur MongoDB — Mongo n'a pas d'API de rollback partiel dans une transaction.`,
+				"codegen_mongo_savepoint_unsupported"
+			);
+		}
+	}
+}
 
 /**
  * Évalue récursivement un Expr.object en Record littéral pour un raw Mongo.
@@ -140,6 +204,177 @@ function evalLiteralValue(
 		"codegen_raw_non_literal",
 		expr.span
 	);
+}
+
+/**
+ * Sprint v3 Mongo : upsert = insert + onConflict. Chaque row du batch génère
+ * une entrée bulkWrite avec :
+ *  - `filter` : {key_col_i: row_value_i} pour les cols du conflict target
+ *  - `setOnInsert` : les fields du doc à créer si aucun match (tous les cols
+ *    sauf ceux dans `set`)
+ *  - `set` (edit only) : les assignments — mais uniquement literals ou
+ *    upsertNew (référence à la row d'insert) v1. Toute expression composite
+ *    (arith, call…) est refusée : la forme classique Mongo `$set` n'accepte
+ *    pas d'expression, et la forme pipeline perd `$setOnInsert`. Ticket
+ *    futur : pipeline avec `$cond` pour simuler set-if-insert.
+ *
+ * Refus v1 : `sourcePlan` (upsert INSERT-SELECT) et `action.where` (guard
+ * PG-only ON CONFLICT ... WHERE) — les deux ont un mapping Mongo non-trivial.
+ */
+function renderUpsertOperations(
+	plan: Extract<MutationPlan, { op: "insert" }>
+): {
+	filter: Record<string, unknown>;
+	set?: Record<string, unknown>;
+	setOnInsert: Record<string, unknown>;
+}[] {
+	if (plan.sourcePlan !== undefined) {
+		throw new SnqlError(
+			"Upsert Mongo v1 : 'add (find …) into t on conflict …' non supporté (INSERT SELECT + ON CONFLICT). Matérialise le SELECT côté application ou utilise Postgres.",
+			"codegen_mongo_upsert_source_plan"
+		);
+	}
+	const onConflict = plan.onConflict;
+	if (onConflict === undefined) {
+		throw new SnqlError(
+			"renderUpsertOperations sans onConflict (bug dispatch mapMutation)",
+			"codegen_mongo_upsert_missing_conflict"
+		);
+	}
+	if (
+		onConflict.action.kind === "update" &&
+		onConflict.action.where !== undefined
+	) {
+		throw new SnqlError(
+			"Upsert Mongo v1 : 'on conflict (…) edit set … where …' non supporté — le prédicat sélectif de PG n'a pas d'équivalent direct dans un updateOne Mongo.",
+			"codegen_mongo_upsert_action_where"
+		);
+	}
+	const ops: {
+		filter: Record<string, unknown>;
+		set?: Record<string, unknown>;
+		setOnInsert: Record<string, unknown>;
+	}[] = [];
+	for (const row of plan.rows) {
+		if (row.length !== plan.columns.length) {
+			throw new SnqlError(
+				"Upsert Mongo : ligne désalignée des colonnes",
+				"codegen_mongo_upsert_arity"
+			);
+		}
+		// Mapping BSON (pour filter + setOnInsert) + literal PlanExpr (pour subst
+		// upsertNew dans les assignments edit).
+		const bsonMapping = new Map<string, unknown>();
+		const literalMapping = new Map<string, PlanExpr>();
+		plan.columns.forEach((column, index) => {
+			const cell = row[index];
+			if (cell === undefined) {
+				bsonMapping.set(column, null);
+				literalMapping.set(column, { kind: "literal", value: null });
+				return;
+			}
+			if (cell.kind === "scalar") {
+				bsonMapping.set(column, bsonStoreValue(cell.value));
+				literalMapping.set(column, { kind: "literal", value: cell.value });
+			} else {
+				// jsonLiteral (composite — object/array). Non substituable en literal
+				// SqlValue → interdit dans les $set d'upsert (v1). Stocké en BSON pour
+				// $setOnInsert uniquement.
+				bsonMapping.set(column, toExprOperand(cell.expr, undefined));
+				literalMapping.set(column, cell.expr);
+			}
+		});
+		const filter: Record<string, unknown> = {};
+		for (const k of onConflict.keys) {
+			if (!bsonMapping.has(k)) {
+				throw new SnqlError(
+					`Upsert Mongo : key col '${k}' absente des colonnes du batch — le conflict target doit référencer une col insérée.`,
+					"codegen_mongo_upsert_missing_key"
+				);
+			}
+			filter[k] = bsonMapping.get(k);
+		}
+		if (onConflict.action.kind === "ignore") {
+			// Tous les cols de la row → $setOnInsert. Sur match : aucun $set,
+			// donc no-op (comportement DO NOTHING PG).
+			const setOnInsert: Record<string, unknown> = {};
+			for (const [col, val] of bsonMapping) setOnInsert[col] = val;
+			ops.push({ filter, setOnInsert });
+			continue;
+		}
+		const setCols = new Set<string>();
+		const set: Record<string, unknown> = {};
+		for (const a of onConflict.action.assignments) {
+			const substituted = substUpsertNewToLiteral(a.value, literalMapping);
+			// Après subst : accepte uniquement literal ou jsonLiteral pur — pas
+			// d'expression composite (v1). Rend en BSON via bsonStoreValue (pas
+			// toExprOperand qui produit du $expr indexed differently).
+			if (substituted.kind === "literal") {
+				set[a.column] = bsonStoreValue(substituted.value);
+			} else if (
+				substituted.kind === "object" ||
+				substituted.kind === "array"
+			) {
+				set[a.column] = toExprOperand(substituted, undefined);
+			} else {
+				throw new SnqlError(
+					`Upsert Mongo v1 : 'on conflict edit set ${a.column} = <expr>' n'accepte que des littéraux ou 'new.<col>' (pas d'arithmétique/call). Postgres pushdown natif de EXCLUDED.<col> + arith — Mongo v2.`,
+					"codegen_mongo_upsert_edit_composite"
+				);
+			}
+			setCols.add(a.column);
+		}
+		const setOnInsert: Record<string, unknown> = {};
+		for (const [col, val] of bsonMapping) {
+			if (!setCols.has(col)) setOnInsert[col] = val;
+		}
+		ops.push({ filter, set, setOnInsert });
+	}
+	return ops;
+}
+
+/**
+ * Substitue récursivement tout `upsertNew.<col>` par le literal PlanExpr
+ * correspondant à la valeur de la row en cours. Utilisé pour rendre les
+ * assignments `on conflict edit set` évaluables sans référence au symbole
+ * `EXCLUDED` (qui n'a pas d'équivalent Mongo natif).
+ */
+function substUpsertNewToLiteral(
+	expr: PlanExpr,
+	mapping: ReadonlyMap<string, PlanExpr>
+): PlanExpr {
+	if (expr.kind === "upsertNew") {
+		const v = mapping.get(expr.column);
+		if (v === undefined) {
+			throw new SnqlError(
+				`Upsert Mongo : 'new.${expr.column}' référence une col absente du batch.`,
+				"codegen_mongo_upsert_new_missing"
+			);
+		}
+		return v;
+	}
+	if (expr.kind === "arith") {
+		return {
+			kind: "arith",
+			op: expr.op,
+			left: substUpsertNewToLiteral(expr.left, mapping),
+			right: substUpsertNewToLiteral(expr.right, mapping)
+		};
+	}
+	if (expr.kind === "call") {
+		return {
+			...expr,
+			args: expr.args.map((a) => substUpsertNewToLiteral(a, mapping))
+		};
+	}
+	if (expr.kind === "cast") {
+		return {
+			kind: "cast",
+			target: expr.target,
+			operand: substUpsertNewToLiteral(expr.operand, mapping)
+		};
+	}
+	return expr;
 }
 
 /** Lignes d'un insert (colonnes homogènes) → documents BSON. */

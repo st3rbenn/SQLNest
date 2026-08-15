@@ -55,6 +55,17 @@ export type AuthenticateResult =
 			readonly tunnelId: string;
 			readonly connectionId: string;
 			readonly expiresAt: Date;
+			/**
+			 * T4/3 : cross-device auto — cette connection est le miroir d'une
+			 * db_connection existante (même db_fingerprint, autre CLI). Le
+			 * canvas a été cloné depuis `clonedFrom.name` pour rendre le
+			 * layout immédiatement disponible sans re-tout-relayouter.
+			 * Absent quand pas de clone (pair nouveau, ou fingerprint idempotent).
+			 */
+			readonly clonedFrom?: {
+				readonly connectionId: string;
+				readonly name: string;
+			};
 	  }
 	| {
 			readonly ok: false;
@@ -65,7 +76,8 @@ export async function authenticatePairing(
 	db: DbOrTx,
 	codeCanonical: string,
 	signatureHex: string,
-	nowMs: number = Date.now()
+	nowMs: number = Date.now(),
+	dbFingerprint: string | null = null
 ): Promise<AuthenticateResult> {
 	return db.transaction(async (tx) => {
 		const rows = await tx
@@ -135,7 +147,12 @@ export async function authenticatePairing(
 			cliPubkey: row.cliPubkey,
 			cliConnectionName: row.cliConnectionName,
 			name: row.deviceName,
-			engine: DEFAULT_ENGINE
+			engine: DEFAULT_ENGINE,
+			// T4/1 Step 6 — le CLI envoie le fingerprint DB (SHA256(sys_id PG)
+			// / replSet Mongo) au moment de l'authenticate. Absent quand le
+			// CLI est legacy ou que la DSN n'a pas répondu — le backend
+			// backfill au prochain succès (voir upsertDbConnectionByFingerprint).
+			dbFingerprint
 		});
 		if (!upsert.ok) {
 			// Cas rarissime : l'user a approuvé un name qui vient d'être
@@ -176,7 +193,10 @@ export async function authenticatePairing(
 			token,
 			tunnelId: sess.id,
 			connectionId: conn.id,
-			expiresAt
+			expiresAt,
+			...(upsert.clonedFrom !== undefined
+				? { clonedFrom: upsert.clonedFrom }
+				: {})
 		};
 	});
 }

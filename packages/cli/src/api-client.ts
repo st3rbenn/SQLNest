@@ -61,6 +61,22 @@ export interface AuthenticateResult {
 	readonly tunnelId: string;
 	readonly connectionId: string;
 	readonly expiresAt: string;
+	/**
+	 * T4/3 : cross-device auto — le backend a détecté que cette DB était
+	 * déjà pair-ée depuis un autre CLI (même db_fingerprint dans la team)
+	 * et a cloné le canvas vers cette nouvelle connection. Le CLI peut
+	 * afficher un message user-friendly pour expliquer pourquoi le canvas
+	 * apparaît déjà rempli au 1er ouverture.
+	 */
+	readonly clonedFrom?: {
+		readonly connectionId: string;
+		readonly name: string;
+	};
+}
+
+export interface HeartbeatResult {
+	readonly ok: true;
+	readonly connectionId: string;
 }
 
 // ─── API client ───────────────────────────────────────────────────────
@@ -73,14 +89,26 @@ export interface ApiClient {
 	getPairingStatus(code: string): Promise<StatusPairingResult>;
 	authenticatePairing(
 		code: string,
-		signatureHex: string
+		signatureHex: string,
+		dbFingerprint?: string | null
 	): Promise<AuthenticateResult>;
 	authenticateWithToken(
 		bearerToken: string,
 		cliPubkeyEd25519: string,
 		deviceName: string,
-		cliConnectionName?: string | null
+		cliConnectionName?: string | null,
+		dbFingerprint?: string | null
 	): Promise<AuthenticateResult>;
+	/**
+	 * T4/1.5 : ping périodique + backfill des métadonnées DB (fingerprint,
+	 * schema checksum) sur une db_connection existante. Contourne le
+	 * findResumableTunnel qui skip authenticate. Auth : Bearer tn_...
+	 */
+	heartbeat(
+		tunnelToken: string,
+		dbFingerprint?: string | null,
+		dbSchemaChecksum?: string | null
+	): Promise<HeartbeatResult>;
 }
 
 /** Impl fetch — injecte `fetch` en option pour permettre le test
@@ -148,11 +176,21 @@ export function createApiClient(
 			return data;
 		},
 
-		async authenticatePairing(code: string, signatureHex: string) {
-			const data = (await jsonPost("/api/tunnels/authenticate", {
-				code,
-				signature: signatureHex
-			})) as AuthenticateResult;
+		async authenticatePairing(
+			code: string,
+			signatureHex: string,
+			dbFingerprint: string | null = null
+		) {
+			const body: Record<string, string> = { code, signature: signatureHex };
+			// T4/1 Step 6 : optionnel — omis si le CLI n'a pas pu ouvrir la DSN
+			// à ce moment. Backend backfill au prochain succès.
+			if (dbFingerprint != null && dbFingerprint !== "") {
+				body.dbFingerprint = dbFingerprint;
+			}
+			const data = (await jsonPost(
+				"/api/tunnels/authenticate",
+				body
+			)) as AuthenticateResult;
 			return data;
 		},
 
@@ -160,15 +198,37 @@ export function createApiClient(
 			bearerToken: string,
 			cliPubkeyEd25519: string,
 			deviceName: string,
-			cliConnectionName: string | null = null
+			cliConnectionName: string | null = null,
+			dbFingerprint: string | null = null
 		) {
 			const body: Record<string, string> = { cliPubkeyEd25519, deviceName };
 			if (cliConnectionName != null && cliConnectionName !== "") {
 				body.cliConnectionName = cliConnectionName;
 			}
+			if (dbFingerprint != null && dbFingerprint !== "") {
+				body.dbFingerprint = dbFingerprint;
+			}
 			const data = (await jsonPost("/api/tunnels/authenticate-token", body, {
 				authorization: `Bearer ${bearerToken}`
 			})) as AuthenticateResult;
+			return data;
+		},
+
+		async heartbeat(
+			tunnelToken: string,
+			dbFingerprint: string | null = null,
+			dbSchemaChecksum: string | null = null
+		) {
+			const body: Record<string, string> = {};
+			if (dbFingerprint != null && dbFingerprint !== "") {
+				body.dbFingerprint = dbFingerprint;
+			}
+			if (dbSchemaChecksum != null && dbSchemaChecksum !== "") {
+				body.dbSchemaChecksum = dbSchemaChecksum;
+			}
+			const data = (await jsonPost("/api/tunnels/heartbeat", body, {
+				authorization: `Bearer ${tunnelToken}`
+			})) as HeartbeatResult;
 			return data;
 		}
 	};

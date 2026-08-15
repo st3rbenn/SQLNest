@@ -52,10 +52,13 @@ export const POSTGRES_CAPABILITIES: Capabilities = caps(
 /**
  * Document : join = $lookup, agrégation via pipeline. `cast(_ as json)` refusé
  * car les documents Mongo sont déjà des BSON — aucun cast nécessaire.
+ * Sprint TxMongo : 'transaction' ajouté — bloc atomique via RS session
+ * (startTransaction/commit/abort). Requiert Mongo en replica set (standalone
+ * n'accepte pas les transactions).
  */
 export const MONGODB_CAPABILITIES: Capabilities = caps(
 	"mongodb",
-	["scan", "filter", "project", "join", "aggregate", "sort", "paginate", "mutate", "introspect"],
+	["scan", "filter", "project", "join", "aggregate", "sort", "paginate", "mutate", "introspect", "transaction", "upsert"],
 	["int", "float", "text", "bool", "date", "timestamp"]
 );
 

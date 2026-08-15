@@ -312,15 +312,15 @@ describe("codegen PG — ON CONFLICT + returning drop", () => {
 // Planner : capability upsert
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe("planner — capability 'upsert' PG only", () => {
-	it("Mongo refuse `on conflict`", () => {
+describe("planner — capability 'upsert'", () => {
+	// v3 Mongo : upsert natif via bulkWrite updateOne+upsert:true.
+	it("Mongo accepte `on conflict` (v3 : updateOne+upsert bulkWrite)", () => {
 		const stmt = parse(tokenize('add {email: "a"} into users on conflict (email) ignore'));
 		if (stmt.operation !== "insert") throw new Error();
 		const mutation = lowerMutation(stmt);
-		expectCode(
-			() => assertMutationUpsertSupported(mutation, MONGODB_CAPABILITIES),
-			"planner_upsert_unsupported"
-		);
+		expect(() =>
+			assertMutationUpsertSupported(mutation, MONGODB_CAPABILITIES)
+		).not.toThrow();
 	});
 
 	it("KV refuse `on conflict`", () => {

@@ -164,6 +164,40 @@ describe("createApiClient — authenticatePairing (device flow)", () => {
 			expect((err as ApiClientError).statusCode).toBe(401);
 		}
 	});
+
+	test("T4/1 : dbFingerprint inclus dans le body si fourni", async () => {
+		const payload = {
+			token: `tn_${"a".repeat(64)}`,
+			tunnelId: "11111111-1111-1111-1111-111111111111",
+			connectionId: "22222222-2222-2222-2222-222222222222",
+			expiresAt: "2026-09-06T12:00:00.000Z"
+		};
+		const { fetch, calls } = mockFetchOk(payload);
+		const api = createApiClient("http://localhost:4000", { fetch });
+		await api.authenticatePairing(
+			"ABCD-1234",
+			"b".repeat(128),
+			"postgres:9876543210/chinook"
+		);
+		// biome-ignore lint/style/noNonNullAssertion: length checked
+		const body = JSON.parse(String(calls[0]!.init?.body));
+		expect(body.dbFingerprint).toBe("postgres:9876543210/chinook");
+	});
+
+	test("T4/1 : dbFingerprint omis si null/vide (rétro-compat CLI legacy)", async () => {
+		const payload = {
+			token: `tn_${"a".repeat(64)}`,
+			tunnelId: "1",
+			connectionId: "2",
+			expiresAt: "2026-09-06T12:00:00.000Z"
+		};
+		const { fetch, calls } = mockFetchOk(payload);
+		const api = createApiClient("http://localhost:4000", { fetch });
+		await api.authenticatePairing("ABCD-1234", "b".repeat(128), null);
+		// biome-ignore lint/style/noNonNullAssertion: length checked
+		const body = JSON.parse(String(calls[0]!.init?.body));
+		expect("dbFingerprint" in body).toBe(false);
+	});
 });
 
 describe("createApiClient — authenticateWithToken (CI Bearer)", () => {
@@ -207,6 +241,74 @@ describe("createApiClient — authenticateWithToken (CI Bearer)", () => {
 				"a".repeat(64),
 				"ci"
 			);
+			throw new Error("should have thrown");
+		} catch (err) {
+			expect((err as ApiClientError).statusCode).toBe(401);
+		}
+	});
+
+	test("T4/1 : dbFingerprint inclus dans le body si fourni", async () => {
+		const payload = {
+			token: `tn_${"c".repeat(64)}`,
+			tunnelId: "3",
+			connectionId: "4",
+			expiresAt: "2026-09-06T12:00:00.000Z"
+		};
+		const { fetch, calls } = mockFetchOk(payload);
+		const api = createApiClient("http://localhost:4000", { fetch });
+		await api.authenticateWithToken(
+			`sn_${"d".repeat(64)}`,
+			"e".repeat(64),
+			"ci-runner",
+			null,
+			"mongo:rs0/chinook"
+		);
+		// biome-ignore lint/style/noNonNullAssertion: length checked
+		const body = JSON.parse(String(calls[0]!.init?.body));
+		expect(body.dbFingerprint).toBe("mongo:rs0/chinook");
+	});
+});
+
+describe("createApiClient — heartbeat (T4/1.5)", () => {
+	test("POST /heartbeat avec Bearer + dbFingerprint + dbSchemaChecksum", async () => {
+		const { fetch, calls } = mockFetchOk({
+			ok: true,
+			connectionId: "conn-1"
+		});
+		const api = createApiClient("http://localhost:4000", { fetch });
+		await api.heartbeat(
+			`tn_${"a".repeat(64)}`,
+			"pg:76004321/apollon",
+			"postgres:abc123def"
+		);
+		// biome-ignore lint/style/noNonNullAssertion: length checked
+		expect(calls[0]!.url).toBe("http://localhost:4000/api/tunnels/heartbeat");
+		// biome-ignore lint/style/noNonNullAssertion: length checked
+		const headers = calls[0]!.init?.headers as Record<string, string>;
+		expect(headers.authorization).toBe(`Bearer tn_${"a".repeat(64)}`);
+		// biome-ignore lint/style/noNonNullAssertion: length checked
+		const body = JSON.parse(String(calls[0]!.init?.body));
+		expect(body).toEqual({
+			dbFingerprint: "pg:76004321/apollon",
+			dbSchemaChecksum: "postgres:abc123def"
+		});
+	});
+
+	test("body vide si aucun champ fourni (juste bump last_seen_at)", async () => {
+		const { fetch, calls } = mockFetchOk({ ok: true, connectionId: "conn-2" });
+		const api = createApiClient("http://localhost:4000", { fetch });
+		await api.heartbeat(`tn_${"b".repeat(64)}`);
+		// biome-ignore lint/style/noNonNullAssertion: length checked
+		const body = JSON.parse(String(calls[0]!.init?.body));
+		expect(body).toEqual({});
+	});
+
+	test("HTTP 401 token révoqué → ApiClientError statusCode 401", async () => {
+		const api = createApiClient("http://localhost:4000", {
+			fetch: mockFetchStatus(401, { message: "Authentification refusée" })
+		});
+		try {
+			await api.heartbeat(`tn_${"c".repeat(64)}`, "pg:1/foo");
 			throw new Error("should have thrown");
 		} catch (err) {
 			expect((err as ApiClientError).statusCode).toBe(401);

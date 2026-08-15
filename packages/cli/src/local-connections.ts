@@ -248,7 +248,10 @@ function validateLocalConnections(raw: unknown): LocalConnectionsFile {
 			`${LOCAL_CONNECTIONS_FILENAME}: version ${String(obj.version)} inconnue (attendu ${LOCAL_CONNECTIONS_VERSION}).`
 		);
 	}
-	const connectionsRaw = obj.connections;
+	// `connections` absent est légitime : un user qui a supprimé toutes ses
+	// entrées à la main garde le header `version = 1`. On traite comme un
+	// tableau vide (`add-connection` pourra insérer normalement).
+	const connectionsRaw = obj.connections ?? [];
 	if (!Array.isArray(connectionsRaw)) {
 		throw new Error(
 			`${LOCAL_CONNECTIONS_FILENAME}: [[connections]] doit être un tableau.`

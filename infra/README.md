@@ -67,11 +67,16 @@ Ou via les scripts racine : `pnpm db:up` / `pnpm db:down` / `pnpm db:reset`.
 | Service  | Port hôte | Identifiants (dev)      | Base           |
 | -------- | --------- | ----------------------- | -------------- |
 | postgres | **5433**  | `sqlnest` / `sqlnest`   | `sqlnest_demo` |
-| mongo    | 27017     | `sqlnest` / `sqlnest`   | `sqlnest_demo` |
+| mongo    | 27017     | *(noauth)*              | `sqlnest_demo` |
 
 > Identifiants de **développement uniquement**. Ne jamais les réutiliser ailleurs.
 > Postgres est exposé sur **5433** (et non 5432) pour cohabiter avec un
 > PostgreSQL installé nativement, qui occupe souvent 5432 sur un poste de dev.
+>
+> Mongo tourne en **replica set single-node** (`rs0`, auth désactivée) — requis
+> pour les transactions natives. Clients : ajouter `?directConnection=true` à
+> l'URL pour cibler ce membre unique sans découverte de topologie.
+> Ex : `mongodb://localhost:27017/sqlnest_demo?directConnection=true`.
 
 ## Données de démo
 

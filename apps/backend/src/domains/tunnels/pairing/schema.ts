@@ -120,7 +120,25 @@ export const AuthenticateBody = z.object({
 	code: z.string(),
 	signature: z
 		.string()
-		.regex(ED25519_SIG_HEX, "Signature Ed25519 doit être 128 chars hex")
+		.regex(ED25519_SIG_HEX, "Signature Ed25519 doit être 128 chars hex"),
+	/**
+	 * T4/1 Step 6 : fingerprint de l'INSTANCE DB (calculé côté CLI via
+	 * `Connection.fingerprint()`). Optionnel — un CLI legacy ou une DSN
+	 * inaccessible au moment de l'authenticate laisse le champ vide.
+	 * Backend :
+	 *  - Si présent + connection existante : backfill (fingerprint devient
+	 *    l'identité stable de la DB, dérivée de son system_identifier PG /
+	 *    replSet name Mongo).
+	 *  - Si présent + nouvelle connection : stocké à l'INSERT.
+	 *  - v2 : lookup prioritaire par (team, db_fingerprint) pour re-pair
+	 *    cross-device sur la même DB depuis un autre CLI.
+	 */
+	dbFingerprint: z
+		.string()
+		.trim()
+		.min(1)
+		.max(200)
+		.optional()
 });
 z.globalRegistry.add(AuthenticateBody, { id: "AuthenticateBody" });
 export type AuthenticateBodyT = z.infer<typeof AuthenticateBody>;
@@ -133,7 +151,19 @@ export const AuthenticateResponse = z.object({
 	/** ID de la db_connection — le browser l'utilisera pour cibler cette DB. */
 	connectionId: z.string(),
 	/** ISO 8601 — le CLI peut décider de re-authenticate avant expi. */
-	expiresAt: z.string()
+	expiresAt: z.string(),
+	/**
+	 * T4/3 : cross-device auto — cette connection est le miroir d'une autre
+	 * (même db_fingerprint, autre CLI). Canvas cloné depuis `clonedFrom.name`.
+	 * Le CLI peut afficher un message "✓ Canvas repris depuis « X »" pour
+	 * que l'user comprenne pourquoi son canvas apparaît déjà rempli.
+	 */
+	clonedFrom: z
+		.object({
+			connectionId: z.string(),
+			name: z.string()
+		})
+		.optional()
 });
 z.globalRegistry.add(AuthenticateResponse, { id: "AuthenticateResponse" });
 export type AuthenticateResponseT = z.infer<typeof AuthenticateResponse>;
@@ -162,6 +192,13 @@ export const AuthenticateTokenBody = z.object({
 		.trim()
 		.min(1, "Le nom de connection CLI ne peut pas être vide")
 		.max(100, "Nom trop long (max 100)")
+		.optional(),
+	/** T4/1 Step 6 — voir AuthenticateBody.dbFingerprint (même sémantique). */
+	dbFingerprint: z
+		.string()
+		.trim()
+		.min(1)
+		.max(200)
 		.optional()
 });
 z.globalRegistry.add(AuthenticateTokenBody, { id: "AuthenticateTokenBody" });
@@ -174,6 +211,42 @@ export const AuthenticateTokenResponse = AuthenticateResponse;
 export type AuthenticateTokenResponseT = z.infer<
 	typeof AuthenticateTokenResponse
 >;
+
+// ─── POST /api/tunnels/heartbeat ───────────────────────────────────────
+// T4/1.5 : le CLI envoie périodiquement (ou au boot du serve loop) le
+// fingerprint de l'INSTANCE DB pour un tunnel existant. Résout le
+// problème "authenticate skip via findResumableTunnel" — le fingerprint
+// arrive au backend même sans re-pair. Auth : Bearer tn_... du tunnel
+// session (le token clair prouve la possession du CLI mandaté).
+
+export const HeartbeatBody = z.object({
+	/** T4/1 : voir AuthenticateBody.dbFingerprint. */
+	dbFingerprint: z
+		.string()
+		.trim()
+		.min(1)
+		.max(200)
+		.optional(),
+	/** T4/2 (prêt à recevoir) : checksum de la STRUCTURE (schéma) — hash
+	 *  déterministe des cols/FKs. Détecte les évolutions de schéma entre
+	 *  connects. Base pour invalidation cache + alertes diff. */
+	dbSchemaChecksum: z
+		.string()
+		.trim()
+		.min(1)
+		.max(200)
+		.optional()
+});
+z.globalRegistry.add(HeartbeatBody, { id: "HeartbeatBody" });
+export type HeartbeatBodyT = z.infer<typeof HeartbeatBody>;
+
+export const HeartbeatResponse = z.object({
+	ok: z.literal(true),
+	/** ID de la db_connection touchée (pour cohérence UI + logs client). */
+	connectionId: z.string()
+});
+z.globalRegistry.add(HeartbeatResponse, { id: "HeartbeatResponse" });
+export type HeartbeatResponseT = z.infer<typeof HeartbeatResponse>;
 
 // ─── Erreurs partagées ─────────────────────────────────────────────────
 export const TunnelsErrorResponse = z.object({ message: z.string() });

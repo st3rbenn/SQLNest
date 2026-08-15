@@ -13,12 +13,17 @@
  * détecte la déconnexion et purge le slot du registry.
  */
 
+import { createApiClient } from "../api-client";
 import type { RemoteOp, RemoteResult } from "../ws-client";
 import { createTunnelWsClient } from "../ws-client";
 import { loadOrInitConfig } from "./connect";
 import { EngineExecutionError, runQuery } from "@sqlnest/engine";
 import type { SchemaModel } from "@sqlnest/snql";
-import { openConnectionForTunnel } from "../engine";
+import {
+	computeTunnelFingerprint,
+	computeTunnelSchemaChecksum,
+	openConnectionForTunnel
+} from "../engine";
 
 /**
  * Cache in-memory du SchemaModel par `connectionName`. Le schéma est
@@ -75,6 +80,20 @@ export async function serveTunnel(opts: ServeTunnelOptions): Promise<number> {
 	const baseWsUrl = opts.baseUrl.replace(HTTP_PREFIX_RE, "ws$1://");
 
 	opts.onEvent?.({ kind: "connecting" });
+
+	// T4/1.5 : heartbeat au boot du serve loop — envoie fingerprint DB +
+	// schema checksum au backend même quand `findResumableTunnel` a skip
+	// l'authenticate. Best-effort : silencieux si offline ou DSN down, le
+	// backend backfill au prochain heartbeat qui réussit. Fire-and-forget
+	// pour ne pas bloquer le serve.
+	sendBootHeartbeat(opts).catch((err) => {
+		if (process.env.NODE_ENV === "development") {
+			const msg = err instanceof Error ? err.message : String(err);
+			process.stderr.write(`[sqlnest dev] heartbeat FAILED: ${msg}\n`);
+		}
+		// prod : silencieux — la connectivité DSN est validée séparément et
+		// l'absence de fingerprint côté serveur n'empêche pas le serve loop.
+	});
 
 	const client = createTunnelWsClient({
 		baseWsUrl,
@@ -196,6 +215,28 @@ async function dispatchOp(
 		}
 	}
 	return { ok: false, error: `op inconnue` };
+}
+
+/**
+ * T4/1.5 : envoie le heartbeat au backend avec le fingerprint DB (T4/1) +
+ * le schema checksum (T4/2). Best-effort — fire-and-forget dans le serve.
+ * Calcul parallèle des 2 métadonnées pour minimiser le temps de boot.
+ * Log stderr en dev uniquement pour tracer le flow sans polluer la prod.
+ */
+async function sendBootHeartbeat(opts: ServeTunnelOptions): Promise<void> {
+	const [dbFingerprint, dbSchemaChecksum] = await Promise.all([
+		computeTunnelFingerprint(opts.connectionName, opts.env),
+		computeTunnelSchemaChecksum(opts.connectionName, opts.env)
+	]);
+	if (process.env.NODE_ENV === "development") {
+		process.stderr.write(
+			`[sqlnest dev] heartbeat dbFingerprint=${JSON.stringify(dbFingerprint)} dbSchemaChecksum=${JSON.stringify(dbSchemaChecksum)}\n`
+		);
+	}
+	// Skip l'appel si aucun des 2 n'a pu être calculé — pas d'info neuve.
+	if (dbFingerprint === null && dbSchemaChecksum === null) return;
+	const api = createApiClient(opts.baseUrl);
+	await api.heartbeat(opts.token, dbFingerprint, dbSchemaChecksum);
 }
 
 function hexToBytes(hex: string): Uint8Array {

@@ -342,14 +342,31 @@ async function runQueryOnCte(
 ): Promise<readonly Row[]> {
 	const sourceName = query.source.collection;
 	if (materialized.has(sourceName)) {
-		// Source = CTE matérialisé → compensate pur.
+		// Source = CTE matérialisé → compensate pur. Les subqueries `in (find
+		// autre_cte …)` dans le predicate se résolvent aussi par compensate car
+		// tout est en RAM à ce stade — pas besoin de walker externe.
 		const lp = lower(query, schema);
 		const linear = linearize(lp);
 		const ops = linear.slice(1).map((op) => toCompensationOp(op));
 		return compensate(ops, [...(materialized.get(sourceName) ?? [])]);
 	}
-	// Source = vraie collection → pipeline engine natif.
-	const physical = plan(lower(query, schema), capabilities);
+	// Source = vraie collection → pipeline engine natif. Étape supplémentaire
+	// pour Mongo/KV : résoudre les subqueries `in (find cte_ou_coll …)` avant
+	// le plan(), sinon le planner refuse (capability subquery absente). Le
+	// walker connaît les CTE matérialisés — un scan sur un CTE court-circuite
+	// l'exécution native et lit les rows RAM directement.
+	let logicalPlan = lower(query, schema);
+	if (!capabilities.supports.has("subquery")) {
+		logicalPlan = await resolveSubqueries(
+			logicalPlan,
+			connection,
+			schema,
+			capabilities,
+			mapper,
+			materialized
+		);
+	}
+	const physical = plan(logicalPlan, capabilities);
 	const native = mapper.map(physical.pushdown);
 	const pushed = await connection.execute(native);
 	return physical.compensation.length === 0
@@ -461,7 +478,8 @@ async function resolveSubqueries(
 	connection: Connection,
 	schema: SchemaModel | undefined,
 	capabilities: import("@sqlnest/snql").Capabilities,
-	mapper: ReturnType<typeof getMapper>
+	mapper: ReturnType<typeof getMapper>,
+	materialized?: Map<string, readonly Row[]>
 ): Promise<import("@sqlnest/snql").LogicalPlan> {
 	// Walker récursif sur les ops. Seuls filter (where) et aggregate.having
 	// portent des predicates capables de contenir des subqueries. Les autres
@@ -498,6 +516,10 @@ async function resolveSubqueries(
 	): Promise<import("@sqlnest/snql").PlanExpr> => {
 		switch (expr.kind) {
 			case "subquery": {
+				assertUncorrelatedForMaterialization(
+					expr.plan,
+					capabilities.engine
+				);
 				// Exécute le sous-plan récursivement (peut contenir lui-même des
 				// subqueries, gérées par la récursion sur walkOp).
 				const rows = await executeInnerSelect(expr.plan);
@@ -512,8 +534,28 @@ async function resolveSubqueries(
 				};
 			}
 			case "exists": {
+				assertUncorrelatedForMaterialization(
+					expr.subplan,
+					capabilities.engine
+				);
 				const rows = await executeInnerSelect(expr.subplan);
-				return { kind: "literal", value: rows.length > 0 };
+				// Un literal bool nu n'est pas un predicate valide côté Mongo
+				// ($match refuse `true`). On wrap en compare toujours vrai/faux
+				// (`1 = 1` / `1 = 0`) pour rester dans le contract PlanExpr et
+				// que le codegen produise un $match compilable.
+				return rows.length > 0
+					? {
+							kind: "compare",
+							op: "eq",
+							left: { kind: "literal", value: 1 },
+							right: { kind: "literal", value: 1 }
+						}
+					: {
+							kind: "compare",
+							op: "eq",
+							left: { kind: "literal", value: 1 },
+							right: { kind: "literal", value: 0 }
+						};
 			}
 			case "in":
 				return {
@@ -597,6 +639,10 @@ async function resolveSubqueries(
 		values: readonly import("@sqlnest/snql").PlanExpr[]
 	): Promise<readonly import("@sqlnest/snql").PlanExpr[]> => {
 		if (values.length === 1 && values[0]?.kind === "subquery") {
+			assertUncorrelatedForMaterialization(
+				values[0].plan,
+				capabilities.engine
+			);
 			const rows = await executeInnerSelect(values[0].plan);
 			return rows.map((r) => {
 				const keys = Object.keys(r);
@@ -612,15 +658,32 @@ async function resolveSubqueries(
 	// Exécute un LogicalPlan sub-select nativement + compensate. Utilisé pour
 	// les subqueries matérialisées. Peut contenir lui-même des subqueries →
 	// résolue par la récursion (on rappelle resolveSubqueries d'abord).
+	//
+	// T3/6.2 v2 A2 : si le subplan est un scan direct sur un CTE déjà
+	// matérialisé (passé via `materialized`), on court-circuite l'exécution
+	// native — les rows sont en RAM. Le compensate applique les stages
+	// (filter/project/sort/limit) directement dessus.
 	const executeInnerSelect = async (
 		subPlan: import("@sqlnest/snql").LogicalPlan
 	): Promise<readonly Row[]> => {
+		const linear = linearize(subPlan);
+		const scanOp = linear[0];
+		if (
+			materialized !== undefined &&
+			scanOp?.op === "scan" &&
+			materialized.has(scanOp.collection)
+		) {
+			const cteRows = [...(materialized.get(scanOp.collection) ?? [])];
+			const ops = linear.slice(1).map((op) => toCompensationOp(op));
+			return compensate(ops, cteRows);
+		}
 		const resolved = await resolveSubqueries(
 			subPlan,
 			connection,
 			schema,
 			capabilities,
-			mapper
+			mapper,
+			materialized
 		);
 		const physical = plan(resolved, capabilities);
 		const native = mapper.map(physical.pushdown);
@@ -654,6 +717,126 @@ function rowToLiteralExpr(row: Row): import("@sqlnest/snql").PlanExpr {
 	}
 	// Fallback : stringify (Date, ObjectId, etc.).
 	return { kind: "literal", value: String(value) };
+}
+
+/**
+ * Sprint v3 Mongo : détecte les subqueries corrélées (le subplan référence
+ * un alias qui n'appartient pas à son scope local) avant de tenter la
+ * matérialisation. Le walker `resolveSubqueries` matérialise en 1 shot :
+ * une corrélée nécessiterait une exécution par row outer (N+1). Le rewrite
+ * $lookup natif est l'objectif v4 ; d'ici là on refuse avec un message
+ * actionable au lieu du `Use of undefined variable` cryptique de Mongo.
+ *
+ * Détection : linearize le subplan, extraire le scan racine → alias local.
+ * Traverse récursivement toutes les exprs (filter.predicate, aggregate.having,
+ * project.fields.expr) : tout field ref `head.<...>` où `head !== localAlias`
+ * signale un ref outer.
+ */
+function assertUncorrelatedForMaterialization(
+	subPlan: import("@sqlnest/snql").LogicalPlan,
+	engine: string
+): void {
+	const outerAliases = detectOuterAliasesInSubplan(subPlan);
+	if (outerAliases.length === 0) return;
+	const first = outerAliases[0];
+	throw new EngineExecutionError(
+		`Sub-query corrélée non supportée sur '${engine}' v3 — la référence '${first}.<col>' pointe vers un scope outer. Postgres pushdown natif (SELECT … WHERE outer.col = inner.col). Contournement : refactor en 'find outer with one inner on outer.pk = inner.fk' (join), ou matérialise l'outer d'abord avec un 'let'. Ticket v4 : rewrite en $lookup sub-pipeline natif.`
+	);
+}
+
+function detectOuterAliasesInSubplan(
+	subPlan: import("@sqlnest/snql").LogicalPlan
+): string[] {
+	const ops = linearize(subPlan);
+	const scan = ops[0];
+	if (scan?.op !== "scan") return [];
+	const localAlias = scan.alias;
+	const found = new Set<string>();
+
+	const scanExpr = (expr: import("@sqlnest/snql").PlanExpr): void => {
+		switch (expr.kind) {
+			case "field":
+				// Ident préfixé (path.length > 1) est un alias qualifié. Si son head
+				// ne matche pas le scan local, c'est un ref outer. Les paths sans
+				// préfixe (col bare) sont supposées résolues localement.
+				if (expr.path.length > 1) {
+					const head = expr.path[0]!;
+					if (head !== localAlias) found.add(head);
+				}
+				return;
+			case "compare":
+			case "arith":
+			case "and":
+			case "or":
+				scanExpr(expr.left);
+				scanExpr(expr.right);
+				return;
+			case "not":
+				scanExpr(expr.operand);
+				return;
+			case "isNull":
+			case "cast":
+				scanExpr(expr.operand);
+				return;
+			case "call":
+			case "windowCall":
+				for (const a of expr.args) scanExpr(a);
+				return;
+			case "in":
+				scanExpr(expr.target);
+				for (const v of expr.values) scanExpr(v);
+				return;
+			case "case":
+				for (const b of expr.branches) {
+					scanExpr(b.cond);
+					scanExpr(b.value);
+				}
+				scanExpr(expr.elseValue);
+				return;
+			case "object":
+				for (const e of expr.entries) scanExpr(e.value);
+				return;
+			case "array":
+				for (const i of expr.items) scanExpr(i);
+				return;
+			case "subquery":
+				// Récursion : le subplan interne peut aussi avoir des refs vers un
+				// alias qui n'est pas dans son scope. Ces refs sont "corrélées 2+
+				// niveaux" — c'est bien le même refus.
+				for (const outerHead of detectOuterAliasesInSubplan(expr.plan)) {
+					if (outerHead !== localAlias) found.add(outerHead);
+				}
+				return;
+			case "exists":
+				for (const outerHead of detectOuterAliasesInSubplan(expr.subplan)) {
+					if (outerHead !== localAlias) found.add(outerHead);
+				}
+				return;
+			case "literal":
+			case "upsertNew":
+				return;
+		}
+	};
+
+	for (const op of ops.slice(1)) {
+		switch (op.op) {
+			case "filter":
+				scanExpr(op.predicate);
+				break;
+			case "aggregate":
+				if (op.having !== undefined) scanExpr(op.having);
+				break;
+			case "project":
+				for (const f of op.fields) if (f.expr !== undefined) scanExpr(f.expr);
+				break;
+			case "sort":
+			case "limit":
+			case "join":
+			case "scan":
+				break;
+		}
+	}
+	return [...found];
 }
 
 /**
