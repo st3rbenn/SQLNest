@@ -187,8 +187,11 @@ export {
 	assertMutationUpsertSupported,
 	assertMutationWriteJoinSupported,
 	assertTransactionSupported,
-	plan
+	plan,
+	toCompensationOp
 } from "./planner/planner";
+export { linearize } from "./ir/plan";
+export type { LetStatement } from "./parser/ast";
 export type { JoinSources, Row } from "./runtime/compensate";
 export { compensate } from "./runtime/compensate";
 export { inferResultColumns } from "./runtime/infer-column-types";

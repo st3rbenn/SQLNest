@@ -9,7 +9,6 @@ import type {
 } from "@sqlnest/snql";
 import {
 	assertIntrospectSupported,
-	assertLetSupported,
 	assertMutationCastTargetsSupported,
 	assertMutationInsertSelectSupported,
 	assertMutationUpsertSupported,
@@ -20,6 +19,7 @@ import {
 	compensate,
 	getMapper,
 	inferResultColumns,
+	linearize,
 	lower,
 	lowerIntrospect,
 	lowerLet,
@@ -29,6 +29,7 @@ import {
 	parse,
 	plan,
 	type SupportedEngine,
+	toCompensationOp,
 	tokenize
 } from "@sqlnest/snql";
 import type { Connection } from "./adapter";
@@ -113,25 +114,22 @@ export async function runQuery(
 		return { ...executed, written: false };
 	}
 
-	// Sprint T3/6 : CTE `let x = ...; body`. Le mapper.mapLet est absent
-	// sur les engines sans support (Mongo/KV) — assertLetSupported remonte
-	// l'erreur claire avant TypeError.
+	// Sprint T3/6 : CTE `let x = ...; body`.
+	//   - Engine natif (PG capability `cte`) : compile en `WITH ... BODY_SQL`.
+	//   - Engine sans cte native (Mongo/KV) : T3/6.1 matérialisation —
+	//     exécute les bindings séquentiellement, puis compensate() le body
+	//     sur les rows RAM. Vision SNQL : porter les features aux engines
+	//     qui ne les ont pas nativement.
 	if (statement.operation === "let") {
-		const letPlan = lowerLet(statement, schema);
-		assertLetSupported(letPlan, capabilities);
-		if (mapper.mapLet === undefined) {
-			throw new EngineExecutionError(
-				`Aucun codegen 'let' (CTE) pour le moteur '${engine}'`
-			);
+		if (capabilities.supports.has("cte") && mapper.mapLet !== undefined) {
+			const letPlan = lowerLet(statement, schema);
+			const native = withIdentSpans(mapper.mapLet(letPlan), identSpans);
+			const written = letPlan.body.op === "insert"
+				|| letPlan.body.op === "update"
+				|| letPlan.body.op === "delete";
+			return { ...(await connection.execute(native)), written };
 		}
-		const native = withIdentSpans(mapper.mapLet(letPlan), identSpans);
-		// Le body du let peut être un read (find) ou un write (add/update/remove).
-		// written = true ssi le body est une mutation — l'UI utilise ce flag
-		// pour décider l'affichage rows vs rowCount.
-		const written = letPlan.body.op === "insert"
-			|| letPlan.body.op === "update"
-			|| letPlan.body.op === "delete";
-		return { ...(await connection.execute(native)), written };
+		return await materializeLet(statement, schema, connection, capabilities, engine);
 	}
 
 	// Sprint T3/4 : escape hatch `raw`. Bypass complet du pipeline SNQL —
@@ -212,6 +210,86 @@ export async function runQuery(
 		columns: schema ? typedColumns : columnsFromRows(rows, pushed.columns),
 		rows,
 		rowCount: rows.length,
+		written: false
+	};
+}
+
+/**
+ * Sprint T3/6.1 : matérialise un CTE sur un engine qui n'a pas la capability
+ * `cte` (Mongo, KV). Vision SNQL : les features SQL manquantes sont portées
+ * via runtime compensation. Pattern v1 supporté :
+ *
+ *   let x = find <collection> [stages];
+ *   find x [stages]
+ *
+ * Contraintes v1 :
+ *  - Body = find (select) uniquement. Mutations avec CTE natif seulement.
+ *  - Body doit scan directement UN CTE (pas de join CTE ↔ vraie collection,
+ *    pas de subquery référençant un CTE — Mongo refuse déjà subqueries).
+ *  - Bindings ne peuvent pas référencer d'autres CTE (chainage v2).
+ *
+ * Ces contraintes garantissent qu'on n'a jamais à mixer données in-memory
+ * et données engine dans la même exécution — le body tourne PUREMENT en
+ * runtime `compensate` sur les rows matérialisées du CTE.
+ */
+async function materializeLet(
+	statement: import("@sqlnest/snql").LetStatement,
+	schema: SchemaModel | undefined,
+	connection: Connection,
+	capabilities: import("@sqlnest/snql").Capabilities,
+	engine: string
+): Promise<QueryOutcome> {
+	if (statement.body.operation !== "select") {
+		throw new EngineExecutionError(
+			`Le body d'un 'let' sur '${engine}' doit être 'find' — les mutations avec CTE nécessitent la capability native (PG uniquement v1).`
+		);
+	}
+	const bodySourceName = statement.body.source.collection;
+	const cteNames = new Set(statement.bindings.map((b) => b.name));
+	if (!cteNames.has(bodySourceName)) {
+		throw new EngineExecutionError(
+			`Le body du 'let' doit scan directement un CTE (nommé ${[...cteNames].map((n) => `'${n}'`).join(", ")}) sur '${engine}' — le join CTE ↔ vraie collection nécessite la capability native.`
+		);
+	}
+	// Bindings : chacun doit scan une vraie collection (chainage CTE v2).
+	for (const binding of statement.bindings) {
+		if (cteNames.has(binding.query.source.collection)) {
+			throw new EngineExecutionError(
+				`Chainage 'let' non supporté sur '${engine}' v1 : '${binding.name}' référence '${binding.query.source.collection}'. Réécris en une seule query find, ou passe sur un engine avec cte native.`
+			);
+		}
+	}
+	// Étape 1 : exécute chaque binding via le pipeline natif de l'engine.
+	//   lower(bindingQuery) → plan → mapper.map → connection.execute → compensate
+	// C'est exactement ce que fait la branche `select` de runQuery ci-dessus,
+	// mais on peut le faire ici sans re-parser puisqu'on a déjà le AST.
+	const mapper = getMapper(engine as SupportedEngine);
+	if (mapper === undefined) {
+		throw new EngineExecutionError(`Aucun codegen pour le moteur '${engine}'`);
+	}
+	const materialized = new Map<string, readonly Row[]>();
+	for (const binding of statement.bindings) {
+		const physical = plan(lower(binding.query, schema), capabilities);
+		const native = mapper.map(physical.pushdown);
+		const pushed = await connection.execute(native);
+		const rows = physical.compensation.length === 0
+			? pushed.rows
+			: compensate(physical.compensation, pushed.rows);
+		materialized.set(binding.name, rows);
+	}
+	// Étape 2 : compensate le body sur les rows matérialisées. On construit
+	// un plan pour le body avec un scan virtuel (`__cte__`) et on extrait
+	// les ops post-scan comme ce que fait lowerIntrospectStages T3/2.3.
+	const bodyPlan = lower(statement.body, schema);
+	const linear = linearize(bodyPlan);
+	// linear[0] est le scan du CTE (bodySourceName). On drop et compense les autres.
+	const compensationOps = linear.slice(1).map((op) => toCompensationOp(op));
+	const inputRows = materialized.get(bodySourceName) ?? [];
+	const outputRows = compensate(compensationOps, [...inputRows]);
+	return {
+		columns: columnsFromRows(outputRows, []),
+		rows: outputRows,
+		rowCount: outputRows.length,
 		written: false
 	};
 }
