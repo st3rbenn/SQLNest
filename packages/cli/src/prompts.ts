@@ -61,11 +61,25 @@ export function defaultPrompter(): Prompter {
 	// double-écho `r*o*o*t*` au lieu de `****`. `terminal: false` permet
 	// aussi au raw-mode manuel du password d'être le SEUL en charge de
 	// l'affichage pendant la saisie masquée.
-	const rl = createInterface({
+	// Ref mutable : `select` (inquirer) prend le contrôle exclusif de stdin
+	// (raw mode, keypress handler propre). Après son exit, l'état de stdin
+	// n'est pas parfaitement restauré pour un readline pré-existant : le
+	// prochain `rl.question` reste bloqué (le user tape sans que rien ne
+	// s'affiche, la promise ne résout jamais → « unsettled top-level await »).
+	// Fix : on close le rl AVANT le select, on en recrée un après. Un rl
+	// est jetable — recréer coûte ~0 (juste un event handler).
+	let rl = createInterface({
 		input: process.stdin,
 		output: process.stdout,
 		terminal: false
 	});
+	const recreateRl = (): void => {
+		rl = createInterface({
+			input: process.stdin,
+			output: process.stdout,
+			terminal: false
+		});
+	};
 	return {
 		line: (promptText) =>
 			new Promise((resolve) => {
@@ -86,18 +100,28 @@ export function defaultPrompter(): Prompter {
 			// `@inquirer/prompts.select` — navigation clavier ↑↓ + Enter, Ctrl-C
 			// throw un `ExitPromptError` qu'on relaie brut au caller (le
 			// dispatcher CLI l'affiche + return 130 comme n'importe quel SIGINT).
-			// `terminal: false` du readline ci-dessus ne gêne pas inquirer :
-			// inquirer utilise process.stdin/stdout directement et gère son
-			// propre raw-mode le temps du prompt.
-			const value = await select({
-				message: opts.message,
-				choices: opts.choices.map((c) => ({
-					name: c.label,
-					value: c.value,
-					...(c.description !== undefined ? { description: c.description } : {})
-				}))
-			});
-			return value as T;
+			// Cède stdin à inquirer proprement : close + recreate évite qu'un
+			// readline en background maintienne un handler qui interfère avec
+			// le raw-mode d'inquirer (et vice-versa au retour).
+			rl.close();
+			try {
+				const value = await select({
+					message: opts.message,
+					choices: opts.choices.map((c) => ({
+						name: c.label,
+						value: c.value,
+						...(c.description !== undefined ? { description: c.description } : {})
+					}))
+				});
+				return value as T;
+			} finally {
+				// Restore explicite en cas où inquirer aurait laissé stdin en
+				// raw mode / pause (ExitPromptError ou fin normale, même
+				// chemin). Sans ça, le prochain rl.question reste muet.
+				if (process.stdin.isTTY) process.stdin.setRawMode(false);
+				process.stdin.resume();
+				recreateRl();
+			}
 		},
 		close: () => rl.close()
 	};
