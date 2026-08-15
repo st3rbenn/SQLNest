@@ -163,4 +163,6 @@ export interface Mapper {
 	mapIntrospect?(plan: IntrospectPlan, ctx?: MapperContext): NativeQuery;
 	/** Sprint T3/4 : escape hatch raw (SQL brut / Mongo command). */
 	mapRaw?(plan: import("../ir/plan").RawPlan): NativeQuery;
+	/** Sprint T3/6 : CTE `let x = ...; body`. PG only v1. */
+	mapLet?(plan: import("../ir/plan").LetPlan): NativeQuery;
 }

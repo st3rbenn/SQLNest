@@ -12,6 +12,8 @@ import type {
 	InsertStatement,
 	IntrospectStatement,
 	IsolationLevel,
+	LetBinding,
+	LetStatement,
 	OnConflictAction,
 	OnConflictClause,
 	Query,
@@ -53,10 +55,16 @@ export function parse(tokens: readonly Token[]): Statement {
 }
 
 function parseStatement(cursor: TokenCursor): Statement {
+	// Sprint T3/6 : `let x = <query>; ... <body>` — CTE. Un ou plusieurs
+	// bindings en tête suivis du statement principal. `let` est soft-keyword
+	// (utilisable comme ident ailleurs — ex. col nommée `let`).
+	const first = cursor.peek();
+	if (first.kind === "ident" && first.value.toLowerCase() === "let") {
+		return parseLet(cursor);
+	}
 	// Sprint T2/15 : `transaction [isolation …] { … }` — bloc atomique
 	// multi-statements. Détection avant le check verb (transaction est un
 	// keyword, pas un verb).
-	const first = cursor.peek();
 	if (first.kind === "keyword" && first.value === "transaction") {
 		return parseTransaction(cursor);
 	}
@@ -184,6 +192,95 @@ function parseIntrospectList(cursor: TokenCursor): IntrospectStatement {
 		"parse_introspect_unknown_list",
 		sub.span
 	);
+}
+
+/**
+ * Sprint T3/6 : `let x1 = find …; let x2 = find x1 …; <body>` — CTE.
+ * Consomme les bindings tant qu'un `let` suit (chacun terminé par `;`), puis
+ * parse le body (find/add/update/remove). Body = transaction/raw/introspect
+ * refusé (pas de sémantique claire v1 — refus explicit avec code).
+ */
+function parseLet(cursor: TokenCursor): LetStatement {
+	const bindings: LetBinding[] = [];
+	const firstTok = cursor.peek();
+	while (
+		cursor.peek().kind === "ident" &&
+		cursor.peek().value.toLowerCase() === "let"
+	) {
+		bindings.push(parseLetBinding(cursor));
+	}
+	// Le body doit être find / add / update / remove — pas transaction/raw/list/describe.
+	const bodyStart = cursor.peek();
+	const body = parseStatement(cursor);
+	if (
+		body.operation === "let" ||
+		body.operation === "transaction" ||
+		body.operation === "introspect" ||
+		body.operation === "raw"
+	) {
+		throw new SnqlError(
+			`'${body.operation}' non supporté comme body d'un 'let' v1 — utilise find / add / update / remove.`,
+			"parse_let_body_unsupported",
+			bodyStart.span
+		);
+	}
+	const lastBinding = bindings[bindings.length - 1]!;
+	return {
+		operation: "let",
+		bindings,
+		body,
+		span: { start: firstTok.span.start, end: body.span?.end ?? lastBinding.span.end }
+	};
+}
+
+/**
+ * Un binding `let <ident> = <query>;`. Le query est une select ; `;` obligatoire
+ * (le suivant peut être un autre `let` ou le body).
+ */
+function parseLetBinding(cursor: TokenCursor): LetBinding {
+	const letTok = cursor.next(); // `let`
+	const nameTok = cursor.peek();
+	if (nameTok.kind !== "ident") {
+		throw new SnqlError(
+			`'let' attend un nom de CTE, trouvé '${nameTok.value}'`,
+			"parse_let_missing_name",
+			nameTok.span
+		);
+	}
+	cursor.next();
+	const eq = cursor.peek();
+	if (eq.kind !== "op" || eq.value !== "=") {
+		throw new SnqlError(
+			`'let ${nameTok.value}' attend '=', trouvé '${eq.value}'`,
+			"parse_let_missing_eq",
+			eq.span
+		);
+	}
+	cursor.next();
+	// Le body du binding est TOUJOURS une query select — pas de let{mutation}.
+	const bodyStart = cursor.peek();
+	const bodyStmt = parseStatement(cursor);
+	if (bodyStmt.operation !== "select") {
+		throw new SnqlError(
+			`'let ${nameTok.value} =' attend une requête 'find' (le CTE est immutable) — reçu '${bodyStmt.operation}'.`,
+			"parse_let_binding_not_select",
+			bodyStart.span
+		);
+	}
+	const sep = cursor.peek();
+	if (sep.kind !== "semicolon") {
+		throw new SnqlError(
+			`';' attendu après 'let ${nameTok.value} = …' (avant le prochain 'let' ou le body).`,
+			"parse_let_missing_semicolon",
+			sep.span
+		);
+	}
+	cursor.next();
+	return {
+		name: nameTok.value,
+		query: bodyStmt,
+		span: { start: letTok.span.start, end: sep.span.end }
+	};
 }
 
 /**
@@ -496,6 +593,16 @@ function parseTransactionItem(cursor: TokenCursor): TransactionBodyItem {
 		throw new SnqlError(
 			"'raw' interdit dans une transaction — SNQL ne parse pas le contenu, l'atomicité n'est pas garantie. Utilise BEGIN/COMMIT directement dans le SQL brut.",
 			"parse_raw_in_transaction",
+			first.span
+		);
+	}
+	// Sprint T3/6 : `let` interdit dans une transaction v1 — scope des CTE
+	// vs multi-stmt atomique ambigu. Chaque stmt de la transaction peut
+	// avoir ses propres let en préfixe si besoin.
+	if (stmt.operation === "let") {
+		throw new SnqlError(
+			"'let' interdit dans une transaction v1 — mets les 'let' à l'intérieur de chaque statement individuel.",
+			"parse_let_in_transaction",
 			first.span
 		);
 	}

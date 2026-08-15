@@ -60,7 +60,7 @@ const labels = (src: string, offset = src.length) =>
 	at(src, offset).options.map((o) => o.label);
 
 describe("completeSnql — début de requête", () => {
-	it("propose les verbes canoniques + introspection + raw sur une entrée vide", () => {
+	it("propose les verbes canoniques + introspection + raw + let sur une entrée vide", () => {
 		expect(labels("")).toEqual([
 			"get",
 			"add",
@@ -68,9 +68,10 @@ describe("completeSnql — début de requête", () => {
 			"remove",
 			"list",
 			"describe",
-			"raw"
+			"raw",
+			"let"
 		]);
-		// Les CRUD sont taggés `verb` ; list/describe/raw sont `keyword` (soft-kw).
+		// Les CRUD sont taggés `verb` ; list/describe/raw/let sont `keyword` (soft-kw).
 		const opts = at("").options;
 		expect(opts.filter((o) => o.type === "verb").map((o) => o.label)).toEqual([
 			"get",
@@ -79,7 +80,7 @@ describe("completeSnql — début de requête", () => {
 			"remove"
 		]);
 		expect(opts.filter((o) => o.type === "keyword").map((o) => o.label)).toEqual(
-			["list", "describe", "raw"]
+			["list", "describe", "raw", "let"]
 		);
 	});
 
@@ -475,7 +476,8 @@ describe("completeSnql — robustesse", () => {
 			"remove",
 			"list",
 			"describe",
-			"raw"
+			"raw",
+			"let"
 		]);
 		expect(
 			completeSnql("get users ", 10, empty).options.map((o) => o.label)

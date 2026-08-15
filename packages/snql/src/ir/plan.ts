@@ -44,7 +44,11 @@ export type Capability =
 	// son propre mécanisme (information_schema PG, listCollections Mongo).
 	// Chaque IntrospectKind renvoie un shape de colonnes stable cross-engine
 	// (ex: list-tables → {name: string}).
-	| "introspect";
+	| "introspect"
+	// Sprint T3/6 : `let x = ...; body` — CTE (Common Table Expressions).
+	// PG only v1 (WITH ... natif). Mongo pourrait matérialiser via $lookup
+	// sub-pipeline mais complexité pas justifiée v1 — refus explicit.
+	| "cte";
 
 /**
  * Décimal **exact** : on garde le texte brut. Les colonnes NUMERIC/DECIMAL de
@@ -471,13 +475,36 @@ export interface RawPlan {
 	readonly payload: import("../parser/ast").RawPayload;
 }
 
-/** Un plan complet : lecture, mutation, transaction (T2/15), introspect (T3/1) ou raw (T3/4). */
+/**
+ * Sprint T3/6 : un binding CTE lowered. Chaque nom devient une "collection
+ * virtuelle" visible dans le body plan — le codegen PG l'émet en préfixe
+ * `WITH <name> AS (<subplan-sql>)`.
+ */
+export interface PlanCteBinding {
+	readonly name: string;
+	readonly plan: LogicalPlan;
+}
+
+/**
+ * Sprint T3/6 : wrapper `let x1 = …; x2 = …; body`. Le body est un plan
+ * classique (Logical pour find, Mutation pour add/update/remove) qui a été
+ * lowered en considérant les cte names comme des collections légitimes.
+ * PG only v1 (capability `cte`) — Mongo refuse au planner.
+ */
+export interface LetPlan {
+	readonly op: "let";
+	readonly bindings: readonly PlanCteBinding[];
+	readonly body: LogicalPlan | MutationPlan;
+}
+
+/** Un plan complet : lecture, mutation, transaction (T2/15), introspect (T3/1), raw (T3/4) ou let/CTE (T3/6). */
 export type Plan =
 	| LogicalPlan
 	| MutationPlan
 	| TransactionPlan
 	| IntrospectPlan
-	| RawPlan;
+	| RawPlan
+	| LetPlan;
 
 export type PlanOp = LogicalPlan["op"];
 

@@ -502,6 +502,22 @@ export function assertIntrospectSupported(
 	);
 }
 
+/**
+ * Sprint T3/6 : refuse `let x = ...; body` si l'engine n'a pas la capability
+ * `cte`. Mongo pourrait matérialiser via $lookup sub-pipeline mais complexité
+ * pas justifiée v1 — l'user peut re-écrire manuellement en subquery.
+ */
+export function assertLetSupported(
+	_plan: import("../ir/plan").LetPlan,
+	capabilities: Capabilities
+): void {
+	if (capabilities.supports.has("cte")) return;
+	throw new SnqlError(
+		`'let' (CTE) non supporté sur '${capabilities.engine}' — réécris la requête sans CTE (ex: subquery in-line).`,
+		"planner_let_unsupported"
+	);
+}
+
 export function toCompensationOp(op: LogicalPlan): CompensationOp {
 	switch (op.op) {
 		case "filter":

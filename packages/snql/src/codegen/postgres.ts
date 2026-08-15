@@ -4,6 +4,7 @@ import type {
 	CastTarget,
 	CompareOp,
 	IntrospectPlan,
+	LetPlan,
 	LogicalPlan,
 	MutationPlan,
 	PlanExpr,
@@ -153,6 +154,34 @@ export const postgresMapper: Mapper = {
 			text: plan.payload.text,
 			params: [],
 			paramSpans: []
+		};
+	},
+	/**
+	 * Sprint T3/6 : `WITH b1 AS (SQL1), b2 AS (SQL2) BODY_SQL`. Les bindings
+	 * et le body partagent la MÊME ParamList — les $N s'incrémentent
+	 * séquentiellement à travers tout le WITH+BODY (PG bind par position
+	 * globale, pas par CTE). Un binding référence un binding précédent en
+	 * tant que "table" — le codegen scan émet `FROM <cte_name>` naturellement.
+	 */
+	mapLet(plan: LetPlan): NativeQuery {
+		const params = new ParamList();
+		const bindingParts: string[] = [];
+		for (const b of plan.bindings) {
+			const inner = renderPlan(b.plan, params);
+			bindingParts.push(`${quoteIdent(b.name)} AS (${inner})`);
+		}
+		const bodyText = plan.body.op === "insert"
+			|| plan.body.op === "update"
+			|| plan.body.op === "delete"
+			? renderMutation(plan.body, params)
+			: renderPlan(plan.body, params);
+		const text = `WITH ${bindingParts.join(", ")} ${bodyText}`;
+		return {
+			engine: "postgres",
+			kind: "sql",
+			text,
+			params: params.all(),
+			paramSpans: params.allSpans()
 		};
 	}
 };

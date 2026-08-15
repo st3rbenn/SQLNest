@@ -65,7 +65,9 @@ const PRIMARY_VERBS: readonly {
 	{ label: "list", detail: "introspection", type: "keyword" },
 	{ label: "describe", detail: "introspection", type: "keyword" },
 	// T3/4 : `raw` escape hatch — dernier recours documenté.
-	{ label: "raw", detail: "escape hatch (SQL/Mongo brut)", type: "keyword" }
+	{ label: "raw", detail: "escape hatch (SQL/Mongo brut)", type: "keyword" },
+	// T3/6 : `let` — CTE binding, préfixe une requête plus grosse.
+	{ label: "let", detail: "CTE (let x = find ...; body)", type: "keyword" }
 ];
 
 /** Sous-commandes reconnues après `list` (T3/1 + T3/3). */

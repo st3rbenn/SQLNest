@@ -495,7 +495,34 @@ export interface RawStatement {
 	readonly span: Span;
 }
 
-/** Racine de l'AST : lecture (`Query`), mutation, transaction (T2/15), introspection (T3/1) ou raw escape hatch (T3/4). */
+/**
+ * Sprint T3/6 : un binding `let <name> = <query>`. Le body du binding est
+ * TOUJOURS une Query (select) — un CTE n'a de sens qu'en lecture (immutable
+ * view). Peut référencer les bindings précédents (ordre topologique validé
+ * au lower).
+ */
+export interface LetBinding {
+	readonly name: string;
+	readonly query: Query;
+	readonly span: Span;
+}
+
+/**
+ * Sprint T3/6 : wrapper `let x1 = ...; let x2 = ...; <body>`. Le body accepte
+ * find/add/update/remove — toute la DML classique peut consommer les CTE
+ * définis en tête (subqueries, joins, insert-select, where in ...). Transaction/
+ * raw/introspection sont refusés au parser (pas de sémantique claire v1).
+ * Le CTE reste IMMUTABLE : écrire dedans (`add into <cte>`, `update <cte>`,
+ * `remove from <cte>`) est refusé au lower.
+ */
+export interface LetStatement {
+	readonly operation: "let";
+	readonly bindings: readonly LetBinding[];
+	readonly body: Query | InsertStatement | UpdateStatement | DeleteStatement;
+	readonly span: Span;
+}
+
+/** Racine de l'AST : lecture (`Query`), mutation, transaction (T2/15), introspection (T3/1), raw (T3/4) ou let/CTE (T3/6). */
 export type Statement =
 	| Query
 	| InsertStatement
@@ -503,4 +530,5 @@ export type Statement =
 	| DeleteStatement
 	| TransactionStatement
 	| IntrospectStatement
-	| RawStatement;
+	| RawStatement
+	| LetStatement;

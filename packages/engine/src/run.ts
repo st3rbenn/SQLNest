@@ -9,6 +9,7 @@ import type {
 } from "@sqlnest/snql";
 import {
 	assertIntrospectSupported,
+	assertLetSupported,
 	assertMutationCastTargetsSupported,
 	assertMutationInsertSelectSupported,
 	assertMutationUpsertSupported,
@@ -21,6 +22,7 @@ import {
 	inferResultColumns,
 	lower,
 	lowerIntrospect,
+	lowerLet,
 	lowerMutation,
 	lowerRaw,
 	lowerTransaction,
@@ -109,6 +111,27 @@ export async function runQuery(
 			};
 		}
 		return { ...executed, written: false };
+	}
+
+	// Sprint T3/6 : CTE `let x = ...; body`. Le mapper.mapLet est absent
+	// sur les engines sans support (Mongo/KV) — assertLetSupported remonte
+	// l'erreur claire avant TypeError.
+	if (statement.operation === "let") {
+		const letPlan = lowerLet(statement, schema);
+		assertLetSupported(letPlan, capabilities);
+		if (mapper.mapLet === undefined) {
+			throw new EngineExecutionError(
+				`Aucun codegen 'let' (CTE) pour le moteur '${engine}'`
+			);
+		}
+		const native = withIdentSpans(mapper.mapLet(letPlan), identSpans);
+		// Le body du let peut être un read (find) ou un write (add/update/remove).
+		// written = true ssi le body est une mutation — l'UI utilise ce flag
+		// pour décider l'affichage rows vs rowCount.
+		const written = letPlan.body.op === "insert"
+			|| letPlan.body.op === "update"
+			|| letPlan.body.op === "delete";
+		return { ...(await connection.execute(native)), written };
 	}
 
 	// Sprint T3/4 : escape hatch `raw`. Bypass complet du pipeline SNQL —

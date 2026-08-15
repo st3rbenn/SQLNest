@@ -100,6 +100,7 @@ export { SnqlError } from "./diagnostics";
 export {
 	lower,
 	lowerIntrospect,
+	lowerLet,
 	lowerMutation,
 	lowerRaw,
 	lowerTransaction
@@ -180,6 +181,7 @@ export type {
 } from "./planner/planner";
 export {
 	assertIntrospectSupported,
+	assertLetSupported,
 	assertMutationCastTargetsSupported,
 	assertMutationInsertSelectSupported,
 	assertMutationUpsertSupported,

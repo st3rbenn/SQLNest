@@ -79,7 +79,9 @@ export const INTROSPECT_VERBS: ReadonlySet<string> = new Set([
 	// soft-keyword (utilisable en ident hors introspect).
 	"for",
 	// T3/4 : `raw` escape hatch — highlight bleu. Soft-keyword aussi.
-	"raw"
+	"raw",
+	// T3/6 : `let` — CTE binding. Highlight bleu, soft-keyword.
+	"let"
 ]);
 
 /**

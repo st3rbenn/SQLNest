@@ -600,6 +600,48 @@ export function lowerRaw(
 	return { op: "raw", payload: statement.payload };
 }
 
+/**
+ * Sprint T3/6 : `let x1 = ...; ... ; body` → LetPlan. Bindings lowered dans
+ * l'ordre (chacun peut ref les précédents). Le body est lowered avec le set
+ * de cte names — les mutations qui ciblent un cte name en écriture sont
+ * refusées (`add into <cte>`, `update <cte>`, `remove from <cte>`).
+ */
+export function lowerLet(
+	statement: import("../parser/ast").LetStatement,
+	schema?: SchemaModel
+): import("./plan").LetPlan {
+	const seen = new Set<string>();
+	const bindings: import("./plan").PlanCteBinding[] = statement.bindings.map(
+		(b) => {
+			if (seen.has(b.name)) {
+				throw new SnqlError(
+					`CTE '${b.name}' déclaré deux fois — chaque 'let' doit avoir un nom unique.`,
+					"lower_let_duplicate_name",
+					b.span
+				);
+			}
+			seen.add(b.name);
+			return { name: b.name, plan: lower(b.query, schema) };
+		}
+	);
+	const cteNames = seen;
+	// Refuse un mutation body qui cible un CTE (write-to-view interdit).
+	if (statement.body.operation !== "select") {
+		const target = statement.body.collection;
+		if (cteNames.has(target)) {
+			throw new SnqlError(
+				`Écriture sur le CTE '${target}' interdite — un CTE est immutable (view). Cible une vraie table.`,
+				"lower_let_write_to_cte",
+				statement.body.span
+			);
+		}
+	}
+	const body = statement.body.operation === "select"
+		? lower(statement.body, schema)
+		: lowerMutation(statement.body, schema);
+	return { op: "let", bindings, body };
+}
+
 export function lowerIntrospect(
 	statement: import("../parser/ast").IntrospectStatement,
 	_schema?: SchemaModel
