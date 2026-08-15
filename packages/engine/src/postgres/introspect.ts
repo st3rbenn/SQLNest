@@ -5,7 +5,7 @@ import type {
 	SchemaModel,
 	SnqlType
 } from "@sqlnest/snql";
-import type { Pool as PgPool } from "pg";
+import type { Pool as PgPool, QueryResultRow } from "pg";
 import { EngineIntrospectionError } from "../errors";
 
 // --- Lignes brutes renvoyées par le catalogue ---
@@ -251,29 +251,64 @@ export async function introspectPostgres(
 	pool: PgPool,
 	schema: string
 ): Promise<SchemaModel> {
+	const params = [schema];
+	// TABLES + COLUMNS sont bloquantes (sans, pas de collections utilisables).
+	// PK / FK / ENUMS sont enrichissantes — un rôle read-only strict
+	// (RNAcentral, DB SaaS multi-tenant) peut se voir refuser l'accès à
+	// pg_enum / pg_constraint (SQLSTATE 42501). Soft-fail chacune pour
+	// dégrader gracieusement plutôt que de bloquer tout le canvas.
+	let tables, columns;
 	try {
-		const params = [schema];
-		const [tables, columns, pks, fks, enums] = await Promise.all([
+		[tables, columns] = await Promise.all([
 			pool.query<{ table_name: string }>(TABLES_SQL, params),
-			pool.query<ColumnRow>(COLUMNS_SQL, params),
-			pool.query<PkRow>(PK_SQL, params),
-			pool.query<FkRow>(FK_SQL, params),
-			pool.query<EnumRow>(ENUMS_SQL, params)
+			pool.query<ColumnRow>(COLUMNS_SQL, params)
 		]);
-		return buildSchemaModel(
-			tables.rows.map((row) => row.table_name),
-			columns.rows,
-			pks.rows,
-			fks.rows,
-			enums.rows
-		);
 	} catch (cause) {
-		// Surface la vraie cause PG (message + sqlstate) plutôt qu'un message
-		// générique — permet au front de diagnoser (droits catalog absents,
-		// schema inaccessible, query système bloquée…).
-		const detail = describePgIntrospectError(cause);
 		throw new EngineIntrospectionError(
-			`Introspection Postgres échouée — ${detail}`,
+			`Introspection Postgres échouée — ${describePgIntrospectError(cause)}`,
+			{ cause }
+		);
+	}
+	const [pks, fks, enums] = await Promise.all([
+		softQuery<PkRow>(pool, PK_SQL, params, "primary keys"),
+		softQuery<FkRow>(pool, FK_SQL, params, "foreign keys"),
+		softQuery<EnumRow>(pool, ENUMS_SQL, params, "enums")
+	]);
+	return buildSchemaModel(
+		tables.rows.map((row) => row.table_name),
+		columns.rows,
+		pks,
+		fks,
+		enums
+	);
+}
+
+/**
+ * Query enrichissante : renvoie `[]` sur erreur de droits (42501) ou objet
+ * système absent (42P01) — laisse le schéma se construire avec un feature
+ * en moins plutôt que de tout bloquer. Les autres erreurs restent propagées.
+ */
+async function softQuery<T extends QueryResultRow>(
+	pool: PgPool,
+	sql: string,
+	params: unknown[],
+	label: string
+): Promise<T[]> {
+	try {
+		const result = await pool.query<T>(sql, params);
+		return result.rows;
+	} catch (cause) {
+		const code = cause instanceof Error
+			? (cause as { code?: unknown }).code
+			: undefined;
+		if (code === "42501" || code === "42P01") {
+			// Droit manquant ou catalog inaccessible — dégradation silencieuse.
+			// La feature qui dépend de `label` (autocomplete enum, inférence
+			// multiplicité join…) sera absente mais rien ne casse.
+			return [];
+		}
+		throw new EngineIntrospectionError(
+			`Introspection Postgres (${label}) échouée — ${describePgIntrospectError(cause)}`,
 			{ cause }
 		);
 	}
