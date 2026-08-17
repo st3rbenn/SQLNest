@@ -61,17 +61,6 @@ export interface AuthenticateResult {
 	readonly tunnelId: string;
 	readonly connectionId: string;
 	readonly expiresAt: string;
-	/**
-	 * T4/3 : cross-device auto — le backend a détecté que cette DB était
-	 * déjà pair-ée depuis un autre CLI (même db_fingerprint dans la team)
-	 * et a cloné le canvas vers cette nouvelle connection. Le CLI peut
-	 * afficher un message user-friendly pour expliquer pourquoi le canvas
-	 * apparaît déjà rempli au 1er ouverture.
-	 */
-	readonly clonedFrom?: {
-		readonly connectionId: string;
-		readonly name: string;
-	};
 }
 
 export interface HeartbeatResult {

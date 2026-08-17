@@ -90,17 +90,6 @@ export interface ConnectResult {
 	 *  `session_token` existant dans `config.tunnels[]` (skip du device
 	 *  flow). `false` si device flow interactif complet a été effectué. */
 	readonly resumed: boolean;
-	/**
-	 * T4/3 : cross-device auto — le backend a détecté que la DB visée était
-	 * déjà pair-ée depuis un autre CLI (même db_fingerprint dans la team)
-	 * et a cloné son canvas vers cette nouvelle connection. Le wrapper CLI
-	 * peut afficher "✓ Canvas repris depuis « <name> »" pour clarifier.
-	 * Absent quand pair vierge OU idempotent.
-	 */
-	readonly clonedFrom?: {
-		readonly connectionId: string;
-		readonly name: string;
-	};
 }
 
 /** Info affichable côté user à la 1re étape. */
@@ -280,8 +269,7 @@ export async function connect(opts: ConnectOptions): Promise<ConnectResult> {
 		sessionToken: auth.token,
 		expiresAt: new Date(auth.expiresAt),
 		connectionName: localConnectionName,
-		resumed: false,
-		...(auth.clonedFrom !== undefined ? { clonedFrom: auth.clonedFrom } : {})
+		resumed: false
 	};
 }
 

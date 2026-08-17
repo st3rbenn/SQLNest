@@ -53,8 +53,30 @@ export type PutCanvasBodyT = z.infer<typeof PutCanvasBody>;
 export type GetCanvasResponseT = z.infer<typeof GetCanvasResponse>;
 export type PutCanvasResponseT = z.infer<typeof PutCanvasResponse>;
 
+/**
+ * T4/4 : endpoint GET /canvas-state/checksum-history?connectionId=... —
+ * expose l'audit trail des checksums vus par le canvas résolu pour cette
+ * db_connection. Read-only, user-scoped (auth cookie), 100 dernières
+ * entrées ordonnées desc par seen_at.
+ */
+export const ChecksumHistoryEntry = z.object({
+	id: z.string(),
+	dbSchemaChecksum: z.string(),
+	dbConnectionId: z.string().nullable(),
+	seenAt: z.string()
+});
+export const ChecksumHistoryResponse = z.object({
+	canvasId: z.string(),
+	entries: z.array(ChecksumHistoryEntry)
+});
+export type ChecksumHistoryEntryT = z.infer<typeof ChecksumHistoryEntry>;
+export type ChecksumHistoryResponseT = z.infer<typeof ChecksumHistoryResponse>;
+
 // Nommage OpenAPI — respecte la convention des autres schémas exposés
 // (cf. HealthResponse, SchemaModel).
 z.globalRegistry.add(GetCanvasResponse, { id: "GetCanvasResponse" });
 z.globalRegistry.add(PutCanvasBody, { id: "PutCanvasBody" });
 z.globalRegistry.add(PutCanvasResponse, { id: "PutCanvasResponse" });
+z.globalRegistry.add(ChecksumHistoryResponse, {
+	id: "ChecksumHistoryResponse"
+});

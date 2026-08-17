@@ -55,17 +55,6 @@ export type AuthenticateResult =
 			readonly tunnelId: string;
 			readonly connectionId: string;
 			readonly expiresAt: Date;
-			/**
-			 * T4/3 : cross-device auto — cette connection est le miroir d'une
-			 * db_connection existante (même db_fingerprint, autre CLI). Le
-			 * canvas a été cloné depuis `clonedFrom.name` pour rendre le
-			 * layout immédiatement disponible sans re-tout-relayouter.
-			 * Absent quand pas de clone (pair nouveau, ou fingerprint idempotent).
-			 */
-			readonly clonedFrom?: {
-				readonly connectionId: string;
-				readonly name: string;
-			};
 	  }
 	| {
 			readonly ok: false;
@@ -193,10 +182,7 @@ export async function authenticatePairing(
 			token,
 			tunnelId: sess.id,
 			connectionId: conn.id,
-			expiresAt,
-			...(upsert.clonedFrom !== undefined
-				? { clonedFrom: upsert.clonedFrom }
-				: {})
+			expiresAt
 		};
 	});
 }

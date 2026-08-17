@@ -1,6 +1,6 @@
 {
 	"name": "sqlnest",
-	"version": "0.0.1",
+	"version": "0.0.7",
 	"scripts": {
 		"preinstall": "npx only-allow pnpm",
 		"check": "biome check --write .",

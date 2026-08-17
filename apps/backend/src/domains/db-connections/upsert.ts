@@ -33,7 +33,7 @@
  */
 
 import { schema as dbSchema } from "@sqlnest/db";
-import { and, eq, ne, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { DbOrTx } from "../canvas-state/db";
 import { computeCliFingerprint } from "../tunnels/pairing/crypto";
 
@@ -81,17 +81,6 @@ export type UpsertConnectionResult =
 			/** `true` si la connection a été créée, `false` si on a réutilisé une
 			 *  connection existante (fingerprint match). */
 			readonly wasCreated: boolean;
-			/**
-			 * T4/3 : cross-device auto — cette db_connection a été créée en
-			 * clonant le canvas d'une db_connection existante qui pointait vers
-			 * la MÊME instance DB (même `db_fingerprint`, cli_fingerprint
-			 * différent). Absent = pas de clone (nouveau pair vierge OU
-			 * fingerprint match idempotent).
-			 */
-			readonly clonedFrom?: {
-				readonly connectionId: string;
-				readonly name: string;
-			};
 	  }
 	| {
 			readonly ok: false;
@@ -172,42 +161,10 @@ export async function upsertDbConnectionByFingerprint(
 		return { ok: false, reason: "name_conflict" };
 	}
 
-	// 2.5. T4/3 — cross-device auto : si le CLI envoie un dbFingerprint et
-	//     qu'une db_connection existante dans la même team match ce fingerprint
-	//     (avec un cli_fingerprint DIFFÉRENT — sinon on serait tombé sur le
-	//     match idempotent à l'étape 1), on va cloner son canvas vers la
-	//     nouvelle db_connection. UX : Windows retrouve le canvas layouté sur
-	//     Mac sans re-tout-remettre-en-place manuellement.
-	//
-	//     Cohabitation : les 2 db_connections restent distinctes (chacune son
-	//     tunnel, son cli_fingerprint). Elles divergent ensuite si l'user
-	//     modifie le canvas sur un seul device (pas de sync temps réel v1).
-	let sourceForClone:
-		| { id: string; name: string; lastPreviewSnapshot: unknown }
-		| null = null;
-	if (opts.dbFingerprint !== undefined && opts.dbFingerprint !== null) {
-		const matches = await tx
-			.select({
-				id: dbSchema.dbConnection.id,
-				name: dbSchema.dbConnection.name,
-				lastPreviewSnapshot: dbSchema.dbConnection.lastPreviewSnapshot
-			})
-			.from(dbSchema.dbConnection)
-			.where(
-				and(
-					eq(dbSchema.dbConnection.teamId, opts.teamId),
-					eq(dbSchema.dbConnection.dbFingerprint, opts.dbFingerprint),
-					ne(dbSchema.dbConnection.cliFingerprint, fingerprint)
-				)
-			)
-			.orderBy(dbSchema.dbConnection.createdAt)
-			.limit(1);
-		if (matches.length > 0 && matches[0]) {
-			sourceForClone = matches[0];
-		}
-	}
-
-	// 3. INSERT normal.
+	// 3. INSERT normal. T4/4 remplace le clone T4/3 par le canvas partagé
+	//    natif via (user, team, db_fingerprint) + historique de checksums —
+	//    la nouvelle db_connection résout automatiquement au bon canvas au
+	//    premier GET/PUT via `resolveCanvasByConnection`. Rien à cloner ici.
 	const inserted = await tx
 		.insert(dbSchema.dbConnection)
 		.values({
@@ -225,12 +182,6 @@ export async function upsertDbConnectionByFingerprint(
 			...(opts.dbSchemaChecksum !== undefined &&
 			opts.dbSchemaChecksum !== null
 				? { dbSchemaChecksum: opts.dbSchemaChecksum }
-				: {}),
-			// T4/3 : reprend le snapshot de la source pour que la mini-preview
-			// canvas s'affiche IMMÉDIATEMENT sur le 2e device — sinon l'user
-			// verrait la gallery vide pendant que le CLI Windows introspect.
-			...(sourceForClone !== null && sourceForClone.lastPreviewSnapshot !== null
-				? { lastPreviewSnapshot: sourceForClone.lastPreviewSnapshot }
 				: {})
 		})
 		.returning({ id: dbSchema.dbConnection.id });
@@ -241,36 +192,5 @@ export async function upsertDbConnectionByFingerprint(
 			"upsertDbConnectionByFingerprint: INSERT db_connection n'a rien renvoyé"
 		);
 	}
-
-	// 4. T4/3 — clone canvas_state depuis la source. INSERT explicite (pas
-	//    de UPSERT) : la nouvelle db_connection ne peut pas déjà avoir un
-	//    canvas (elle vient d'être créée à l'étape 3). La contrainte unique
-	//    `(user_id, connection_id)` n'est jamais violée.
-	if (sourceForClone !== null) {
-		const canvasRows = await tx
-			.select({ payload: dbSchema.canvasState.payload })
-			.from(dbSchema.canvasState)
-			.where(
-				and(
-					eq(dbSchema.canvasState.userId, opts.userId),
-					eq(dbSchema.canvasState.connectionId, sourceForClone.id)
-				)
-			)
-			.limit(1);
-		if (canvasRows.length > 0 && canvasRows[0]) {
-			await tx.insert(dbSchema.canvasState).values({
-				userId: opts.userId,
-				connectionId: row.id,
-				payload: canvasRows[0].payload
-			});
-		}
-		return {
-			ok: true,
-			connectionId: row.id,
-			wasCreated: true,
-			clonedFrom: { connectionId: sourceForClone.id, name: sourceForClone.name }
-		};
-	}
-
 	return { ok: true, connectionId: row.id, wasCreated: true };
 }

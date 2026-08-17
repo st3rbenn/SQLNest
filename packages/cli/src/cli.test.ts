@@ -80,7 +80,9 @@ describe("runCli — help & version", () => {
 			stderr: io.stderr
 		});
 		expect(code).toBe(0);
-		expect(io.out.join("")).toMatch(/^\d+\.\d+\.\d+$/);
+		// Accepte semver (build via esbuild `--define:__SQLNEST_CLI_VERSION__`)
+		// OU "dev" (tsx runtime, __SQLNEST_CLI_VERSION__ undefined → fallback).
+		expect(io.out.join("")).toMatch(/^(\d+\.\d+\.\d+|dev)$/);
 	});
 
 	test("commande inconnue → 2 + help sur stderr", async () => {

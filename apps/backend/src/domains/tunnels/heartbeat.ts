@@ -24,7 +24,8 @@
  */
 
 import { schema as dbSchema } from "@sqlnest/db";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
+import { resolveCanvasByConnection } from "../canvas-state/resolve";
 import type { DbOrTx } from "./db";
 import { authenticateTunnelSession } from "./session/authenticate-tunnel-session";
 
@@ -67,5 +68,70 @@ export async function heartbeatTunnel(
 		.set(patch)
 		.where(eq(dbSchema.dbConnection.id, session.connectionId));
 
+	// T4/4 : si un canvas existe déjà (via lookup fp/checksum/legacy) pour
+	// cette db_connection, on APPEND le checksum courant à son historique
+	// s'il n'est pas encore présent, puis on log un event audit. Rien à
+	// faire si aucun canvas — il sera créé au premier PUT côté frontend
+	// avec le checksum initial via put.ts.
+	if (dbSchemaChecksum !== null) {
+		await appendCanvasChecksum(
+			db,
+			session.userId,
+			session.connectionId,
+			dbSchemaChecksum
+		);
+	}
+
 	return { ok: true, connectionId: session.connectionId };
+}
+
+/**
+ * T4/4 : append un checksum courant à l'array historique du canvas si
+ * absent, puis insert un `canvas_checksum_event` (audit trail). Idempotent
+ * sur l'array (pas d'append si le checksum est déjà présent) MAIS log
+ * quand même l'event — permet de tracer les heartbeats redondants dans le
+ * temps ("le CLI Mac est toujours actif avec checksum X"). Skip si aucun
+ * canvas trouvé (le CLI a pair-é mais l'user n'a pas encore ouvert le
+ * canvas côté frontend, donc pas de row à append).
+ */
+async function appendCanvasChecksum(
+	db: DbOrTx,
+	userId: string,
+	connectionId: string,
+	checksum: string
+): Promise<void> {
+	const { canvas } = await resolveCanvasByConnection(db, userId, connectionId);
+	if (canvas === null) return;
+
+	// Append si absent. `array_append` retourne un nouveau tableau — on
+	// filtre côté WHERE via NOT `= ANY` pour éviter les doublons. Cap à 20
+	// entrées via `array_length` : au-delà, on trim le plus vieux (FIFO).
+	await db
+		.update(dbSchema.canvasState)
+		.set({
+			dbSchemaChecksums: sql`(
+				CASE
+					WHEN array_length(${dbSchema.canvasState.dbSchemaChecksums}, 1) >= 20
+						THEN array_append(
+							${dbSchema.canvasState.dbSchemaChecksums}[2:20],
+							${checksum}
+						)
+					ELSE array_append(${dbSchema.canvasState.dbSchemaChecksums}, ${checksum})
+				END
+			)`
+		})
+		.where(
+			and(
+				eq(dbSchema.canvasState.id, canvas.id),
+				sql`NOT (${checksum} = ANY(${dbSchema.canvasState.dbSchemaChecksums}))`
+			)
+		);
+
+	// Log l'event quel que soit le résultat de l'append (checksum déjà vu
+	// = event redondant qui trace le heartbeat).
+	await db.insert(dbSchema.canvasChecksumEvent).values({
+		canvasStateId: canvas.id,
+		dbConnectionId: connectionId,
+		dbSchemaChecksum: checksum
+	});
 }

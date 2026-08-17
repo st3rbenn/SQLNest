@@ -9,8 +9,10 @@ import {
 import { countCanvasStates } from "../../../domains/canvas-state/count";
 import { delCanvasState } from "../../../domains/canvas-state/del";
 import { getCanvasState } from "../../../domains/canvas-state/get";
+import { getCanvasChecksumHistory } from "../../../domains/canvas-state/history";
 import { putCanvasState } from "../../../domains/canvas-state/put";
 import {
+	ChecksumHistoryResponse,
 	GetCanvasQuery,
 	GetCanvasResponse,
 	PutCanvasBody,
@@ -255,6 +257,38 @@ export default function canvasStateRoute(fastify: FastifyInstance) {
 				return reply
 					.code(500)
 					.send({ message: "Erreur interne lors de la suppression" });
+			}
+		}
+	);
+
+	// ─── GET /canvas-state/checksum-history — T4/4 audit trail ────────
+	instance.get(
+		"/checksum-history",
+		{
+			preHandler: [requireUser],
+			schema: {
+				querystring: GetCanvasQuery,
+				response: {
+					200: ChecksumHistoryResponse,
+					404: ErrorResponse
+				}
+			}
+		},
+		async (request, reply) => {
+			assertAuthenticated(request);
+			try {
+				const history = await getCanvasChecksumHistory(
+					fastify.db,
+					request.user.id,
+					request.query.connectionId
+				);
+				if (history === null) {
+					return reply.code(404).send({ message: "Canvas introuvable" });
+				}
+				return history;
+			} catch (err) {
+				request.log.error({ err }, "canvas-state checksum-history failed");
+				throw err;
 			}
 		}
 	);

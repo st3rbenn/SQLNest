@@ -1,6 +1,5 @@
-import { schema as dbSchema } from "@sqlnest/db";
-import { and, eq } from "drizzle-orm";
 import type { DbOrTx } from "./db";
+import { resolveCanvasByConnection } from "./resolve";
 import type { CanvasConnectionIdT, CanvasPayloadT } from "./schema";
 
 export interface GetCanvasResult {
@@ -11,39 +10,22 @@ export interface GetCanvasResult {
 /**
  * Lit le canvas d'un utilisateur pour une db_connection donnée.
  *
- * ─── Contrat ───────────────────────────────────────────────────────────
- * - `null` si aucune row (userId × connectionId) — le handler HTTP répondra 404.
- * - `{ payload, updatedAt }` sinon.
- *
- * L'unique-index (`user_id`, `db_connection_id`) garantit qu'au plus une
- * row existe pour un couple donné — on utilise `LIMIT 1` pour rester
- * explicite (defensive : si l'index disparaissait, on ne renverrait pas
- * plusieurs rows silencieusement).
+ * ─── T4/4 : résolution cross-device ────────────────────────────────────
+ * Passe par `resolveCanvasByConnection` qui match dans l'ordre :
+ *   1. `(user, team, db_fingerprint)` — même instance DB, autre CLI
+ *   2. `(user, team) + checksum ∈ historique` — même dump, autre container
+ *   3. `(user, connection_id)` — canvas legacy pré-T4/4
+ * → `null` si aucun match (le handler HTTP répond 404).
  */
 export async function getCanvasState(
 	db: DbOrTx,
 	userId: string,
 	connectionId: CanvasConnectionIdT
 ): Promise<GetCanvasResult | null> {
-	const rows = await db
-		.select({
-			payload: dbSchema.canvasState.payload,
-			updatedAt: dbSchema.canvasState.updatedAt
-		})
-		.from(dbSchema.canvasState)
-		.where(
-			and(
-				eq(dbSchema.canvasState.userId, userId),
-				eq(dbSchema.canvasState.connectionId, connectionId)
-			)
-		)
-		.limit(1);
-
-	const row = rows[0];
-	if (!row) return null;
-
+	const { canvas } = await resolveCanvasByConnection(db, userId, connectionId);
+	if (canvas === null) return null;
 	return {
-		payload: row.payload as CanvasPayloadT,
-		updatedAt: row.updatedAt.toISOString()
+		payload: canvas.payload as CanvasPayloadT,
+		updatedAt: canvas.updatedAt.toISOString()
 	};
 }

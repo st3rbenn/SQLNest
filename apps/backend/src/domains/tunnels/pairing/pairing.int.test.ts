@@ -35,6 +35,8 @@ import {
 	formatPairingCode,
 	hashSha256Hex
 } from "../../../domains/tunnels/pairing/crypto";
+import { getCanvasState } from "../../canvas-state/get";
+import { putCanvasState } from "../../canvas-state/put";
 import tunnelsRoute from "../../../routes/api/tunnels/root";
 import {
 	createTestApp,
@@ -957,7 +959,11 @@ describe.skipIf(!DATABASE_URL)("/api/tunnels — device flow", () => {
 			expect(conns[0]!.dbFingerprint).toBeNull();
 		});
 
-		test("T4/3 : 2 CLI distincts sur même db_fingerprint → 2 connections, canvas cloné du 1er sur le 2e", async () => {
+		test("T4/4 : 2 CLI distincts sur même db_fingerprint → un SEUL canvas partagé via lookup fp", async () => {
+			// T4/3 (clone) supprimé au refactor T4/4 : plus de duplication.
+			// Le canvas est partagé natively via (user, team, db_fingerprint).
+			// Ce test valide qu'un GET depuis Windows retourne le payload
+			// écrit depuis Mac — un seul canvas physique en DB.
 			const { userId } = await createTestUser(
 				app,
 				"cross-dev@example.com",
@@ -965,7 +971,7 @@ describe.skipIf(!DATABASE_URL)("/api/tunnels — device flow", () => {
 			);
 			const dbFp = "pg:7600431566186733602/apollon-db";
 
-			// Device 1 (Mac) — pair + canvas custom.
+			// Device Mac : pair.
 			const { pubkeyHex: mac, sign: signMac } = makeCliKeypair();
 			await seedPairing(app, {
 				code: "MACDEV01",
@@ -985,21 +991,15 @@ describe.skipIf(!DATABASE_URL)("/api/tunnels — device flow", () => {
 				}
 			});
 			expect(macAuth.statusCode).toBe(200);
-			const macBody = macAuth.json() as {
-				connectionId: string;
-				clonedFrom?: unknown;
-			};
-			// 1er device : rien à cloner (aucune connection existante).
-			expect(macBody.clonedFrom).toBeUndefined();
+			const macConn = (macAuth.json() as { connectionId: string })
+				.connectionId;
 
-			// Poser un canvas custom sur la connection Mac.
-			await app.db.insert(schema.canvasState).values({
-				userId,
-				connectionId: macBody.connectionId,
-				payload: { positions: { artist: { x: 100, y: 200 } } }
+			// PUT canvas depuis Mac via domain fn.
+			await putCanvasState(app.db, userId, macConn, {
+				positions: { artist: { x: 100, y: 200 } }
 			});
 
-			// Device 2 (Windows) — pair sur MÊME db_fingerprint.
+			// Device Windows : pair sur MÊME db_fingerprint (nouveau CLI).
 			const { pubkeyHex: win, sign: signWin } = makeCliKeypair();
 			await seedPairing(app, {
 				code: "WNDEV001",
@@ -1019,75 +1019,106 @@ describe.skipIf(!DATABASE_URL)("/api/tunnels — device flow", () => {
 				}
 			});
 			expect(winAuth.statusCode).toBe(200);
-			const winBody = winAuth.json() as {
-				connectionId: string;
-				clonedFrom?: { connectionId: string; name: string };
-			};
+			const winConn = (winAuth.json() as { connectionId: string })
+				.connectionId;
+			expect(winConn).not.toBe(macConn);
 
-			// Nouvelle connection (pas la même que Mac).
-			expect(winBody.connectionId).not.toBe(macBody.connectionId);
-			// clonedFrom pointe vers la connection Mac.
-			expect(winBody.clonedFrom).toEqual({
-				connectionId: macBody.connectionId,
-				name: "apollon-mac"
-			});
-			// Canvas Windows a la MÊME payload que Mac (cloné).
-			const winCanvas = await app.db
-				.select({ payload: schema.canvasState.payload })
+			// GET canvas depuis Windows → DOIT retourner le payload écrit
+			// par Mac (canvas partagé via (user, team, db_fingerprint)).
+			const winCanvas = await getCanvasState(app.db, userId, winConn);
+			expect(winCanvas).not.toBeNull();
+			expect(
+				(winCanvas!.payload as { positions?: unknown }).positions
+			).toEqual({ artist: { x: 100, y: 200 } });
+
+			// Il n'y a qu'UN SEUL canvas_state en DB pour cette (user, team, fp).
+			const canvasCount = await app.db
+				.select({ id: schema.canvasState.id })
 				.from(schema.canvasState)
-				.where(eq(schema.canvasState.connectionId, winBody.connectionId));
-			expect((winCanvas[0]?.payload as { positions?: unknown })?.positions).toEqual({
-				artist: { x: 100, y: 200 }
-			});
+				.where(eq(schema.canvasState.dbFingerprint, dbFp));
+			expect(canvasCount.length).toBe(1);
 		});
 
-		test("T4/3 : re-pair MÊME CLI (idempotent) → PAS de clonedFrom même si db_fingerprint match", async () => {
+		test("T4/4 : heartbeat append checksum + insert canvas_checksum_event", async () => {
 			const { userId } = await createTestUser(
 				app,
-				"idem-fp@example.com",
-				"idemfp-idemfp-idemfp-idemf"
+				"hb-cs-audit@example.com",
+				"hbcs-hbcs-hbcs-hbcs-hbcs"
 			);
-			const dbFp = "pg:1111111111/idem-db";
+			const dbFp = "pg:9999/audit-db";
+			const cs1 = "postgres:aaa111";
+			const cs2 = "postgres:bbb222";
+
 			const { pubkeyHex, sign } = makeCliKeypair();
 			await seedPairing(app, {
-				code: "DEMFP001",
+				code: "HBAPPCS1",
 				cliPubkeyEd25519: pubkeyHex,
 				userId,
-				deviceName: "idem-mac",
+				deviceName: "audit-mac",
 				approvedAt: new Date()
 			});
+			const auth = await app.inject({
+				method: "POST",
+				url: "/api/tunnels/authenticate",
+				headers: { "content-type": "application/json" },
+				payload: {
+					code: "HBAPPCS-1",
+					signature: sign("HBAPPCS1"),
+					dbFingerprint: dbFp,
+					dbSchemaChecksum: cs1
+				}
+			});
+			expect(auth.statusCode).toBe(200);
+			const { token, connectionId } = auth.json() as {
+				token: string;
+				connectionId: string;
+			};
+
+			// PUT canvas → seed avec cs1.
+			await putCanvasState(app.db, userId, connectionId, { foo: "bar" });
+
+			// Heartbeat avec MÊME checksum → event logged, array inchangé.
 			await app.inject({
 				method: "POST",
-				url: "/api/tunnels/authenticate",
-				headers: { "content-type": "application/json" },
-				payload: {
-					code: "DEMFP-001",
-					signature: sign("DEMFP001"),
-					dbFingerprint: dbFp
-				}
+				url: "/api/tunnels/heartbeat",
+				headers: {
+					"content-type": "application/json",
+					authorization: `Bearer ${token}`
+				},
+				payload: { dbFingerprint: dbFp, dbSchemaChecksum: cs1 }
 			});
-			// 2e pair MÊME cli_pubkey → idempotent path (étape 1 dans upsert).
-			await seedPairing(app, {
-				code: "DEMFP002",
-				cliPubkeyEd25519: pubkeyHex,
-				userId,
-				deviceName: "idem-mac",
-				approvedAt: new Date()
-			});
-			const second = await app.inject({
+
+			// Heartbeat avec NOUVEAU checksum → append + event.
+			await app.inject({
 				method: "POST",
-				url: "/api/tunnels/authenticate",
-				headers: { "content-type": "application/json" },
-				payload: {
-					code: "DEMFP-002",
-					signature: sign("DEMFP002"),
-					dbFingerprint: dbFp
-				}
+				url: "/api/tunnels/heartbeat",
+				headers: {
+					"content-type": "application/json",
+					authorization: `Bearer ${token}`
+				},
+				payload: { dbFingerprint: dbFp, dbSchemaChecksum: cs2 }
 			});
-			expect(second.statusCode).toBe(200);
-			const body = second.json() as { clonedFrom?: unknown };
-			// Match cli_fingerprint direct → path idempotent, PAS de clone.
-			expect(body.clonedFrom).toBeUndefined();
+
+			// Vérifie l'array : [cs1, cs2].
+			const canvasRow = await app.db
+				.select({
+					id: schema.canvasState.id,
+					checksums: schema.canvasState.dbSchemaChecksums
+				})
+				.from(schema.canvasState)
+				.where(eq(schema.canvasState.dbFingerprint, dbFp));
+			expect(canvasRow[0]?.checksums).toEqual([cs1, cs2]);
+
+			// Vérifie 2 events dans l'audit trail (heartbeat cs1 + cs2).
+			// Le PUT initial ne loggue pas d'event (pas de heartbeat).
+			const events = await app.db
+				.select({ checksum: schema.canvasChecksumEvent.dbSchemaChecksum })
+				.from(schema.canvasChecksumEvent)
+				.where(
+					eq(schema.canvasChecksumEvent.canvasStateId, canvasRow[0]!.id)
+				);
+			expect(events.length).toBe(2);
+			expect(events.map((e) => e.checksum).sort()).toEqual([cs1, cs2]);
 		});
 
 		test("T4/1 : re-authenticate avec dbFingerprint sur connection existante → backfill", async () => {

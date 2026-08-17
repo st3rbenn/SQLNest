@@ -1,6 +1,7 @@
 import { schema as dbSchema } from "@sqlnest/db";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
+import { resolveCanvasByConnection } from "./resolve";
 import type { CanvasConnectionIdT } from "./schema";
 
 export interface DelCanvasResult {
@@ -10,31 +11,26 @@ export interface DelCanvasResult {
 /**
  * Supprime le canvas d'un utilisateur pour une db_connection donnée.
  *
- * ─── Contrat ───────────────────────────────────────────────────────────
- * Retourne `{ deleted: true }` si une row a été supprimée, `false` sinon.
- * L'appelant HTTP renvoie 204 dans les deux cas (idempotent : deleting a
- * non-existent resource ne doit pas être une erreur — le résultat final
- * est le même : la ressource n'existe pas).
+ * ─── T4/4 : résolution cross-device ────────────────────────────────────
+ * Utilise `resolveCanvasByConnection` pour trouver le canvas (via
+ * fp/checksum/legacy). ATTENTION : le canvas moderne est partagé entre
+ * plusieurs db_connections d'un user (Mac + Windows sur la même DB). Le
+ * DELETE via `/api/canvas-state/:connectionId` supprime le canvas partagé,
+ * pas juste la liaison — décision UX : l'user reset son layout, pas juste
+ * pour un device. Documenter côté UI.
  *
- * Le `RETURNING id` permet de savoir combien de rows ont été affectées
- * sans re-compter (Drizzle expose `rowCount` sur certains dialects mais
- * pas de façon uniforme via `postgres.js` → `.returning()` reste le plus
- * portable).
+ * Idempotent (retourne `deleted: false` si aucun canvas).
  */
 export async function delCanvasState(
 	db: FastifyInstance["db"],
 	userId: string,
 	connectionId: CanvasConnectionIdT
 ): Promise<DelCanvasResult> {
+	const { canvas } = await resolveCanvasByConnection(db, userId, connectionId);
+	if (canvas === null) return { deleted: false };
 	const rows = await db
 		.delete(dbSchema.canvasState)
-		.where(
-			and(
-				eq(dbSchema.canvasState.userId, userId),
-				eq(dbSchema.canvasState.connectionId, connectionId)
-			)
-		)
+		.where(eq(dbSchema.canvasState.id, canvas.id))
 		.returning({ id: dbSchema.canvasState.id });
-
 	return { deleted: rows.length > 0 };
 }

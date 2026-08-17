@@ -151,19 +151,7 @@ export const AuthenticateResponse = z.object({
 	/** ID de la db_connection — le browser l'utilisera pour cibler cette DB. */
 	connectionId: z.string(),
 	/** ISO 8601 — le CLI peut décider de re-authenticate avant expi. */
-	expiresAt: z.string(),
-	/**
-	 * T4/3 : cross-device auto — cette connection est le miroir d'une autre
-	 * (même db_fingerprint, autre CLI). Canvas cloné depuis `clonedFrom.name`.
-	 * Le CLI peut afficher un message "✓ Canvas repris depuis « X »" pour
-	 * que l'user comprenne pourquoi son canvas apparaît déjà rempli.
-	 */
-	clonedFrom: z
-		.object({
-			connectionId: z.string(),
-			name: z.string()
-		})
-		.optional()
+	expiresAt: z.string()
 });
 z.globalRegistry.add(AuthenticateResponse, { id: "AuthenticateResponse" });
 export type AuthenticateResponseT = z.infer<typeof AuthenticateResponse>;

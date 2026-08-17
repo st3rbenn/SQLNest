@@ -270,9 +270,35 @@ export const canvasState = pgTable(
 		userId: text("user_id")
 			.notNull()
 			.references(() => user.id, { onDelete: "cascade" }),
-		connectionId: uuid("db_connection_id")
+		// T4/4 : nullable + SET NULL — le canvas SURVIT si la db_connection
+		// est supprimée (un autre CLI/device sur la même DB peut encore
+		// pointer dessus via (team, db_fingerprint) ou checksum match).
+		// Historiquement NOT NULL + CASCADE ; le refactor cross-device
+		// impose la survie du canvas indépendamment d'une connection unique.
+		connectionId: uuid("db_connection_id").references(
+			() => dbConnection.id,
+			{ onDelete: "set null" }
+		),
+		// T4/4 : team qui possède le canvas (V1 = team perso). Scope le
+		// lookup par (team, db_fingerprint) et l'isolation cross-team.
+		// Nullable pour les rows legacy antérieures au refactor — backfill
+		// au premier accès (voir get.ts).
+		teamId: uuid("team_id").references(() => team.id, {
+			onDelete: "cascade"
+		}),
+		// T4/4 : identité INSTANCE DB (system_identifier PG, replSet Mongo).
+		// Priorité 1 du lookup canvas cross-device. Nullable rétro-compat.
+		dbFingerprint: text("db_fingerprint"),
+		// T4/4 : historique des checksums structure vus. Un CLI qui arrive
+		// avec un checksum courant matchant N'IMPORTE lequel de l'array
+		// trouve le canvas. Permet le partage cross-docker (2 dumps
+		// identiques ont le même checksum initial) + la survie aux
+		// migrations (Mac migre → nouveau checksum append à l'array, mais
+		// canvas reste). Cap 20 entrées pour éviter growth infini.
+		dbSchemaChecksums: text("db_schema_checksums")
+			.array()
 			.notNull()
-			.references(() => dbConnection.id, { onDelete: "cascade" }),
+			.default(sql`ARRAY[]::text[]`),
 		// Payload complet : positions tables, sizes, frames, hidden, drawer
 		// width, etc. Sérialisé côté frontend, opaque côté backend.
 		payload: jsonb("payload").notNull(),
@@ -284,7 +310,57 @@ export const canvasState = pgTable(
 			.defaultNow()
 	},
 	(t) => [
-		uniqueIndex("canvas_user_connection_unique").on(t.userId, t.connectionId)
+		// T4/4 : canvas moderne — unique (user, team, fp) quand fp connu.
+		// Un même user avec 2 db_connections Mac + Windows sur la MÊME DB
+		// (même db_fingerprint) partage 1 canvas.
+		uniqueIndex("canvas_user_team_fp_unique")
+			.on(t.userId, t.teamId, t.dbFingerprint)
+			.where(sql`${t.dbFingerprint} IS NOT NULL`),
+		// Rétro-compat legacy : canvas sans fp gardent l'ancien unique
+		// (user, connection_id). Backfill au premier put/get pour migrer
+		// vers le modèle moderne.
+		uniqueIndex("canvas_user_connection_legacy_unique")
+			.on(t.userId, t.connectionId)
+			.where(sql`${t.dbFingerprint} IS NULL`),
+		// GIN index pour lookup rapide `<checksum> = ANY(db_schema_checksums)`.
+		index("canvas_team_checksums_gin_idx")
+			.using("gin", t.dbSchemaChecksums)
+			.where(sql`array_length(${t.dbSchemaChecksums}, 1) > 0`)
+	]
+);
+
+// ─── canvas_checksum_event ───────────────────────────────────────────────
+// T4/4 : audit trail append-only des checksums vus par un canvas au fil du
+// temps. Alimenté à chaque heartbeat/authenticate qui apporte un checksum
+// (nouveau OU répété — nouveauté logged pour timeline stricte). L'array
+// `canvas_state.db_schema_checksums` reste l'index de lookup rapide ; cette
+// table est la source de vérité audit (qui, quand, depuis quelle CLI).
+//
+// Rétention : pas de TTL v1 — les events sont bornés (1 par heartbeat
+// distinct, cap volumétrique par canvas). L'user peut exporter/purger via
+// endpoint dédié en v2 si besoin.
+export const canvasChecksumEvent = pgTable(
+	"canvas_checksum_event",
+	{
+		id: uuid("id").defaultRandom().primaryKey(),
+		canvasStateId: uuid("canvas_state_id")
+			.notNull()
+			.references(() => canvasState.id, { onDelete: "cascade" }),
+		// Origine du checksum. SET NULL si l'user delete la db_connection —
+		// on garde le fait qu'un checksum a été vu même si la connection
+		// disparaît (audit historique).
+		dbConnectionId: uuid("db_connection_id").references(
+			() => dbConnection.id,
+			{ onDelete: "set null" }
+		),
+		dbSchemaChecksum: text("db_schema_checksum").notNull(),
+		seenAt: timestamp("seen_at", { withTimezone: true })
+			.notNull()
+			.defaultNow()
+	},
+	(t) => [
+		// Lookup principal : timeline d'un canvas, plus récent en premier.
+		index("canvas_checksum_event_canvas_idx").on(t.canvasStateId, t.seenAt)
 	]
 );
 

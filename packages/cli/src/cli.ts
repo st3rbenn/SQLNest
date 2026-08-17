@@ -245,13 +245,6 @@ async function runConnect(args: string[], ctx: RunContext): Promise<number> {
 				ctx.stdout(
 					`✓ Pairing OK : « ${result.connectionName} » — ${result.tunnelId}`
 				);
-				// T4/3 : signale à l'user que son canvas apparaîtra pré-rempli
-				// (cloné depuis une db_connection existante sur la même DB).
-				if (result.clonedFrom) {
-					ctx.stdout(
-						`  ↪ Canvas repris depuis « ${result.clonedFrom.name} »`
-					);
-				}
 			}
 			sessionId = result.tunnelId;
 			token = result.sessionToken;

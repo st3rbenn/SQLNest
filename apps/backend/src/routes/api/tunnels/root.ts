@@ -300,10 +300,7 @@ export default function tunnelsRoute(fastify: FastifyInstance) {
 					token: result.token,
 					tunnelId: result.tunnelId,
 					connectionId: result.connectionId,
-					expiresAt: result.expiresAt.toISOString(),
-					...(result.clonedFrom !== undefined
-						? { clonedFrom: result.clonedFrom }
-						: {})
+					expiresAt: result.expiresAt.toISOString()
 				};
 			}
 
@@ -370,10 +367,7 @@ export default function tunnelsRoute(fastify: FastifyInstance) {
 					token: result.token,
 					tunnelId: result.tunnelId,
 					connectionId: result.connectionId,
-					expiresAt: result.expiresAt.toISOString(),
-					...(result.clonedFrom !== undefined
-						? { clonedFrom: result.clonedFrom }
-						: {})
+					expiresAt: result.expiresAt.toISOString()
 				};
 			}
 

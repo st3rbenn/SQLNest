@@ -51,11 +51,6 @@ export type AuthenticateTokenResult =
 			readonly tunnelId: string;
 			readonly connectionId: string;
 			readonly expiresAt: Date;
-			/** T4/3 : voir authenticatePairing.clonedFrom. */
-			readonly clonedFrom?: {
-				readonly connectionId: string;
-				readonly name: string;
-			};
 	  }
 	| {
 			readonly ok: false;
@@ -130,10 +125,7 @@ export async function authenticateTunnelWithToken(
 			token,
 			tunnelId: sess.id,
 			connectionId: conn.id,
-			expiresAt,
-			...(upsert.clonedFrom !== undefined
-				? { clonedFrom: upsert.clonedFrom }
-				: {})
+			expiresAt
 		};
 	});
 }

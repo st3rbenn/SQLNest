@@ -134,6 +134,13 @@
       "when": 1786821135661,
       "tag": "0018_db_schema_checksum",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1786971389707,
+      "tag": "0019_canvas_shared_by_fingerprint",
+      "breakpoints": true
     }
   ]
 }
