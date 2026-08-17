@@ -468,12 +468,6 @@ function CanvasInner({
 	const [focusedConsoleId, setFocusedConsoleId] = useState<string | null>(null);
 	const [consoleRFNodes, setConsoleRFNodes, onConsoleNodesChange] =
 		useNodesState<ConsoleNodeType>([]);
-	// Snapshot viewport pré-fullscreen pour restore à l'exit.
-	const savedViewportRef = useRef<{
-		x: number;
-		y: number;
-		zoom: number;
-	} | null>(null);
 
 	// Sync `consoleNodes.geoms` (persist) → state RF. Preserve les valeurs
 	// RF existantes pour un id déjà présent (le state RF est à jour pendant
@@ -503,27 +497,19 @@ function CanvasInner({
 		});
 	}, [consoleNodes.geoms, setConsoleRFNodes, teamSlug, connectionId]);
 
-	const enterConsoleFocus = useCallback(
-		(id: string) => {
-			savedViewportRef.current = rf.getViewport();
-			// Instant : pas d'animation "zoom depuis le centre" — le CSS fade
-			// des autres nodes/overlays donne la transition perceptible.
-			rf.setViewport({ x: 0, y: 0, zoom: 1 }, { duration: 0 });
-			setFocusedConsoleId(id);
-		},
-		[rf]
-	);
+	const enterConsoleFocus = useCallback((id: string) => {
+		// Fullscreen = React Portal vers document.body (dans ConsoleNode
+		// quand isFocused). Le shell rendu HORS du transform React Flow
+		// → pas de scale zoom sur le contenu, texte natif. La caméra
+		// canvas n'est pas touchée — pas d'animation "zoom depuis le
+		// centre" perceptible. Le node RF garde sa géom et reste dans le
+		// graphe (le CSS fade le cache derrière l'overlay).
+		setFocusedConsoleId(id);
+	}, []);
 	const exitConsoleFocus = useCallback(() => {
 		if (focusedConsoleId === null) return;
 		setFocusedConsoleId(null);
-		const saved = savedViewportRef.current;
-		if (saved) {
-			rf.setViewport(saved, { duration: 0 });
-			savedViewportRef.current = null;
-		} else {
-			applyOverviewRef.current();
-		}
-	}, [focusedConsoleId, rf]);
+	}, [focusedConsoleId]);
 
 	// Escape sort du fullscreen — window listener au niveau capture pour
 	// attraper la touche AVANT que CodeMirror la consomme (l'éditeur bloque
@@ -541,45 +527,29 @@ function CanvasInner({
 			window.removeEventListener("keydown", onKey, { capture: true });
 	}, [focusedConsoleId, exitConsoleFocus]);
 
+
 	const consoleDisplayNodes = useMemo<ConsoleNodeType[]>(
 		() =>
 			consoleRFNodes.map((n) => {
 				const isFocused = n.id === focusedConsoleId;
-				// En fullscreen : override la géom RF avec les dimensions écran.
-				// Le node RF ne persist pas cet override (draggable:false) — c'est
-				// purement visuel. À l'exit, l'override est retiré (isFocused
-				// false) et le node revient à ses dimensions RF (= persist geom
-				// ou live drag state).
-				const geom = isFocused
-					? {
-							position: { x: 0, y: 0 },
-							width: window.innerWidth,
-							height: window.innerHeight
-						}
-					: {
-							position: n.position,
-							width: n.width,
-							height: n.height
-						};
+				// Le node RF garde sa géom persistée quel que soit isFocused.
+				// Le fullscreen est un React Portal rendu par ConsoleNode
+				// vers document.body → hors du transform React Flow. Le node
+				// dans le graphe est juste caché par le CSS fade pendant ce
+				// temps (opacity 0 sur toutes les nodes RF).
 				return {
 					...n,
-					position: geom.position,
-					width: geom.width,
-					height: geom.height,
 					// `selectable: true` : cliquer sur le node le marque `.selected`
 					// (RF standard) — le CSS `.selected` garde les handles NodeResizer
 					// visibles sans hover. Click ailleurs = deselect standard.
 					selectable: !isFocused,
-					// Draggable/resizable désactivés en fullscreen — pas de sens
-					// et évite les gestes accidentels qui bougent le node hors-écran.
 					draggable: !isFocused,
 					// `deletable: false` : le Backspace natif RF supprime le node
 					// mais ne clean pas les tabs localStorage → on force le user
 					// à passer par le bouton `×` du header qui appelle
 					// `consoleNodes.remove` (clean tabs inclus).
 					deletable: false,
-					zIndex: isFocused ? 999 : 10,
-					...(isFocused ? { className: "sqlnest-console-focused" } : {}),
+					zIndex: 10,
 					data: {
 						teamSlug,
 						connId: connectionId,

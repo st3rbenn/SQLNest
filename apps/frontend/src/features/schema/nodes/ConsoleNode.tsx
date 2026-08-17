@@ -29,9 +29,14 @@
  */
 
 import { Tooltip } from "@mantine/core";
-import { IconArrowsMaximize, IconX } from "@tabler/icons-react";
+import {
+	IconArrowsMaximize,
+	IconArrowsMinimize,
+	IconX
+} from "@tabler/icons-react";
 import { type Node, type NodeProps, NodeResizer } from "@xyflow/react";
 import type { CSSProperties } from "react";
+import { createPortal } from "react-dom";
 import { ConsoleShellInner } from "../../query/ConsoleShellInner";
 import {
 	CONSOLE_NODE_MIN_HEIGHT,
@@ -83,14 +88,15 @@ const outerNodeStyle: CSSProperties = {
 	backgroundPosition: "center 9px"
 };
 
-// En fullscreen : chrome-less. Pas de padding drag (le fullscreen n'est
-// pas draggable), pas de border/shadow/backgroundImage → seul le
-// ConsoleShellInner remplit l'écran, comme la route `/query`.
-const outerNodeStyleFocused: CSSProperties = {
-	width: "100%",
-	height: "100%",
+// Overlay fullscreen — le shell est rendu ici via React Portal quand
+// isFocused. Hors du transform React Flow → texte natif (pas de scale
+// zoom), events ne remontent pas au canvas (pas de pan/zoom accidentel
+// depuis un click dans le contenu).
+const overlayStyle: CSSProperties = {
+	position: "fixed",
+	inset: 0,
+	zIndex: 1000,
 	background: "var(--sqlnest-canvas-bg)",
-	overflow: "hidden",
 	display: "flex",
 	flexDirection: "column"
 };
@@ -103,13 +109,6 @@ const innerHolderStyle: CSSProperties = {
 	overflow: "hidden"
 };
 
-const innerHolderStyleFocused: CSSProperties = {
-	flex: 1,
-	minHeight: 0,
-	minWidth: 0,
-	borderRadius: 0,
-	overflow: "hidden"
-};
 
 const focusButtonStyle: CSSProperties = {
 	display: "inline-flex",
@@ -139,16 +138,58 @@ export function ConsoleNode({
 		isFocused,
 		onResizeEnd,
 		onEnterFocus,
+		onExitFocus,
 		onDelete
 	} = data;
 
+	// En fullscreen : le shell est rendu via React Portal vers document.body
+	// → hors du transform React Flow (pas de scale zoom qui shrink le
+	// contenu, pas de click qui remonte au canvas pour trigger un pan/zoom).
+	// Note : le shell est UNMOUNT côté node quand on entre en fullscreen et
+	// REMOUNT au retour → le state useRunQuery (mutation en cours) est
+	// perdu au switch. Les tabs / historique / geoms persistent car
+	// localStorage. Trade-off accepté pour éviter le RF viewport scale.
+	if (isFocused) {
+		return typeof document !== "undefined"
+			? createPortal(
+					<div style={overlayStyle}>
+						<ConsoleShellInner
+							teamSlug={teamSlug}
+							connId={connId}
+							variant="node"
+							tabsScopeSuffix={id}
+							extraLeftActions={
+								<Tooltip
+									label="Sortir du fullscreen (Esc)"
+									openDelay={400}
+									styles={tooltipStyles}
+									withArrow
+									arrowSize={4}
+								>
+									<button
+										type="button"
+										style={focusButtonStyle}
+										aria-label="Sortir du fullscreen"
+										onClick={(e) => {
+											e.stopPropagation();
+											onExitFocus?.();
+										}}
+									>
+										<IconArrowsMinimize size={13} stroke={2} />
+									</button>
+								</Tooltip>
+							}
+						/>
+					</div>,
+					document.body
+				)
+			: null;
+	}
+
 	return (
 		<>
-			{/* NodeResizer caché en fullscreen (pas de resize possible dans ce
-			 * mode). En mode normal : visible au hover via canvas-overrides.css
-			 * qui override l'opacity, comme pour les tables. */}
 			<NodeResizer
-				isVisible={!isFocused}
+				isVisible
 				minWidth={CONSOLE_NODE_MIN_WIDTH}
 				minHeight={CONSOLE_NODE_MIN_HEIGHT}
 				lineStyle={{
@@ -177,11 +218,8 @@ export function ConsoleNode({
 					});
 				}}
 			/>
-			<div style={isFocused ? outerNodeStyleFocused : outerNodeStyle}>
-				<div
-					className="nodrag nowheel"
-					style={isFocused ? innerHolderStyleFocused : innerHolderStyle}
-				>
+			<div style={outerNodeStyle}>
+				<div className="nodrag nowheel" style={innerHolderStyle}>
 					<ConsoleShellInner
 						teamSlug={teamSlug}
 						connId={connId}
@@ -190,9 +228,7 @@ export function ConsoleNode({
 						extraLeftActions={
 							<>
 								<Tooltip
-									label={
-										isFocused ? "Sortir du fullscreen" : "Passer en fullscreen"
-									}
+									label="Passer en fullscreen"
 									openDelay={400}
 									styles={tooltipStyles}
 									withArrow
@@ -201,44 +237,34 @@ export function ConsoleNode({
 									<button
 										type="button"
 										style={focusButtonStyle}
-										aria-label={
-											isFocused
-												? "Sortir du fullscreen"
-												: "Passer en fullscreen"
-										}
+										aria-label="Passer en fullscreen"
 										onClick={(e) => {
 											e.stopPropagation();
-											if (isFocused) {
-												data.onExitFocus?.();
-											} else {
-												onEnterFocus?.(id);
-											}
+											onEnterFocus?.(id);
 										}}
 									>
 										<IconArrowsMaximize size={13} stroke={2} />
 									</button>
 								</Tooltip>
-								{isFocused ? null : (
-									<Tooltip
-										label="Fermer cette console"
-										openDelay={400}
-										styles={tooltipStyles}
-										withArrow
-										arrowSize={4}
+								<Tooltip
+									label="Fermer cette console"
+									openDelay={400}
+									styles={tooltipStyles}
+									withArrow
+									arrowSize={4}
+								>
+									<button
+										type="button"
+										style={focusButtonStyle}
+										aria-label="Fermer cette console"
+										onClick={(e) => {
+											e.stopPropagation();
+											onDelete?.(id);
+										}}
 									>
-										<button
-											type="button"
-											style={focusButtonStyle}
-											aria-label="Fermer cette console"
-											onClick={(e) => {
-												e.stopPropagation();
-												onDelete?.(id);
-											}}
-										>
-											<IconX size={13} stroke={2} />
-										</button>
-									</Tooltip>
-								)}
+										<IconX size={13} stroke={2} />
+									</button>
+								</Tooltip>
 							</>
 						}
 					/>

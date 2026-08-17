@@ -155,33 +155,14 @@
 }
 
 /*
- * T5 fullscreen — le wrapper canvas porte `data-console-focus="true"`
- * quand une console est en fullscreen. Le node console cible reçoit la
- * className `sqlnest-console-focused` (via `consoleDisplayNodes`) pour
- * rester visible pendant que tout le reste fade.
- *
- * Fade appliqué à :
- *  - Nodes RF non-focus (tables, frames, autres consoles).
- *  - Edges.
- *  - Grille de points de fond (Background).
- *  - Overlays flottants qui vivent hors du <ReactFlow> mais dans le
- *    même wrapper (CanvasBottomBar/LeftPanel/Overlays via CanvasProviders,
- *    ainsi que le Panel top-right HUD via RF).
+ * T5 fullscreen — le shell fullscreen est un React Portal vers
+ * document.body (voir ConsoleNode + createPortal), rendu par-dessus le
+ * canvas avec un fond opaque `--sqlnest-canvas-bg`. Le canvas derrière
+ * est donc masqué visuellement par l'overlay lui-même — le fade CSS
+ * n'est plus nécessaire, mais on garde `pointer-events: none` pour
+ * éviter les clics fantômes qui traverseraient l'overlay.
  */
-[data-console-focus="true"] .react-flow__node,
-[data-console-focus="true"] .react-flow__edges,
-[data-console-focus="true"] .react-flow__background,
-[data-console-focus="true"] .react-flow__panel {
-	opacity: 0;
-	transition: opacity 120ms ease-out;
-	pointer-events: none;
-}
-[data-console-focus="true"] .react-flow__node.sqlnest-console-focused {
-	opacity: 1;
-	pointer-events: auto;
-}
+[data-console-focus="true"] .react-flow,
 [data-console-focus="true"] > *:not(.react-flow) {
-	opacity: 0;
-	transition: opacity 120ms ease-out;
 	pointer-events: none;
 }
