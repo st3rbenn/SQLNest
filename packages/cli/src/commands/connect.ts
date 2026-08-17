@@ -51,7 +51,10 @@ import {
 	generateSalt,
 	signMessage
 } from "../crypto";
-import { computeTunnelFingerprint } from "../engine";
+import {
+	computeTunnelFingerprint,
+	computeTunnelSchemaChecksum
+} from "../engine";
 import { openBrowser } from "../open-browser";
 
 /** Regex hissée top-level (règle Biome `useTopLevelRegex`). */
@@ -167,9 +170,22 @@ export async function connect(opts: ConnectOptions): Promise<ConnectResult> {
 	// On envoie `cliConnectionName` : le backend l'utilise pour scoper le
 	// fingerprint effectif → un même install CLI peut servir N DBs
 	// distinctes côté serveur (C.13).
+	// T4/5 : on calcule aussi le db_fingerprint + db_schema_checksum côté
+	// CLI (best-effort — silencieux si DSN inaccessible). Envoyés dès le
+	// pair pour que le backend détecte au /approve qu'une db_connection
+	// existe déjà pour cette DB (multi-CLI reuse) et auto-fill le name
+	// côté frontend /pair → user click Approve sans typing.
+	const [prePairFingerprint, prePairChecksum] = opts.cliConnectionName
+		? await Promise.all([
+				computeTunnelFingerprint(opts.cliConnectionName),
+				computeTunnelSchemaChecksum(opts.cliConnectionName)
+			])
+		: [null, null];
 	const pairing = await api.createPairing(
 		config.keypair.public,
-		opts.cliConnectionName ?? null
+		opts.cliConnectionName ?? null,
+		prePairFingerprint,
+		prePairChecksum
 	);
 	const connectUrl = `${opts.frontendUrl.replace(TRAILING_SLASH_RE, "")}/pair`;
 	const expiresAt = new Date(pairing.expiresAt);

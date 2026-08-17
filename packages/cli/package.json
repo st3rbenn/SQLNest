@@ -1,6 +1,6 @@
 {
 	"name": "@sqlnest/cli",
-	"version": "0.0.5",
+	"version": "0.0.7",
 	"type": "module",
 	"description": "CLI local SQLNest — device flow + tunnel WSS vers ta DB Postgres (Mongo v1.1).",
 	"main": "./src/index.ts",

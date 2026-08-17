@@ -149,7 +149,11 @@ export default function tunnelsRoute(fastify: FastifyInstance) {
 				const result = await createPairing(
 					fastify.db,
 					request.body.cliPubkeyEd25519,
-					request.body.cliConnectionName ?? null
+					request.body.cliConnectionName ?? null,
+					undefined,
+					null,
+					request.body.dbFingerprint ?? null,
+					request.body.dbSchemaChecksum ?? null
 				);
 				return {
 					code: result.code,

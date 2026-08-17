@@ -73,7 +73,9 @@ export interface HeartbeatResult {
 export interface ApiClient {
 	createPairing(
 		cliPubkeyEd25519: string,
-		cliConnectionName?: string | null
+		cliConnectionName?: string | null,
+		dbFingerprint?: string | null,
+		dbSchemaChecksum?: string | null
 	): Promise<CreatePairingResult>;
 	getPairingStatus(code: string): Promise<StatusPairingResult>;
 	authenticatePairing(
@@ -143,11 +145,22 @@ export function createApiClient(
 	return {
 		async createPairing(
 			cliPubkeyEd25519: string,
-			cliConnectionName: string | null = null
+			cliConnectionName: string | null = null,
+			dbFingerprint: string | null = null,
+			dbSchemaChecksum: string | null = null
 		) {
 			const body: Record<string, string> = { cliPubkeyEd25519 };
 			if (cliConnectionName != null && cliConnectionName !== "") {
 				body.cliConnectionName = cliConnectionName;
+			}
+			// T4/5 : envoie les identifiants DB dès le pair pour que le
+			// backend détecte au /approve qu'une db_connection existe déjà
+			// pour cette DB (multi-CLI reuse) → auto-fill device_name.
+			if (dbFingerprint != null && dbFingerprint !== "") {
+				body.dbFingerprint = dbFingerprint;
+			}
+			if (dbSchemaChecksum != null && dbSchemaChecksum !== "") {
+				body.dbSchemaChecksum = dbSchemaChecksum;
 			}
 			const data = (await jsonPost(
 				"/api/tunnels/pairings",

@@ -37,7 +37,11 @@ import { createPersonalTeam } from "../teams/create";
 import { getDefaultTeamOfUser } from "../teams/get";
 import type { DbOrTx } from "./db";
 import { TUNNEL_SESSION_TTL_MS } from "./pairing/authenticate";
-import { generateSessionToken, hashSha256Hex } from "./pairing/crypto";
+import {
+	computeCliFingerprint,
+	generateSessionToken,
+	hashSha256Hex
+} from "./pairing/crypto";
 
 /** Engine par défaut — aligné sur `authenticatePairing` device flow. */
 const DEFAULT_ENGINE = "postgres";
@@ -104,12 +108,19 @@ export async function authenticateTunnelWithToken(
 
 		const token = generateSessionToken();
 		const expiresAt = new Date(nowMs + TUNNEL_SESSION_TTL_MS);
+		// T4/5 : session porte son propre cli_fingerprint (le CLI qui l'a
+		// ouverte). En CI mode, c'est le pubkey du body.
+		const cliFingerprintForSession = computeCliFingerprint(
+			cliPubkeyEd25519,
+			cliConnectionName
+		);
 		const insertedSession = await tx
 			.insert(dbSchema.tunnelSession)
 			.values({
 				connectionId: conn.id,
 				hash: hashSha256Hex(token),
-				expiresAt
+				expiresAt,
+				cliFingerprint: cliFingerprintForSession
 			})
 			.returning({ id: dbSchema.tunnelSession.id });
 

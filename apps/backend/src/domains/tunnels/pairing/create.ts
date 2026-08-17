@@ -56,7 +56,9 @@ export async function createPairing(
 	cliPubkeyEd25519: string,
 	cliConnectionName: string | null = null,
 	nowMs: number = Date.now(),
-	teamId: string | null = null
+	teamId: string | null = null,
+	dbFingerprint: string | null = null,
+	dbSchemaChecksum: string | null = null
 ): Promise<CreatePairingResult> {
 	const canonical = generatePairingCode();
 	// Sanity — devrait être garanti par `generatePairingCode`, cette
@@ -72,7 +74,12 @@ export async function createPairing(
 		cliPubkeyEd25519,
 		cliConnectionName,
 		teamId,
-		expiresAt
+		expiresAt,
+		// T4/5 : peut être NULL si CLI legacy ou DSN inaccessible au pair.
+		// Le backend approve/authenticate détecte le match db_fingerprint et
+		// évite la création d'une db_connection dupliquée (multi-CLI reuse).
+		...(dbFingerprint !== null ? { dbFingerprint } : {}),
+		...(dbSchemaChecksum !== null ? { dbSchemaChecksum } : {})
 	});
 
 	return {

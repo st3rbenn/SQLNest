@@ -33,7 +33,7 @@
  */
 
 import { schema as dbSchema } from "@sqlnest/db";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import type { DbOrTx } from "../canvas-state/db";
 import { computeCliFingerprint } from "../tunnels/pairing/crypto";
 
@@ -81,6 +81,13 @@ export type UpsertConnectionResult =
 			/** `true` si la connection a été créée, `false` si on a réutilisé une
 			 *  connection existante (fingerprint match). */
 			readonly wasCreated: boolean;
+			/** T4/5 : `true` si la connection a été réutilisée via match db_fingerprint
+			 *  (multi-CLI sur MÊME instance DB) — le CLI courant a un cli_fingerprint
+			 *  DIFFÉRENT de celui de la connection primaire, mais on skip la création
+			 *  d'une nouvelle row et on partage la même db_connection (chacun a son
+			 *  propre tunnel_session avec son cli_fingerprint). Le caller peut créer
+			 *  un tunnel_session avec le cli_fingerprint courant sur cette connection. */
+			readonly reusedByDbFingerprint?: boolean;
 	  }
 	| {
 			readonly ok: false;
@@ -144,9 +151,56 @@ export async function upsertDbConnectionByFingerprint(
 		return { ok: true, connectionId: row.id, wasCreated: false };
 	}
 
-	// 2. Pas d'existant : check collision `(team_id, name)` explicitement
-	//    avant l'INSERT — renvoie un `name_conflict` propre plutôt qu'un
-	//    unique_violation Postgres cryptique.
+	// 2. T4/5 — MULTI-CLI REUSE : si le CLI courant a un cli_fingerprint
+	//    différent (Windows après Mac) MAIS un db_fingerprint qui match une
+	//    db_connection existante dans la team → RÉUTILISER cette connection
+	//    au lieu d'en créer une nouvelle. Un seul row db_connection par DB
+	//    logique, plusieurs tunnel_session (1 par CLI) chacun avec son
+	//    propre cli_fingerprint. Résout le pb "2× apollon dans la gallery".
+	if (opts.dbFingerprint !== undefined && opts.dbFingerprint !== null) {
+		const dbFpMatch = await tx
+			.select({ id: dbSchema.dbConnection.id })
+			.from(dbSchema.dbConnection)
+			.where(
+				and(
+					eq(dbSchema.dbConnection.teamId, opts.teamId),
+					eq(dbSchema.dbConnection.dbFingerprint, opts.dbFingerprint),
+					ne(dbSchema.dbConnection.cliFingerprint, fingerprint)
+				)
+			)
+			.limit(1);
+		if (dbFpMatch.length > 0 && dbFpMatch[0]) {
+			// Bump activity + backfill checksum sur la connection réutilisée.
+			const patch: {
+				activeSince: ReturnType<typeof sql>;
+				lastSeenAt: ReturnType<typeof sql>;
+				dbSchemaChecksum?: string;
+			} = {
+				activeSince: sql`now()`,
+				lastSeenAt: sql`now()`
+			};
+			if (
+				opts.dbSchemaChecksum !== undefined &&
+				opts.dbSchemaChecksum !== null
+			) {
+				patch.dbSchemaChecksum = opts.dbSchemaChecksum;
+			}
+			await tx
+				.update(dbSchema.dbConnection)
+				.set(patch)
+				.where(eq(dbSchema.dbConnection.id, dbFpMatch[0].id));
+			return {
+				ok: true,
+				connectionId: dbFpMatch[0].id,
+				wasCreated: false,
+				reusedByDbFingerprint: true
+			};
+		}
+	}
+
+	// 3. Pas d'existant + pas de match db_fingerprint : check collision
+	//    `(team_id, name)` explicitement avant l'INSERT — renvoie un
+	//    `name_conflict` propre plutôt qu'un unique_violation Postgres cryptique.
 	const nameCollision = await tx
 		.select({ id: dbSchema.dbConnection.id })
 		.from(dbSchema.dbConnection)
@@ -161,7 +215,7 @@ export async function upsertDbConnectionByFingerprint(
 		return { ok: false, reason: "name_conflict" };
 	}
 
-	// 3. INSERT normal. T4/4 remplace le clone T4/3 par le canvas partagé
+	// 4. INSERT normal. T4/4 remplace le clone T4/3 par le canvas partagé
 	//    natif via (user, team, db_fingerprint) + historique de checksums —
 	//    la nouvelle db_connection résout automatiquement au bon canvas au
 	//    premier GET/PUT via `resolveCanvasByConnection`. Rien à cloner ici.

@@ -47,7 +47,8 @@ export async function getPairingStatus(
 			expiresAt: dbSchema.tunnelPairing.expiresAt,
 			deviceName: dbSchema.tunnelPairing.deviceName,
 			cliPubkey: dbSchema.tunnelPairing.cliPubkeyEd25519,
-			cliConnectionName: dbSchema.tunnelPairing.cliConnectionName
+			cliConnectionName: dbSchema.tunnelPairing.cliConnectionName,
+			dbFingerprint: dbSchema.tunnelPairing.dbFingerprint
 		})
 		.from(dbSchema.tunnelPairing)
 		.where(eq(dbSchema.tunnelPairing.code, codeCanonical))
@@ -58,32 +59,62 @@ export async function getPairingStatus(
 		return { status: "expired", deviceName: null, existingConnection: null };
 	}
 
-	// Lookup existingConnection quand un user est identifié — fingerprint
-	// SCOPÉ par la DSN CLI (C.13) : SHA256(pubkey || "|" || connectionName)
-	// si le CLI a envoyé son nom local, sinon fingerprint legacy pubkey-only.
-	// C.21.4 : si `teamId` est fourni (route team-scoped), on scope aussi
-	// par team_id. Sinon lookup par user_id (legacy).
+	// Lookup existingConnection quand un user est identifié. Deux stratégies :
+	//  1) T4/5 — le CLI a envoyé un db_fingerprint dès le POST /pairings :
+	//     on lookup (team, db_fingerprint). Si match, MÊME instance DB déjà
+	//     pair-ée par un autre CLI → UI /pair auto-fill le name + peut
+	//     afficher "cette DB est déjà connue sous « X »".
+	//  2) Legacy C.7 — fingerprint scopé CLI (SHA256(pubkey|connectionName)) :
+	//     un même CLI qui re-pair sur le MÊME nom local → autofill du name
+	//     existant (idempotent). Priorité 2 (après le check T4/5).
+	// C.21.4 : scope par team_id si fourni, sinon user_id (legacy).
 	let existingConnection: { id: string; name: string } | null = null;
 	if (options.userId !== undefined) {
-		const fingerprint = computeCliFingerprint(
-			row.cliPubkey,
-			row.cliConnectionName
-		);
 		const scopeFilter = options.teamId
 			? eq(dbSchema.dbConnection.teamId, options.teamId)
 			: eq(dbSchema.dbConnection.userId, options.userId);
-		const existing = await db
-			.select({
-				id: dbSchema.dbConnection.id,
-				name: dbSchema.dbConnection.name
-			})
-			.from(dbSchema.dbConnection)
-			.where(
-				and(scopeFilter, eq(dbSchema.dbConnection.cliFingerprint, fingerprint))
-			)
-			.limit(1);
-		const match = existing[0];
-		if (match) existingConnection = { id: match.id, name: match.name };
+		// Priorité 1 : lookup par db_fingerprint (multi-CLI reuse T4/5).
+		if (row.dbFingerprint !== null) {
+			const dbFpMatch = await db
+				.select({
+					id: dbSchema.dbConnection.id,
+					name: dbSchema.dbConnection.name
+				})
+				.from(dbSchema.dbConnection)
+				.where(
+					and(
+						scopeFilter,
+						eq(dbSchema.dbConnection.dbFingerprint, row.dbFingerprint)
+					)
+				)
+				.limit(1);
+			if (dbFpMatch[0]) {
+				existingConnection = { id: dbFpMatch[0].id, name: dbFpMatch[0].name };
+			}
+		}
+		// Priorité 2 : lookup par cli_fingerprint (idempotent re-pair même CLI).
+		if (existingConnection === null) {
+			const fingerprint = computeCliFingerprint(
+				row.cliPubkey,
+				row.cliConnectionName
+			);
+			const cliMatch = await db
+				.select({
+					id: dbSchema.dbConnection.id,
+					name: dbSchema.dbConnection.name
+				})
+				.from(dbSchema.dbConnection)
+				.where(
+					and(
+						scopeFilter,
+						eq(dbSchema.dbConnection.cliFingerprint, fingerprint)
+					)
+				)
+				.limit(1);
+			if (cliMatch[0]) {
+				existingConnection = { id: cliMatch[0].id, name: cliMatch[0].name };
+			}
+		}
 	}
 
 	if (row.consumedAt != null) {

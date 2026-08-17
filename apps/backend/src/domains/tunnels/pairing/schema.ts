@@ -15,6 +15,24 @@ const ED25519_PUBKEY_HEX = /^[0-9a-fA-F]{64}$/;
 /** Regex Ed25519 signature détachée — 64 bytes = 128 hex chars. */
 const ED25519_SIG_HEX = /^[0-9a-fA-F]{128}$/;
 
+// ─── shared: fingerprint hints ─────────────────────────────────────────
+// T4/5 : le CLI envoie ses 2 identifiants DB dès le POST /pairings pour
+// que le backend puisse détecter au /approve qu'une db_connection existe
+// déjà pour cette DB dans la team → auto-fill device_name + réutiliser la
+// connection au /authenticate (multi-CLI par db_connection).
+export const DbFingerprintField = z
+	.string()
+	.trim()
+	.min(1)
+	.max(200)
+	.optional();
+export const DbSchemaChecksumField = z
+	.string()
+	.trim()
+	.min(1)
+	.max(200)
+	.optional();
+
 // ─── POST /api/tunnels/pairings ────────────────────────────────────────
 // Body: le CLI envoie sa clé publique Ed25519. Le backend génère un code
 // aléatoire, retourne code + expiration + poll URL.
@@ -33,7 +51,11 @@ export const CreatePairingBody = z.object({
 		.trim()
 		.min(1, "Le nom de connection CLI ne peut pas être vide")
 		.max(100, "Nom trop long (max 100)")
-		.optional()
+		.optional(),
+	/** T4/5 : voir DbFingerprintField. Envoyé dès le POST /pairings pour
+	 *  détection cross-CLI au approve. */
+	dbFingerprint: DbFingerprintField,
+	dbSchemaChecksum: DbSchemaChecksumField
 });
 z.globalRegistry.add(CreatePairingBody, { id: "CreatePairingBody" });
 export type CreatePairingBodyT = z.infer<typeof CreatePairingBody>;

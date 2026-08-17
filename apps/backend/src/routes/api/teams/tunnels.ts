@@ -93,7 +93,9 @@ export default function teamsTunnelsRoute(fastify: FastifyInstance) {
 					request.body.cliPubkeyEd25519,
 					request.body.cliConnectionName ?? null,
 					Date.now(),
-					request.team.id
+					request.team.id,
+					request.body.dbFingerprint ?? null,
+					request.body.dbSchemaChecksum ?? null
 				);
 				return {
 					code: result.code,

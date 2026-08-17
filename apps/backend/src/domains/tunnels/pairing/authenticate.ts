@@ -30,7 +30,12 @@ import { upsertDbConnectionByFingerprint } from "../../db-connections/upsert";
 import { createPersonalTeam } from "../../teams/create";
 import { getDefaultTeamOfUser } from "../../teams/get";
 import type { DbOrTx } from "../db";
-import { generateSessionToken, hashSha256Hex, verifyEd25519 } from "./crypto";
+import {
+	computeCliFingerprint,
+	generateSessionToken,
+	hashSha256Hex,
+	verifyEd25519
+} from "./crypto";
 
 /** Engine par défaut à la première authentification. Le CLI pourra
  * changer via le dashboard (Bloc 11) ou une future commande CLI. */
@@ -76,6 +81,8 @@ export async function authenticatePairing(
 				cliConnectionName: dbSchema.tunnelPairing.cliConnectionName,
 				deviceName: dbSchema.tunnelPairing.deviceName,
 				teamId: dbSchema.tunnelPairing.teamId,
+				dbFingerprintFromPair: dbSchema.tunnelPairing.dbFingerprint,
+				dbSchemaChecksumFromPair: dbSchema.tunnelPairing.dbSchemaChecksum,
 				approvedAt: dbSchema.tunnelPairing.approvedAt,
 				consumedAt: dbSchema.tunnelPairing.consumedAt,
 				expiresAt: dbSchema.tunnelPairing.expiresAt
@@ -130,6 +137,14 @@ export async function authenticatePairing(
 			}
 		}
 
+		// T4/5 : priorité au fingerprint stocké sur le tunnel_pairing (envoyé
+		// dès le POST /pairings côté CLI récent). Fallback : le fingerprint
+		// éventuellement passé en param `dbFingerprint` (compat CLI ancien
+		// qui l'envoie au /authenticate seulement).
+		const effectiveDbFingerprint =
+			row.dbFingerprintFromPair ?? dbFingerprint;
+		const effectiveDbSchemaChecksum = row.dbSchemaChecksumFromPair ?? null;
+
 		const upsert = await upsertDbConnectionByFingerprint(tx, {
 			userId: row.userId,
 			teamId,
@@ -141,7 +156,9 @@ export async function authenticatePairing(
 			// / replSet Mongo) au moment de l'authenticate. Absent quand le
 			// CLI est legacy ou que la DSN n'a pas répondu — le backend
 			// backfill au prochain succès (voir upsertDbConnectionByFingerprint).
-			dbFingerprint
+			dbFingerprint: effectiveDbFingerprint,
+			// T4/5 : le checksum aussi disponible dès le pair, propagé au backfill.
+			dbSchemaChecksum: effectiveDbSchemaChecksum
 		});
 		if (!upsert.ok) {
 			// Cas rarissime : l'user a approuvé un name qui vient d'être
@@ -156,12 +173,21 @@ export async function authenticatePairing(
 		const tokenHash = hashSha256Hex(token);
 		const expiresAt = new Date(nowMs + TUNNEL_SESSION_TTL_MS);
 
+		// T4/5 : chaque tunnel_session porte le cli_fingerprint DU CLI qui
+		// l'a ouverte. Différent de dbConnection.cliFingerprint quand cette
+		// session appartient à un CLI secondaire (reuse via db_fingerprint
+		// match). Le WS handshake vérifie contre session.cliFingerprint.
+		const cliFingerprintForSession = computeCliFingerprint(
+			row.cliPubkey,
+			row.cliConnectionName
+		);
 		const insertedSession = await tx
 			.insert(dbSchema.tunnelSession)
 			.values({
 				connectionId: conn.id,
 				hash: tokenHash,
-				expiresAt
+				expiresAt,
+				cliFingerprint: cliFingerprintForSession
 			})
 			.returning({ id: dbSchema.tunnelSession.id });
 

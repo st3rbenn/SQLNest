@@ -56,7 +56,8 @@ export async function approvePairing(
 				expiresAt: dbSchema.tunnelPairing.expiresAt,
 				cliPubkey: dbSchema.tunnelPairing.cliPubkeyEd25519,
 				cliConnectionName: dbSchema.tunnelPairing.cliConnectionName,
-				teamId: dbSchema.tunnelPairing.teamId
+				teamId: dbSchema.tunnelPairing.teamId,
+				dbFingerprint: dbSchema.tunnelPairing.dbFingerprint
 			})
 			.from(dbSchema.tunnelPairing)
 			.where(eq(dbSchema.tunnelPairing.code, codeCanonical))
@@ -95,29 +96,50 @@ export async function approvePairing(
 			}
 		}
 
-		// C.7 — Lookup db_connection existante par fingerprint SCOPÉ (C.13 :
-		// SHA256(pubkey || "|" || cliConnectionName)). C.21.4 : on scope par
-		// team_id — un même CLI peut exister dans plusieurs teams du user,
-		// chacune reconnue indépendamment. Si match dans la team courante,
-		// on autofill le deviceName avec le nom existant côté serveur.
+		// Lookup db_connection existante — deux stratégies pour autofill le
+		// deviceName :
+		//   1) T4/5 : match par (team, db_fingerprint) — un autre CLI a déjà
+		//      pair-é cette INSTANCE DB dans la team → nouveau CLI hérite
+		//      du même name (l'user click Approve sans taper).
+		//   2) C.7 : match par (team, cli_fingerprint) — même CLI re-pair
+		//      idempotent → autofill son ancien name.
 		const fingerprint = computeCliFingerprint(
 			row.cliPubkey,
 			row.cliConnectionName
 		);
-		const existing = await tx
-			.select({
-				id: dbSchema.dbConnection.id,
-				name: dbSchema.dbConnection.name
-			})
-			.from(dbSchema.dbConnection)
-			.where(
-				and(
-					eq(dbSchema.dbConnection.teamId, effectiveTeamId),
-					eq(dbSchema.dbConnection.cliFingerprint, fingerprint)
+		let existingConn: { id: string; name: string } | undefined;
+		if (row.dbFingerprint !== null) {
+			const dbFpMatch = await tx
+				.select({
+					id: dbSchema.dbConnection.id,
+					name: dbSchema.dbConnection.name
+				})
+				.from(dbSchema.dbConnection)
+				.where(
+					and(
+						eq(dbSchema.dbConnection.teamId, effectiveTeamId),
+						eq(dbSchema.dbConnection.dbFingerprint, row.dbFingerprint)
+					)
 				)
-			)
-			.limit(1);
-		const existingConn = existing[0];
+				.limit(1);
+			if (dbFpMatch[0]) existingConn = dbFpMatch[0];
+		}
+		if (existingConn === undefined) {
+			const cliMatch = await tx
+				.select({
+					id: dbSchema.dbConnection.id,
+					name: dbSchema.dbConnection.name
+				})
+				.from(dbSchema.dbConnection)
+				.where(
+					and(
+						eq(dbSchema.dbConnection.teamId, effectiveTeamId),
+						eq(dbSchema.dbConnection.cliFingerprint, fingerprint)
+					)
+				)
+				.limit(1);
+			if (cliMatch[0]) existingConn = cliMatch[0];
+		}
 		const effectiveDeviceName = existingConn?.name ?? deviceName;
 
 		if (!effectiveDeviceName) {

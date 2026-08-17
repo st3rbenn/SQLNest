@@ -456,6 +456,17 @@ export const tunnelPairing = pgTable(
 		// côté serveur, chacune ayant sa propre db_connection.
 		// NULL = CLI legacy (pré-C.13) → fingerprint = SHA256(pubkey) seul.
 		cliConnectionName: text("cli_connection_name"),
+		// T4/5 : le CLI envoie son db_fingerprint (identité INSTANCE DB)
+		// dès le POST /pairings pour que le backend détecte au approve si
+		// cette DB est déjà connue (autre CLI dans la même team ayant
+		// pair-é la MÊME instance) → auto-fill le device_name existant et
+		// réutiliser la db_connection au authenticate (1 db_connection
+		// physique pour N tunnels CLI). Absent = CLI legacy pré-T4/5,
+		// flow classique (nouvelle db_connection).
+		dbFingerprint: text("db_fingerprint"),
+		// T4/5 : idem, checksum structure pour fallback cross-docker
+		// (2 dumps identiques ont même checksum mais fp différent).
+		dbSchemaChecksum: text("db_schema_checksum"),
 		// C.21.4 : la team dans laquelle la db_connection sera créée.
 		// Renseignée au moment du /approve (l'user choisit dans quelle
 		// team ce CLI est intégré). Reste nullable pour compat CLI legacy
@@ -628,6 +639,14 @@ export const tunnelSession = pgTable(
 			.references(() => dbConnection.id, { onDelete: "cascade" }),
 		// SHA-256 hex du clair. Unique — la validation d'un token WS = 1 lookup.
 		hash: text("hash").notNull(),
+		// T4/5 : fingerprint du CLI QUI A OUVERT cette session tunnel. Peut
+		// différer de `dbConnection.cliFingerprint` (le "créateur" primaire)
+		// quand plusieurs CLI se pair-e à la MÊME db_connection (Mac +
+		// Windows sur même DB via lookup db_fingerprint). Le WS handshake
+		// vérifie la sig contre CE fingerprint, pas celui de la db_connection.
+		// Nullable pour rétro-compat : les sessions antérieures au refactor
+		// tombent en fallback sur `db_connection.cli_fingerprint` côté auth.
+		cliFingerprint: text("cli_fingerprint"),
 		createdAt: timestamp("created_at", { withTimezone: true })
 			.notNull()
 			.defaultNow(),

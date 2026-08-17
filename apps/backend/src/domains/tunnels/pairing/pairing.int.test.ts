@@ -959,11 +959,11 @@ describe.skipIf(!DATABASE_URL)("/api/tunnels — device flow", () => {
 			expect(conns[0]!.dbFingerprint).toBeNull();
 		});
 
-		test("T4/4 : 2 CLI distincts sur même db_fingerprint → un SEUL canvas partagé via lookup fp", async () => {
-			// T4/3 (clone) supprimé au refactor T4/4 : plus de duplication.
-			// Le canvas est partagé natively via (user, team, db_fingerprint).
-			// Ce test valide qu'un GET depuis Windows retourne le payload
-			// écrit depuis Mac — un seul canvas physique en DB.
+		test("T4/5 : 2 CLI distincts sur même db_fingerprint → même db_connection + canvas partagé", async () => {
+			// T4/5 renforce T4/4 : plus de 2 db_connections dupliquées (Mac +
+			// Windows). Windows RÉUTILISE la db_connection Mac via lookup
+			// (team, db_fingerprint). 1 db_connection physique, 2 tunnel_session
+			// (chacun son cli_fingerprint). Canvas partagé automatiquement.
 			const { userId } = await createTestUser(
 				app,
 				"cross-dev@example.com",
@@ -1021,17 +1021,23 @@ describe.skipIf(!DATABASE_URL)("/api/tunnels — device flow", () => {
 			expect(winAuth.statusCode).toBe(200);
 			const winConn = (winAuth.json() as { connectionId: string })
 				.connectionId;
-			expect(winConn).not.toBe(macConn);
+			// T4/5 : MÊME db_connection (pas de dupliqué).
+			expect(winConn).toBe(macConn);
 
 			// GET canvas depuis Windows → DOIT retourner le payload écrit
-			// par Mac (canvas partagé via (user, team, db_fingerprint)).
+			// par Mac (canvas partagé via T4/4).
 			const winCanvas = await getCanvasState(app.db, userId, winConn);
 			expect(winCanvas).not.toBeNull();
 			expect(
 				(winCanvas!.payload as { positions?: unknown }).positions
 			).toEqual({ artist: { x: 100, y: 200 } });
 
-			// Il n'y a qu'UN SEUL canvas_state en DB pour cette (user, team, fp).
+			// 1 seule db_connection ET 1 seul canvas_state en DB.
+			const connCount = await app.db
+				.select({ id: schema.dbConnection.id })
+				.from(schema.dbConnection)
+				.where(eq(schema.dbConnection.dbFingerprint, dbFp));
+			expect(connCount.length).toBe(1);
 			const canvasCount = await app.db
 				.select({ id: schema.canvasState.id })
 				.from(schema.canvasState)
