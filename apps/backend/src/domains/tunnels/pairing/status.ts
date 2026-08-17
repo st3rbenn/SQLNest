@@ -48,7 +48,8 @@ export async function getPairingStatus(
 			deviceName: dbSchema.tunnelPairing.deviceName,
 			cliPubkey: dbSchema.tunnelPairing.cliPubkeyEd25519,
 			cliConnectionName: dbSchema.tunnelPairing.cliConnectionName,
-			dbFingerprint: dbSchema.tunnelPairing.dbFingerprint
+			dbFingerprint: dbSchema.tunnelPairing.dbFingerprint,
+			dbSchemaChecksum: dbSchema.tunnelPairing.dbSchemaChecksum
 		})
 		.from(dbSchema.tunnelPairing)
 		.where(eq(dbSchema.tunnelPairing.code, codeCanonical))
@@ -59,21 +60,20 @@ export async function getPairingStatus(
 		return { status: "expired", deviceName: null, existingConnection: null };
 	}
 
-	// Lookup existingConnection quand un user est identifié. Deux stratégies :
+	// Lookup existingConnection quand un user est identifié. Trois stratégies :
 	//  1) T4/5 — le CLI a envoyé un db_fingerprint dès le POST /pairings :
-	//     on lookup (team, db_fingerprint). Si match, MÊME instance DB déjà
-	//     pair-ée par un autre CLI → UI /pair auto-fill le name + peut
-	//     afficher "cette DB est déjà connue sous « X »".
-	//  2) Legacy C.7 — fingerprint scopé CLI (SHA256(pubkey|connectionName)) :
-	//     un même CLI qui re-pair sur le MÊME nom local → autofill du name
-	//     existant (idempotent). Priorité 2 (après le check T4/5).
+	//     match (team, db_fingerprint). Instance stricte (system_id PG).
+	//  2) T4/5 fallback — match (team, db_schema_checksum). Cross-docker
+	//     (2 dumps identiques ont même checksum mais fingerprints différents).
+	//  3) Legacy C.7 — fingerprint scopé CLI (SHA256(pubkey|connectionName)) :
+	//     un même CLI qui re-pair sur le MÊME nom local → autofill du name.
 	// C.21.4 : scope par team_id si fourni, sinon user_id (legacy).
 	let existingConnection: { id: string; name: string } | null = null;
 	if (options.userId !== undefined) {
 		const scopeFilter = options.teamId
 			? eq(dbSchema.dbConnection.teamId, options.teamId)
 			: eq(dbSchema.dbConnection.userId, options.userId);
-		// Priorité 1 : lookup par db_fingerprint (multi-CLI reuse T4/5).
+		// Priorité 1 : lookup par db_fingerprint (match instance).
 		if (row.dbFingerprint !== null) {
 			const dbFpMatch = await db
 				.select({
@@ -92,7 +92,26 @@ export async function getPairingStatus(
 				existingConnection = { id: dbFpMatch[0].id, name: dbFpMatch[0].name };
 			}
 		}
-		// Priorité 2 : lookup par cli_fingerprint (idempotent re-pair même CLI).
+		// Priorité 2 : lookup par db_schema_checksum (match cross-docker).
+		if (existingConnection === null && row.dbSchemaChecksum !== null) {
+			const csMatch = await db
+				.select({
+					id: dbSchema.dbConnection.id,
+					name: dbSchema.dbConnection.name
+				})
+				.from(dbSchema.dbConnection)
+				.where(
+					and(
+						scopeFilter,
+						eq(dbSchema.dbConnection.dbSchemaChecksum, row.dbSchemaChecksum)
+					)
+				)
+				.limit(1);
+			if (csMatch[0]) {
+				existingConnection = { id: csMatch[0].id, name: csMatch[0].name };
+			}
+		}
+		// Priorité 3 : lookup par cli_fingerprint (idempotent re-pair même CLI).
 		if (existingConnection === null) {
 			const fingerprint = computeCliFingerprint(
 				row.cliPubkey,

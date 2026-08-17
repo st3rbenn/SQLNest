@@ -57,7 +57,8 @@ export async function approvePairing(
 				cliPubkey: dbSchema.tunnelPairing.cliPubkeyEd25519,
 				cliConnectionName: dbSchema.tunnelPairing.cliConnectionName,
 				teamId: dbSchema.tunnelPairing.teamId,
-				dbFingerprint: dbSchema.tunnelPairing.dbFingerprint
+				dbFingerprint: dbSchema.tunnelPairing.dbFingerprint,
+				dbSchemaChecksum: dbSchema.tunnelPairing.dbSchemaChecksum
 			})
 			.from(dbSchema.tunnelPairing)
 			.where(eq(dbSchema.tunnelPairing.code, codeCanonical))
@@ -96,13 +97,13 @@ export async function approvePairing(
 			}
 		}
 
-		// Lookup db_connection existante — deux stratégies pour autofill le
+		// Lookup db_connection existante — 3 stratégies pour autofill le
 		// deviceName :
-		//   1) T4/5 : match par (team, db_fingerprint) — un autre CLI a déjà
-		//      pair-é cette INSTANCE DB dans la team → nouveau CLI hérite
-		//      du même name (l'user click Approve sans taper).
-		//   2) C.7 : match par (team, cli_fingerprint) — même CLI re-pair
-		//      idempotent → autofill son ancien name.
+		//   1) T4/5 : match (team, db_fingerprint) — MÊME instance DB déjà
+		//      pair-ée par un autre CLI (backup/restore ou re-attach).
+		//   2) T4/5 fallback : match (team, db_schema_checksum) — cross-docker,
+		//      2 dumps identiques dans 2 containers PG distincts.
+		//   3) C.7 : match (team, cli_fingerprint) — même CLI re-pair idempotent.
 		const fingerprint = computeCliFingerprint(
 			row.cliPubkey,
 			row.cliConnectionName
@@ -123,6 +124,22 @@ export async function approvePairing(
 				)
 				.limit(1);
 			if (dbFpMatch[0]) existingConn = dbFpMatch[0];
+		}
+		if (existingConn === undefined && row.dbSchemaChecksum !== null) {
+			const csMatch = await tx
+				.select({
+					id: dbSchema.dbConnection.id,
+					name: dbSchema.dbConnection.name
+				})
+				.from(dbSchema.dbConnection)
+				.where(
+					and(
+						eq(dbSchema.dbConnection.teamId, effectiveTeamId),
+						eq(dbSchema.dbConnection.dbSchemaChecksum, row.dbSchemaChecksum)
+					)
+				)
+				.limit(1);
+			if (csMatch[0]) existingConn = csMatch[0];
 		}
 		if (existingConn === undefined) {
 			const cliMatch = await tx

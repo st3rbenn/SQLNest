@@ -152,50 +152,90 @@ export async function upsertDbConnectionByFingerprint(
 	}
 
 	// 2. T4/5 — MULTI-CLI REUSE : si le CLI courant a un cli_fingerprint
-	//    différent (Windows après Mac) MAIS un db_fingerprint qui match une
-	//    db_connection existante dans la team → RÉUTILISER cette connection
-	//    au lieu d'en créer une nouvelle. Un seul row db_connection par DB
-	//    logique, plusieurs tunnel_session (1 par CLI) chacun avec son
-	//    propre cli_fingerprint. Résout le pb "2× apollon dans la gallery".
-	if (opts.dbFingerprint !== undefined && opts.dbFingerprint !== null) {
-		const dbFpMatch = await tx
-			.select({ id: dbSchema.dbConnection.id })
-			.from(dbSchema.dbConnection)
-			.where(
-				and(
-					eq(dbSchema.dbConnection.teamId, opts.teamId),
-					eq(dbSchema.dbConnection.dbFingerprint, opts.dbFingerprint),
-					ne(dbSchema.dbConnection.cliFingerprint, fingerprint)
+	//    différent (Windows après Mac) MAIS on trouve une db_connection dans
+	//    la team qui pointe vers la MÊME DB → RÉUTILISER cette connection.
+	//    Un seul row db_connection par DB logique, plusieurs tunnel_session
+	//    (1 par CLI) chacun avec son propre cli_fingerprint. Résout le pb
+	//    "2× apollon dans la gallery".
+	//
+	//    Priorité :
+	//      1) `(team, db_fingerprint)` — match INSTANCE stricte (backup/restore
+	//         même cluster PG, system_identifier identique).
+	//      2) `(team, db_schema_checksum)` — match cross-docker : 2 clusters
+	//         PG distincts (system_id différents) mais MÊME dump → même schéma
+	//         checksum. Cas typique : Mac docker A + Windows docker B avec le
+	//         même seed apollon-db.
+	//    Le lookup exclut le cli_fingerprint courant (sinon on match soi-même,
+	//    le path idempotent étape 1 traite ce cas).
+	const findReuseCandidate = async (): Promise<
+		{ id: string } | undefined
+	> => {
+		if (opts.dbFingerprint !== undefined && opts.dbFingerprint !== null) {
+			const rows = await tx
+				.select({ id: dbSchema.dbConnection.id })
+				.from(dbSchema.dbConnection)
+				.where(
+					and(
+						eq(dbSchema.dbConnection.teamId, opts.teamId),
+						eq(dbSchema.dbConnection.dbFingerprint, opts.dbFingerprint),
+						ne(dbSchema.dbConnection.cliFingerprint, fingerprint)
+					)
 				)
-			)
-			.limit(1);
-		if (dbFpMatch.length > 0 && dbFpMatch[0]) {
-			// Bump activity + backfill checksum sur la connection réutilisée.
-			const patch: {
-				activeSince: ReturnType<typeof sql>;
-				lastSeenAt: ReturnType<typeof sql>;
-				dbSchemaChecksum?: string;
-			} = {
-				activeSince: sql`now()`,
-				lastSeenAt: sql`now()`
-			};
-			if (
-				opts.dbSchemaChecksum !== undefined &&
-				opts.dbSchemaChecksum !== null
-			) {
-				patch.dbSchemaChecksum = opts.dbSchemaChecksum;
-			}
-			await tx
-				.update(dbSchema.dbConnection)
-				.set(patch)
-				.where(eq(dbSchema.dbConnection.id, dbFpMatch[0].id));
-			return {
-				ok: true,
-				connectionId: dbFpMatch[0].id,
-				wasCreated: false,
-				reusedByDbFingerprint: true
-			};
+				.limit(1);
+			if (rows[0]) return rows[0];
 		}
+		if (
+			opts.dbSchemaChecksum !== undefined &&
+			opts.dbSchemaChecksum !== null
+		) {
+			const rows = await tx
+				.select({ id: dbSchema.dbConnection.id })
+				.from(dbSchema.dbConnection)
+				.where(
+					and(
+						eq(dbSchema.dbConnection.teamId, opts.teamId),
+						eq(dbSchema.dbConnection.dbSchemaChecksum, opts.dbSchemaChecksum),
+						ne(dbSchema.dbConnection.cliFingerprint, fingerprint)
+					)
+				)
+				.limit(1);
+			if (rows[0]) return rows[0];
+		}
+		return undefined;
+	};
+	const reuseCandidate = await findReuseCandidate();
+	if (reuseCandidate !== undefined) {
+		// Bump activity + backfill fp/checksum sur la connection réutilisée
+		// (le lookup peut avoir matché via checksum → on rétablit le fp
+		// courant si absent OU l'update est no-op idempotent si déjà set).
+		const patch: {
+			activeSince: ReturnType<typeof sql>;
+			lastSeenAt: ReturnType<typeof sql>;
+			dbFingerprint?: string;
+			dbSchemaChecksum?: string;
+		} = {
+			activeSince: sql`now()`,
+			lastSeenAt: sql`now()`
+		};
+		if (opts.dbFingerprint !== undefined && opts.dbFingerprint !== null) {
+			patch.dbFingerprint = opts.dbFingerprint;
+		}
+		if (
+			opts.dbSchemaChecksum !== undefined &&
+			opts.dbSchemaChecksum !== null
+		) {
+			patch.dbSchemaChecksum = opts.dbSchemaChecksum;
+		}
+		await tx
+			.update(dbSchema.dbConnection)
+			.set(patch)
+			.where(eq(dbSchema.dbConnection.id, reuseCandidate.id));
+		return {
+			ok: true,
+			connectionId: reuseCandidate.id,
+			wasCreated: false,
+			reusedByDbFingerprint: true
+		};
 	}
 
 	// 3. Pas d'existant + pas de match db_fingerprint : check collision
