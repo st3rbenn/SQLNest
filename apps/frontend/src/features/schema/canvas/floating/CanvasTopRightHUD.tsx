@@ -1,11 +1,8 @@
-import { Avatar, Menu, Tooltip, UnstyledButton } from "@mantine/core";
-import { useHotkeys } from "@mantine/hooks";
-import { IconChevronDown, IconTerminal2 } from "@tabler/icons-react";
-import { useNavigate, useParams } from "@tanstack/react-router";
+import { Avatar, Menu, UnstyledButton } from "@mantine/core";
+import { IconChevronDown } from "@tabler/icons-react";
 import { useReactFlow, useViewport } from "@xyflow/react";
 import type { CSSProperties } from "react";
 import { useCurrentUser } from "../../../auth/sessionQuery";
-import { openConsoleInPopout } from "../../../query/usePopoutWindow";
 
 /**
  * HUD flottant top-right du canvas — regroupe l'accès compte (avatar +
@@ -94,74 +91,8 @@ export function CanvasTopRightHUD(): React.ReactNode {
 	return (
 		<div style={containerStyle}>
 			<UserAvatarMenu />
-			<ConsoleButton />
 			<ZoomControl />
 		</div>
-	);
-}
-
-/**
- * Ouvre la console SNQL fullscreen sur la route `/query`. Raccourcis :
- *   ⌘K  → navigate même onglet
- *   ⇧⌘K → détache dans une fenêtre pop-out (2ᵉ écran)
- *
- * Rendu comme icône dans le HUD. Les params team/conn viennent de la
- * route parente — le HUD n'est monté qu'à l'intérieur du canvas.
- */
-function ConsoleButton(): React.ReactNode {
-	const params = useParams({
-		from: "/_authenticated/team/$teamSlug/canvas/$connId/"
-	}) as { teamSlug: string; connId: string };
-	const navigate = useNavigate();
-
-	function openFullscreen(): void {
-		navigate({
-			to: "/team/$teamSlug/canvas/$connId/query",
-			params: { teamSlug: params.teamSlug, connId: params.connId }
-		});
-	}
-
-	function openPopout(): void {
-		openConsoleInPopout(params.teamSlug, params.connId);
-	}
-
-	// 2ᵉ arg [] = actif même dans les inputs. Le canvas ReactFlow n'est
-	// pas un input, mais l'user peut avoir focus dans un search / rename.
-	useHotkeys(
-		[
-			["mod+K", openFullscreen, { preventDefault: true }],
-			["mod+shift+K", openPopout, { preventDefault: true }]
-		],
-		[]
-	);
-
-	return (
-		<Tooltip
-			label="Console SNQL — ⌘K (ou ⇧⌘K pour détacher)"
-			openDelay={400}
-			styles={{
-				tooltip: { fontSize: 11, padding: "4px 8px", borderRadius: 6 }
-			}}
-			withArrow
-			arrowSize={4}
-		>
-			<UnstyledButton
-				aria-label="Ouvrir la console SNQL"
-				className="sqlnest-menu-item"
-				onClick={openFullscreen}
-				style={{
-					display: "inline-flex",
-					alignItems: "center",
-					justifyContent: "center",
-					width: 28,
-					height: 28,
-					borderRadius: 6,
-					color: "var(--sqlnest-text-primary)"
-				}}
-			>
-				<IconTerminal2 size={15} stroke={2} />
-			</UnstyledButton>
-		</Tooltip>
 	);
 }
 

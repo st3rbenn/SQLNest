@@ -55,7 +55,6 @@ const fakeUI: CanvasUIContextValue = {
 	},
 	leftPadding: 328,
 	consoleHeight: 38,
-	setConsoleHeight: noop,
 	consoleGap: 8,
 	layoutConfirmOpen: false,
 	setLayoutConfirmOpen: noop,
@@ -72,7 +71,8 @@ const fakeActions: CanvasActionsContextValue = {
 	relayoutAll: noop,
 	addTableToFrame: noop,
 	removeTableFromFrame: noop,
-	commandGroups: []
+	commandGroups: [],
+	createConsole: noop
 };
 
 function wrap(children: React.ReactNode) {

@@ -84,8 +84,9 @@ export interface CanvasUIContextValue {
 	readonly leftDrawerWidth: number;
 	readonly drawerHandleProps: ResizableDrawerHandleProps;
 	readonly leftPadding: number;
+	/** Espace bas réservé au safeArea du fit (approx hauteur toolbar).
+	 * Constant depuis T5 : plus de panel bas dynamique. */
 	readonly consoleHeight: number;
-	readonly setConsoleHeight: (h: number) => void;
 	readonly consoleGap: number;
 	readonly layoutConfirmOpen: boolean;
 	readonly setLayoutConfirmOpen: (o: boolean) => void;
@@ -111,6 +112,8 @@ export interface CanvasActionsContextValue {
 	readonly addTableToFrame: (frameKey: string, tableName: string) => void;
 	readonly removeTableFromFrame: (tableName: string) => void;
 	readonly commandGroups: SpotlightActionGroupData[];
+	/** T5 : crée un node console au centre du viewport courant. */
+	readonly createConsole: () => void;
 }
 
 // ─── Contexts + selector hooks ─────────────────────────────────────────

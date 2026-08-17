@@ -7,7 +7,9 @@ import {
 	Panel,
 	ReactFlow,
 	ReactFlowProvider,
-	SelectionMode
+	SelectionMode,
+	useNodesState,
+	useReactFlow
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import "./canvas-overrides.css";
@@ -27,6 +29,11 @@ import { useCanvasFocus } from "./canvas/useCanvasFocus";
 import { useCanvasFrames } from "./canvas/useCanvasFrames";
 import { useCanvasHistory } from "./canvas/useCanvasHistory";
 import { useCanvasNodes } from "./canvas/useCanvasNodes";
+import {
+	CONSOLE_NODE_DEFAULT_HEIGHT,
+	CONSOLE_NODE_DEFAULT_WIDTH,
+	useConsoleNodes
+} from "./canvas/useConsoleNodes";
 import { useCanvasSelection } from "./canvas/useCanvasSelection";
 import { useCanvasSelectionLasso } from "./canvas/useCanvasSelectionLasso";
 import { useCanvasSyncBridge } from "./canvas/useCanvasSyncBridge";
@@ -37,6 +44,7 @@ import { initialZoom, OVERVIEW_FIT } from "./canvas/viewport";
 import { FrameNode, type FrameNodeType } from "./FrameNode";
 import { InteractiveEdge } from "./InteractiveEdge";
 import { buildLayout, type LayoutResult } from "./layout";
+import { ConsoleNode, type ConsoleNodeType } from "./nodes/ConsoleNode";
 import type { SchemaModel } from "./schema-model";
 import {
 	NODE_WIDTH,
@@ -54,10 +62,14 @@ import { useTableSizes } from "./useTableSizes";
 // choisies pour rester lisibles sur `#1E1E1E`.
 const DECLARED = "#0d99ff";
 const INFERRED = "#ffc933";
-const nodeTypes = { table: TableNode, frame: FrameNode };
+const nodeTypes = {
+	table: TableNode,
+	frame: FrameNode,
+	console: ConsoleNode
+};
 const edgeTypes = { fk: InteractiveEdge };
 
-type SchemaNode = TableNodeType | FrameNodeType;
+type SchemaNode = TableNodeType | FrameNodeType | ConsoleNodeType;
 
 /** Exportées + queryKey helper — permet à `useNavigateToCanvas` de
  *  prefetch le layout ELK dans le queryClient AVANT de naviguer. Le
@@ -122,14 +134,19 @@ interface CanvasInnerProps {
 	schemaLabel?: string | undefined;
 	connectionId: string;
 	dbName: string;
+	/** Team scope — nécessaire pour les nodes console qui appellent les
+	 * routes team-scoped (`POST /api/teams/:slug/db-connections/:id/query`). */
+	teamSlug: string;
 }
 
 function CanvasInner({
 	schema,
 	schemaLabel,
 	connectionId,
-	dbName
+	dbName,
+	teamSlug
 }: CanvasInnerProps) {
+	const rf = useReactFlow();
 	// Layout ELK — async, mais caché par connectionId dans le queryClient
 	// TanStack. Sans ça, chaque re-mount (retour gallery → canvas) refait
 	// un compute ELK à froid (~500ms-1s) → flick visible avant le rendu
@@ -436,17 +453,172 @@ function CanvasInner({
 	// (`frameNodes` + handlers + drag lifecycle exposés par `useCanvasFrames`
 	// plus haut.)
 
-	const displayNodes = useMemo<SchemaNode[]>(
-		() => [...frameNodes, ...displayTableNodes],
-		[frameNodes, displayTableNodes]
+	// ─── Nodes console T5 ───────────────────────────────────────────────
+	// Chaque node console vit dans le graphe RF comme une table/frame ;
+	// sa géométrie est persistée localement par `useConsoleNodes` (pas
+	// encore sync serveur — deferred).
+	//
+	// Architecture : les consoles ont leur propre `useNodesState<Console>`
+	// séparé du state tables (`useCanvasNodes`) — ce state RF gère nativement
+	// les positions et dimensions pendant les drag/resize (identité stable,
+	// pas de re-render depuis persist). `onConsoleNodesChange` est composé
+	// avec `handleNodesChange` du parent dans `onNodesChange`. Persist
+	// depuis le state RF au drop (onNodeDragStop / NodeResizer.onResizeEnd).
+	const consoleNodes = useConsoleNodes(connectionId);
+	const [focusedConsoleId, setFocusedConsoleId] = useState<string | null>(null);
+	const [consoleRFNodes, setConsoleRFNodes, onConsoleNodesChange] =
+		useNodesState<ConsoleNodeType>([]);
+	// Snapshot viewport pré-fullscreen pour restore à l'exit.
+	const savedViewportRef = useRef<{
+		x: number;
+		y: number;
+		zoom: number;
+	} | null>(null);
+
+	// Sync `consoleNodes.geoms` (persist) → state RF. Preserve les valeurs
+	// RF existantes pour un id déjà présent (le state RF est à jour pendant
+	// le drag/resize, on ne veut pas l'écraser par des valeurs persist plus
+	// anciennes). Nouveaux ids : injectés depuis geom. Ids supprimés :
+	// retirés du state RF.
+	useEffect(() => {
+		setConsoleRFNodes((prev) => {
+			const prevById = new Map(prev.map((n) => [n.id, n]));
+			return consoleNodes.geoms.map((g) => {
+				const existing = prevById.get(g.id);
+				if (existing) return existing;
+				return {
+					id: g.id,
+					type: "console" as const,
+					position: g.position,
+					width: g.width,
+					height: g.height,
+					// Placeholder — enrichi (props + data) dans consoleDisplayNodes.
+					data: {
+						teamSlug,
+						connId: connectionId,
+						isFocused: false
+					}
+				};
+			});
+		});
+	}, [consoleNodes.geoms, setConsoleRFNodes, teamSlug, connectionId]);
+
+	const enterConsoleFocus = useCallback(
+		(id: string) => {
+			savedViewportRef.current = rf.getViewport();
+			// Instant : pas d'animation "zoom depuis le centre" — le CSS fade
+			// des autres nodes/overlays donne la transition perceptible.
+			rf.setViewport({ x: 0, y: 0, zoom: 1 }, { duration: 0 });
+			setFocusedConsoleId(id);
+		},
+		[rf]
+	);
+	const exitConsoleFocus = useCallback(() => {
+		if (focusedConsoleId === null) return;
+		setFocusedConsoleId(null);
+		const saved = savedViewportRef.current;
+		if (saved) {
+			rf.setViewport(saved, { duration: 0 });
+			savedViewportRef.current = null;
+		} else {
+			applyOverviewRef.current();
+		}
+	}, [focusedConsoleId, rf]);
+
+	// Escape sort du fullscreen — window listener au niveau capture pour
+	// attraper la touche AVANT que CodeMirror la consomme (l'éditeur bloque
+	// autrement la sortie via clavier).
+	useEffect(() => {
+		if (focusedConsoleId === null) return;
+		function onKey(e: KeyboardEvent): void {
+			if (e.key !== "Escape") return;
+			e.preventDefault();
+			e.stopPropagation();
+			exitConsoleFocus();
+		}
+		window.addEventListener("keydown", onKey, { capture: true });
+		return () =>
+			window.removeEventListener("keydown", onKey, { capture: true });
+	}, [focusedConsoleId, exitConsoleFocus]);
+
+	const consoleDisplayNodes = useMemo<ConsoleNodeType[]>(
+		() =>
+			consoleRFNodes.map((n) => {
+				const isFocused = n.id === focusedConsoleId;
+				// En fullscreen : override la géom RF avec les dimensions écran.
+				// Le node RF ne persist pas cet override (draggable:false) — c'est
+				// purement visuel. À l'exit, l'override est retiré (isFocused
+				// false) et le node revient à ses dimensions RF (= persist geom
+				// ou live drag state).
+				const geom = isFocused
+					? {
+							position: { x: 0, y: 0 },
+							width: window.innerWidth,
+							height: window.innerHeight
+						}
+					: {
+							position: n.position,
+							width: n.width,
+							height: n.height
+						};
+				return {
+					...n,
+					position: geom.position,
+					width: geom.width,
+					height: geom.height,
+					// `selectable: true` : cliquer sur le node le marque `.selected`
+					// (RF standard) — le CSS `.selected` garde les handles NodeResizer
+					// visibles sans hover. Click ailleurs = deselect standard.
+					selectable: !isFocused,
+					// Draggable/resizable désactivés en fullscreen — pas de sens
+					// et évite les gestes accidentels qui bougent le node hors-écran.
+					draggable: !isFocused,
+					// `deletable: false` : le Backspace natif RF supprime le node
+					// mais ne clean pas les tabs localStorage → on force le user
+					// à passer par le bouton `×` du header qui appelle
+					// `consoleNodes.remove` (clean tabs inclus).
+					deletable: false,
+					zIndex: isFocused ? 999 : 10,
+					...(isFocused ? { className: "sqlnest-console-focused" } : {}),
+					data: {
+						teamSlug,
+						connId: connectionId,
+						isFocused,
+						onResizeEnd: (nodeId, size) =>
+							consoleNodes.updateGeom(nodeId, {
+								position: { x: size.x, y: size.y },
+								width: size.width,
+								height: size.height
+							}),
+						onEnterFocus: enterConsoleFocus,
+						onExitFocus: exitConsoleFocus,
+						onDelete: consoleNodes.remove
+					}
+				};
+			}),
+		[
+			consoleRFNodes,
+			consoleNodes.updateGeom,
+			consoleNodes.remove,
+			teamSlug,
+			connectionId,
+			focusedConsoleId,
+			enterConsoleFocus,
+			exitConsoleFocus
+		]
 	);
 
-	// Hauteur courante de la console SNQL (bas droite). Publiée par
-	// `CanvasConsole.onHeightChange` — sert (a) au safeArea pour que le
-	// fit initial garde le contenu au-dessus de la console, (b) au
-	// bottom-offset de la toolbar horizontale pour qu'elle remonte quand
-	// la console s'ouvre.
-	const [consoleHeight, setConsoleHeight] = useState(38);
+	const displayNodes = useMemo<SchemaNode[]>(
+		() => [...frameNodes, ...displayTableNodes, ...consoleDisplayNodes],
+		[frameNodes, displayTableNodes, consoleDisplayNodes]
+	);
+
+	// Espace réservé en bas du canvas pour la toolbar flottante — sert au
+	// safeArea du fit initial pour ne pas cacher les nodes derrière la
+	// toolbar. Constants depuis que la console SNQL n'est plus un panel
+	// bas-docké (elle vit dans un node RF T5). Les 38 px approximent la
+	// hauteur de CanvasToolbar + son offset bottom-center.
+	const consoleHeight = 38;
 	const CONSOLE_GAP = 8;
 
 	// Visibilité du drawer gauche — masquable via un IconButton pour libérer
@@ -533,6 +705,23 @@ function CanvasInner({
 		history: historyProxy
 	});
 
+	// Créer un node console au centre du viewport courant. Convertit les
+	// coords écran (centre du container DOM) en coords canvas via
+	// `rf.screenToFlowPosition` — sinon on placerait le node à des
+	// coords canvas fixes indépendantes du pan/zoom courant.
+	const createConsoleAtCenter = useCallback(() => {
+		const rect = containerRef.current?.getBoundingClientRect();
+		if (!rect) return;
+		const pt = rf.screenToFlowPosition({
+			x: rect.left + rect.width / 2,
+			y: rect.top + rect.height / 2
+		});
+		consoleNodes.create({
+			x: pt.x - CONSOLE_NODE_DEFAULT_WIDTH / 2,
+			y: pt.y - CONSOLE_NODE_DEFAULT_HEIGHT / 2
+		});
+	}, [rf, consoleNodes]);
+
 	// Shortcuts toolbar canvas. `useHotkeys` skip auto sur
 	// INPUT/TEXTAREA/SELECT + contentEditable (préserve l'undo/rename
 	// inline), et gère les modifier keys sans qu'on ait besoin de check
@@ -541,6 +730,12 @@ function CanvasInner({
 		[
 			"Escape",
 			() => {
+				// T5 : Escape sort du focus mode console en priorité, sinon
+				// désactive le mode frame en cours.
+				if (focusedConsoleId !== null) {
+					exitConsoleFocus();
+					return;
+				}
 				if (activeTool === "frame") setActiveTool("select");
 			},
 			{ preventDefault: true }
@@ -560,7 +755,8 @@ function CanvasInner({
 				}
 			},
 			{ preventDefault: true }
-		]
+		],
+		["C", createConsoleAtCenter, { preventDefault: true }]
 	]);
 
 	// Mode « frame » toolbar — capture lasso + crée un frame. Voir
@@ -640,7 +836,6 @@ function CanvasInner({
 			drawerHandleProps,
 			leftPadding,
 			consoleHeight,
-			setConsoleHeight,
 			consoleGap: CONSOLE_GAP,
 			layoutConfirmOpen,
 			setLayoutConfirmOpen,
@@ -657,7 +852,6 @@ function CanvasInner({
 			leftDrawerWidth,
 			drawerHandleProps,
 			leftPadding,
-			consoleHeight,
 			layoutConfirmOpen,
 			setLayoutConfirmOpen,
 			selectedTables,
@@ -676,7 +870,8 @@ function CanvasInner({
 			relayoutAll,
 			addTableToFrame,
 			removeTableFromFrame,
-			commandGroups
+			commandGroups,
+			createConsole: createConsoleAtCenter
 		}),
 		[
 			hideTable,
@@ -688,7 +883,8 @@ function CanvasInner({
 			relayoutAll,
 			addTableToFrame,
 			removeTableFromFrame,
-			commandGroups
+			commandGroups,
+			createConsoleAtCenter
 		]
 	);
 
@@ -696,6 +892,11 @@ function CanvasInner({
 		<div
 			ref={containerRef}
 			className={activeTool === "frame" ? "canvas-tool-frame" : undefined}
+			// T5 fullscreen : les autres nodes/edges + overlays sont fade via
+			// sélecteurs CSS (canvas-overrides.css) quand ce flag est présent.
+			// Le node console focus garde `opacity: 1` via sa className
+			// `sqlnest-console-focused`.
+			data-console-focus={focusedConsoleId !== null ? "true" : undefined}
 			style={{ position: "relative", width: "100%", height: "100%" }}
 		>
 			{/* Pendant le calcul du layout ELK, on garde juste un fond
@@ -732,7 +933,15 @@ function CanvasInner({
 			<ReactFlow
 				nodes={displayNodes as unknown as TableNodeType[]}
 				edges={displayEdges}
-				onNodesChange={handleNodesChange}
+				onNodesChange={(changes) => {
+					// RF émet les changes pour TOUS les nodes affichés — les
+					// tables/frames sont routés vers `handleNodesChange` de
+					// useCanvasNodes, les consoles vers `onConsoleNodesChange`
+					// (leur propre useNodesState). Chaque handler filtre les
+					// changes par id internally.
+					handleNodesChange(changes);
+					onConsoleNodesChange(changes);
+				}}
 				nodeTypes={nodeTypes}
 				edgeTypes={edgeTypes}
 				// Comportements souris :
@@ -768,12 +977,27 @@ function CanvasInner({
 				// Clic sur un frame → ouvre FrameDetails (liste des tables du frame)
 				// dans le même drawer, avec back button vers l'arborescence.
 				onNodeClick={(event, node) => {
+					const t = (node as { type?: string }).type;
+					if (t === "console") {
+						// Single-click console → focus modéré (zoom sur ce node
+						// sans passer en fullscreen). Double-clic pour le
+						// vrai fullscreen chrome-less. Skip si modifier
+						// (sélection multi RF, mais consoles sont selectable:
+						// false donc no-op de toute façon).
+						if (event.shiftKey || event.metaKey || event.ctrlKey) return;
+						rf.fitView({
+							nodes: [{ id: node.id }],
+							padding: 0.25,
+							duration: 350
+						});
+						return;
+					}
 					if (event.shiftKey || event.metaKey || event.ctrlKey) {
 						setFocusId(null);
 						setFocusFrameKey(null);
 						return;
 					}
-					if ((node as { type?: string }).type === "frame") {
+					if (t === "frame") {
 						const frameKey = node.id.replace(/^frame:/, "");
 						focusFrame(frameKey);
 						return;
@@ -781,11 +1005,19 @@ function CanvasInner({
 					focusNode(node.id);
 				}}
 				onNodeDoubleClick={(_, node) => {
-					if ((node as { type?: string }).type === "frame") return;
+					const t = (node as { type?: string }).type;
+					if (t === "frame") return;
+					if (t === "console") {
+						// T5 : double-clic console → entre en focus mode (zoom +
+						// fade UI). Sortie via Esc ou bouton focus dans le node.
+						enterConsoleFocus(node.id);
+						return;
+					}
 					focusAndZoom(node.id);
 				}}
 				onNodeContextMenu={(event, node) => {
-					if ((node as { type?: string }).type === "frame") return;
+					const t = (node as { type?: string }).type;
+					if (t === "frame" || t === "console") return;
 					event.preventDefault();
 					// Focus visuel sans fitView : la vue ne bouge pas, donc le menu
 					// positionné en clientX/Y reste face à la carte cliquée.
@@ -798,7 +1030,30 @@ function CanvasInner({
 				}}
 				onNodeDragStart={onNodeDragStart}
 				onNodeDrag={onNodeDrag}
-				onNodeDragStop={onNodeDragStop}
+				onNodeDragStop={(event, node, others) => {
+					// Compose : logique frames (drag lifecycle) puis persist de
+					// la position du node console. Le state RF a déjà été update
+					// par onConsoleNodesChange pendant le drag — au drop on
+					// snapshotte `node.position` (position finale) dans persist.
+					onNodeDragStop(event, node, others);
+					if (
+						(node as { type?: string }).type === "console" &&
+						node.id !== focusedConsoleId
+					) {
+						consoleNodes.updatePosition(node.id, node.position);
+					}
+				}}
+				onNodesDelete={(deleted) => {
+					// RF fire ce callback quand le user press Backspace/Delete
+					// sur un node sélectionné. On clean uniquement les geoms +
+					// tabs des consoles supprimées ; les tables/frames ont leurs
+					// propres flux (hide/remove-from-frame).
+					for (const n of deleted) {
+						if ((n as { type?: string }).type === "console") {
+							consoleNodes.remove(n.id);
+						}
+					}
+				}}
 				onPaneClick={() => {
 					setFocusId(null);
 					setMenu(null);
@@ -871,12 +1126,14 @@ export function SchemaCanvas({
 	schema,
 	schemaLabel,
 	connectionId,
-	dbName
+	dbName,
+	teamSlug
 }: {
 	schema: SchemaModel;
 	schemaLabel?: string;
 	connectionId: string;
 	dbName: string;
+	teamSlug: string;
 }) {
 	// Remonte tout le flow au changement de schéma : état React Flow réinitialisé
 	// proprement, le graphe se recadre au montage. Clé combinant moteur, taille et
@@ -890,6 +1147,7 @@ export function SchemaCanvas({
 				schemaLabel={schemaLabel}
 				connectionId={connectionId}
 				dbName={dbName}
+				teamSlug={teamSlug}
 			/>
 		</ReactFlowProvider>
 	);

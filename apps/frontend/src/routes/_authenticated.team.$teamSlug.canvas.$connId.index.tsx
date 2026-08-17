@@ -55,7 +55,12 @@ function TeamCanvasPage() {
 	if (data) {
 		return (
 			<div style={pageStyle}>
-				<SchemaCanvas schema={data} connectionId={connId} dbName={dbName} />
+				<SchemaCanvas
+					schema={data}
+					connectionId={connId}
+					dbName={dbName}
+					teamSlug={teamSlug}
+				/>
 			</div>
 		);
 	}

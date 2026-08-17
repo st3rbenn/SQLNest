@@ -222,6 +222,8 @@ const outlineBtnStyle: CSSProperties = {
 	minHeight: 26
 };
 
+export type ConsoleHeaderVariant = "route" | "node";
+
 export interface ConsoleHeaderProps {
 	readonly connectionName: string;
 	readonly teamSlug: string;
@@ -243,6 +245,15 @@ export interface ConsoleHeaderProps {
 	readonly onNewTab: () => void;
 	readonly onRenameTab: (id: string, name: string) => void;
 	readonly onReorderTabs: (fromId: string, toId: string) => void;
+	/** `"route"` (défaut) = shell fullscreen ; rend Back Canvas / Fermer +
+	 * Détacher. `"node"` = console vit dans un node RF ; cache back/close
+	 * (le user navigue via le canvas) et cache Détacher (pas de popout
+	 * depuis un node). L'usage passe des actions node-spécifiques via
+	 * `extraLeftActions` (ex : bouton focus / close du node). */
+	readonly variant?: ConsoleHeaderVariant;
+	/** Slot pour actions insérées à gauche du titre — utilisé en mode
+	 * `"node"` pour le bouton Focus/Collapse. Ignoré si absent. */
+	readonly extraLeftActions?: React.ReactNode;
 }
 
 export function ConsoleHeader({
@@ -265,7 +276,9 @@ export function ConsoleHeader({
 	onCloseTab,
 	onNewTab,
 	onRenameTab,
-	onReorderTabs
+	onReorderTabs,
+	variant = "route",
+	extraLeftActions
 }: ConsoleHeaderProps): React.ReactNode {
 	const modKey = useModKeyLabel();
 
@@ -284,28 +297,33 @@ export function ConsoleHeader({
 	return (
 		<div style={headerStyle}>
 			<div style={leftGroupStyle}>
-				{isPopout ? (
-					<button
-						type="button"
-						style={closeButtonStyle}
-						className="sqlnest-header-cta"
-						onClick={() => window.close()}
-					>
-						<IconX size={13} stroke={2} />
-						Fermer
-					</button>
-				) : (
-					<Link
-						to="/team/$teamSlug/canvas/$connId"
-						params={{ teamSlug, connId }}
-						style={backLinkStyle}
-						className="sqlnest-header-cta"
-					>
-						<IconArrowLeft size={13} stroke={2} />
-						Canvas
-					</Link>
-				)}
-				<div style={separatorStyle} />
+				{variant === "route" ? (
+					<>
+						{isPopout ? (
+							<button
+								type="button"
+								style={closeButtonStyle}
+								className="sqlnest-header-cta"
+								onClick={() => window.close()}
+							>
+								<IconX size={13} stroke={2} />
+								Fermer
+							</button>
+						) : (
+							<Link
+								to="/team/$teamSlug/canvas/$connId"
+								params={{ teamSlug, connId }}
+								style={backLinkStyle}
+								className="sqlnest-header-cta"
+							>
+								<IconArrowLeft size={13} stroke={2} />
+								Canvas
+							</Link>
+						)}
+						<div style={separatorStyle} />
+					</>
+				) : null}
+				{extraLeftActions}
 				<span style={titleGroupStyle}>
 					<IconTerminal2 size={14} stroke={2} />
 					<span>Console</span>
@@ -430,7 +448,7 @@ export function ConsoleHeader({
 					</ActionIcon>
 				</Tooltip>
 
-				{!isPopout ? (
+				{variant === "route" && !isPopout ? (
 					<Tooltip
 						label={`Détacher — ${modKey} ⇧ K`}
 						openDelay={400}

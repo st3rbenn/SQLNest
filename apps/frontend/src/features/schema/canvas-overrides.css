@@ -129,3 +129,59 @@
 .react-flow__attribution {
 	display: none !important;
 }
+
+/*
+ * NodeResizer console — hidden by default, revealed on hover OR when the
+ * node is `.selected` (single-click focus — l'user attend que les
+ * handles restent visibles tant qu'il "travaille" sur ce node). En
+ * fullscreen (`isFocused`), le NodeResizer est `isVisible={false}` dans
+ * ConsoleNode donc rien à cacher ici.
+ */
+.react-flow__node-console .react-flow__resize-control.handle,
+.react-flow__node-console .react-flow__resize-control.line {
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity 120ms ease-out;
+}
+.react-flow__node-console:hover .react-flow__resize-control.handle,
+.react-flow__node-console.selected .react-flow__resize-control.handle {
+	opacity: 1;
+	pointer-events: auto;
+}
+.react-flow__node-console:hover .react-flow__resize-control.line,
+.react-flow__node-console.selected .react-flow__resize-control.line {
+	opacity: 0.6;
+	pointer-events: auto;
+}
+
+/*
+ * T5 fullscreen — le wrapper canvas porte `data-console-focus="true"`
+ * quand une console est en fullscreen. Le node console cible reçoit la
+ * className `sqlnest-console-focused` (via `consoleDisplayNodes`) pour
+ * rester visible pendant que tout le reste fade.
+ *
+ * Fade appliqué à :
+ *  - Nodes RF non-focus (tables, frames, autres consoles).
+ *  - Edges.
+ *  - Grille de points de fond (Background).
+ *  - Overlays flottants qui vivent hors du <ReactFlow> mais dans le
+ *    même wrapper (CanvasBottomBar/LeftPanel/Overlays via CanvasProviders,
+ *    ainsi que le Panel top-right HUD via RF).
+ */
+[data-console-focus="true"] .react-flow__node,
+[data-console-focus="true"] .react-flow__edges,
+[data-console-focus="true"] .react-flow__background,
+[data-console-focus="true"] .react-flow__panel {
+	opacity: 0;
+	transition: opacity 120ms ease-out;
+	pointer-events: none;
+}
+[data-console-focus="true"] .react-flow__node.sqlnest-console-focused {
+	opacity: 1;
+	pointer-events: auto;
+}
+[data-console-focus="true"] > *:not(.react-flow) {
+	opacity: 0;
+	transition: opacity 120ms ease-out;
+	pointer-events: none;
+}

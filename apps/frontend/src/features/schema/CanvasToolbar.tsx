@@ -12,7 +12,8 @@ import {
 	IconMoon,
 	IconPointer,
 	IconSparkles,
-	IconSquareDashed
+	IconSquareDashed,
+	IconTerminal2
 } from "@tabler/icons-react";
 import { useState } from "react";
 
@@ -37,6 +38,8 @@ interface Props {
 	 * comportements RF (cursor, action au release du lasso, etc.). */
 	readonly activeTool: CanvasTool;
 	readonly onSelectTool: (tool: CanvasTool) => void;
+	/** T5 : crée un node console SNQL au centre du viewport courant. */
+	readonly onCreateConsole?: () => void;
 }
 
 const ICON = { size: 18, stroke: 1.8 } as const;
@@ -46,7 +49,8 @@ export function CanvasToolbar({
 	onAutoLayout,
 	bottomOffset = 0,
 	activeTool,
-	onSelectTool
+	onSelectTool,
+	onCreateConsole
 }: Props) {
 	// Le tool « comment » reste local — pas d'implémentation côté canvas
 	// donc pas la peine de le remonter. Basculer sur select/frame quitte
@@ -80,6 +84,15 @@ export function CanvasToolbar({
 					onClick={() => selectCanvasTool("frame")}
 				>
 					<IconSquareDashed {...ICON} />
+				</ToolbarButton>
+				<ToolbarButton
+					label="Console SNQL (C)"
+					onClick={() => {
+						if (onCreateConsole) onCreateConsole();
+						else notImplemented("Console");
+					}}
+				>
+					<IconTerminal2 {...ICON} />
 				</ToolbarButton>
 				<ToolbarButton
 					label="Annoter (bientôt)"

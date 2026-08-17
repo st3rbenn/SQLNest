@@ -5,7 +5,12 @@
  * dans la tab bar en badge.
  *
  * Persistance :
- *   clé `sqlnest.console.tabs.<connId>` → `{ tabs, activeTabId }`
+ *   clé `sqlnest.console.tabs.<connId>[.<scopeSuffix>]` → `{ tabs, activeTabId }`
+ *
+ * Le `scopeSuffix` (optionnel) permet d'isoler plusieurs consoles sur
+ * la même connexion — utile quand la console vit dans un node canvas et
+ * qu'on veut plusieurs consoles côte à côte, chacune avec ses propres
+ * tabs. Sans suffix, comportement legacy (une console par connId).
  *
  * Auto-crée un tab défaut "Sans titre" au premier mount si aucun state
  * existant. Le dernier tab ne peut pas être fermé (fallback : reset son
@@ -62,9 +67,16 @@ export interface UseConsoleTabsApi {
 	readonly reorderTabs: (fromId: string, toId: string) => void;
 }
 
-export function useConsoleTabs(connectionId: string): UseConsoleTabsApi {
+export function useConsoleTabs(
+	connectionId: string,
+	scopeSuffix?: string
+): UseConsoleTabsApi {
+	const storageKey =
+		scopeSuffix !== undefined && scopeSuffix !== ""
+			? `sqlnest.console.tabs.${connectionId}.${scopeSuffix}`
+			: `sqlnest.console.tabs.${connectionId}`;
 	const [state, setState] = useLocalStorage<ConsoleState>({
-		key: `sqlnest.console.tabs.${connectionId}`,
+		key: storageKey,
 		defaultValue: makeDefaultState(),
 		getInitialValueInEffect: false
 	});
