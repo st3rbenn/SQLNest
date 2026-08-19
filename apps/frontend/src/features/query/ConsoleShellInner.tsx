@@ -37,12 +37,13 @@ import {
 import { useDbConnections } from "../db-connections/useDbConnections";
 import { useConsolePersistence } from "../schema/console/useConsolePersistence";
 import { useSchema } from "../schema/useSchema";
+import { runConsoleQuery, useConsoleQuery } from "./consoleQueriesStore";
 import { ConsoleHeader, type ConsoleHeaderVariant } from "./ConsoleHeader";
 import { ConsoleResultsPanel } from "./ConsoleResultsPanel";
 import { SnqlEditor, type SnqlEditorHandle } from "./SnqlEditor";
 import { useConsoleTabs } from "./useConsoleTabs";
 import { useLiveDiagnostics } from "./useLiveDiagnostics";
-import { type SerializedSpan, SnqlRuntimeError, useRunQuery } from "./useRunQuery";
+import { type SerializedSpan, SnqlRuntimeError } from "./useRunQuery";
 
 /**
  * Type guard défensif : la source pgError peut avoir été sérialisée par
@@ -146,7 +147,20 @@ export function ConsoleShellInner({
 
 	const tabs = useConsoleTabs(connId, tabsScopeSuffix);
 	const persistence = useConsolePersistence(engine);
-	const runQuery = useRunQuery();
+
+	// La query state vit dans un store singleton (voir consoleQueriesStore)
+	// pour survivre au remount du shell — sinon le switch fullscreen ↔ normal
+	// (portal T5) tuerait la mutation en cours. Key stable par (connId,
+	// scope de node éventuel, tab actif) : chaque tab a son propre run state.
+	const activeTabIdEarly = tabs.activeTab.id;
+	const queryKey = useMemo(
+		() =>
+			tabsScopeSuffix
+				? `${connId}:${tabsScopeSuffix}:${activeTabIdEarly}`
+				: `${connId}:${activeTabIdEarly}`,
+		[connId, tabsScopeSuffix, activeTabIdEarly]
+	);
+	const queryState = useConsoleQuery(queryKey);
 
 	// Split resize state (persisted, partagé entre toutes les instances —
 	// c'est un préférence globale de layout console, pas per-instance).
@@ -195,8 +209,6 @@ export function ConsoleShellInner({
 		schemaQuery.data ?? undefined
 	);
 
-	const [lastRunAt, setLastRunAt] = useState<number | undefined>(undefined);
-	const [timingMs, setTimingMs] = useState<number | undefined>(undefined);
 	const editorRef = useRef<SnqlEditorHandle>(null);
 
 	// Extrait tous les spans source SNQL du pgError courant → alimente les
@@ -206,7 +218,7 @@ export function ConsoleShellInner({
 	//    l'erreur pointe une colonne inexistante.
 	//  - Phase 3c : `rowSpans` sur violation unique/FK (SQLSTATE 23xxx).
 	const errorSpans = useMemo<readonly SerializedSpan[]>(() => {
-		const err = runQuery.error;
+		const err = queryState.error;
 		if (!(err instanceof SnqlRuntimeError) || err.pgError == null) return [];
 		const pg = err.pgError;
 		const collected: SerializedSpan[] = [];
@@ -254,7 +266,7 @@ export function ConsoleShellInner({
 		}
 
 		return collected;
-	}, [runQuery.error]);
+	}, [queryState.error]);
 
 	const onFocusSpan = useCallback((span: SerializedSpan) => {
 		editorRef.current?.focusSpan(span);
@@ -264,9 +276,9 @@ export function ConsoleShellInner({
 	// query (pending, résultat ou erreur). Avant : l'éditeur prend tout
 	// l'espace pour ne pas polluer visuellement.
 	const hasRun =
-		runQuery.isPending ||
-		runQuery.data !== undefined ||
-		runQuery.error !== null;
+		queryState.isPending ||
+		queryState.data !== undefined ||
+		queryState.error !== null;
 
 	// Injection depuis les search params ?source= (avant tout run éventuel).
 	// Le hook n'écrase que si le tab actif est vide (évite d'effacer un
@@ -281,27 +293,45 @@ export function ConsoleShellInner({
 	const execute = useCallback(() => {
 		const src = tabs.activeTab.source.trim();
 		if (src === "") return;
-		const t0 = performance.now();
-		runQuery.mutate(
-			{ connectionId: connId, source: src, teamSlug },
-			{
-				onSuccess: (data) => {
-					const timing = Math.round(performance.now() - t0);
-					setTimingMs(timing);
-					setLastRunAt(Date.now());
-					tabs.setLastResult(activeTabId, {
-						rowCount: data.rowCount,
-						timingMs: timing
-					});
-					persistence.addHistory(src);
-				},
-				onError: () => {
-					setTimingMs(Math.round(performance.now() - t0));
-					setLastRunAt(Date.now());
-				}
+		// Fire-and-forget : le store est notify des changes de state, le
+		// useEffect ci-dessous propage vers `tabs.setLastResult` +
+		// `persistence.addHistory` au done.
+		void runConsoleQuery(queryKey, {
+			connectionId: connId,
+			source: src,
+			teamSlug
+		});
+	}, [tabs, connId, teamSlug, queryKey]);
+
+	// Side-effects post-run — quand une run termine (success ou error), on
+	// propage vers `tabs.setLastResult` (rowCount + timing dans la tab bar)
+	// et `persistence.addHistory` (only success). Le trigger est le change
+	// de `lastRunAt` — set par le store à chaque done. `lastHandledRunAtRef`
+	// évite de re-fire si le shell remount avec le state existant.
+	const lastHandledRunAtRef = useRef<number | undefined>(undefined);
+	useEffect(() => {
+		const runAt = queryState.lastRunAt;
+		if (runAt === undefined) return;
+		if (lastHandledRunAtRef.current === runAt) return;
+		lastHandledRunAtRef.current = runAt;
+		if (queryState.data && queryState.timingMs !== undefined) {
+			tabs.setLastResult(activeTabId, {
+				rowCount: queryState.data.rowCount,
+				timingMs: queryState.timingMs
+			});
+			if (queryState.lastSource !== undefined) {
+				persistence.addHistory(queryState.lastSource);
 			}
-		);
-	}, [runQuery, connId, teamSlug, tabs, activeTabId, persistence]);
+		}
+	}, [
+		queryState.lastRunAt,
+		queryState.data,
+		queryState.timingMs,
+		queryState.lastSource,
+		tabs,
+		activeTabId,
+		persistence
+	]);
 
 	const format = useCallback(() => {
 		const src = tabs.activeTab.source;
@@ -356,7 +386,7 @@ export function ConsoleShellInner({
 					activeSource.trim() !== "" && connection !== undefined
 				}
 				canFormat={activeSource.trim() !== ""}
-				isRunning={runQuery.isPending}
+				isRunning={queryState.isPending}
 				onExecute={execute}
 				onFormat={format}
 				onDetach={detachHandler}
@@ -417,10 +447,10 @@ export function ConsoleShellInner({
 							aria-label="Redimensionner l'éditeur"
 						/>
 						<ConsoleResultsPanel
-							result={runQuery.data}
-							error={runQuery.error}
-							isPending={runQuery.isPending}
-							timingMs={lastRunAt !== undefined ? timingMs : undefined}
+							result={queryState.data}
+							error={queryState.error}
+							isPending={queryState.isPending}
+							timingMs={queryState.timingMs}
 							onFocusSpan={onFocusSpan}
 						/>
 					</>
