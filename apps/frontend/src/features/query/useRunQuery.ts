@@ -91,7 +91,7 @@ export interface RunQueryInput {
 	readonly teamSlug?: string | null;
 }
 
-async function runQueryRequest(input: RunQueryInput): Promise<QueryResult> {
+export async function runQueryRequest(input: RunQueryInput): Promise<QueryResult> {
 	const url = input.teamSlug
 		? `${API_BASE}/api/teams/${encodeURIComponent(input.teamSlug)}/db-connections/${encodeURIComponent(input.connectionId)}/query`
 		: `${API_BASE}/api/db-connections/${encodeURIComponent(input.connectionId)}/query`;
