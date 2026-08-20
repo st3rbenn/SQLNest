@@ -600,6 +600,11 @@ export function lowerRaw(
 	return { op: "raw", payload: statement.payload };
 }
 
+function bindingReferencesSelf(query: Query, name: string): boolean {
+	if (query.source.collection === name) return true;
+	return query.stages.some((s) => s.type === "with" && s.collection === name);
+}
+
 /**
  * Sprint T3/6 : `let x1 = ...; ... ; body` → LetPlan. Bindings lowered dans
  * l'ordre (chacun peut ref les précédents). Le body est lowered avec le set
@@ -617,6 +622,25 @@ export function lowerLet(
 				throw new SnqlError(
 					`CTE '${b.name}' déclaré deux fois — chaque 'let' doit avoir un nom unique.`,
 					"lower_let_duplicate_name",
+					b.span
+				);
+			}
+			// ADR-020 (T3/7) : refus shadowing CTE vs table du SchemaModel.
+			// Gated sur schema — sans schema (mode lib / tests unitaires isolés) skip.
+			if (schema && schema.collections.some((c) => c.name === b.name)) {
+				throw new SnqlError(
+					`CTE '${b.name}' masque la table '${b.name}' — renomme (ex: 'active_${b.name}', '${b.name}_view').`,
+					"lower_let_shadows_collection",
+					b.span
+				);
+			}
+			// ADR-021 graft (T3/7) : `let a = find a` émet du SQL invalide en T3/6 —
+			// détecter au lower avec hint vers `let rec`. Couvre source + with-join ;
+			// walker complet (subqueries) arrive avec T3/8 (G12).
+			if (bindingReferencesSelf(b.query, b.name)) {
+				throw new SnqlError(
+					`CTE '${b.name}' se référence lui-même — utilise 'let rec ${b.name} = base union all step;' pour un CTE récursif.`,
+					"lower_let_self_reference_without_rec",
 					b.span
 				);
 			}

@@ -24,6 +24,15 @@ import {
 	POSTGRES_CAPABILITIES,
 	tokenize
 } from "./index";
+import type { SchemaModel } from "./schema/model";
+
+function makeSchema(...names: string[]): SchemaModel {
+	return {
+		engine: "postgres",
+		collections: names.map((name) => ({ name, fields: [], source: { kind: "test" } })),
+		relations: []
+	} as unknown as SchemaModel;
+}
 
 function expectCode(fn: () => unknown, code: string): void {
 	try {
@@ -171,6 +180,82 @@ describe("lower — let CTE", () => {
 		const plan = lowerLet(stmt);
 		expect(plan.bindings.map((b) => b.name)).toEqual(["a", "b"]);
 		expect(plan.body.op).toBe("project");
+	});
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Lower T3/7 — shadowing (ADR-020) + graft self-ref sans rec (ADR-021)
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("lower T3/7 — shadowing CTE vs table (ADR-020)", () => {
+	it("refus shadow simple (CTE porte le nom d'une collection)", () => {
+		const stmt = parse(
+			tokenize("let users = find users where is_active = true; find users pick email")
+		);
+		if (stmt.operation !== "let") throw new Error();
+		expectCode(() => lowerLet(stmt, makeSchema("users")), "lower_let_shadows_collection");
+	});
+
+	it("accepté quand renommé (active_users)", () => {
+		const stmt = parse(
+			tokenize(
+				"let active_users = find users where is_active = true; find active_users pick email"
+			)
+		);
+		if (stmt.operation !== "let") throw new Error();
+		expect(() => lowerLet(stmt, makeSchema("users"))).not.toThrow();
+	});
+
+	it("mode lib sans schema : shadow accepté (invariant prod)", () => {
+		// Nom du binding = 'users' (potentiellement shadow), source = 'products' pour éviter self-ref.
+		// Sans schema : shadow check skip → compile OK. Avec schema {users} : shadow détecté.
+		const stmt = parse(tokenize("let users = find products; find users pick id"));
+		if (stmt.operation !== "let") throw new Error();
+		expect(() => lowerLet(stmt)).not.toThrow();
+		expectCode(() => lowerLet(stmt, makeSchema("users")), "lower_let_shadows_collection");
+	});
+
+	it("shadow détecté dans binding chaîné", () => {
+		const stmt = parse(
+			tokenize("let x = find users; let users = find x; find users pick email")
+		);
+		if (stmt.operation !== "let") throw new Error();
+		expectCode(
+			() => lowerLet(stmt, makeSchema("users")),
+			"lower_let_shadows_collection"
+		);
+	});
+
+	it("case-sensitivity exact (Users ≠ users)", () => {
+		const stmt = parse(tokenize("let Users = find users; find Users pick email"));
+		if (stmt.operation !== "let") throw new Error();
+		expect(() => lowerLet(stmt, makeSchema("users"))).not.toThrow();
+	});
+});
+
+describe("lower T3/7 — self-ref sans rec (graft ADR-021)", () => {
+	it("refus self-ref en source (`let a = find a`)", () => {
+		const stmt = parse(tokenize("let a = find a where id = 1; find a pick id"));
+		if (stmt.operation !== "let") throw new Error();
+		expectCode(() => lowerLet(stmt), "lower_let_self_reference_without_rec");
+	});
+
+	it("refus self-ref via with-join (`let a = find users with one a on …`)", () => {
+		const stmt = parse(
+			tokenize(
+				"let a = find users with one a on users.parent_id = a.id pick id; find a pick id"
+			)
+		);
+		if (stmt.operation !== "let") throw new Error();
+		expectCode(() => lowerLet(stmt), "lower_let_self_reference_without_rec");
+	});
+
+	it("non-self-ref accepté (`let a = find users; let b = find a`)", () => {
+		const stmt = parse(
+			tokenize("let a = find users; let b = find a where id = 1; find b pick id")
+		);
+		if (stmt.operation !== "let") throw new Error();
+		expect(() => lowerLet(stmt)).not.toThrow();
 	});
 });
 
