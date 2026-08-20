@@ -53,6 +53,7 @@ import {
 	loadLocalConnections
 } from "./local-connections";
 import { defaultPrompter, type Prompter } from "./prompts";
+import { createSpinner, type SpinnerHandle } from "./spinner";
 
 // URLs sélectionnées à la compile via `process.env.NODE_ENV`.
 // esbuild remplace cette expression par la string littérale "production"
@@ -217,38 +218,62 @@ async function runConnect(args: string[], ctx: RunContext): Promise<number> {
 			connectionName = result.connectionName;
 		} else {
 			// ─── Device flow interactif ─────────────────────────────────
+			// P/6 (ADR-022 Q4c + D1) — spinner Braille avec transitions
+			// in-place. Fallback plain-log préfixé `[sqlnest]` si non-TTY
+			// (CI, pipe, redirection) pour que `sqlnest connect | tee log.txt`
+			// et GHA restent lisibles.
 			const connectFn = ctx.io.connectFn ?? defaultConnect;
-			const result = await connectFn({
-				baseUrl,
-				frontendUrl,
-				openBrowserOnDisplay: parsed.values["no-browser"] !== true,
-				cliConnectionName,
-				onCodeDisplayed: (info) => {
-					ctx.stdout("▲ SQLNest — device pairing");
-					if (cliConnectionName) {
-						ctx.stdout(`  DSN    : ${cliConnectionName}`);
+			let spinner: SpinnerHandle | null = null;
+			try {
+				const result = await connectFn({
+					baseUrl,
+					frontendUrl,
+					openBrowserOnDisplay: parsed.values["no-browser"] !== true,
+					cliConnectionName,
+					onCodeDisplayed: (info) => {
+						ctx.stdout("▲ SQLNest — device pairing");
+						if (cliConnectionName) {
+							ctx.stdout(`  DSN    : ${cliConnectionName}`);
+						}
+						ctx.stdout(`  Visite : ${info.connectUrl}`);
+						ctx.stdout(`  Code   : ${info.code}`);
+						ctx.stdout(
+							`  Expire : ${new Date(info.expiresAt).toLocaleTimeString()}`
+						);
+						ctx.stdout("");
+						spinner = createSpinner("En attente d'approbation…");
+					},
+					onStatus: (status) => {
+						if (status === "approved" && spinner !== null) {
+							spinner.update("Approuvé — ouverture du tunnel…");
+						}
 					}
-					ctx.stdout(`  Visite : ${info.connectUrl}`);
-					ctx.stdout(`  Code   : ${info.code}`);
+				});
+				if (result.resumed) {
+					// Auto-resume : `onCodeDisplayed` n'est pas appelé, pas
+					// de spinner à arrêter.
 					ctx.stdout(
-						`  Expire : ${new Date(info.expiresAt).toLocaleTimeString()}`
+						`↻ Tunnel repris : « ${result.connectionName} » — ${result.tunnelId}`
 					);
-					ctx.stdout("");
-					ctx.stdout("En attente d'approbation…");
+				} else if (spinner !== null) {
+					(spinner as SpinnerHandle).succeed(
+						`Pairing OK : « ${result.connectionName} » — ${result.tunnelId}`
+					);
+				} else {
+					ctx.stdout(
+						`✓ Pairing OK : « ${result.connectionName} » — ${result.tunnelId}`
+					);
 				}
-			});
-			if (result.resumed) {
-				ctx.stdout(
-					`↻ Tunnel repris : « ${result.connectionName} » — ${result.tunnelId}`
-				);
-			} else {
-				ctx.stdout(
-					`✓ Pairing OK : « ${result.connectionName} » — ${result.tunnelId}`
-				);
+				sessionId = result.tunnelId;
+				token = result.sessionToken;
+				connectionName = result.connectionName;
+			} catch (err) {
+				// Nettoie la ligne du spinner avant que le handler stderr
+				// print le message d'erreur — sinon le `⠋ En attente…`
+				// reste collé devant l'erreur.
+				spinner?.stop();
+				throw err;
 			}
-			sessionId = result.tunnelId;
-			token = result.sessionToken;
-			connectionName = result.connectionName;
 		}
 	} catch (err) {
 		return handleConnectError(err, ctx.stderr);
@@ -359,7 +384,10 @@ async function resolveCliConnectionName(
 		if (process.stdin.isTTY === true) {
 			return await prompter.select({
 				message: "DSN à servir",
-				choices: entries.map((c) => ({ value: c.name, label: decorate(c.name) }))
+				choices: entries.map((c) => ({
+					value: c.name,
+					label: decorate(c.name)
+				}))
 			});
 		}
 		// Fallback non-TTY : prompt numéroté ligne par ligne.
@@ -578,10 +606,7 @@ async function runAddConnection(
 	}
 }
 
-function runListConnections(
-	args: string[],
-	ctx: RunSyncContext
-): number {
+function runListConnections(args: string[], ctx: RunSyncContext): number {
 	if (args.length > 0) {
 		ctx.stderr(
 			`sqlnest list-connections: aucun argument attendu, reçu « ${args.join(" ")} »`

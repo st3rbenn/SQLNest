@@ -187,7 +187,10 @@ export async function connect(opts: ConnectOptions): Promise<ConnectResult> {
 		prePairFingerprint,
 		prePairChecksum
 	);
-	const connectUrl = `${opts.frontendUrl.replace(TRAILING_SLASH_RE, "")}/pair`;
+	// P/2 (ADR-022 D7) : prefill le code dans l'URL — évite à l'user de
+	// taper les 8 chars dans PairPage. Le dash n'est pas un caractère
+	// réservé RFC 3986, encodeURIComponent le laisse intact.
+	const connectUrl = `${opts.frontendUrl.replace(TRAILING_SLASH_RE, "")}/pair?code=${encodeURIComponent(pairing.code)}`;
 	const expiresAt = new Date(pairing.expiresAt);
 
 	// ─── 3. Émit affichage + open browser ─────────────────────────────

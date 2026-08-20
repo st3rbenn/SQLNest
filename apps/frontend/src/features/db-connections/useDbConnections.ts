@@ -61,7 +61,7 @@ interface ListResponse {
 	readonly connections: readonly DbConnection[];
 }
 
-async function fetchDbConnections(
+export async function fetchDbConnections(
 	teamSlug: string | null
 ): Promise<readonly DbConnection[]> {
 	// C.21.5 : URL team-scoped si teamSlug est fourni (context router),

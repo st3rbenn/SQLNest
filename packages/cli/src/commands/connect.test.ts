@@ -18,7 +18,7 @@ import type {
 	PairingStatus,
 	StatusPairingResult
 } from "../api-client";
-import { type TunnelEntry, loadConfig, saveConfig } from "../config";
+import { loadConfig, saveConfig, type TunnelEntry } from "../config";
 import {
 	ConnectError,
 	connect,
@@ -155,7 +155,7 @@ describe("connect — happy path", () => {
 		expect(onCodeDisplayed).toHaveBeenCalledTimes(1);
 		expect(onCodeDisplayed.mock.calls[0]?.[0].code).toBe("ABCD-1234");
 		expect(onCodeDisplayed.mock.calls[0]?.[0].connectUrl).toBe(
-			"http://localhost:3000/pair"
+			"http://localhost:3000/pair?code=ABCD-1234"
 		);
 
 		// Browser tenté 1 fois.
