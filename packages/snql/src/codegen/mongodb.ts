@@ -79,6 +79,27 @@ export const mongoMapper: Mapper = {
 						operations: renderUpsertOperations(plan)
 					};
 				}
+				// ADR-024 PM/5 Q5a — insert-select Mongo via aggregate + $merge
+				// dans une collection différente. Le sourcePlan est rendu comme
+				// pipeline normale via mongoMapper.map ; on ajoute $merge terminal.
+				if (plan.sourcePlan !== undefined) {
+					const sourceNative = mongoMapper.map(plan.sourcePlan) as MongoQuery;
+					return {
+						...base,
+						op: "insert-select-agg-merge",
+						sourceCollection: sourceNative.collection,
+						pipeline: [
+							...sourceNative.pipeline,
+							{
+								$merge: {
+									into: plan.collection,
+									whenMatched: "fail",
+									whenNotMatched: "insert"
+								}
+							}
+						]
+					};
+				}
 				return { ...base, op: "insert", documents: renderDocuments(plan) };
 			case "update":
 				// ADR-024 PM/4 Q4a — write-join Mongo via aggregate + $merge natif.

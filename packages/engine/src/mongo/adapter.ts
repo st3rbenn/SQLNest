@@ -429,6 +429,16 @@ class MongoConnection implements Connection {
 				await collection.aggregate(pipeline).toArray();
 				return { columns: [], rows: [], rowCount: 0 };
 			}
+			if (query.op === "insert-select-agg-merge") {
+				// ADR-024 PM/5 Q5a + D19 — insert-select via aggregate + $merge
+				// dans collection cible. D19 impose session tx (Mongo 5.0+ RS) :
+				// hors session, refus typé planner_mongo_insert_select_requires_txn
+				// (voir contrainte non-négociable #5 ADR-024, silent fallback
+				// interdit). Wrap tes insert-select dans un `transaction { … }`.
+				throw new EngineExecutionError(
+					`insert-select Mongo hors transaction interdit — wrap dans un 'transaction { … }' block. Code : planner_mongo_insert_select_requires_txn (ADR-024 D19).`
+				);
+			}
 			if (query.op === "upsert") {
 				// Sprint v3 Mongo : bulkWrite d'updateOne+upsert (atomicité côté
 				// serveur par bulk, pas par transaction). `rowCount` = docs matched
@@ -709,6 +719,19 @@ class MongoConnection implements Connection {
 					false
 				) as Document[];
 				await collection.aggregate(pipeline, { session }).toArray();
+				return { columns: [], rows: [], rowCount: 0 };
+			}
+			if (query.op === "insert-select-agg-merge") {
+				// ADR-024 PM/5 Q5a + D19 — insert-select en tx. $merge dans une
+				// collection différente demande Mongo 5.0+ RS (D3 features.mergeInTx).
+				// Le check features est délégué au caller — ici on suppose tx active
+				// donc runtime OK. Source collection = query.sourceCollection.
+				const sourceColl = this.#requireDb().collection(query.sourceCollection);
+				const pipeline = hydrateBson(
+					[...query.pipeline],
+					false
+				) as Document[];
+				await sourceColl.aggregate(pipeline, { session }).toArray();
 				return { columns: [], rows: [], rowCount: 0 };
 			}
 			if (query.op === "upsert") {

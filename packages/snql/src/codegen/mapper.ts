@@ -117,6 +117,20 @@ export type MongoWriteQuery = {
 			readonly op: "update-agg-merge";
 			readonly pipeline: readonly MongoStage[];
 	  }
+	| {
+			/**
+			 * ADR-024 PM/5 Q5a — insert-select Mongo via aggregate + `$merge` dans
+			 * une collection différente. Le codegen émet `[...source pipeline...,
+			 * $merge{into: target, whenMatched: 'fail', whenNotMatched: 'insert'}]`.
+			 * L'adapter exécute via `db.<sourceCollection>.aggregate(pipeline)`.
+			 * D19 : session tx obligatoire (Mongo 5.0+ RS) — l'adapter refuse hors
+			 * session avec `planner_mongo_insert_select_requires_txn`. `collection`
+			 * porte le TARGET, `sourceCollection` le root scan à agréger.
+			 */
+			readonly op: "insert-select-agg-merge";
+			readonly sourceCollection: string;
+			readonly pipeline: readonly MongoStage[];
+	  }
 );
 
 /**

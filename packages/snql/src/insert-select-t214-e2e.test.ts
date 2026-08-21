@@ -201,15 +201,14 @@ describe("codegen PG — INSERT INTO ... SELECT", () => {
 // Planner : capability insert-select
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe("planner — capability 'insert-select' PG only", () => {
-	it("Mongo refuse add (find …) into", () => {
+describe("planner — capability 'insert-select' PG + Mongo (PM/5), KV refusé", () => {
+	it("Mongo supporte add (find …) into (PM/5 aggregate+$merge)", () => {
 		const stmt = parse(tokenize("add (find users pick id) into archive"));
 		if (stmt.operation !== "insert") throw new Error();
 		const mutation = lowerMutation(stmt);
-		expectCode(
-			() => assertMutationInsertSelectSupported(mutation, MONGODB_CAPABILITIES),
-			"planner_insert_select_unsupported"
-		);
+		expect(() =>
+			assertMutationInsertSelectSupported(mutation, MONGODB_CAPABILITIES)
+		).not.toThrow();
 	});
 
 	it("KV refuse add (find …) into", () => {

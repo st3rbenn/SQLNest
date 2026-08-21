@@ -85,12 +85,9 @@ describe("assertMongoRefused (ADR-024 D11)", () => {
 		expect(write.op).toBe("update-agg-merge");
 	});
 
-	it("insert-select Mongo → planner_insert_select_unsupported", () => {
-		const err = assertMongoRefused(
-			"add (find users pick id, email) into archive",
-			"planner_insert_select_unsupported"
-		);
-		expect(err.code).toBe("planner_insert_select_unsupported");
+	it("insert-select Mongo (PM/5) → codegen aggregate+$merge, plus de refus", () => {
+		const write = mongoWrite("add (find users pick id, email) into archive");
+		expect(write.op).toBe("insert-select-agg-merge");
 	});
 
 	it("let Mongo (PM/3) → matérialisation runtime, pas de codegen", () => {
