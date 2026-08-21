@@ -98,22 +98,20 @@ describe("E2E cast cross-engine — SNQL identique, sortie engine-spécifique", 
 	});
 });
 
-describe("E2E cast cross-engine — cast(_ as json) : PG jsonb, Mongo refusé", () => {
+describe("E2E cast cross-engine — cast(_ as json) : PG jsonb, Mongo no-op (ADR-024 PM/6 #7)", () => {
 	it("PG accepte cast(_ as json)", () => {
 		expect(pgSql("get t pick cast(x as json) as y")).toContain(
 			`CAST("x" AS jsonb)`
 		);
 	});
 
-	it("Mongo refuse via planFor() (planner_cast_target_unsupported)", () => {
-		try {
-			planFor("get t pick cast(x as json) as y", "mongodb");
-			throw new Error("SnqlError attendu");
-		} catch (e) {
-			if (!(e instanceof SnqlError)) throw e;
-			expect(e.code).toBe("planner_cast_target_unsupported");
-			expect(e.message).toContain("BSON");
-		}
+	it("Mongo accepte cast(_ as json) : no-op (BSON = JSON natif)", () => {
+		// ADR-024 PM/6 item #7 — Mongo a désormais 'json' dans castTargets.
+		// Le codegen retourne l'operand tel quel (pas de $convert). D8 squiggly
+		// INFO éditeur alerte sur `cast(str as json)` (trap : pas de parse).
+		expect(() =>
+			planFor("get t pick cast(x as json) as y", "mongodb")
+		).not.toThrow();
 	});
 });
 

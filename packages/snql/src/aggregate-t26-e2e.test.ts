@@ -375,11 +375,40 @@ describe("codegen Mongo", () => {
 		expect(JSON.stringify(proj.$project.safe_sum)).toContain("$__agg_0");
 	});
 
-	it("sum(unique x) sur Mongo → planner_agg_unique_mongo_unsupported_sum_avg", () => {
-		expectCode(
-			() => mongoPipeline("find o pick sum(unique amount) as s"),
-			"planner_agg_unique_mongo_unsupported_sum_avg"
+	it("sum(unique x) sur Mongo → SSA slot $addToSet + $sum (ADR-024 PM/6 #5)", () => {
+		const pipeline = mongoPipeline("find o pick sum(unique amount) as s");
+		const groupStage = pipeline.find((s) => "$group" in s) as {
+			$group: Record<string, unknown>;
+		};
+		// Slot uSet contient $addToSet (dédup non-null via $$REMOVE)
+		const uSlot = Object.keys(groupStage.$group).find((k) =>
+			k.startsWith("__u_")
 		);
+		expect(uSlot).toBeDefined();
+		expect(groupStage.$group[uSlot!]).toEqual({
+			$addToSet: {
+				$cond: [{ $ne: ["$amount", null] }, "$amount", "$$REMOVE"]
+			}
+		});
+		// Le project pick le slot via $sum sur le set
+		const projectStage = pipeline.find((s) => "$project" in s) as {
+			$project: Record<string, unknown>;
+		};
+		expect(projectStage.$project.s).toEqual({ $sum: `$${uSlot!}` });
+	});
+
+	it("avg(unique x) sur Mongo → SSA slot $addToSet + $avg (ADR-024 PM/6 #5)", () => {
+		const pipeline = mongoPipeline("find o pick avg(unique amount) as a");
+		const projectStage = pipeline.find((s) => "$project" in s) as {
+			$project: Record<string, unknown>;
+		};
+		const groupStage = pipeline.find((s) => "$group" in s) as {
+			$group: Record<string, unknown>;
+		};
+		const uSlot = Object.keys(groupStage.$group).find((k) =>
+			k.startsWith("__u_")
+		);
+		expect(projectStage.$project.a).toEqual({ $avg: `$${uSlot!}` });
 	});
 });
 

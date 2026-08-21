@@ -108,7 +108,10 @@ export const MONGODB_CAPABILITIES: Capabilities = caps(
 		"write-join",
 		"insert-select"
 	],
-	["int", "float", "text", "bool", "date", "timestamp"],
+	// ADR-024 PM/6 item #7 : 'json' ajouté aux castTargets Mongo — cast(x as json)
+	// est un no-op côté Mongo (BSON = JSON natif). D8 squiggly INFO éditeur
+	// avertira sur `cast(str as json)` (trap type : la string ne sera pas parsée).
+	["int", "float", "text", "bool", "date", "timestamp", "json"],
 	{ subqueryStrategy: "materialize" }
 );
 

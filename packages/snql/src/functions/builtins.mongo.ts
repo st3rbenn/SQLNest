@@ -7,7 +7,6 @@
  */
 
 import { extractStringLiteralArg } from "./builtins-shared";
-import { SnqlError } from "../diagnostics";
 import type { EngineRenderer } from "./registry";
 
 function renderArgs(args: readonly unknown[], ctx: { renderExpr: (e: unknown) => unknown }): unknown[] {
@@ -512,9 +511,11 @@ export const mongoCount: EngineRenderer = (args, ctx) => {
  */
 export const mongoSum: EngineRenderer = (args, ctx) => {
 	if (ctx.unique === true) {
-		throw new SnqlError(
-			"'sum(unique ...)' non supporté sur mongodb sprint 6 — utilise 'count(unique x)' ou reporte sprint 8 (aggregateMulti 2-stage)",
-			"planner_agg_unique_mongo_unsupported_sum_avg"
+		// ADR-024 PM/6 item #5 — sum(unique) matérialisé par SSA extract
+		// $addToSet + $sum ; ce renderer ne devrait jamais être appelé avec
+		// ctx.unique=true. Defense-in-depth : sync SSA cassée.
+		throw new Error(
+			"mongoSum(unique) doit être matérialisé par le SSA extract ($addToSet + $sum), pas via le renderer direct"
 		);
 	}
 	const arg = ctx.renderExpr(args[0]);
@@ -527,9 +528,10 @@ export const mongoSum: EngineRenderer = (args, ctx) => {
  */
 export const mongoAvg: EngineRenderer = (args, ctx) => {
 	if (ctx.unique === true) {
-		throw new SnqlError(
-			"'avg(unique ...)' non supporté sur mongodb sprint 6 — utilise 'count(unique x)' ou reporte sprint 8 (aggregateMulti 2-stage)",
-			"planner_agg_unique_mongo_unsupported_sum_avg"
+		// ADR-024 PM/6 item #5 — avg(unique) matérialisé par SSA extract
+		// $addToSet + $avg ; defense-in-depth si sync SSA cassée.
+		throw new Error(
+			"mongoAvg(unique) doit être matérialisé par le SSA extract ($addToSet + $avg), pas via le renderer direct"
 		);
 	}
 	const arg = ctx.renderExpr(args[0]);

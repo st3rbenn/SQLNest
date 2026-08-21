@@ -844,10 +844,24 @@ function renderAggregatePipeline(
 					);
 				}
 				const key = aggKeyOf(expr as PlanExpr & { kind: "call" });
-				// count(unique x) : 2-stage hardcodé
-				if (expr.name === "count" && expr.unique === true) {
+				// count/sum/avg(unique x) : 2-stage $addToSet + fold hardcodé.
+				// ADR-024 PM/6 item #5 : sum(unique) et avg(unique) réutilisent le
+				// même pattern SSA que count(unique) — le slot uSet stocke un set
+				// des valeurs distinctes non-null, le project fold via $size / $sum /
+				// $avg selon la fonction.
+				if (
+					expr.unique === true &&
+					(expr.name === "count" ||
+						expr.name === "sum" ||
+						expr.name === "avg")
+				) {
+					const foldOf = (slot: string): Record<string, unknown> => {
+						if (expr.name === "count") return { $size: `$${slot}` };
+						if (expr.name === "sum") return { $sum: `$${slot}` };
+						return { $avg: `$${slot}` };
+					};
 					const existing = slotByKey.get(key);
-					if (existing !== undefined) return { $size: `$${existing}` };
+					if (existing !== undefined) return foldOf(existing);
 					const argRendered = toExprOperand(expr.args[0]!, alias);
 					const uSlot = `__u_${uSlotCounter}`;
 					uSlotCounter += 1;
@@ -861,7 +875,7 @@ function renderAggregatePipeline(
 							]
 						}
 					};
-					return { $size: `$${uSlot}` };
+					return foldOf(uSlot);
 				}
 				// Cas standard : appel du renderer aggregate (accumulator body).
 				const existing = slotByKey.get(key);
@@ -925,11 +939,11 @@ function renderAggregatePipeline(
 		}
 		if (expr.kind === "cast") {
 			if (expr.target === "json") {
-				throw new SnqlError(
-					"cast(_ as json) non supporté sur mongodb — les documents Mongo sont déjà des BSON",
-					"codegen_mongo_cast_unsupported",
-					expr.span
-				);
+				// ADR-024 PM/6 item #7 — cast(x as json) no-op sur Mongo (BSON = JSON
+				// natif). D8 squiggly INFO éditeur alerte sur `cast(str as json)` (trap
+				// type : la string ne sera pas parsée). Défense-en-profondeur : retourne
+				// l'operand tel quel après transformation récursive.
+				return transformExpr(expr.operand, insideAggArg);
 			}
 			const inner = transformExpr(expr.operand, insideAggArg);
 			const input =
@@ -1911,13 +1925,10 @@ function toExprOperand(expr: PlanExpr, alias: string | undefined): unknown {
 		});
 	}
 	if (expr.kind === "cast") {
-		// Défense-en-profondeur : le planner devrait avoir rejeté `json` avant.
 		if (expr.target === "json") {
-			throw new SnqlError(
-				"cast(_ as json) non supporté sur mongodb — les documents Mongo sont déjà des BSON",
-				"codegen_mongo_cast_unsupported",
-				expr.span
-			);
+			// ADR-024 PM/6 item #7 — cast(x as json) no-op sur Mongo (BSON = JSON
+			// natif). Retourne l'operand transformé tel quel.
+			return toExprOperand(expr.operand, alias);
 		}
 		const inner = toExprOperand(expr.operand, alias);
 		// Parité NULL avec PG : un field absent en `$convert` throw

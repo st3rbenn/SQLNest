@@ -237,13 +237,14 @@ describe("codegen Mongo object/array literal — BSON natif", () => {
 	});
 });
 
-describe("codegen Mongo — guards refus", () => {
-	it("where col = {n:1} → plan_mongo_compare_object_literal_unsupported (via planFor)", () => {
-		// Guard planner : compile() court-circuite, on teste via planFor().
-		expectCode(
-			() => planFor('find t where meta = {n: 1}', "mongodb"),
-			"plan_mongo_compare_object_literal_unsupported"
-		);
+describe("codegen Mongo — object literal in where (ADR-024 PM/6 #12)", () => {
+	it("where col = {n:1} → accepté sur Mongo (comparaison BSON native)", () => {
+		// ADR-024 PM/6 item #12 — retire l'ancien refus `plan_mongo_compare_object
+		// _literal_unsupported`. Mongo compare nativement les objects BSON (ordre
+		// des clés préservé). Divergence order-sensitivity documentée D8 squiggly INFO.
+		expect(() =>
+			planFor('find t where meta = {n: 1}', "mongodb")
+		).not.toThrow();
 	});
 });
 

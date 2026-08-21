@@ -633,19 +633,11 @@ function assertJsonPredicatesPg(
 				expr.span
 			);
 		}
-		// Sprint object-literals — Mongo refuse where col = {...} (divergence)
-		if (
-			capabilities.engine === "mongodb" &&
-			expr.kind === "compare" &&
-			(expr.op === "eq" || expr.op === "ne") &&
-			(expr.right.kind === "object" || expr.right.kind === "array")
-		) {
-			throw new SnqlError(
-				`Comparaison directe avec un ${expr.right.kind} literal non supportée sur Mongo (divergence order-sensitivity) — utilise json_contains (sprint 6)`,
-				"plan_mongo_compare_object_literal_unsupported",
-				expr.right.span
-			);
-		}
+		// ADR-024 PM/6 item #12 — retiré : `where col = {n:1}` sur Mongo est
+		// désormais autorisé. La comparaison BSON object literal fonctionne
+		// nativement côté driver (ordre des clés préservé lors de la
+		// sérialisation). Divergence order-sensitivity documentée dans
+		// divergences.yaml (PM/8) via squiggly INFO éditeur (D8).
 		// Sprint 4 guards existants — PG only
 		if (capabilities.engine !== "postgres") return;
 		// Cas 1 : cast(json_get(...) as <primitive>) → planner_cast_from_jsonb_unsupported
@@ -853,13 +845,17 @@ function assertAggregateEngineRestrictions(
 	capabilities: Capabilities
 ): void {
 	if (capabilities.engine === "postgres") return;
+	// ADR-024 PM/6 item #5 — sum(unique)/avg(unique) désormais supportés sur
+	// Mongo via SSA slot 2-stage $addToSet + $sum/$avg (mongodb.ts). KV reste
+	// hors scope. Le refus n'est levé que pour les engines non-supportés.
+	if (capabilities.engine === "mongodb") return;
 	visitPlanExprs(plan, (expr) => {
 		if (expr.kind !== "call" || expr.unique !== true) return;
 		const entry = SNQL_FUNCTIONS.get(expr.name);
 		if (entry?.kind !== "aggregate") return;
 		if (expr.name === "sum" || expr.name === "avg") {
 			throw new SnqlError(
-				`'${expr.name}(unique ...)' non supporté sur '${capabilities.engine}' sprint 6 — utilise 'count(unique x)' ou reporte sprint 8 (aggregateMulti 2-stage)`,
+				`'${expr.name}(unique ...)' non supporté sur '${capabilities.engine}' — utilise 'count(unique x)' ou matérialise côté application`,
 				"planner_agg_unique_mongo_unsupported_sum_avg",
 				expr.span
 			);

@@ -48,15 +48,10 @@ describe("planner cast — capability check castTargets", () => {
 		});
 	}
 
-	it("cast(_ as json) sur mongodb → planner_cast_target_unsupported (message dédié)", () => {
-		try {
-			planFor("get t pick cast(x as json) as y", "mongodb");
-			throw new Error("SnqlError attendu");
-		} catch (e) {
-			if (!(e instanceof SnqlError)) throw e;
-			expect(e.code).toBe("planner_cast_target_unsupported");
-			expect(e.message).toContain("BSON");
-		}
+	it("cast(_ as json) sur mongodb → accepté (ADR-024 PM/6 #7 no-op)", () => {
+		expect(() =>
+			planFor("get t pick cast(x as json) as y", "mongodb")
+		).not.toThrow();
 	});
 
 	it("cast(_ as date) sur kv → planner_cast_target_unsupported", () => {
@@ -72,16 +67,15 @@ describe("planner cast — capability check castTargets", () => {
 		).not.toThrow();
 	});
 
-	it("cast profondément imbriqué visite chaque target", () => {
-		// cast(_ as json) est profond, doit remonter la première erreur
-		expectCode(
-			() =>
-				planFor(
-					"get t pick cast(cast(x as text) as json) as y",
-					"mongodb"
-				),
-			"planner_cast_target_unsupported"
-		);
+	it("cast profondément imbriqué : json accepté sur mongodb (PM/6 #7)", () => {
+		// Depuis PM/6 : cast(_ as json) est accepté sur mongodb (no-op).
+		// L'imbrication passe donc — inner cast(x as text) OK + outer json = no-op.
+		expect(() =>
+			planFor(
+				"get t pick cast(cast(x as text) as json) as y",
+				"mongodb"
+			)
+		).not.toThrow();
 	});
 
 	it("cast qui contient un call visite aussi les fonctions", () => {
@@ -93,19 +87,17 @@ describe("planner cast — capability check castTargets", () => {
 });
 
 describe("planner cast — mutations", () => {
-	it("update SET value = cast(_ as json) sur mongodb → planner_cast_target_unsupported", () => {
+	it("update SET value = cast(_ as json) sur mongodb → accepté (PM/6 #7 no-op)", () => {
 		const stmt = parse(
 			tokenize("update t where id = 1 set y = cast(x as json)")
 		);
 		if (stmt.operation !== "update") throw new Error("update attendu");
-		expectCode(
-			() =>
-				assertMutationCastTargetsSupported(
-					lowerMutation(stmt),
-					MONGODB_CAPABILITIES
-				),
-			"planner_cast_target_unsupported"
-		);
+		expect(() =>
+			assertMutationCastTargetsSupported(
+				lowerMutation(stmt),
+				MONGODB_CAPABILITIES
+			)
+		).not.toThrow();
 	});
 
 	it("update WHERE cast(_ as timestamp) sur kv → refusé (kv sans timestamp)", () => {

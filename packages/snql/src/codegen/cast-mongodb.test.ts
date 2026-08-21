@@ -198,27 +198,21 @@ describe("codegen mongodb — cast dans in refusé (v1)", () => {
 	});
 });
 
-describe("codegen mongodb — cast(_ as json) refusé", () => {
-	it("via planFor() → planner_cast_target_unsupported (message BSON)", () => {
-		// planFor() passe par le planner, qui rejette avant d'atteindre le codegen.
-		try {
-			planFor("get t pick cast(payload as json) as p", "mongodb");
-			throw new Error("SnqlError attendu");
-		} catch (e) {
-			if (!(e instanceof SnqlError)) throw e;
-			expect(e.code).toBe("planner_cast_target_unsupported");
-			expect(e.message).toContain("BSON");
-		}
+describe("codegen mongodb — cast(_ as json) no-op (ADR-024 PM/6 #7)", () => {
+	it("via planFor() → accepté (json ajouté aux Mongo castTargets)", () => {
+		expect(() =>
+			planFor("get t pick cast(payload as json) as p", "mongodb")
+		).not.toThrow();
 	});
 
-	it("via compile() (défense-en-profondeur du codegen, court-circuite planner) → codegen_mongo_cast_unsupported", () => {
-		try {
-			mongo("get t pick cast(payload as json) as p");
-			throw new Error("SnqlError attendu");
-		} catch (e) {
-			if (!(e instanceof SnqlError)) throw e;
-			expect(e.code).toBe("codegen_mongo_cast_unsupported");
-			expect(e.message).toContain("BSON");
-		}
+	it("via compile() → codegen produit un pipeline sans $convert (no-op)", () => {
+		// L'operand `payload` est retourné tel quel — pas de wrap $convert.
+		// Le $project pick le champ direct (path bare).
+		const { pipeline } = mongo("get t pick cast(payload as json) as p");
+		const project = pipeline.find((s) => "$project" in s) as {
+			$project: Record<string, unknown>;
+		};
+		// Le field `payload` renommé en `p` — pas de $convert.
+		expect(project.$project.p).toBe("$payload");
 	});
 });
