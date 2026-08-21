@@ -53,6 +53,29 @@ export async function openConnectionForTunnel(
 }
 
 /**
+ * PM/10 D8 fix — détecte l'engine ("postgres" | "mongodb") depuis la DSN
+ * locale du tunnel. Exposé pour que `serve` l'envoie au backend via heartbeat
+ * (backfill db_connection.engine — le pairing initial stocke DEFAULT_ENGINE
+ * en dur). Retourne null si la DSN ne peut pas être résolue (mode dégradé
+ * best-effort).
+ */
+export function detectEngineFromConnectionName(
+	tunnelName: string,
+	env: NodeJS.ProcessEnv = process.env
+): "postgres" | "mongodb" | null {
+	try {
+		const url = resolveLocalConnectionUrl(tunnelName, env);
+		const colonIdx = url.indexOf(":");
+		const scheme = colonIdx > 0 ? url.slice(0, colonIdx).toLowerCase() : "";
+		if (scheme === "postgres" || scheme === "postgresql") return "postgres";
+		if (scheme === "mongodb" || scheme === "mongodb+srv") return "mongodb";
+		return null;
+	} catch {
+		return null;
+	}
+}
+
+/**
  * Détecte l'engine cible depuis le scheme de la DSN et route vers le bon
  * resolver. Support v1 : postgres/postgresql → PG, mongodb/mongodb+srv →
  * Mongo. Tout autre scheme = engine non supporté (message clair).

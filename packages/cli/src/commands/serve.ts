@@ -22,6 +22,7 @@ import type { SchemaModel } from "@sqlnest/snql";
 import {
 	computeTunnelFingerprint,
 	computeTunnelSchemaChecksum,
+	detectEngineFromConnectionName,
 	openConnectionForTunnel
 } from "../engine";
 
@@ -228,15 +229,21 @@ async function sendBootHeartbeat(opts: ServeTunnelOptions): Promise<void> {
 		computeTunnelFingerprint(opts.connectionName, opts.env),
 		computeTunnelSchemaChecksum(opts.connectionName, opts.env)
 	]);
+	// PM/10 D8 fix — engine détecté (scheme DSN) envoyé au heartbeat pour
+	// backfill db_connection.engine côté backend (pairing historique stocke
+	// DEFAULT_ENGINE="postgres" en dur, ne distingue pas Mongo).
+	const engine = detectEngineFromConnectionName(opts.connectionName, opts.env);
 	if (process.env.NODE_ENV === "development") {
 		process.stderr.write(
-			`[sqlnest dev] heartbeat dbFingerprint=${JSON.stringify(dbFingerprint)} dbSchemaChecksum=${JSON.stringify(dbSchemaChecksum)}\n`
+			`[sqlnest dev] heartbeat dbFingerprint=${JSON.stringify(dbFingerprint)} dbSchemaChecksum=${JSON.stringify(dbSchemaChecksum)} engine=${JSON.stringify(engine)}\n`
 		);
 	}
-	// Skip l'appel si aucun des 2 n'a pu être calculé — pas d'info neuve.
-	if (dbFingerprint === null && dbSchemaChecksum === null) return;
+	// Skip l'appel si aucune info neuve à backfill (les 3 nulls simultanés
+	// = pas la peine de tirer sur le rate-limit backend).
+	if (dbFingerprint === null && dbSchemaChecksum === null && engine === null)
+		return;
 	const api = createApiClient(opts.baseUrl);
-	await api.heartbeat(opts.token, dbFingerprint, dbSchemaChecksum);
+	await api.heartbeat(opts.token, dbFingerprint, dbSchemaChecksum, engine);
 }
 
 function hexToBytes(hex: string): Uint8Array {

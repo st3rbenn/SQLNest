@@ -98,7 +98,8 @@ export interface ApiClient {
 	heartbeat(
 		tunnelToken: string,
 		dbFingerprint?: string | null,
-		dbSchemaChecksum?: string | null
+		dbSchemaChecksum?: string | null,
+		engine?: "postgres" | "mongodb" | null
 	): Promise<HeartbeatResult>;
 }
 
@@ -219,7 +220,8 @@ export function createApiClient(
 		async heartbeat(
 			tunnelToken: string,
 			dbFingerprint: string | null = null,
-			dbSchemaChecksum: string | null = null
+			dbSchemaChecksum: string | null = null,
+			engine: "postgres" | "mongodb" | null = null
 		) {
 			const body: Record<string, string> = {};
 			if (dbFingerprint != null && dbFingerprint !== "") {
@@ -227,6 +229,12 @@ export function createApiClient(
 			}
 			if (dbSchemaChecksum != null && dbSchemaChecksum !== "") {
 				body.dbSchemaChecksum = dbSchemaChecksum;
+			}
+			// PM/10 D8 fix — envoie l'engine détecté (scheme DSN) pour backfill
+			// db_connection.engine côté backend (pairing historique défaultait
+			// à "postgres" pour toutes les connections y compris Mongo).
+			if (engine != null) {
+				body.engine = engine;
 			}
 			const data = (await jsonPost("/api/tunnels/heartbeat", body, {
 				authorization: `Bearer ${tunnelToken}`

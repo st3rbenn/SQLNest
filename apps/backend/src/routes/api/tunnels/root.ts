@@ -425,7 +425,8 @@ export default function tunnelsRoute(fastify: FastifyInstance) {
 				fastify.db,
 				clearBearer,
 				request.body.dbFingerprint ?? null,
-				request.body.dbSchemaChecksum ?? null
+				request.body.dbSchemaChecksum ?? null,
+				request.body.engine ?? null
 			);
 			if (result.ok) {
 				return { ok: true as const, connectionId: result.connectionId };

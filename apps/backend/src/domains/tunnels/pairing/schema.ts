@@ -245,7 +245,14 @@ export const HeartbeatBody = z.object({
 		.trim()
 		.min(1)
 		.max(200)
-		.optional()
+		.optional(),
+	/** PM/10 D8 fix — engine réel du CLI (détecté depuis le scheme DSN local :
+	 *  postgres/postgresql → "postgres", mongodb/mongodb+srv → "mongodb"). Le
+	 *  backend backfill db_connection.engine si différent — corrige les rows
+	 *  historiquement stockées avec DEFAULT_ENGINE="postgres" par le pairing.
+	 *  Consommé par le hook frontend useLiveDiagnostics (émission INFO
+	 *  divergences PG↔Mongo — hors Mongo, hint hors-sujet). */
+	engine: z.enum(["postgres", "mongodb"]).optional()
 });
 z.globalRegistry.add(HeartbeatBody, { id: "HeartbeatBody" });
 export type HeartbeatBodyT = z.infer<typeof HeartbeatBody>;

@@ -46,6 +46,7 @@ export async function heartbeatTunnel(
 	clearToken: string,
 	dbFingerprint: string | null = null,
 	dbSchemaChecksum: string | null = null,
+	engine: "postgres" | "mongodb" | null = null,
 	nowMs: number = Date.now()
 ): Promise<HeartbeatResult> {
 	const session = await authenticateTunnelSession(db, clearToken, nowMs);
@@ -57,11 +58,18 @@ export async function heartbeatTunnel(
 		lastSeenAt: ReturnType<typeof sql>;
 		dbFingerprint?: string;
 		dbSchemaChecksum?: string;
+		engine?: string;
 	} = {
 		lastSeenAt: sql`now()`
 	};
 	if (dbFingerprint !== null) patch.dbFingerprint = dbFingerprint;
 	if (dbSchemaChecksum !== null) patch.dbSchemaChecksum = dbSchemaChecksum;
+	// PM/10 D8 fix — backfill engine réel du CLI (le pairing initial stocke
+	// DEFAULT_ENGINE="postgres" en dur, ne distingue pas Mongo). Le CLI envoie
+	// désormais son engine détecté (scheme DSN) via ce heartbeat, on met à
+	// jour db_connection.engine en conséquence. Idempotent : chaque heartbeat
+	// écrit la valeur, silencieux si déjà correcte.
+	if (engine !== null) patch.engine = engine;
 
 	await db
 		.update(dbSchema.dbConnection)
