@@ -286,14 +286,31 @@ describe("json_contains PG débloqué (sprint object-literals)", () => {
 		).not.toThrow();
 	});
 
-	it("json_contains Mongo → planner_unsupported_function (sprint 6+)", () => {
+	it("json_contains Mongo object literal → PA/8 $and $eq $getField", () => {
+		const nat = mongo(
+			'find t pick json_contains(meta, {archived: true}) as h'
+		);
+		const serialized = JSON.stringify(nat);
+		expect(serialized).toContain("$getField");
+		expect(serialized).toContain("archived");
+	});
+
+	it("json_contains Mongo array literal → PA/8 $setIsSubset", () => {
+		const nat = mongo('find t pick json_contains(tags, [1, 2, 3]) as h');
+		expect(JSON.stringify(nat)).toContain("$setIsSubset");
+	});
+
+	it("json_contains Mongo nested object → refus planner_mongo_json_contains_nested_unsupported", () => {
 		expectCode(
-			() =>
-				planFor(
-					'find t pick json_contains(meta, {a: 1}) as h',
-					"mongodb"
-				),
-			"planner_unsupported_function"
+			() => mongo('find t pick json_contains(meta, {inner: {deep: 1}}) as h'),
+			"planner_mongo_json_contains_nested_unsupported"
+		);
+	});
+
+	it("json_contains Mongo array element nested → refus", () => {
+		expectCode(
+			() => mongo('find t pick json_contains(tags, [{k: 1}]) as h'),
+			"planner_mongo_json_contains_nested_unsupported"
 		);
 	});
 });

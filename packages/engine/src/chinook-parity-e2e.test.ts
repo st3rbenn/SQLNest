@@ -333,4 +333,29 @@ describe.skipIf(!hasBoth)("Chinook parité PG ↔ Mongo", () => {
 		]);
 		expect(normalize(mongo)).toEqual(normalize(pg));
 	}, 30_000);
+
+	// ═══════════════════════════════════════════════════════════════════════════
+	// PA/8 (ADR-024-A) — json_contains Mongo (object flat scalar / array scalar)
+	// ═══════════════════════════════════════════════════════════════════════════
+
+	it("json_contains object flat scalar : filtre par title (parity PG↔Mongo)", async () => {
+		// json_contains({title: employee.title}, {title: "Sales Manager"}) →
+		// filtre les rows dont title = "Sales Manager". Mongo génère $expr $and
+		// $eq $getField, PG génère jsonb @>.
+		const q = `find employee where json_contains({title: title}, {title: "Sales Manager"}) = true pick employee_id sort employee_id asc`;
+		const [pg, mongo] = await Promise.all([
+			runOn(pgConn, q),
+			runOn(mongoConn, q)
+		]);
+		expect(normalize(mongo)).toEqual(normalize(pg));
+	}, 20_000);
+
+	it("json_contains flat scalar always-true (smoke) : renvoie tous les rows", async () => {
+		const q = `find genre where json_contains({r: "x"}, {r: "x"}) = true pick genre_id sort genre_id asc limit 5`;
+		const [pg, mongo] = await Promise.all([
+			runOn(pgConn, q),
+			runOn(mongoConn, q)
+		]);
+		expect(normalize(mongo)).toEqual(normalize(pg));
+	}, 20_000);
 });

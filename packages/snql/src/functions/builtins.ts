@@ -49,6 +49,7 @@ import {
 	mongoGreatest,
 	mongoIf,
 	mongoJsonAgg,
+	mongoJsonContains,
 	mongoJsonGet,
 	mongoJsonGetText,
 	mongoJsonHasKey,
@@ -352,18 +353,17 @@ const BUILTINS: readonly FunctionEntry[] = [
 		engines: { postgres: pgJsonTypeof, mongodb: mongoJsonTypeof }
 	},
 
-	// ─── sprint object-literals : json_contains débloqué PG only ──────────
+	// ─── sprint object-literals : json_contains PG + Mongo (PA/8) ────────
 	{
 		name: "json_contains",
 		kind: "scalar",
 		arity: { min: 2, max: 2 },
 		// args non typés : subdoc peut être object/array literal, doc column jsonb.
 		writeNullBehavior: "propagate",
-		// Pas de mongoMatchHoist : Mongo n'a pas d'opérateur @> natif, l'émulation
-		// via $expr $mergeObjects est coûteuse et incomplète (subset arrays).
-		// Reporté sprint 6+ ; côté Mongo, forEngine renvoie no renderer →
-		// planner_unsupported_function avec message actionnable.
-		engines: { postgres: pgJsonContains }
+		// PA/8 (ADR-024-A) : Mongo renderer dispatch $setIsSubset (flat scalar
+		// array) vs $and+$eq+$getField (flat scalar object). Subdoc dynamique ou
+		// nested → refus planner_mongo_json_contains_nested_unsupported.
+		engines: { postgres: pgJsonContains, mongodb: mongoJsonContains }
 	},
 
 	// ─── sprint T2/5 : conditional ────────────────────────────────────────

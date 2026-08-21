@@ -6,6 +6,8 @@
  * Baseline Mongo 5.0+ pour $dateTrunc, $dateAdd, $dateDiff, $replaceAll.
  */
 
+import { SnqlError } from "../diagnostics";
+import type { PlanExpr } from "../ir/plan";
 import { extractStringLiteralArg } from "./builtins-shared";
 import type { EngineRenderer } from "./registry";
 
@@ -401,6 +403,84 @@ export const mongoJsonTypeof: EngineRenderer = (args, ctx) => {
 		}
 	};
 };
+
+/**
+ * PA/8 (ADR-024-A) — `json_contains(doc, subdoc)` Mongo. PG utilise l'opérateur
+ * natif `@>`. Mongo n'a pas d'équivalent direct : deux stratégies selon la
+ * forme du subdoc literal (analysé statiquement pour dispatch propre) :
+ *
+ *  - **Subdoc = array literal `[v1, v2, ...]`** : `$setIsSubset: [subdoc, doc]`
+ *    natif Mongo (coût 1 op) — vérifie que chaque élément de subdoc est dans
+ *    doc. Cas typique `json_contains(tags, ["x","y"])`.
+ *
+ *  - **Subdoc = object literal `{k1: v1, k2: v2, ...}`** : `$and` de
+ *    `$eq [{$getField:{field:k, input:doc}}, v]` pour chaque paire. Coût N
+ *    op mais correct pour l'inclusion partielle d'objet. Cas typique
+ *    `json_contains(meta, {archived:true, tier:"gold"})`.
+ *
+ * Non-négociables :
+ *  - Refus si subdoc dynamique (field/cast/call) — pattern non-analysable au
+ *    codegen. Ticket v3 : parse runtime via `$function` Mongo 4.4+.
+ *  - Refus si valeur dans object literal est un array/object nested — deep
+ *    array compare via $eq ambigu ordre, deep object non-géré par $getField
+ *    chain simple. Code `planner_mongo_json_contains_nested_unsupported`.
+ *  - Refus si element d'array literal est non-scalar — même raison.
+ */
+export const mongoJsonContains: EngineRenderer = (args, ctx) => {
+	const docExpr = ctx.renderExpr(args[0]);
+	const subdoc = args[1] as PlanExpr;
+	if (subdoc.kind === "array") {
+		assertFlatScalarArrayItems(subdoc.items);
+		const subdocExpr = ctx.renderExpr(subdoc);
+		return { $setIsSubset: [subdocExpr, docExpr] };
+	}
+	if (subdoc.kind === "object") {
+		if (subdoc.entries.length === 0) return true;
+		const clauses = subdoc.entries.map((entry) => {
+			assertFlatScalarValue(entry.value);
+			const valExpr = ctx.renderExpr(entry.value);
+			return {
+				$eq: [
+					{ $getField: { field: entry.key, input: docExpr } },
+					valExpr
+				]
+			};
+		});
+		if (clauses.length === 1) return clauses[0];
+		return { $and: clauses };
+	}
+	throw new SnqlError(
+		`json_contains sur Mongo v1 : le subdoc doit être un object literal '{k: v, …}' ou un array literal '[v, …]' avec des valeurs scalaires. Subdoc dynamique (field/cast/call) non supporté — matérialise côté application ou attends portage v3 ($function Mongo 4.4+).`,
+		"planner_mongo_json_contains_nested_unsupported",
+		subdoc.span
+	);
+};
+
+function assertFlatScalarValue(expr: PlanExpr): void {
+	if (expr.kind === "object" || expr.kind === "array") {
+		throw new SnqlError(
+			`json_contains sur Mongo v1 : valeur nested (${expr.kind}) dans le subdoc non supportée — deep array/object compare ambigu. Aplatis le pattern ou attends portage v3.`,
+			"planner_mongo_json_contains_nested_unsupported",
+			expr.span
+		);
+	}
+}
+
+function assertFlatScalarArrayItems(items: readonly PlanExpr[]): void {
+	for (const item of items) {
+		if (
+			item.kind === "object" ||
+			item.kind === "array" ||
+			item.kind !== "literal"
+		) {
+			throw new SnqlError(
+				`json_contains sur Mongo v1 : élément non-scalaire (${item.kind}) dans le subdoc array — pattern MVP accepte uniquement des literals scalaires.`,
+				"planner_mongo_json_contains_nested_unsupported",
+				item.span
+			);
+		}
+	}
+}
 
 // ─── sprint T2/5 : conditional ─────────────────────────────────────────────
 

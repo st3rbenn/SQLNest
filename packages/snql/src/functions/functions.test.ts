@@ -72,11 +72,12 @@ describe("call node — registry + arity", () => {
 		);
 	});
 
-	it("forEngine expose les fonctions supportées par engine (41 PG / 40 Mongo / 16 KV — T2/9 window +3)", () => {
+	it("forEngine expose les fonctions supportées par engine (41 PG / 41 Mongo / 16 KV — PA/8 json_contains Mongo)", () => {
 		// Sprint T2/9 : +3 window fns (row_number/rank/dense_rank) cross-engine.
-		// Total : PG 38+3=41, Mongo 37+3=40, KV 13+3=16.
+		// PA/8 (ADR-024-A) : json_contains Mongo débloqué → Mongo passe 40 → 41.
+		// Total : PG 38+3=41, Mongo 37+3+1=41, KV 13+3=16.
 		expect(SNQL_FUNCTIONS.forEngine("postgres").size).toBe(41);
-		expect(SNQL_FUNCTIONS.forEngine("mongodb").size).toBe(40);
+		expect(SNQL_FUNCTIONS.forEngine("mongodb").size).toBe(41);
 		expect(SNQL_FUNCTIONS.forEngine("kv").size).toBe(16);
 	});
 
