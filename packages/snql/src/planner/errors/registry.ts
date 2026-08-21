@@ -73,6 +73,14 @@ export type PlannerErrorCode =
 	// PM/7 — refus D5 savepoint Mongo au planner (aujourd'hui refusé tardivement
 	// au codegen dans flattenMongoTransactionBody — incohérent doctrine T2/11-15)
 	| "planner_savepoint_mongo_unsupported"
+	// PA/5 (ADR-024-A) FLAGSHIP — savepoint Mongo via compensation logique
+	// in-session (snapshot pre-write + inverse ops sur erreur). MVP accepte
+	// INSERT/UPDATE/DELETE simples ; refuse patterns non-analysables :
+	| "planner_savepoint_body_opaque_raw"
+	| "planner_savepoint_nested_v3"
+	| "planner_savepoint_body_write_join_v3"
+	| "planner_savepoint_body_insert_select_v3"
+	| "planner_savepoint_body_upsert_v3"
 	// Introspect
 	| "planner_introspect_unsupported"
 	// PM/7 — refus D18 #19 json_contains nested (flat scalar accepté via $setIsSubset)
@@ -134,6 +142,11 @@ export const PLANNER_ERROR_CODES: ReadonlySet<PlannerErrorCode> =
 		"planner_mongo_insert_select_in_txn_forbidden",
 		"planner_transaction_unsupported",
 		"planner_savepoint_mongo_unsupported",
+		"planner_savepoint_body_opaque_raw",
+		"planner_savepoint_nested_v3",
+		"planner_savepoint_body_write_join_v3",
+		"planner_savepoint_body_insert_select_v3",
+		"planner_savepoint_body_upsert_v3",
 		"planner_introspect_unsupported",
 		"planner_mongo_json_contains_nested_unsupported",
 		"planner_mongo_version_capability_missing",

@@ -154,19 +154,24 @@ export const PARITY_CASES: readonly ParityCase[] = [
 		source: "add (find users pick id, email) into archive",
 		engines: ["postgres", "mongodb"]
 	},
-	// ─── Transaction (PM/7 savepoint refusé Mongo) ──────────────────────
+	// ─── Transaction (PA/5 savepoint via compensation logique in-session) ─
 	{
 		id: "transaction-simple",
 		source: "transaction { update users where id = 1 set is_active = false; remove from orders where user_id = 1 }",
 		engines: ["postgres", "mongodb"]
 	},
 	{
-		id: "transaction-savepoint-refused-mongo",
+		id: "transaction-savepoint-compensation",
 		source: "transaction { savepoint sp1 { update users where id = 1 set is_active = false } }",
+		engines: ["postgres", "mongodb"]
+	},
+	{
+		id: "transaction-savepoint-nested-refused-mongo",
+		source: "transaction { savepoint sp1 { savepoint sp2 { find users pick id } } }",
 		engines: ["postgres"],
 		expectedRefusal: {
 			engine: "mongodb",
-			code: "planner_savepoint_mongo_unsupported"
+			code: "planner_savepoint_nested_v3"
 		}
 	},
 	// ─── Divergences documentées ────────────────────────────────────────

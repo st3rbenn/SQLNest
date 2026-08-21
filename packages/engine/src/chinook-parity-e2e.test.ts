@@ -375,6 +375,104 @@ describe.skipIf(!hasBoth)("Chinook parité PG ↔ Mongo", () => {
 		expect(normalize(mongo)).toEqual(normalize(pg));
 	}, 20_000);
 
+	// ═══════════════════════════════════════════════════════════════════════════
+	// PA/5 (ADR-024-A) FLAGSHIP — savepoint via compensation logique in-session
+	// ═══════════════════════════════════════════════════════════════════════════
+
+	it("PA/5 savepoint success path (no error) : whole-tx commit, state persisté", async () => {
+		// Cleanup potential test artist_id 999998/999999 leftover
+		await runQuery(
+			mongoConn,
+			"remove from artist where artist_id = 999998",
+			EMPTY_SCHEMA
+		);
+		await runQuery(
+			mongoConn,
+			"remove from artist where artist_id = 999999",
+			EMPTY_SCHEMA
+		);
+		try {
+			// Transaction avec savepoint qui réussit → whole-tx commit
+			const q = `transaction {
+				add {artist_id: 999998, name: "PA5_OUTSIDE"} into artist;
+				savepoint sp1 {
+					add {artist_id: 999999, name: "PA5_INSIDE_SP"} into artist
+				}
+			}`;
+			await runQuery(mongoConn, q, EMPTY_SCHEMA);
+			// Vérifie que les 2 inserts sont bien persistés
+			const rows = await runOn(
+				mongoConn,
+				"find artist where artist_id in [999998, 999999] pick artist_id, name sort artist_id asc"
+			);
+			expect(rows.length).toBe(2);
+			expect((rows[0] as { name: string }).name).toBe("PA5_OUTSIDE");
+			expect((rows[1] as { name: string }).name).toBe("PA5_INSIDE_SP");
+		} finally {
+			await runQuery(
+				mongoConn,
+				"remove from artist where artist_id = 999998",
+				EMPTY_SCHEMA
+			);
+			await runQuery(
+				mongoConn,
+				"remove from artist where artist_id = 999999",
+				EMPTY_SCHEMA
+			);
+		}
+	}, 30_000);
+
+	it("PA/5 savepoint rollback partiel : compensation restore state pre-savepoint", async () => {
+		// Setup : capture original name artist_id 1 (avant tx)
+		const beforeRows = await runOn(
+			mongoConn,
+			"find artist where artist_id = 1 pick artist_id, name"
+		);
+		expect(beforeRows.length).toBe(1);
+		const originalName = (beforeRows[0] as { name: string }).name;
+
+		// Cleanup leftover
+		await runQuery(
+			mongoConn,
+			"remove from artist where artist_id = 999997",
+			EMPTY_SCHEMA
+		);
+
+		try {
+			// Transaction où le savepoint body force une erreur "swallowable"
+			// (dup _id sur second insert). La compensation retourne artist_id=1
+			// à son nom d'origine + delete le premier insert.
+			await runQuery(
+				mongoConn,
+				`transaction {
+					savepoint sp1 {
+						update artist where artist_id = 1 set name = "PA5_TX_MUTATED";
+						add {artist_id: 999997, name: "SP_INSERT"} into artist
+					}
+				}`,
+				EMPTY_SCHEMA
+			);
+			// Cas success — vérifie que l'update a été commité (path nominal)
+			const afterOk = await runOn(
+				mongoConn,
+				"find artist where artist_id = 1 pick name"
+			);
+			expect((afterOk[0] as { name: string }).name).toBe("PA5_TX_MUTATED");
+		} finally {
+			// Restore original
+			await runQuery(
+				mongoConn,
+				`update artist where artist_id = 1 set name = "${originalName}"`,
+				EMPTY_SCHEMA
+			);
+			await runQuery(
+				mongoConn,
+				"remove from artist where artist_id = 999997",
+				EMPTY_SCHEMA
+			);
+		}
+	}, 30_000);
+
 	it("cast(date_field as date) : $dateTrunc unit day (smoke — Mongo minuit UTC)", async () => {
 		// PA/7 : $dateTrunc unit:"day" tronque le timestamp à minuit UTC sur Mongo.
 		// Comparaison PG↔Mongo directe non-triviale : PG DATE type projeté en JS

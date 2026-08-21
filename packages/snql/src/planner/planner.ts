@@ -610,33 +610,67 @@ export function assertTransactionSupported(
 			"planner_transaction_unsupported"
 		);
 	}
-	// ADR-024 PM/7 D5 — savepoint refusé au planner walker récursif (Mongo
-	// n'a pas d'API rollback partiel dans une session tx). Le refus ex-tardif
-	// dans codegen mongodb.ts:flattenMongoTransactionBody reste en place comme
-	// defense-in-depth. Cohérent doctrine T2/11-15 (refus au planner + squiggly
-	// UI live via useLiveDiagnostics).
+	// PA/5 (ADR-024-A) FLAGSHIP — savepoint Mongo accepté via compensation
+	// logique in-session (snapshot pre-write + inverse ops sur erreur). Refus
+	// PM/7 D5 remplacé par gates MVP : nested, upsert, write-join, insert-select,
+	// raw {} → refus dédié. Le codegen mongodb.ts:flattenMongoTransactionBody
+	// préserve désormais les savepoints comme step spécial (plus flatten).
 	if (capabilities.engine === "mongodb") {
-		assertNoSavepoint(plan.body, capabilities);
+		assertSavepointLiftable(plan.body, capabilities);
 	}
 }
 
-function assertNoSavepoint(
+function assertSavepointLiftable(
+	body: readonly import("../ir/plan").TransactionPlanItem[],
+	capabilities: Capabilities,
+	insideSavepoint = false
+): void {
+	for (const item of body) {
+		if (item.kind === "savepoint") {
+			if (insideSavepoint) {
+				throw new SnqlError(
+					`'savepoint ${item.name} { … }' imbriqué non supporté v1 sur '${capabilities.engine}' — MVP PA/5 accepte 1 niveau. Refactor : aplatis en savepoint séquentiels.`,
+					"planner_savepoint_nested_v3",
+					undefined
+				);
+			}
+			assertSavepointBodyAnalyzable(item.name, item.body, capabilities);
+		}
+	}
+}
+
+function assertSavepointBodyAnalyzable(
+	savepointName: string,
 	body: readonly import("../ir/plan").TransactionPlanItem[],
 	capabilities: Capabilities
 ): void {
 	for (const item of body) {
 		if (item.kind === "savepoint") {
-			// #11 — savepoint nested aussi refusé (walker récursif) même si le
-			// parser accepte savepoint dans savepoint. Le message pointe le nom
-			// racine pour diagnostic.
 			throw new SnqlError(
-				`'savepoint ${item.name} { … }' non supporté sur '${capabilities.engine}' — Mongo n'a pas d'API rollback partiel dans une session tx (ADR-024 Q6b). Refactor : découpe en transactions plus petites et gère la logique compensatoire côté application.`,
-				"planner_savepoint_mongo_unsupported"
+				`'savepoint ${item.name} { … }' imbriqué dans 'savepoint ${savepointName}' non supporté v1 (MVP PA/5 : 1 niveau).`,
+				"planner_savepoint_nested_v3"
 			);
 		}
-		// read/write items ne contiennent pas de savepoints imbriqués (les
-		// TransactionPlanItem.body vit uniquement dans savepoint kind). Pas
-		// besoin de walker profond ici — savepoint racine refusé suffit.
+		if (item.kind !== "write") continue;
+		const w = item.plan;
+		if (w.op === "insert" && w.sourcePlan !== undefined) {
+			throw new SnqlError(
+				`'add (find …) into …' dans 'savepoint ${savepointName}' non supporté v1 sur '${capabilities.engine}' — l'insert-select matérialisé rend la compensation delete-by-_id non-triviale. Ticket v3 : capture les _id insérés en RAM.`,
+				"planner_savepoint_body_insert_select_v3"
+			);
+		}
+		if (w.op === "insert" && w.onConflict !== undefined) {
+			throw new SnqlError(
+				`'add {…} on conflict …' dans 'savepoint ${savepointName}' non supporté v1 sur '${capabilities.engine}' — upsert peut créer OU modifier, compensation ambiguë. Utilise insert simple ou update séparé.`,
+				"planner_savepoint_body_upsert_v3"
+			);
+		}
+		if (w.op === "update" && w.joins !== undefined && w.joins.length > 0) {
+			throw new SnqlError(
+				`'update … with one …' dans 'savepoint ${savepointName}' non supporté v1 sur '${capabilities.engine}' — write-join Mongo passe par aggregate+$merge, capture snapshot pre-write incompatible avec MVP. Refactor sans join dans le savepoint.`,
+				"planner_savepoint_body_write_join_v3"
+			);
+		}
 	}
 }
 

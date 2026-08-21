@@ -164,20 +164,19 @@ describe("codegen — mapTransaction Mongo", () => {
 // Refus explicit
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe("PM/7 D5 — refus savepoint au planner Mongo (ADR-024 Q6b)", () => {
-	it("savepoint refusé au planner (assertTransactionSupported walker)", () => {
+describe("PA/5 (ADR-024-A) — savepoint Mongo accepté via compensation logique in-session", () => {
+	it("savepoint simple accepté au planner (walker assertSavepointLiftable)", () => {
 		const stmt = parse(
 			tokenize(`transaction { savepoint sp1 { find users pick _id } }`)
 		);
 		if (stmt.operation !== "transaction") throw new Error();
 		const planned = lowerTransaction(stmt);
-		expectCode(
-			() => assertTransactionSupported(planned, MONGODB_CAPABILITIES),
-			"planner_savepoint_mongo_unsupported"
-		);
+		expect(() =>
+			assertTransactionSupported(planned, MONGODB_CAPABILITIES)
+		).not.toThrow();
 	});
 
-	it("savepoint mixé avec read/write refusé au planner", () => {
+	it("savepoint mixé avec read/write accepté (writes analysables MVP)", () => {
 		const stmt = parse(
 			tokenize(
 				`transaction { find users pick _id; savepoint sp1 { update users where _id = 1 set is_active = false } }`
@@ -185,19 +184,65 @@ describe("PM/7 D5 — refus savepoint au planner Mongo (ADR-024 Q6b)", () => {
 		);
 		if (stmt.operation !== "transaction") throw new Error();
 		const planned = lowerTransaction(stmt);
+		expect(() =>
+			assertTransactionSupported(planned, MONGODB_CAPABILITIES)
+		).not.toThrow();
+	});
+
+	it("codegen préserve savepoint comme step dédié (plus flatten)", () => {
+		const tx = mongoTx(
+			`transaction { savepoint sp1 { update users where _id = 1 set is_active = false } }`
+		);
+		expect(tx.steps).toHaveLength(1);
+		const step = tx.steps[0] as Extract<
+			MongoTransactionStep,
+			{ kind: "savepoint" }
+		>;
+		expect(step.kind).toBe("savepoint");
+		expect(step.name).toBe("sp1");
+		expect(step.body).toHaveLength(1);
+		expect(step.body[0]?.kind).toBe("write");
+	});
+
+	it("savepoint nested → refus planner_savepoint_nested_v3", () => {
+		const stmt = parse(
+			tokenize(
+				`transaction { savepoint sp1 { savepoint sp2 { find users pick _id } } }`
+			)
+		);
+		if (stmt.operation !== "transaction") throw new Error();
+		const planned = lowerTransaction(stmt);
 		expectCode(
 			() => assertTransactionSupported(planned, MONGODB_CAPABILITIES),
-			"planner_savepoint_mongo_unsupported"
+			"planner_savepoint_nested_v3"
 		);
 	});
 
-	it("defense-in-depth codegen : refus tardif toujours en place", () => {
+	it("savepoint body avec write-join → refus planner_savepoint_body_write_join_v3", () => {
+		const stmt = parse(
+			tokenize(
+				`transaction { savepoint sp1 { update users with one orders as o on _id = o.user_id set is_active = false } }`
+			)
+		);
+		if (stmt.operation !== "transaction") throw new Error();
+		const planned = lowerTransaction(stmt);
 		expectCode(
-			() =>
-				mongoTx(
-					`transaction { savepoint sp1 { find users pick _id } }`
-				),
-			"codegen_mongo_savepoint_unsupported"
+			() => assertTransactionSupported(planned, MONGODB_CAPABILITIES),
+			"planner_savepoint_body_write_join_v3"
+		);
+	});
+
+	it("savepoint body avec insert-select → refus planner_savepoint_body_insert_select_v3", () => {
+		const stmt = parse(
+			tokenize(
+				`transaction { savepoint sp1 { add (find users pick _id) into orders } }`
+			)
+		);
+		if (stmt.operation !== "transaction") throw new Error();
+		const planned = lowerTransaction(stmt);
+		expectCode(
+			() => assertTransactionSupported(planned, MONGODB_CAPABILITIES),
+			"planner_savepoint_body_insert_select_v3"
 		);
 	});
 });

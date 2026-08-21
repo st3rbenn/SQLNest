@@ -692,8 +692,11 @@ class MongoConnection implements Connection {
 						rows,
 						rowCount: rows.length
 					};
-				} else {
+				} else if (step.kind === "write") {
 					lastResult = await this.#executeWriteInSession(step.write, session);
+				} else {
+					// PA/5 (ADR-024-A) — savepoint via compensation logique in-session.
+					lastResult = await this.#executeSavepoint(step, session);
 				}
 			}
 			await session.commitTransaction();
@@ -837,6 +840,175 @@ class MongoConnection implements Connection {
 		}
 	}
 
+	/**
+	 * PA/5 (ADR-024-A) FLAGSHIP — savepoint Mongo via compensation logique
+	 * in-session. Pour chaque write du body : capture snapshot pre-write (find
+	 * touched via session), exec le write, retient la compensation. Sur erreur
+	 * dans un write du body : apply toutes les compensations retenues en REVERSE
+	 * order dans la MÊME session tx, puis absorbe l'erreur (savepoint rollback
+	 * partiel). La whole-tx continue au step suivant, semantique parité PG.
+	 *
+	 * Sur erreur transient (WriteConflict, TransactionAborted, NoSuchTransaction),
+	 * la session est déjà marquée aborted par le driver ; les compensations
+	 * échoueraient — on rethrow pour laisser #executeTransaction abort proprement.
+	 *
+	 * Compensations par op :
+	 *  - insert → deleteMany({_id: {$in: insertedIds}})
+	 *  - update → pour chaque snapshot row : updateOne({_id}, {$set: old_values})
+	 *  - delete → insertMany(snapshot_full_docs)
+	 *
+	 * Retourne le dernier ResultSet du body (parité #executeTransaction).
+	 */
+	async #executeSavepoint(
+		step: Extract<
+			import("@sqlnest/snql").MongoTransactionStep,
+			{ kind: "savepoint" }
+		>,
+		session: ClientSession
+	): Promise<ResultSet> {
+		const db = this.#requireDb();
+		const compensations: (() => Promise<void>)[] = [];
+		let lastResult: ResultSet = { columns: [], rows: [], rowCount: 0 };
+		try {
+			for (const bodyStep of step.body) {
+				if (bodyStep.kind === "query") {
+					const pipeline = hydrateBson(
+						[...bodyStep.query.pipeline],
+						true
+					) as Document[];
+					const docs = await db
+						.collection(bodyStep.query.collection)
+						.aggregate(pipeline, { session })
+						.toArray();
+					const rows = docs.map((doc) => normalizeBson(doc) as Row);
+					lastResult = {
+						columns: columnsOf(rows),
+						rows,
+						rowCount: rows.length
+					};
+				} else if (bodyStep.kind === "write") {
+					const outcome = await this.#execWriteWithCompensation(
+						bodyStep.write,
+						session
+					);
+					lastResult = outcome.result;
+					compensations.push(outcome.compensate);
+				}
+			}
+			return lastResult;
+		} catch (bodyErr) {
+			if (isExpectedAbortError(bodyErr)) {
+				throw bodyErr;
+			}
+			for (let i = compensations.length - 1; i >= 0; i -= 1) {
+				const comp = compensations[i];
+				if (comp === undefined) continue;
+				try {
+					await comp();
+				} catch (compErr) {
+					throw new EngineExecutionError(
+						`Savepoint '${step.name}' rollback partiel a échoué (compensation) — ${describeMongoExecutionError(compErr)} — cause d'origine : ${describeMongoExecutionError(bodyErr)}`,
+						{ cause: bodyErr }
+					);
+				}
+			}
+			return { columns: [], rows: [], rowCount: 0 };
+		}
+	}
+
+	/**
+	 * PA/5 — exécute un write dans une session tx ET retourne la compensation
+	 * inverse à appliquer si le savepoint doit rollback. Snapshot pre-write
+	 * capturé côté RAM avant l'exec (find via session, cohérence intra-tx).
+	 */
+	async #execWriteWithCompensation(
+		query: import("@sqlnest/snql").MongoWriteQuery,
+		session: ClientSession
+	): Promise<{ result: ResultSet; compensate: () => Promise<void> }> {
+		const collection = this.#requireDb().collection(query.collection);
+		if (query.op === "insert") {
+			const documents = query.documents.map(
+				(doc) => hydrateBson(doc, true) as Document
+			);
+			const insertResult = await collection.insertMany(documents, {
+				session
+			});
+			const insertedIds = Object.values(insertResult.insertedIds);
+			const rows = documents.map((doc) => normalizeBson(doc) as Row);
+			return {
+				result: {
+					columns: columnsOf(rows),
+					rows,
+					rowCount: insertResult.insertedCount
+				},
+				compensate: async () => {
+					if (insertedIds.length === 0) return;
+					await collection.deleteMany(
+						{ _id: { $in: insertedIds } },
+						{ session }
+					);
+				}
+			};
+		}
+		if (query.op === "update") {
+			const filter = hydrateBson(query.filter, true) as Document;
+			const fields = extractUpdateFields(query.update);
+			const projection: Document = { _id: 1 };
+			for (const f of fields) projection[f] = 1;
+			const snapshot = (await collection
+				.find(filter, { session, projection })
+				.toArray()) as Document[];
+			const update = Array.isArray(query.update)
+				? (hydrateBson([...query.update], false) as Document[])
+				: (hydrateBson(query.update, false) as Document);
+			const upResult = await collection.updateMany(filter, update, { session });
+			return {
+				result: { columns: [], rows: [], rowCount: upResult.matchedCount },
+				compensate: async () => {
+					for (const row of snapshot) {
+						const oldSet: Document = {};
+						const oldUnset: Document = {};
+						for (const f of fields) {
+							if (row[f] === undefined) oldUnset[f] = "";
+							else oldSet[f] = row[f];
+						}
+						const restoreUpdate: Document = {};
+						if (Object.keys(oldSet).length > 0) restoreUpdate["$set"] = oldSet;
+						if (Object.keys(oldUnset).length > 0)
+							restoreUpdate["$unset"] = oldUnset;
+						if (Object.keys(restoreUpdate).length === 0) continue;
+						await collection.updateOne(
+							{ _id: row["_id"] } as Document,
+							restoreUpdate,
+							{ session }
+						);
+					}
+				}
+			};
+		}
+		if (query.op === "delete") {
+			const filter = hydrateBson(query.filter, true) as Document;
+			const snapshot = (await collection
+				.find(filter, { session })
+				.toArray()) as Document[];
+			const delResult = await collection.deleteMany(filter, { session });
+			return {
+				result: { columns: [], rows: [], rowCount: delResult.deletedCount },
+				compensate: async () => {
+					if (snapshot.length === 0) return;
+					await collection.insertMany(snapshot, { session });
+				}
+			};
+		}
+		// Les autres ops (update-agg-merge, insert-select-agg-merge, upsert) sont
+		// refusés au planner pour un body savepoint (voir assertSavepointBody
+		// Analyzable). Defense-in-depth ici pour éviter une exec silencieuse
+		// sans compensation.
+		throw new EngineExecutionError(
+			`Savepoint : op '${query.op}' non supporté v1 MVP (planner devrait avoir refusé)`
+		);
+	}
+
 	async close(): Promise<void> {
 		const client = this.#client;
 		if (client === undefined) {
@@ -859,6 +1031,24 @@ class MongoConnection implements Connection {
 		}
 		return this.#client;
 	}
+}
+
+/**
+ * PA/5 — extrait les noms de fields écrits par un update Mongo (forme classique
+ * `{$set: {...}}` ou pipeline `[{$set: {...}}]`). Utilisé pour builder la
+ * projection du snapshot pre-write (retenir les old values seulement pour les
+ * champs qui vont être modifiés).
+ */
+function extractUpdateFields(update: unknown): string[] {
+	const stages = Array.isArray(update) ? update : [update];
+	const fields = new Set<string>();
+	for (const stage of stages) {
+		const s = stage as { $set?: Record<string, unknown> };
+		if (s.$set !== undefined) {
+			for (const k of Object.keys(s.$set)) fields.add(k);
+		}
+	}
+	return [...fields];
 }
 
 /**

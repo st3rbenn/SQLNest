@@ -173,7 +173,15 @@ export interface MongoIntrospectQuery {
  */
 export type MongoTransactionStep =
 	| { readonly kind: "query"; readonly query: MongoQuery }
-	| { readonly kind: "write"; readonly write: MongoWriteQuery };
+	| { readonly kind: "write"; readonly write: MongoWriteQuery }
+	// PA/5 (ADR-024-A) — savepoint préservé comme step dédié, non aplati.
+	// L'adapter exécute chaque body step avec snapshot pre-write + compensation
+	// runtime si erreur (inverse ops dans même session tx).
+	| {
+			readonly kind: "savepoint";
+			readonly name: string;
+			readonly body: readonly MongoTransactionStep[];
+	  };
 
 export interface MongoTransaction {
 	readonly engine: string;

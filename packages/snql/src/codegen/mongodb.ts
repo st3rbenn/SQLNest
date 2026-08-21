@@ -194,10 +194,13 @@ function flattenMongoTransactionBody(
 				write: mongoMapper.mapMutation(item.plan) as MongoWriteQuery
 			});
 		} else {
-			throw new SnqlError(
-				`savepoint '${item.name}' non supporté sur MongoDB — Mongo n'a pas d'API de rollback partiel dans une transaction.`,
-				"codegen_mongo_savepoint_unsupported"
-			);
+			// PA/5 (ADR-024-A) — savepoint préservé comme step dédié (plus flatten).
+			// L'adapter Mongo capture snapshot pre-write + compensation runtime si
+			// erreur dans le body. Les gates MVP (nested, upsert, write-join,
+			// insert-select, raw) sont refusés au planner en amont.
+			const nested: MongoTransactionStep[] = [];
+			flattenMongoTransactionBody(item.body, nested);
+			out.push({ kind: "savepoint", name: item.name, body: nested });
 		}
 	}
 }

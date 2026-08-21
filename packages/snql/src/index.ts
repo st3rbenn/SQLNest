@@ -89,6 +89,7 @@ export type {
 	MongoIntrospectQuery,
 	MongoQuery,
 	MongoStage,
+	MongoTransactionStep,
 	MongoWriteQuery,
 	NativeQuery,
 	SerializedSpan,

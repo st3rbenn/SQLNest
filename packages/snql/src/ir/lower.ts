@@ -3409,9 +3409,10 @@ function jsValueToPlanExpr(
 	value: unknown,
 	span: import("../lexer/token").Span | undefined
 ): PlanExpr {
-	if (value === null) return { kind: "literal", value: null, span };
-	if (typeof value === "string") return { kind: "literal", value, span };
-	if (typeof value === "boolean") return { kind: "literal", value, span };
+	const spanOpt = span !== undefined ? { span } : {};
+	if (value === null) return { kind: "literal", value: null, ...spanOpt };
+	if (typeof value === "string") return { kind: "literal", value, ...spanOpt };
+	if (typeof value === "boolean") return { kind: "literal", value, ...spanOpt };
 	if (typeof value === "number") {
 		if (!Number.isFinite(value)) {
 			throw new SnqlError(
@@ -3420,13 +3421,13 @@ function jsValueToPlanExpr(
 				span
 			);
 		}
-		return { kind: "literal", value, span };
+		return { kind: "literal", value, ...spanOpt };
 	}
 	if (Array.isArray(value)) {
 		return {
 			kind: "array",
 			items: value.map((item) => jsValueToPlanExpr(item, span)),
-			span
+			...spanOpt
 		};
 	}
 	if (typeof value === "object") {
@@ -3435,7 +3436,7 @@ function jsValueToPlanExpr(
 			entries: Object.entries(value as Record<string, unknown>).map(
 				([key, val]) => ({ key, value: jsValueToPlanExpr(val, span) })
 			),
-			span
+			...spanOpt
 		};
 	}
 	throw new SnqlError(
