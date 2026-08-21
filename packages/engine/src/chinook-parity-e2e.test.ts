@@ -275,4 +275,35 @@ describe.skipIf(!hasBoth)("Chinook parité PG ↔ Mongo", () => {
 		]);
 		expect(normalize(mongo)).toEqual(normalize(pg));
 	}, 20_000);
+
+	// ═══════════════════════════════════════════════════════════════════════════
+	// Cast dans predicate write (PA/4 — ADR-024-A) : pipeline update $expr+$convert
+	// ═══════════════════════════════════════════════════════════════════════════
+
+	it("update where cast(int as text) = '<id inexistant>' (non-destructif) : compile+exec sur les 2 engines", async () => {
+		// Cast dans predicate write : avant PA/4 → codegen_mongo_write_cast_predicate.
+		// Après PA/4 → filter {$expr:{$eq:[{$convert:{input:$track_id,to:'string'}},'-99999']}}.
+		// track_id -99999 n'existe pas → 0 rows affectées sur les 2 engines, 0 corruption.
+		const q = `update track where cast(track_id as text) = "-99999" set milliseconds = 0`;
+		const [pgRes, mongoRes] = await Promise.all([
+			runQuery(pgConn, q, EMPTY_SCHEMA),
+			runQuery(mongoConn, q, EMPTY_SCHEMA)
+		]);
+		expect(pgRes.written).toBe(true);
+		expect(mongoRes.written).toBe(true);
+		expect(pgRes.rowCount).toBe(0);
+		expect(mongoRes.rowCount).toBe(0);
+	}, 20_000);
+
+	it("remove where cast(int as text) = '<id inexistant>' (non-destructif)", async () => {
+		const q = `remove from track where cast(track_id as text) = "-99999"`;
+		const [pgRes, mongoRes] = await Promise.all([
+			runQuery(pgConn, q, EMPTY_SCHEMA),
+			runQuery(mongoConn, q, EMPTY_SCHEMA)
+		]);
+		expect(pgRes.written).toBe(true);
+		expect(mongoRes.written).toBe(true);
+		expect(pgRes.rowCount).toBe(0);
+		expect(mongoRes.rowCount).toBe(0);
+	}, 20_000);
 });

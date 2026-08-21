@@ -9,6 +9,7 @@ import type {
 } from "@sqlnest/snql";
 import {
 	assertIntrospectSupported,
+	assertMongoMutationWriteCastCoercive,
 	assertMutationCastTargetsSupported,
 	assertMutationInsertSelectSupported,
 	assertMutationUpsertSupported,
@@ -183,6 +184,7 @@ export async function runQuery(
 		}
 		const mutation = lowerMutation(statement, schema);
 		assertMutationCastTargetsSupported(mutation, capabilities);
+		assertMongoMutationWriteCastCoercive(mutation, capabilities);
 		assertMutationUpsertSupported(mutation, capabilities);
 		assertMutationWriteJoinSupported(mutation, capabilities);
 		assertMutationInsertSelectSupported(mutation, capabilities);

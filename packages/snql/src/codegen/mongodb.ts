@@ -116,11 +116,15 @@ export const mongoMapper: Mapper = {
 				return {
 					...base,
 					op: "update",
-					filter: renderFilter(plan.predicate),
+					filter: renderWriteFilter(plan.predicate, plan.alias),
 					update: renderUpdate(plan.assignments)
 				};
 			case "delete":
-				return { ...base, op: "delete", filter: renderFilter(plan.predicate) };
+				return {
+					...base,
+					op: "delete",
+					filter: renderWriteFilter(plan.predicate, undefined)
+				};
 		}
 	},
 	/**
@@ -440,13 +444,73 @@ function renderDocuments(
 	});
 }
 
-/** Prédicat → filtre Mongo. Absent ⇒ `{}` : toutes les lignes (assumé, ADR-012). */
-function renderFilter(
-	predicate: PlanExpr | undefined
+/**
+ * PA/4 (ADR-024-A) — filtre write Mongo qui route via `$expr` + `$convert`
+ * quand le predicate contient un cast (non-json). Sinon fallback sur la forme
+ * `renderMatch` classique (idiomatique champ↔littéral indexable).
+ *
+ * Les casts type coercitifs ambigus (bool/date/timestamp) ont déjà été
+ * refusés au planner via `assertMongoMutationWriteCastCoercive` — donc ici
+ * on ne rencontre que int/text/float/decimal (safe pour `$convert`).
+ */
+function renderWriteFilter(
+	predicate: PlanExpr | undefined,
+	alias: string | undefined
 ): Record<string, unknown> {
-	return predicate === undefined
-		? {}
-		: renderMatch(predicate, undefined, "write");
+	if (predicate === undefined) return {};
+	if (containsNonJsonCastInPredicate(predicate)) {
+		return {
+			$expr: renderMongoAggExpr(predicate, alias, new Map())
+		};
+	}
+	return renderMatch(predicate, alias, "write");
+}
+
+/** Walker : true si le predicate contient au moins un cast non-json. */
+function containsNonJsonCastInPredicate(expr: PlanExpr): boolean {
+	switch (expr.kind) {
+		case "cast":
+			if (expr.target !== "json") return true;
+			return containsNonJsonCastInPredicate(expr.operand);
+		case "and":
+		case "or":
+		case "compare":
+		case "arith":
+			return (
+				containsNonJsonCastInPredicate(expr.left) ||
+				containsNonJsonCastInPredicate(expr.right)
+			);
+		case "not":
+		case "isNull":
+			return containsNonJsonCastInPredicate(expr.operand);
+		case "in":
+			if (containsNonJsonCastInPredicate(expr.target)) return true;
+			return expr.values.some(containsNonJsonCastInPredicate);
+		case "call":
+		case "windowCall":
+			return expr.args.some(containsNonJsonCastInPredicate);
+		case "case":
+			for (const b of expr.branches) {
+				if (
+					containsNonJsonCastInPredicate(b.cond) ||
+					containsNonJsonCastInPredicate(b.value)
+				)
+					return true;
+			}
+			return containsNonJsonCastInPredicate(expr.elseValue);
+		case "object":
+			return expr.entries.some((e) =>
+				containsNonJsonCastInPredicate(e.value)
+			);
+		case "array":
+			return expr.items.some(containsNonJsonCastInPredicate);
+		case "literal":
+		case "field":
+		case "subquery":
+		case "exists":
+		case "upsertNew":
+			return false;
+	}
 }
 
 /**
@@ -1059,14 +1123,17 @@ function renderMongoAggExpr(
 				if (head !== subLocalAlias) {
 					const col = expr.path.slice(1).join(".");
 					const letVar = outerLetVars.get(col);
-					if (letVar === undefined) {
+					if (letVar !== undefined) return `$$${letVar}`;
+					if (outerLetVars.size > 0) {
 						throw new SnqlError(
 							`Ref outer '${head}.${col}' inconnue dans let vars (correlated subquery)`,
 							"codegen_mongo_subquery_unsupported",
 							expr.span
 						);
 					}
-					return `$$${letVar}`;
+					// PA/4 write context : pas de scope outer déclaré → path traité
+					// comme un champ local nested (dot-notation Mongo).
+					return `$${expr.path.join(".")}`;
 				}
 			}
 			return `$${mongoField(expr.path, subLocalAlias)}`;

@@ -428,6 +428,112 @@ export function assertMutationCastTargetsSupported(
 }
 
 /**
+ * PA/4 (ADR-024-A) — refuse au planner les casts type coercitifs ambigus
+ * (`bool`, `date`, `timestamp`) dans le predicate d'un update/delete Mongo.
+ *
+ * Motif : Mongo `$convert` truthy sur string non-vide (tout devient true sauf
+ * empty) et parse ISO 8601 permissif — divergent des règles strictes PG.
+ * Rewrite $expr+$convert marcherait syntaxiquement mais silencieusement
+ * corromprait le résultat sur un delete (rows matchées trop larges ou nulles).
+ * Refus explicit → user matérialise côté application ou utilise la valeur brute.
+ *
+ * Les autres casts (int↔text, decimal↔float, etc.) sont acceptés et routés
+ * par le codegen mongo vers pipeline update avec `$expr: {$convert: ...}`.
+ */
+export function assertMongoMutationWriteCastCoercive(
+	plan: MutationPlan,
+	capabilities: Capabilities
+): void {
+	if (capabilities.engine !== "mongodb") return;
+	const predicate = getMutationPredicate(plan);
+	if (predicate === undefined) return;
+	const bad: { target: CastTarget; span: Span | undefined } | null =
+		findFirstCoerciveCast(predicate);
+	if (bad === null) return;
+	throw new SnqlError(
+		`cast(_ as ${bad.target}) dans un filtre de mutation Mongo non supporté v1 — Mongo $convert truthy/permissif divergent de PG strict, refus explicite pour éviter silent-corruption. Matérialise la valeur convertie côté application, ou utilise un filtre sur la valeur brute (ex: 'where field = <literal>').`,
+		"planner_mongo_write_cast_coercive_v3",
+		bad.span
+	);
+}
+
+function getMutationPredicate(plan: MutationPlan): PlanExpr | undefined {
+	if (plan.op === "update" || plan.op === "delete") return plan.predicate;
+	return undefined;
+}
+
+function findFirstCoerciveCast(
+	expr: PlanExpr
+): { target: CastTarget; span: Span | undefined } | null {
+	const isCoercive = (t: CastTarget): boolean =>
+		t === "bool" || t === "date" || t === "timestamp";
+	const walk = (e: PlanExpr): {
+		target: CastTarget;
+		span: Span | undefined;
+	} | null => {
+		switch (e.kind) {
+			case "cast":
+				if (isCoercive(e.target)) return { target: e.target, span: e.span };
+				return walk(e.operand);
+			case "and":
+			case "or":
+			case "compare":
+			case "arith": {
+				const l = walk(e.left);
+				if (l !== null) return l;
+				return walk(e.right);
+			}
+			case "not":
+			case "isNull":
+				return walk(e.operand);
+			case "in": {
+				const t = walk(e.target);
+				if (t !== null) return t;
+				for (const v of e.values) {
+					const n = walk(v);
+					if (n !== null) return n;
+				}
+				return null;
+			}
+			case "call":
+			case "windowCall":
+				for (const a of e.args) {
+					const n = walk(a);
+					if (n !== null) return n;
+				}
+				return null;
+			case "case":
+				for (const b of e.branches) {
+					const c = walk(b.cond);
+					if (c !== null) return c;
+					const v = walk(b.value);
+					if (v !== null) return v;
+				}
+				return walk(e.elseValue);
+			case "object":
+				for (const en of e.entries) {
+					const n = walk(en.value);
+					if (n !== null) return n;
+				}
+				return null;
+			case "array":
+				for (const i of e.items) {
+					const n = walk(i);
+					if (n !== null) return n;
+				}
+				return null;
+			case "literal":
+			case "field":
+			case "subquery":
+			case "exists":
+			case "upsertNew":
+				return null;
+		}
+	};
+	return walk(expr);
+}
+
+/**
  * Sprint T2/13 : refuse `add {…} into t on conflict (…) …` si l'engine cible
  * n'a pas la capability `upsert`. Message actionable : Mongo a un upsert
  * natif mais sémantique différente (updateOne(upsert:true) sur un full doc),

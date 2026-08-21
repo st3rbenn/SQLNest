@@ -38,6 +38,12 @@ export type PlannerErrorCode =
 	| "planner_correlated_subquery_nested_v3"
 	| "planner_correlated_subquery_in_disjunction_v3"
 	| "planner_correlated_subquery_complex_v3"
+	// PA/4 (ADR-024-A) — cast dans WHERE d'un update/delete Mongo. Le codegen
+	// route vers pipeline update $expr+$convert (4.2+) SAUF pour les casts type
+	// coercitifs ambigus : bool/date/timestamp. Ces cibles diffèrent structurellement
+	// entre PG (parse strict) et Mongo ($convert truthy / ISO 8601 permissif),
+	// donc refus au planner pour éviter silent-corruption sur delete/update.
+	| "planner_mongo_write_cast_coercive_v3"
 	// CTE / let
 	| "planner_let_unsupported"
 	// PM/3 — refus dédié D17 join CTE↔collection Mongo v1 (materializeLet
@@ -110,6 +116,7 @@ export const PLANNER_ERROR_CODES: ReadonlySet<PlannerErrorCode> =
 		"planner_correlated_subquery_nested_v3",
 		"planner_correlated_subquery_in_disjunction_v3",
 		"planner_correlated_subquery_complex_v3",
+		"planner_mongo_write_cast_coercive_v3",
 		"planner_let_unsupported",
 		"planner_cte_body_join_mongo_unsupported",
 		"planner_mongo_cte_write_requires_txn",

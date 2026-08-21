@@ -4,6 +4,7 @@ import {
 	compile,
 	getMapper,
 	lowerMutation,
+	mongoWrite,
 	parse,
 	planFor,
 	tokenize
@@ -167,24 +168,93 @@ describe("codegen mongodb — cast refusé en position prédicat", () => {
 	});
 });
 
-describe("codegen mongodb — cast refusé dans filtre write", () => {
-	it("update where cast(id as text) = ... → codegen_mongo_write_cast_predicate (message dédié)", () => {
-		try {
-			mongoMutation('update t where cast(id as text) = "42" set y = 1');
-			throw new Error("SnqlError attendu");
-		} catch (e) {
-			if (!(e instanceof SnqlError)) throw e;
-			expect(e.code).toBe("codegen_mongo_write_cast_predicate");
-			expect(e.message).toContain("matérialise");
-			// NE PAS réutiliser le message champ↔champ trompeur.
-			expect(e.message).not.toContain("champ↔champ");
+describe("PA/4 (ADR-024-A) — cast dans filtre write Mongo via pipeline $expr+$convert", () => {
+	it("update where cast(id as text) = '42' → filter {$expr: {$eq:[{$convert}, '42']}}", () => {
+		const nat = mongoMutation(
+			'update t where cast(id as text) = "42" set y = 1'
+		);
+		if (nat.kind !== "mongo-write" || nat.op !== "update") {
+			throw new Error("update attendu");
 		}
+		expect(nat.filter).toEqual({
+			$expr: {
+				$eq: [
+					{ $convert: { input: { $ifNull: ["$id", null] }, to: "string" } },
+					"42"
+				]
+			}
+		});
+		expect(nat.update).toEqual({ $set: { y: 1 } });
 	});
 
-	it("remove where cast(x as int) = 42 → refusé pareil", () => {
+	it("remove where cast(x as int) = 42 → deleteMany filter {$expr}", () => {
+		const nat = mongoMutation("remove from t where cast(x as int) = 42");
+		if (nat.kind !== "mongo-write" || nat.op !== "delete") {
+			throw new Error("delete attendu");
+		}
+		expect(nat.filter).toEqual({
+			$expr: {
+				$eq: [
+					{ $convert: { input: { $ifNull: ["$x", null] }, to: "long" } },
+					42
+				]
+			}
+		});
+	});
+
+	it("update sans cast dans where → forme classique conservée (indexable)", () => {
+		const nat = mongoMutation('update t where id = 1 set y = "z"');
+		if (nat.kind !== "mongo-write" || nat.op !== "update") {
+			throw new Error("update attendu");
+		}
+		expect(nat.filter).toEqual({ id: { $eq: 1 } });
+	});
+
+	it("update avec cast dans AND-combo : $expr wrappe tout le predicate", () => {
+		const nat = mongoMutation(
+			'update t where cast(id as text) = "42" and name = "x" set y = 1'
+		);
+		if (nat.kind !== "mongo-write" || nat.op !== "update") {
+			throw new Error("update attendu");
+		}
+		expect(nat.filter).toEqual({
+			$expr: {
+				$and: [
+					{
+						$eq: [
+							{ $convert: { input: { $ifNull: ["$id", null] }, to: "string" } },
+							"42"
+						]
+					},
+					{ $eq: ["$name", "x"] }
+				]
+			}
+		});
+	});
+});
+
+describe("PA/4 — refus planner casts coercitifs ambigus (bool/date/timestamp)", () => {
+	it("update where cast(x as bool) = true → refus planner_mongo_write_cast_coercive_v3", () => {
 		expectCode(
-			() => mongoMutation("remove from t where cast(x as int) = 42"),
-			"codegen_mongo_write_cast_predicate"
+			() => mongoWrite("update t where cast(x as bool) = true set y = 1"),
+			"planner_mongo_write_cast_coercive_v3"
+		);
+	});
+
+	it("remove where cast(x as date) = ... → refus", () => {
+		expectCode(
+			() => mongoWrite('remove from t where cast(x as date) = "2024-01-01"'),
+			"planner_mongo_write_cast_coercive_v3"
+		);
+	});
+
+	it("update where cast(x as timestamp) = ... → refus", () => {
+		expectCode(
+			() =>
+				mongoWrite(
+					'update t where cast(x as timestamp) = "2024-01-01T00:00:00Z" set y = 1'
+				),
+			"planner_mongo_write_cast_coercive_v3"
 		);
 	});
 });

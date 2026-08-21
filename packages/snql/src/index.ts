@@ -188,6 +188,7 @@ export {
 	assertMutationWriteJoinSupported,
 	assertTransactionSupported,
 	assertCorrelatedSubqueryLiftable,
+	assertMongoMutationWriteCastCoercive,
 	assertUncorrelatedSubqueryForMaterialize,
 	detectOuterAliasesInSubplan,
 	plan,

@@ -15,6 +15,7 @@ import type { PlannerErrorCode } from "../planner/errors/registry";
 import {
 	assertIntrospectSupported,
 	assertLetSupported,
+	assertMongoMutationWriteCastCoercive,
 	assertMutationCastTargetsSupported,
 	assertMutationInsertSelectSupported,
 	assertMutationUpsertSupported,
@@ -218,6 +219,7 @@ function dispatchNative(
 		case "delete": {
 			const mutationPlan = lowerMutation(statement, schema);
 			assertMutationCastTargetsSupported(mutationPlan, capabilities);
+			assertMongoMutationWriteCastCoercive(mutationPlan, capabilities);
 			assertMutationUpsertSupported(mutationPlan, capabilities);
 			assertMutationWriteJoinSupported(mutationPlan, capabilities);
 			assertMutationInsertSelectSupported(mutationPlan, capabilities);

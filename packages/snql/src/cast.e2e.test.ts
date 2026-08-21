@@ -172,18 +172,21 @@ describe("E2E cast — writes (PG autorisé, Mongo autorisé sauf en filtre)", (
 		);
 	});
 
-	it("update WHERE cast(_) sur Mongo → codegen_mongo_write_cast_predicate", () => {
+	it("update WHERE cast(_ as text) sur Mongo → pipeline $expr+$convert (PA/4)", () => {
 		const stmt = parse(
 			tokenize('update t where cast(id as text) = "42" set y = 1')
 		);
 		if (stmt.operation !== "update") throw new Error("update attendu");
-		try {
-			getMapper("mongodb").mapMutation(lowerMutation(stmt));
-			throw new Error("SnqlError attendu");
-		} catch (e) {
-			if (!(e instanceof SnqlError)) throw e;
-			expect(e.code).toBe("codegen_mongo_write_cast_predicate");
+		const native = getMapper("mongodb").mapMutation(lowerMutation(stmt));
+		expect(native.kind).toBe("mongo-write");
+		if (native.kind !== "mongo-write" || native.op !== "update") {
+			throw new Error("write update attendu");
 		}
+		expect(native.filter).toEqual({
+			$expr: {
+				$eq: [{ $convert: { input: { $ifNull: ["$id", null] }, to: "string" } }, "42"]
+			}
+		});
 	});
 
 	it("insert avec cast en valeur refusé (literal-only)", () => {
