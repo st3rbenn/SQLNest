@@ -772,13 +772,40 @@ class MongoConnection implements Connection {
 				return { columns: [], rows: [], rowCount: 0 };
 			}
 			if (query.op === "insert-select-agg-merge") {
-				// ADR-024 PM/5 D19-revised — insert-select via $merge NE peut PAS
-				// s'exécuter DANS une session tx Mongo (contrainte driver, toutes
-				// versions 4.2+). Refus explicite avec code typé. Wrap est INVERSÉ
-				// de l'assumption D19 originale (validation E2E chinook-mongo 2026-08-21).
-				throw new EngineExecutionError(
-					`insert-select Mongo DANS une transaction interdit — $merge n'est pas supporté en session tx (contrainte MongoDB driver). Extrais le insert-select HORS du 'transaction { … }' block. Code : planner_mongo_insert_select_in_txn_forbidden (ADR-024 D19-revised).`
+				// ADR-024-A PA/3 — insert-select DANS session tx via matérialisation
+				// client + insertMany (le $merge natif est interdit en session tx, cf
+				// D19-revised). Le pipeline est split : (a) source-fetch = toutes les
+				// stages avant $merge (retourne des docs), (b) $merge terminal droppé.
+				// insertMany écrit atomiquement dans la même session tx. Whole-tx
+				// rollback protège en cas d'erreur. Non-atomique par-doc sur duplicate
+				// key (insertMany ordonné throw à la première collision) — même
+				// sémantique que $merge whenMatched='fail' hors tx.
+				const sourceColl = this.#requireDb().collection(query.sourceCollection);
+				const stagesBeforeMerge = query.pipeline.filter(
+					(s) => !("$merge" in s)
 				);
+				const fetchPipeline = hydrateBson(
+					[...stagesBeforeMerge],
+					false
+				) as Document[];
+				const docsRaw = await sourceColl
+					.aggregate(fetchPipeline, { session })
+					.toArray();
+				if (docsRaw.length === 0) {
+					return { columns: [], rows: [], rowCount: 0 };
+				}
+				const docsToInsert = docsRaw.map(
+					(d) => hydrateBson(d, true) as Document
+				);
+				const targetColl = this.#requireDb().collection(query.collection);
+				const result = await targetColl.insertMany(docsToInsert, {
+					session
+				});
+				return {
+					columns: [],
+					rows: [],
+					rowCount: result.insertedCount
+				};
 			}
 			if (query.op === "upsert") {
 				const bulkOps = query.operations.map((op) => {
