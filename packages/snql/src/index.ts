@@ -187,6 +187,7 @@ export {
 	assertMutationUpsertSupported,
 	assertMutationWriteJoinSupported,
 	assertTransactionSupported,
+	assertUncorrelatedSubqueryForMaterialize,
 	plan,
 	toCompensationOp
 } from "./planner/planner";

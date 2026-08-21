@@ -750,7 +750,7 @@ function assertSubqueryCapability(
  * Déplacé de `packages/engine/src/run.ts` où le refus était tardif (runtime
  * EngineExecutionError) et incohérent doctrine T2/11-15.
  */
-function assertUncorrelatedSubqueryForMaterialize(
+export function assertUncorrelatedSubqueryForMaterialize(
 	plan: LogicalPlan,
 	capabilities: Capabilities
 ): void {

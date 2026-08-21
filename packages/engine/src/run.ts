@@ -14,6 +14,7 @@ import {
 	assertMutationUpsertSupported,
 	assertMutationWriteJoinSupported,
 	assertTransactionSupported,
+	assertUncorrelatedSubqueryForMaterialize,
 	capabilitiesFor,
 	collectIdentSpans,
 	compensate,
@@ -198,8 +199,12 @@ export async function runQuery(
 	// ADR-024 PM/2 — condition changée : Mongo a désormais `subquery` capability,
 	// mais avec strategy='materialize'. Le planner accepte les sub-queries
 	// uncorrelated (correlated rejetées par assertUncorrelatedSubqueryForMaterialize),
-	// le runtime les résout via materializeSubplan avant plan().
+	// le runtime les résout via materializeSubplan avant plan(). Le refus
+	// correlated est fait AVANT resolveSubqueries — sinon la matérialisation
+	// remplace les subqueries par des littéraux et le planner assert (dans plan())
+	// ne les voit plus (bug PM/2 corrigé après validation E2E chinook-mongo).
 	if (capabilities.subqueryStrategy === "materialize") {
+		assertUncorrelatedSubqueryForMaterialize(logicalForPlan, capabilities);
 		logicalForPlan = await resolveSubqueries(
 			logicalForPlan,
 			connection,
@@ -396,9 +401,12 @@ async function runQueryOnCte(
 	let logicalPlan = lower(query, schema);
 	// ADR-024 PM/2 — condition changée : Mongo a désormais `subquery` capability,
 	// mais avec strategy='materialize'. Le planner accepte les sub-queries
-	// uncorrelated (correlated rejetées par assertUncorrelatedSubqueryForMaterialize),
-	// le runtime les résout via materializeSubplan avant plan().
+	// uncorrelated (correlated rejetées par assertUncorrelatedSubqueryForMaterialize).
+	// Le refus correlated est fait AVANT resolveSubqueries — sinon la
+	// matérialisation remplace les subqueries par des littéraux et le planner
+	// assert ne les voit plus (bug PM/2 corrigé après validation E2E chinook-mongo).
 	if (capabilities.subqueryStrategy === "materialize") {
+		assertUncorrelatedSubqueryForMaterialize(logicalPlan, capabilities);
 		logicalPlan = await resolveSubqueries(
 			logicalPlan,
 			connection,
