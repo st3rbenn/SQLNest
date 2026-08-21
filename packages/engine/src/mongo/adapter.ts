@@ -462,14 +462,21 @@ class MongoConnection implements Connection {
 				return { columns: [], rows: [], rowCount: 0 };
 			}
 			if (query.op === "insert-select-agg-merge") {
-				// ADR-024 PM/5 Q5a + D19 — insert-select via aggregate + $merge
-				// dans collection cible. D19 impose session tx (Mongo 5.0+ RS) :
-				// hors session, refus typé planner_mongo_insert_select_requires_txn
-				// (voir contrainte non-négociable #5 ADR-024, silent fallback
-				// interdit). Wrap tes insert-select dans un `transaction { … }`.
-				throw new EngineExecutionError(
-					`insert-select Mongo hors transaction interdit — wrap dans un 'transaction { … }' block. Code : planner_mongo_insert_select_requires_txn (ADR-024 D19).`
-				);
+				// ADR-024 PM/5 Q5a — insert-select via aggregate + $merge dans
+				// collection cible. D19-revised (validation E2E chinook-mongo
+				// 2026-08-21) : $merge NE PEUT PAS être utilisé DANS une session tx
+				// Mongo (contrainte driver, toutes versions Mongo 4.2+). D19
+				// original ("tx obligatoire") est inversé : hors session OK,
+				// dans session refus au codegen (#executeWriteInSession). Le
+				// $merge whenMatched='fail' gère les duplicate keys ; non-atomique
+				// sur batch mid-failure — divergence documentée dans registre D7.
+				const sourceColl = this.#requireDb().collection(query.sourceCollection);
+				const pipeline = hydrateBson(
+					[...query.pipeline],
+					false
+				) as Document[];
+				await sourceColl.aggregate(pipeline).toArray();
+				return { columns: [], rows: [], rowCount: 0 };
 			}
 			if (query.op === "upsert") {
 				// Sprint v3 Mongo : bulkWrite d'updateOne+upsert (atomicité côté
@@ -765,17 +772,13 @@ class MongoConnection implements Connection {
 				return { columns: [], rows: [], rowCount: 0 };
 			}
 			if (query.op === "insert-select-agg-merge") {
-				// ADR-024 PM/5 Q5a + D19 — insert-select en tx. $merge dans une
-				// collection différente demande Mongo 5.0+ RS (D3 features.mergeInTx).
-				// Le check features est délégué au caller — ici on suppose tx active
-				// donc runtime OK. Source collection = query.sourceCollection.
-				const sourceColl = this.#requireDb().collection(query.sourceCollection);
-				const pipeline = hydrateBson(
-					[...query.pipeline],
-					false
-				) as Document[];
-				await sourceColl.aggregate(pipeline, { session }).toArray();
-				return { columns: [], rows: [], rowCount: 0 };
+				// ADR-024 PM/5 D19-revised — insert-select via $merge NE peut PAS
+				// s'exécuter DANS une session tx Mongo (contrainte driver, toutes
+				// versions 4.2+). Refus explicite avec code typé. Wrap est INVERSÉ
+				// de l'assumption D19 originale (validation E2E chinook-mongo 2026-08-21).
+				throw new EngineExecutionError(
+					`insert-select Mongo DANS une transaction interdit — $merge n'est pas supporté en session tx (contrainte MongoDB driver). Extrais le insert-select HORS du 'transaction { … }' block. Code : planner_mongo_insert_select_in_txn_forbidden (ADR-024 D19-revised).`
+				);
 			}
 			if (query.op === "upsert") {
 				const bulkOps = query.operations.map((op) => {

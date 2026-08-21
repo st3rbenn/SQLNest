@@ -43,7 +43,12 @@ export type PlannerErrorCode =
 	| "planner_upsert_unsupported"
 	| "planner_write_join_unsupported"
 	| "planner_insert_select_unsupported"
-	// PM/5 — refus D19 insert-select Mongo hors session tx (Mongo <5.0 replica set)
+	// PM/5 — refus D19-revised (2026-08-21 E2E chinook-mongo) : insert-select
+	// via $merge NE PEUT PAS s'exécuter DANS une session tx Mongo (contrainte
+	// driver toutes versions 4.2+). Refus si dans transaction { … } block.
+	| "planner_mongo_insert_select_in_txn_forbidden"
+	// Ancien code D19 original ("tx obligatoire") — gardé le temps de purger
+	// les tests qui référencent l'ancienne sémantique.
 	| "planner_mongo_insert_select_requires_txn"
 	// Transactions / savepoints
 	| "planner_transaction_unsupported"
@@ -103,6 +108,7 @@ export const PLANNER_ERROR_CODES: ReadonlySet<PlannerErrorCode> =
 		"planner_write_join_unsupported",
 		"planner_insert_select_unsupported",
 		"planner_mongo_insert_select_requires_txn",
+		"planner_mongo_insert_select_in_txn_forbidden",
 		"planner_transaction_unsupported",
 		"planner_savepoint_mongo_unsupported",
 		"planner_introspect_unsupported",
