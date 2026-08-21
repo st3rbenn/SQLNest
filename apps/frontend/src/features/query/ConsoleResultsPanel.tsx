@@ -15,11 +15,13 @@
 
 import { SearchInput, ToolbarButton } from "@sqlnest/design-system";
 import { useLocalStorage } from "@mantine/hooks";
+import type { SchemaModel } from "@sqlnest/snql";
 import {
 	IconChartBar,
 	IconChevronLeft,
 	IconChevronRight,
 	IconCode,
+	IconRoute,
 	IconTable
 } from "@tabler/icons-react";
 import type { CSSProperties } from "react";
@@ -27,6 +29,7 @@ import { useMemo, useState } from "react";
 import { ErrorBlock } from "./ErrorBlock";
 import { ResultsGraphPlaceholder } from "./ResultsGraphPlaceholder";
 import { ResultsJsonView } from "./ResultsJsonView";
+import { ResultsPlanView } from "./ResultsPlanView";
 import { ResultsTable } from "./ResultsTable";
 import { classifyRuntimeError } from "./rollbackClassify";
 import { supportsTransactionsForEngine } from "./transactionWrap";
@@ -36,7 +39,7 @@ import {
 	SnqlRuntimeError
 } from "./useRunQuery";
 
-export type ResultsViewMode = "table" | "json" | "graph";
+export type ResultsViewMode = "table" | "json" | "graph" | "plan";
 
 const VIEW_STORAGE_KEY = "sqlnest.console.results.view";
 const PAGE_SIZE_STORAGE_KEY = "sqlnest.console.results.pageSize";
@@ -146,7 +149,8 @@ export function ConsoleResultsPanel({
 	timingMs,
 	onFocusSpan,
 	engine,
-	lastSource
+	lastSource,
+	schema
 }: {
 	readonly result: QueryResult | undefined;
 	readonly error: Error | null;
@@ -162,6 +166,9 @@ export function ConsoleResultsPanel({
 	 * `transaction { … }` racine côté frontend sans re-parser à chaque
 	 * render. Absent = pas de header. */
 	readonly lastSource?: string;
+	/** [PM/10 D10] Schema consommé par ResultsPlanView pour compile local et
+	 * afficher les stages du native query avec badges. */
+	readonly schema?: SchemaModel;
 }): React.ReactNode {
 	const [viewMode, setViewMode] = useLocalStorage<ResultsViewMode>({
 		key: VIEW_STORAGE_KEY,
@@ -352,6 +359,14 @@ export function ConsoleResultsPanel({
 					>
 						<IconCode size={13} stroke={2} />
 					</ToolbarButton>
+					<ToolbarButton
+						label="Vue Plan (D10)"
+						active={viewMode === "plan"}
+						size={26}
+						onClick={() => setViewMode("plan")}
+					>
+						<IconRoute size={13} stroke={2} />
+					</ToolbarButton>
 				</div>
 			</div>
 
@@ -359,6 +374,12 @@ export function ConsoleResultsPanel({
 				<ResultsTable columns={columns} rows={pagedRows} />
 			) : viewMode === "json" ? (
 				<ResultsJsonView rows={pagedRows} />
+			) : viewMode === "plan" ? (
+				<ResultsPlanView
+					source={lastSource ?? ""}
+					engine={engine ?? "postgres"}
+					schema={schema}
+				/>
 			) : (
 				<ResultsGraphPlaceholder />
 			)}

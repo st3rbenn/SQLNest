@@ -702,6 +702,7 @@ export function ConsoleShellInner({
 							onFocusSpan={onFocusSpan}
 							engine={engine}
 							lastSource={queryState.lastSource}
+							schema={schemaQuery.data ?? undefined}
 						/>
 					</>
 				) : null}
