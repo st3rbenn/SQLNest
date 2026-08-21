@@ -46,6 +46,7 @@ import {
 	collectDivergenceHints,
 	type DivergenceHint
 } from "./divergenceHints";
+import { collectPerfHints, type PerfHint } from "./perfHints";
 import {
 	collectUnfilteredWrites,
 	labelForFinding,
@@ -123,6 +124,18 @@ export function useLiveDiagnostics(
 					if (hints.length > 0) {
 						setState({
 							diag: hintToDiagnostic(hints[0]!, hints.length),
+							rawStatementSpan
+						});
+						return;
+					}
+					// Étape 4 (PM/10 D9) — perf hints INFO pour les patterns non-
+					// indexables Mongo (cast dans predicate write PA/4, correlated
+					// subquery PA/1). Priorité inférieure aux divergences (info
+					// correction avant info perf).
+					const perf = collectPerfHints(statement);
+					if (perf.length > 0) {
+						setState({
+							diag: perfToDiagnostic(perf[0]!, perf.length),
 							rawStatementSpan
 						});
 						return;
@@ -231,6 +244,20 @@ function hintToDiagnostic(
 	hint: DivergenceHint,
 	total: number
 ): LiveDiagnostic {
+	const suffix = total > 1 ? ` (1/${total})` : "";
+	return {
+		span: hint.span,
+		message: hint.message + suffix,
+		severity: "info"
+	};
+}
+
+/**
+ * PM/10 D9 — convertit un perf hint en LiveDiagnostic `info` (même canal
+ * visual que D8, distinct sémantiquement via le préfixe "⚡ perf:" dans le
+ * message). Squiggly bleu discret + tooltip explique la cause + refactor.
+ */
+function perfToDiagnostic(hint: PerfHint, total: number): LiveDiagnostic {
 	const suffix = total > 1 ? ` (1/${total})` : "";
 	return {
 		span: hint.span,
