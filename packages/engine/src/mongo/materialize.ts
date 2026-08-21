@@ -1,5 +1,6 @@
 import type {
 	Capabilities,
+	JoinSources,
 	LogicalPlan,
 	Row,
 	SchemaModel
@@ -73,6 +74,8 @@ export async function materializeSubplan(
 
 	// Court-circuit : scan direct sur un CTE déjà en RAM → compensate pur, pas
 	// de round-trip driver. Central pour le chaînage CTE → subquery / body.
+	// PA/2 (ADR-024-A) : les autres CTE matérialisés sont passés en JoinSources
+	// pour que compensate applique les join op sur des RAM sets.
 	if (
 		materialized !== undefined &&
 		scanOp?.op === "scan" &&
@@ -80,7 +83,7 @@ export async function materializeSubplan(
 	) {
 		const cteRows = [...(materialized.get(scanOp.collection) ?? [])];
 		const ops = linear.slice(1).map((op) => toCompensationOp(op));
-		const rows = compensate(ops, cteRows);
+		const rows = compensate(ops, cteRows, materializedAsJoinSources(materialized));
 		return assertUnderCap(rows, maxRows);
 	}
 
@@ -93,8 +96,22 @@ export async function materializeSubplan(
 	const rows =
 		physical.compensation.length === 0
 			? [...pushed.rows]
-			: compensate(physical.compensation, pushed.rows);
+			: compensate(
+					physical.compensation,
+					pushed.rows,
+					materialized !== undefined
+						? materializedAsJoinSources(materialized)
+						: {}
+				);
 	return assertUnderCap(rows, maxRows);
+}
+
+function materializedAsJoinSources(
+	materialized: ReadonlyMap<string, readonly Row[]>
+): JoinSources {
+	const sources: Record<string, readonly Row[]> = {};
+	for (const [name, rows] of materialized) sources[name] = rows;
+	return sources;
 }
 
 function assertUnderCap(rows: readonly Row[], maxRows: number): readonly Row[] {

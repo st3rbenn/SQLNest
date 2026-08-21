@@ -86,9 +86,18 @@ interface JoinOp {
 	readonly as: string;
 	readonly localField: readonly string[];
 	readonly foreignField: readonly string[];
+	readonly kind?: "join" | "embed";
 }
 
-/** Embed : indexe la collection droite par foreignField, attache les matchs sous `as`. */
+/**
+ * Compensation d'un join. Deux sémantiques :
+ *  - `kind: "embed"` (défaut historique 1-to-many) : indexe le right par
+ *    foreignField, attache l'array de matchs sous `as` — 1 row par LEFT row.
+ *  - `kind: "join"` (many-to-one/one-to-one, LEFT JOIN Mongo natif via
+ *    `$lookup + $unwind{preserveNullAndEmptyArrays:true}`) : produit N rows
+ *    par LEFT row (cartesian), garde le LEFT si aucun match avec `as: undefined`.
+ *    Câblé PA/2 (ADR-024-A) pour honorer la sémantique join↔real coll matérialisée.
+ */
 function joinRows(
 	left: readonly Row[],
 	op: JoinOp,
@@ -105,7 +114,7 @@ function joinRows(
 	for (const row of right) {
 		const key = joinKey(getPath(row, op.foreignField));
 		if (key === null) {
-			continue; // une clé NULL ne matche jamais (parité SQL)
+			continue;
 		}
 		const bucket = index.get(key);
 		if (bucket === undefined) {
@@ -113,6 +122,16 @@ function joinRows(
 		} else {
 			bucket.push(row);
 		}
+	}
+	if (op.kind === "join") {
+		return left.flatMap((row) => {
+			const key = joinKey(getPath(row, op.localField));
+			const matched = key !== null ? (index.get(key) ?? []) : [];
+			if (matched.length === 0) {
+				return [{ ...row, [op.as]: undefined }];
+			}
+			return matched.map((rightRow) => ({ ...row, [op.as]: rightRow }));
+		});
 	}
 	return left.map((row) => {
 		const key = joinKey(getPath(row, op.localField));

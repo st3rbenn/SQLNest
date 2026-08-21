@@ -306,4 +306,31 @@ describe.skipIf(!hasBoth)("Chinook parité PG ↔ Mongo", () => {
 		expect(pgRes.rowCount).toBe(0);
 		expect(mongoRes.rowCount).toBe(0);
 	}, 20_000);
+
+	// ═══════════════════════════════════════════════════════════════════════════
+	// PA/2 (ADR-024-A) — Join CTE ↔ collection via matérialisation symétrique
+	// ═══════════════════════════════════════════════════════════════════════════
+
+	it("let CTE + body scan real coll + join CTE (PA/2 roadmap-canon)", async () => {
+		// `big` matérialisé, `album` real coll joined via `big` sur album_id.
+		// Avant PA/2 → planner_cte_body_join_mongo_unsupported.
+		// Après PA/2 → real coll matérialisée (cap D4) + compensate join sur les
+		// 2 RAM sets. Résultats identiques à PG.
+		const q = `let big = find track where milliseconds > 500000 pick track_id, name, album_id; find album with one big on album_id = big.album_id pick title sort title asc limit 5`;
+		const [pg, mongo] = await Promise.all([
+			runOn(pgConn, q),
+			runOn(mongoConn, q)
+		]);
+		expect(normalize(mongo)).toEqual(normalize(pg));
+	}, 30_000);
+
+	it("let CTE + body scan real coll + join CTE (pattern users↔orders adapté)", async () => {
+		// Pattern du roadmap adapté à chinook : customer avec au moins une invoice de +20$.
+		const q = `let big_invoice = find invoice where total > 20 pick customer_id; find customer with one big_invoice on customer_id = big_invoice.customer_id pick first_name sort first_name asc limit 3`;
+		const [pg, mongo] = await Promise.all([
+			runOn(pgConn, q),
+			runOn(mongoConn, q)
+		]);
+		expect(normalize(mongo)).toEqual(normalize(pg));
+	}, 30_000);
 });

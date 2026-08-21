@@ -35,6 +35,10 @@ export type CompensationOp =
 			readonly as: string;
 			readonly localField: readonly string[];
 			readonly foreignField: readonly string[];
+			// PA/2 (ADR-024-A) — sémantique cross-engine préservée : "join" =
+			// LEFT JOIN unwind (many-to-one/one-to-one), "embed" = 1-to-many array
+			// non aplati. Défaut "embed" pour compat historique quand omis.
+			readonly kind?: "join" | "embed";
 	  }
 	// Sprint T2/6 : agrégation scalaire fold. Runtime KV implémente via
 	// foldAggregate (1 row output sprint 6). groupKeys undefined = fold sur
@@ -693,7 +697,8 @@ export function toCompensationOp(op: LogicalPlan): CompensationOp {
 				collection: op.collection,
 				as: op.as,
 				localField: op.localField,
-				foreignField: op.foreignField
+				foreignField: op.foreignField,
+				kind: op.kind
 			};
 		case "aggregate":
 			return {

@@ -31,7 +31,6 @@ import {
 	lowerTransaction,
 	parse,
 	plan,
-	SnqlError,
 	type SupportedEngine,
 	tokenize
 } from "@sqlnest/snql";
@@ -301,31 +300,12 @@ async function materializeLet(
 		);
 		materialized.set(binding.name, rows);
 	}
-	const cteNames = [...materialized.keys()];
 	// Étape 2 : exécute le body selon son type.
 	if (statement.body.operation === "select") {
-		// ADR-024 PM/3 D17 — body doit scan directement un CTE. Le join
-		// CTE↔collection est refusé v1 (materializeLet ne peut mixer données
-		// in-memory et engine dans un même $lookup natif). Message actionable :
-		// matérialise côté application, ou attends portage v2 via temp-collection.
-		if (!materialized.has(statement.body.source.collection)) {
-			throw new SnqlError(
-				`Le body du 'let' doit scan un CTE (parmi ${cteNames.map((n) => `'${n}'`).join(", ")}) sur '${engine}' — le join CTE↔collection n'est pas supporté v1. Contournement : matérialise côté application via un let séparé, ou attends portage v2 (temp-collection + $lookup).`,
-				"planner_cte_body_join_mongo_unsupported"
-			);
-		}
-		// D17 additionnel — refus si body.stages contient un `with` sur une vraie
-		// collection alors que la source est un CTE (mix incompatible avec
-		// materialize runtime).
-		for (const stage of statement.body.stages) {
-			if (stage.type === "with" && !materialized.has(stage.collection)) {
-				throw new SnqlError(
-					`Le body du 'let' fait un 'with ${stage.collection}' sur une vraie collection alors que la source est un CTE ('${statement.body.source.collection}') — join CTE↔collection non supporté v1 sur '${engine}'. Contournement : matérialise ${stage.collection} via un let séparé.`,
-					"planner_cte_body_join_mongo_unsupported",
-					stage.span
-				);
-			}
-		}
+		// PA/2 (ADR-024-A) — le body peut scan une vraie collection ET joindre
+		// un CTE matérialisé. Le refus D17 PM/3 est retiré : runQueryOnCte
+		// détecte ce cas et matérialise la real coll AUSSI (cap D4), puis
+		// compensate le join sur les 2 RAM sets. Symétrique CTE↔real.
 		const rows = await runQueryOnCte(
 			statement.body,
 			schema,
@@ -419,6 +399,34 @@ async function runQueryOnCte(
 			materialized
 		);
 	}
+	// PA/2 (ADR-024-A) — join CTE↔real coll : le body scan une real coll et
+	// join un CTE matérialisé. Un $lookup natif pointerait vers une coll
+	// inexistante côté engine. Matérialise la real coll (scan seul), l'ajoute
+	// comme CTE virtuel, puis re-exécute via court-circuit (compensate pur avec
+	// materialized comme JoinSources). Cap D4 s'applique.
+	if (
+		capabilities.subqueryStrategy === "materialize" &&
+		hasJoinToMaterialized(logicalPlan, materialized)
+	) {
+		const scanOnlyPlan = extractScanOnlyPlan(logicalPlan);
+		const realRows = await materializeSubplan(
+			scanOnlyPlan,
+			connection,
+			schema,
+			capabilities,
+			mapper
+		);
+		const virtualMaterialized = new Map(materialized);
+		virtualMaterialized.set(sourceName, realRows);
+		return materializeSubplan(
+			logicalPlan,
+			connection,
+			schema,
+			capabilities,
+			mapper,
+			{ materialized: virtualMaterialized }
+		);
+	}
 	return materializeSubplan(
 		logicalPlan,
 		connection,
@@ -426,6 +434,36 @@ async function runQueryOnCte(
 		capabilities,
 		mapper
 	);
+}
+
+/** True si le plan contient au moins un op join dont la collection est un CTE matérialisé. */
+function hasJoinToMaterialized(
+	logicalPlan: import("@sqlnest/snql").LogicalPlan,
+	materialized: ReadonlyMap<string, readonly Row[]>
+): boolean {
+	for (const op of linearize(logicalPlan)) {
+		if (op.op === "join" && materialized.has(op.collection)) return true;
+	}
+	return false;
+}
+
+/**
+ * PA/2 — extrait le scan racine du plan (sans stages downstream). Utilisé pour
+ * matérialiser la real coll seule avant que compensate applique les joins CTE
+ * + filters + project + sort + limit sur les 2 RAM sets. Optimisation future :
+ * pousser aussi les filters racines pushdown-friendly (aucune ref CTE).
+ */
+function extractScanOnlyPlan(
+	logicalPlan: import("@sqlnest/snql").LogicalPlan
+): import("@sqlnest/snql").LogicalPlan {
+	const ops = linearize(logicalPlan);
+	const scan = ops[0];
+	if (scan === undefined || scan.op !== "scan") {
+		throw new EngineExecutionError(
+			"extractScanOnlyPlan: scan racine manquant"
+		);
+	}
+	return scan;
 }
 
 /**
