@@ -43,6 +43,10 @@ import {
 import { useEffect, useState } from "react";
 import type { LiveDiagnostic } from "./errorMarkers";
 import {
+	collectDivergenceHints,
+	type DivergenceHint
+} from "./divergenceHints";
+import {
 	collectUnfilteredWrites,
 	labelForFinding,
 	type UnfilteredFinding
@@ -109,6 +113,20 @@ export function useLiveDiagnostics(
 						rawStatementSpan
 					});
 					return;
+				}
+				// Étape 3 (PM/10 D8) — divergence hints INFO squiggly bleu discret.
+				// Émises seulement quand engine === "mongodb" (PG = référence, pas
+				// de divergence à surfacer). Priorité inférieure aux warnings :
+				// n'affichée que si aucun warning unfiltered n'a précédé.
+				if (engine === "mongodb") {
+					const hints = collectDivergenceHints(statement);
+					if (hints.length > 0) {
+						setState({
+							diag: hintToDiagnostic(hints[0]!, hints.length),
+							rawStatementSpan
+						});
+						return;
+					}
 				}
 				setState({ diag: null, rawStatementSpan });
 			} catch (err) {
@@ -201,6 +219,23 @@ function findingToDiagnostic(
 		span,
 		message: labelForFinding(finding) + suffix,
 		severity: "warning"
+	};
+}
+
+/**
+ * PM/10 D8 — convertit un divergence hint en LiveDiagnostic `info`. Squiggly
+ * bleu discret + tooltip hint depuis le registre `divergences-mongo-vs-pg`.
+ * Suffixe `(1/N)` idem findings quand plusieurs hints coexistent.
+ */
+function hintToDiagnostic(
+	hint: DivergenceHint,
+	total: number
+): LiveDiagnostic {
+	const suffix = total > 1 ? ` (1/${total})` : "";
+	return {
+		span: hint.span,
+		message: hint.message + suffix,
+		severity: "info"
 	};
 }
 
