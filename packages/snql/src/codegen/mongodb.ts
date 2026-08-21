@@ -1188,15 +1188,7 @@ function renderMongoAggExpr(
 			};
 		case "cast": {
 			const inner = renderMongoAggExpr(expr.operand, subLocalAlias, outerLetVars);
-			if (expr.target === "json") return inner;
-			const input =
-				expr.operand.kind === "field" ? { $ifNull: [inner, null] } : inner;
-			return {
-				$convert: {
-					input,
-					to: MONGO_CAST_TYPE[expr.target as Exclude<CastTarget, "json">]
-				}
-			};
+			return mongoRenderCast(inner, expr.target, expr.operand.kind === "field");
 		}
 		default:
 			throw new SnqlError(
@@ -1489,22 +1481,13 @@ function renderAggregatePipeline(
 			};
 		}
 		if (expr.kind === "cast") {
-			if (expr.target === "json") {
-				// ADR-024 PM/6 item #7 — cast(x as json) no-op sur Mongo (BSON = JSON
-				// natif). D8 squiggly INFO éditeur alerte sur `cast(str as json)` (trap
-				// type : la string ne sera pas parsée). Défense-en-profondeur : retourne
-				// l'operand tel quel après transformation récursive.
-				return transformExpr(expr.operand, insideAggArg);
-			}
+			// ADR-024 PM/6 #7 : cast(_ as json) no-op sur Mongo (BSON = JSON natif),
+			// D8 squiggly INFO éditeur alerte sur `cast(str as json)` (trap type).
+			// PA/7 (ADR-024-A) : cast(<string literal> as json) parsé au lower vers
+			// object/array literal — l'operand est déjà transformé. mongoRenderCast
+			// centralise le rendu ($dateTrunc pour target="date", $convert sinon).
 			const inner = transformExpr(expr.operand, insideAggArg);
-			const input =
-				expr.operand.kind === "field" ? { $ifNull: [inner, null] } : inner;
-			return {
-				$convert: {
-					input,
-					to: MONGO_CAST_TYPE[expr.target as Exclude<CastTarget, "json">]
-				}
-			};
+			return mongoRenderCast(inner, expr.target, expr.operand.kind === "field");
 		}
 		if (expr.kind === "object") {
 			const out: Record<string, unknown> = {};
@@ -1687,19 +1670,14 @@ function renderAggregatePipeline(
 			};
 		}
 		if (expr.kind === "cast") {
-			if (expr.target === "json") {
-				throw new SnqlError(
-					"cast(_ as json) non supporté sur mongodb",
-					"codegen_mongo_cast_unsupported",
-					expr.span
-				);
-			}
-			return {
-				$convert: {
-					input: transformHaving(expr.operand),
-					to: MONGO_CAST_TYPE[expr.target as Exclude<CastTarget, "json">]
-				}
-			};
+			// PA/7 : cast(_ as json) déjà résolu au lower pour les string literals ;
+			// operand non-literal → no-op (BSON = JSON natif). mongoRenderCast
+			// centralise $dateTrunc pour target="date", $convert sinon.
+			return mongoRenderCast(
+				transformHaving(expr.operand),
+				expr.target,
+				expr.operand.kind === "field"
+			);
 		}
 		if (expr.kind === "compare") {
 			return {
@@ -2476,24 +2454,15 @@ function toExprOperand(expr: PlanExpr, alias: string | undefined): unknown {
 		});
 	}
 	if (expr.kind === "cast") {
-		if (expr.target === "json") {
-			// ADR-024 PM/6 item #7 — cast(x as json) no-op sur Mongo (BSON = JSON
-			// natif). Retourne l'operand transformé tel quel.
-			return toExprOperand(expr.operand, alias);
-		}
-		const inner = toExprOperand(expr.operand, alias);
-		// Parité NULL avec PG : un field absent en `$convert` throw
-		// `ConversionFailure` côté Mongo, là où PG écrirait NULL. Wrap en
-		// `$ifNull` uniquement sur un operand de type field (pas besoin sinon —
-		// arith/call/literal produisent déjà une valeur définie ou null propagé).
-		const input =
-			expr.operand.kind === "field" ? { $ifNull: [inner, null] } : inner;
-		return {
-			$convert: {
-				input,
-				to: MONGO_CAST_TYPE[expr.target as Exclude<CastTarget, "json">]
-			}
-		};
+		// PA/7 (ADR-024-A) : mongoRenderCast centralise le rendu — no-op sur json
+		// (BSON = JSON natif, string literals déjà parsés au lower), $dateTrunc
+		// unit:"day" pour target="date" (émule PG date-only, comble div #15),
+		// $convert sinon avec $ifNull wrap sur field pour parité NULL PG.
+		return mongoRenderCast(
+			toExprOperand(expr.operand, alias),
+			expr.target,
+			expr.operand.kind === "field"
+		);
 	}
 	if (expr.kind === "object") {
 		// BSON natif — chaque value passe par toExprOperand récursif qui applique
@@ -2597,6 +2566,41 @@ export const MONGO_CAST_TYPE: Readonly<
 	date: "date",
 	timestamp: "date"
 };
+
+/**
+ * PA/7 (ADR-024-A) — helper centralisé pour rendre un `cast(x as target)`
+ * Mongo. Comble partiellement divergence #15 (BSON collapse date/timestamp)
+ * pour `target = "date"` : au lieu de `$convert{to:"date"}` (timestamp full),
+ * émet `$dateTrunc{date, unit:"day", timezone:"UTC"}` pour émuler PG date-only.
+ * `target = "timestamp"` reste `$convert{to:"date"}` (parity timestamp full).
+ *
+ * `operandIsField` pilote le wrap `$ifNull` : sans lui `$convert` sur un field
+ * manquant throw `ConversionFailure` côté Mongo. Avec fallback null, la row
+ * est préservée avec un cast null (parité PG NULL propagation).
+ */
+export function mongoRenderCast(
+	inputExpr: unknown,
+	target: CastTarget,
+	operandIsField: boolean
+): unknown {
+	if (target === "json") return inputExpr;
+	const wrapped = operandIsField ? { $ifNull: [inputExpr, null] } : inputExpr;
+	if (target === "date") {
+		return {
+			$dateTrunc: {
+				date: { $convert: { input: wrapped, to: "date" } },
+				unit: "day",
+				timezone: "UTC"
+			}
+		};
+	}
+	return {
+		$convert: {
+			input: wrapped,
+			to: MONGO_CAST_TYPE[target as Exclude<CastTarget, "json">]
+		}
+	};
+}
 
 function literalValue(expr: PlanExpr): unknown {
 	if (expr.kind !== "literal") {

@@ -2673,6 +2673,20 @@ function lowerExpr(expr: Expr): PlanExpr {
 				);
 			}
 			const operand = lowerExpr(expr.operand);
+			// PA/7 (ADR-024-A) — cast(<string literal> as json) : parse au lower
+			// et remplacement statique par object/array/scalar literal. Cross-
+			// engine (aucun engine-specific code). Fires SnqlError si JSON.parse
+			// échoue — signale l'erreur au parse-time, pas au runtime silent.
+			if (
+				expr.target === "json" &&
+				operand.kind === "literal" &&
+				typeof operand.value === "string"
+			) {
+				return parseJsonLiteralToPlanExpr(
+					operand.value,
+					operand.span ?? expr.span
+				);
+			}
 			// Span de l'operand pour cibler PG 22P02 (`invalid input syntax for … : "X"`)
 			// sur le fragment fautif — pas sur le mot-clé `cast`.
 			return {
@@ -3365,6 +3379,70 @@ function lowerCompare(
 
 function isNullLiteral(expr: PlanExpr): boolean {
 	return expr.kind === "literal" && expr.value === null;
+}
+
+/**
+ * PA/7 (ADR-024-A) — parse un JSON string literal en PlanExpr statique. Utilisé
+ * pour rewriter `cast('{"k":1}' as json)` en `{k: 1}` object literal au lower,
+ * cross-engine. Convertit récursivement chaque valeur JSON en son PlanExpr
+ * équivalent (object/array/literal). Fires SnqlError si JSON.parse échoue.
+ */
+function parseJsonLiteralToPlanExpr(
+	raw: string,
+	span: import("../lexer/token").Span | undefined
+): PlanExpr {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(raw);
+	} catch (e) {
+		const message = e instanceof Error ? e.message : String(e);
+		throw new SnqlError(
+			`cast('...' as json) — le string literal n'est pas du JSON valide : ${message}`,
+			"lower_cast_json_string_invalid",
+			span
+		);
+	}
+	return jsValueToPlanExpr(parsed, span);
+}
+
+function jsValueToPlanExpr(
+	value: unknown,
+	span: import("../lexer/token").Span | undefined
+): PlanExpr {
+	if (value === null) return { kind: "literal", value: null, span };
+	if (typeof value === "string") return { kind: "literal", value, span };
+	if (typeof value === "boolean") return { kind: "literal", value, span };
+	if (typeof value === "number") {
+		if (!Number.isFinite(value)) {
+			throw new SnqlError(
+				"cast('...' as json) — JSON contient une valeur numérique hors IEEE-754 finie",
+				"lower_cast_json_string_invalid",
+				span
+			);
+		}
+		return { kind: "literal", value, span };
+	}
+	if (Array.isArray(value)) {
+		return {
+			kind: "array",
+			items: value.map((item) => jsValueToPlanExpr(item, span)),
+			span
+		};
+	}
+	if (typeof value === "object") {
+		return {
+			kind: "object",
+			entries: Object.entries(value as Record<string, unknown>).map(
+				([key, val]) => ({ key, value: jsValueToPlanExpr(val, span) })
+			),
+			span
+		};
+	}
+	throw new SnqlError(
+		`cast('...' as json) — type JSON parsé non supporté (${typeof value})`,
+		"lower_cast_json_string_invalid",
+		span
+	);
 }
 
 function literalToValue(lit: LiteralValue): SqlValue {

@@ -358,4 +358,39 @@ describe.skipIf(!hasBoth)("Chinook parité PG ↔ Mongo", () => {
 		]);
 		expect(normalize(mongo)).toEqual(normalize(pg));
 	}, 20_000);
+
+	// ═══════════════════════════════════════════════════════════════════════════
+	// PA/7 (ADR-024-A) — cast(str_literal as json) parse au lower + cast date
+	// $dateTrunc
+	// ═══════════════════════════════════════════════════════════════════════════
+
+	it("cast('{...}' as json) parsé au lower : json_contains sur pattern parsé", async () => {
+		// Le string literal JSON est parsé au lower → object literal.
+		// json_contains le compare au subdoc scalar. Résultat parity PG↔Mongo.
+		const q = `find employee where json_contains(cast('{"title":"Sales Manager"}' as json), {title:"Sales Manager"}) = true pick employee_id sort employee_id asc`;
+		const [pg, mongo] = await Promise.all([
+			runOn(pgConn, q),
+			runOn(mongoConn, q)
+		]);
+		expect(normalize(mongo)).toEqual(normalize(pg));
+	}, 20_000);
+
+	it("cast(date_field as date) : $dateTrunc unit day (smoke — Mongo minuit UTC)", async () => {
+		// PA/7 : $dateTrunc unit:"day" tronque le timestamp à minuit UTC sur Mongo.
+		// Comparaison PG↔Mongo directe non-triviale : PG DATE type projeté en JS
+		// applique le fuseau local (2021-01-03 → 2021-01-02T23:00Z en Europe/Paris),
+		// alors que Mongo garde le tronqué UTC. Smoke test Mongo-only : vérifie
+		// juste que chaque row Mongo est minuit UTC (heures/min/sec/ms == 0).
+		const q = `find invoice pick cast(invoice_date as date) as day sort day asc limit 5`;
+		const mongoRows = await runOn(mongoConn, q);
+		expect(mongoRows.length).toBe(5);
+		for (const row of mongoRows) {
+			const day = row["day"];
+			if (!(day instanceof Date)) throw new Error(`day non-Date: ${day}`);
+			expect(day.getUTCHours()).toBe(0);
+			expect(day.getUTCMinutes()).toBe(0);
+			expect(day.getUTCSeconds()).toBe(0);
+			expect(day.getUTCMilliseconds()).toBe(0);
+		}
+	}, 20_000);
 });

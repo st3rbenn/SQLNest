@@ -51,13 +51,14 @@ describe("codegen mongodb — cast (T2 sprint 2)", () => {
 		]);
 	});
 
-	it("les 6 targets mappent vers les types BSON figés", () => {
+	it("les 5 targets $convert mappent vers les types BSON figés", () => {
+		// PA/7 (ADR-024-A) : target=date passe désormais par $dateTrunc unit
+		// day (émule PG date-only, comble div #15) — testé séparément.
 		const cases: [string, string][] = [
 			["int", "long"],
 			["float", "double"],
 			["text", "string"],
 			["bool", "bool"],
-			["date", "date"],
 			["timestamp", "date"]
 		];
 		for (const [target, bson] of cases) {
@@ -65,6 +66,24 @@ describe("codegen mongodb — cast (T2 sprint 2)", () => {
 			const proj = pipeline[0] as { $project: { y: { $convert: { to: string } } } };
 			expect(proj.$project.y.$convert.to).toBe(bson);
 		}
+	});
+
+	it("PA/7 : cast(x as date) → $dateTrunc unit day (émule PG date-only)", () => {
+		const { pipeline } = mongo("get t pick cast(x as date) as y");
+		expect(pipeline[0]).toEqual({
+			$project: {
+				y: {
+					$dateTrunc: {
+						date: {
+							$convert: { input: { $ifNull: ["$x", null] }, to: "date" }
+						},
+						unit: "day",
+						timezone: "UTC"
+					}
+				},
+				_id: 0
+			}
+		});
 	});
 
 	it("cast d'une arith (operand non-field, pas de $ifNull)", () => {
@@ -79,14 +98,20 @@ describe("codegen mongodb — cast (T2 sprint 2)", () => {
 		});
 	});
 
-	it("cast d'un call (operand call, pas de $ifNull)", () => {
+	it("cast d'un call as date (operand call, pas de $ifNull) — wrap $dateTrunc PA/7", () => {
 		const { pipeline } = mongo("get t pick cast(now() as date) as today");
-		const proj = pipeline[0] as {
-			$project: { today: { $convert: { input: unknown; to: string } } };
-		};
-		expect(proj.$project.today.$convert.to).toBe("date");
-		// L'input du convert n'est PAS un $ifNull — c'est directement le résultat now().
-		expect(proj.$project.today.$convert.input).toEqual("$$NOW");
+		expect(pipeline[0]).toEqual({
+			$project: {
+				today: {
+					$dateTrunc: {
+						date: { $convert: { input: "$$NOW", to: "date" } },
+						unit: "day",
+						timezone: "UTC"
+					}
+				},
+				_id: 0
+			}
+		});
 	});
 
 	it("cast imbriqué", () => {

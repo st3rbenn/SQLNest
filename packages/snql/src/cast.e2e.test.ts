@@ -78,14 +78,17 @@ describe("E2E cast cross-engine — SNQL identique, sortie engine-spécifique", 
 		expect(proj.$project.y.$convert.to).toBe("bool");
 	});
 
-	it("cast(x as date) — PG date / Mongo date", () => {
+	it("cast(x as date) — PG date / Mongo $dateTrunc unit day (PA/7 émule date-only)", () => {
 		const src = "get t pick cast(x as date) as y";
 		expect(pgSql(src)).toContain(`CAST("x" AS date)`);
 		const proj = mongoPipeline(src)[0] as {
-			$project: { y: { $convert: { to: string } } };
+			$project: { y: { $dateTrunc: { unit: string; timezone: string } } };
 		};
-		// Divergence documentée : Mongo n'a pas de date-only, produit un Date UTC.
-		expect(proj.$project.y.$convert.to).toBe("date");
+		// PA/7 : comble divergence #15 partiel — $dateTrunc unit:"day" émule
+		// PG date-only en tronquant à minuit UTC (au lieu de $convert to date
+		// qui laisserait un timestamp full).
+		expect(proj.$project.y.$dateTrunc.unit).toBe("day");
+		expect(proj.$project.y.$dateTrunc.timezone).toBe("UTC");
 	});
 
 	it("cast(x as timestamp) — PG timestamptz / Mongo date (collapse)", () => {
@@ -115,6 +118,43 @@ describe("E2E cast cross-engine — cast(_ as json) : PG jsonb, Mongo no-op (ADR
 	});
 });
 
+describe("PA/7 (ADR-024-A) — cast(<string literal> as json) parsé au lower cross-engine", () => {
+	it("cast('{\"k\":1}' as json) → object literal parsé (Mongo BSON natif)", () => {
+		const pipeline = mongoPipeline(
+			'get t pick cast(\'{"k":1}\' as json) as d'
+		);
+		const proj = pipeline[0] as { $project: { d: { k: number } } };
+		expect(proj.$project.d).toEqual({ k: 1 });
+	});
+
+	it("cast('[1,2,3]' as json) → array literal parsé", () => {
+		const pipeline = mongoPipeline("get t pick cast('[1,2,3]' as json) as d");
+		const proj = pipeline[0] as { $project: { d: readonly number[] } };
+		expect(proj.$project.d).toEqual([1, 2, 3]);
+	});
+
+	it("cast('invalid{{' as json) → SnqlError lower_cast_json_string_invalid", () => {
+		try {
+			mongoPipeline("get t pick cast('invalid{{' as json) as d");
+			throw new Error("SnqlError attendu");
+		} catch (e) {
+			if (!(e instanceof SnqlError)) throw e;
+			expect(e.code).toBe("lower_cast_json_string_invalid");
+			expect(e.message).toContain("JSON valide");
+		}
+	});
+
+	it("cast('{\"a\":{\"b\":true}}' as json) → nested object literal", () => {
+		const pipeline = mongoPipeline(
+			'get t pick cast(\'{"a":{"b":true}}\' as json) as d'
+		);
+		const proj = pipeline[0] as {
+			$project: { d: { a: { b: boolean } } };
+		};
+		expect(proj.$project.d).toEqual({ a: { b: true } });
+	});
+});
+
 describe("E2E cast — compositions", () => {
 	it("cast d'une arith cross-engine", () => {
 		const src = "get t pick cast(a + b as int) as sum";
@@ -129,14 +169,22 @@ describe("E2E cast — compositions", () => {
 		});
 	});
 
-	it("cast d'un call cross-engine", () => {
+	it("cast d'un call cross-engine — PA/7 $dateTrunc pour date", () => {
 		const src = "get t pick cast(now() as date) as today";
 		expect(pgSql(src)).toContain(`CAST(NOW() AS date)`);
 		const proj = mongoPipeline(src)[0] as {
-			$project: { today: { $convert: { input: unknown; to: string } } };
+			$project: {
+				today: {
+					$dateTrunc: {
+						date: { $convert: { input: unknown; to: string } };
+						unit: string;
+					};
+				};
+			};
 		};
-		expect(proj.$project.today.$convert.to).toBe("date");
-		expect(proj.$project.today.$convert.input).toBe("$$NOW");
+		expect(proj.$project.today.$dateTrunc.unit).toBe("day");
+		expect(proj.$project.today.$dateTrunc.date.$convert.input).toBe("$$NOW");
+		expect(proj.$project.today.$dateTrunc.date.$convert.to).toBe("date");
 	});
 
 	it("cast imbriqué cross-engine", () => {

@@ -22,6 +22,12 @@ export type PlannerErrorCode =
 	// Cast
 	| "planner_cast_target_unsupported"
 	| "planner_cast_from_jsonb_unsupported"
+	// PA/7 (ADR-024-A) — cast(<dynamic expr> as json) sur Mongo. Le lower parse
+	// les string literals au compile-time ; les operands non-literal (field/call
+	// /cast) restent no-op silent PM/6 (BSON = JSON natif). Le codegen mongo
+	// refuse quand l'operand est CLAIREMENT un string (post-cast(_ as text)),
+	// pour éviter le trap "cast à runtime silent" documenté D8.
+	| "planner_mongo_cast_str_to_json_dynamic_v3"
 	// Aggregates
 	| "planner_agg_bare_field_needs_group"
 	| "planner_agg_unique_mongo_unsupported_sum_avg"
@@ -108,6 +114,7 @@ export const PLANNER_ERROR_CODES: ReadonlySet<PlannerErrorCode> =
 		"planner_unsupported_function",
 		"planner_cast_target_unsupported",
 		"planner_cast_from_jsonb_unsupported",
+		"planner_mongo_cast_str_to_json_dynamic_v3",
 		"planner_agg_bare_field_needs_group",
 		"planner_agg_unique_mongo_unsupported_sum_avg",
 		"planner_json_get_compare_ambiguous",
