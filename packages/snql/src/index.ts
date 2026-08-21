@@ -192,6 +192,15 @@ export {
 } from "./planner/planner";
 export type { PlannerErrorCode } from "./planner/errors/registry";
 export { PLANNER_ERROR_CODES, plannerError } from "./planner/errors/registry";
+export type {
+	DivergenceEntry,
+	DivergenceMitigation
+} from "./divergences-mongo-vs-pg";
+export {
+	DIVERGENCES,
+	divergenceByCode,
+	hintsForConstruct
+} from "./divergences-mongo-vs-pg";
 export {
 	assertMongoPipeline,
 	assertMongoRefused,

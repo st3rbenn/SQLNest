@@ -59,13 +59,16 @@ export const mongoCoalesce: EngineRenderer = (args, ctx) => {
 export const mongoNow: EngineRenderer = () => "$$NOW";
 
 /**
- * `concat(a, b, …)` → `{ $concat: [<a>, <b>, …] }` — Mongo propage NULL si un
- * arg est null (comportement diffère de PG.CONCAT qui traite NULL comme "").
- * L'écart est documenté ; T2 sprint 1 assume la sémantique de chaque moteur.
+ * `concat(a, b, …)` → `{ $concat: [{$ifNull:[<a>,""]},{$ifNull:[<b>,""]}, …] }`.
+ * ADR-024 PM/8 divergence #13 — chaque arg wrappé dans `$ifNull:[_,""]` pour
+ * atteindre la parité PG.CONCAT (traite NULL comme ""). Coût = 1 op par arg
+ * (passe le critère Q7c : ≤ 1 op ET sémantique PG exacte). Le refus write
+ * context reste en place (writeNullBehavior non déclaré) — le shim ne s'applique
+ * qu'en projection/read.
  */
 export const mongoConcat: EngineRenderer = (args, ctx) => {
 	const rendered = renderArgs(args, ctx);
-	return { $concat: rendered };
+	return { $concat: rendered.map((r) => ({ $ifNull: [r, ""] })) };
 };
 
 // ─── sprint 3 : string ─────────────────────────────────────────────────────
