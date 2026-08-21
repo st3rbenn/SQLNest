@@ -1,68 +1,141 @@
 /**
- * ADR-024 PM/2 — Sibling parité Mongo pour correlated sub-queries. Mirror
- * de correlated-subquery-t212-e2e.test.ts (oracle PG accepte correlated
- * via ScopeStack + pushdown SELECT). Mongo refuse au planner via
- * `assertUncorrelatedSubqueryForMaterialize` (moved from run.ts, PM/2).
+ * ADR-024-A PA/1 — Sibling parité Mongo pour correlated sub-queries. Mirror
+ * de correlated-subquery-t212-e2e.test.ts (oracle PG accepte correlated via
+ * ScopeStack + pushdown SELECT). Mongo accepte désormais via lift-lookup
+ * ($lookup{from, let, pipeline, as} — 5.0+) en remplacement du refus PM/2
+ * (assertUncorrelatedSubqueryForMaterialize).
  *
- * Verrous stricts : chaque cas où PG accepte doit produire un refus typé
- * `planner_subquery_unsupported` sur Mongo avec message actionnable.
- * Ticket v3+ : rewrite `$lookup` sub-pipeline natif.
+ * Verrous shape : chaque cas produit exactement la séquence attendue [$lookup,
+ * $match, $unset]. Restrictions MVP hors-scope conservées (nested v3+,
+ * disjonction OR/NOT/case, sub-find complexe) — refus typés dédiés.
  */
 
 import { describe, expect, it } from "vitest";
-import { assertMongoRefused } from "./index";
+import { assertMongoPipeline, assertMongoRefused } from "./index";
 
-describe("PM/2 — correlated subquery Mongo refusée systématiquement (v3+)", () => {
-	it("exists corrélée simple : refus", () => {
-		assertMongoRefused(
-			"find users as u where exists (find orders as o where o.user_id = u.id)",
-			"planner_subquery_unsupported"
+describe("PA/1 — correlated exists lift-lookup", () => {
+	it("exists corrélée : $lookup + $match ne empty + $unset", () => {
+		const pipeline = assertMongoPipeline(
+			"find users as u where exists (find orders as o where o.user_id = u.id)"
 		);
+		expect(pipeline).toEqual([
+			{
+				$lookup: {
+					from: "orders",
+					let: { outer_id: "$id" },
+					pipeline: [
+						{
+							$match: {
+								$expr: { $eq: ["$user_id", "$$outer_id"] }
+							}
+						}
+					],
+					as: "__sq_0"
+				}
+			},
+			{ $match: { __sq_0: { $ne: [] } } },
+			{ $unset: ["__sq_0"] }
+		]);
 	});
 
-	it("in (corrélée) sur champ outer : refus", () => {
-		assertMongoRefused(
-			"find users as u where u.id in (find orders as o where o.total > u.age pick o.user_id)",
-			"planner_subquery_unsupported"
+	it("not exists corrélée : $match eq empty", () => {
+		const pipeline = assertMongoPipeline(
+			"find users as u where not exists (find orders as o where o.user_id = u.id)"
 		);
+		expect(pipeline[1]).toEqual({ $match: { __sq_0: { $eq: [] } } });
+	});
+});
+
+describe("PA/1 — correlated `in (subq pick col)` lift-lookup", () => {
+	it("in (correlated pick col) : $lookup + $expr $in + $unset", () => {
+		const pipeline = assertMongoPipeline(
+			"find users as u where u.id in (find orders as o where o.total > u.age pick o.user_id)"
+		);
+		expect(pipeline).toEqual([
+			{
+				$lookup: {
+					from: "orders",
+					let: { outer_age: "$age" },
+					pipeline: [
+						{
+							$match: {
+								$expr: { $gt: ["$total", "$$outer_age"] }
+							}
+						},
+						{ $project: { _id: 0, user_id: 1 } }
+					],
+					as: "__sq_0"
+				}
+			},
+			{
+				$match: {
+					$expr: { $in: ["$id", "$__sq_0.user_id"] }
+				}
+			},
+			{ $unset: ["__sq_0"] }
+		]);
+	});
+});
+
+describe("PA/1 — correlated combinée avec AND top-level", () => {
+	it("where compare AND exists corrélée : predicate résiduel + match addition", () => {
+		const pipeline = assertMongoPipeline(
+			'find users as u where u.email = "x" and exists (find orders as o where o.user_id = u.id)'
+		);
+		const matchStage = pipeline[1] as { $match: Record<string, unknown> };
+		expect(matchStage.$match).toEqual({
+			$and: [{ email: { $eq: "x" } }, { __sq_0: { $ne: [] } }]
+		});
+	});
+});
+
+describe("PA/1 — verrous MVP refus explicites", () => {
+	it("correlated sous OR : refus disjunction_v3", () => {
+		const err = assertMongoRefused(
+			'find users as u where u.email = "x" or exists (find orders as o where o.user_id = u.id)',
+			"planner_correlated_subquery_in_disjunction_v3"
+		);
+		expect(err.message).toContain("OR/NOT/case");
 	});
 
-	it("not exists corrélée : refus", () => {
-		assertMongoRefused(
-			"find users as u where not exists (find orders as o where o.user_id = u.id)",
-			"planner_subquery_unsupported"
-		);
-	});
-
-	it("corrélée dans un aggregate having : refus", () => {
-		// having qui référence outer via subquery corrélée. Fires même via aggregate.having walker.
-		assertMongoRefused(
-			"find users as u group by u.id having count(*) > 0 and exists (find orders as o where o.user_id = u.id) pick u.id",
-			"planner_subquery_unsupported"
-		);
-	});
-
-	it("corrélée 2 niveaux (inner ref outermost) : refus", () => {
-		assertMongoRefused(
+	it("correlated 2 niveaux (inner ref outermost) : refus nested_v3", () => {
+		const err = assertMongoRefused(
 			"find users as u where exists (find orders as o where exists (find items as i where i.tag = u.name))",
-			"planner_subquery_unsupported"
+			"planner_correlated_subquery_nested_v3"
+		);
+		expect(err.message).toContain("MVP");
+	});
+
+	it("correlated avec sort dans le sub-find : refus complex_v3", () => {
+		const err = assertMongoRefused(
+			"find users as u where exists (find orders as o where o.user_id = u.id sort o.total desc)",
+			"planner_correlated_subquery_complex_v3"
+		);
+		expect(err.message).toContain("MVP");
+	});
+
+	it("correlated avec limit dans le sub-find : refus complex_v3", () => {
+		assertMongoRefused(
+			"find users as u where exists (find orders as o where o.user_id = u.id take 5)",
+			"planner_correlated_subquery_complex_v3"
 		);
 	});
 
-	it("message inclut l'alias outer référencé (diagnostic actionnable)", () => {
+	it("message inclut l'alias outer référencé pour nested", () => {
 		const err = assertMongoRefused(
-			"find users as u where exists (find orders as o where o.user_id = u.id)",
-			"planner_subquery_unsupported"
+			"find users as u where exists (find orders as o where exists (find items as i where i.tag = u.name))",
+			"planner_correlated_subquery_nested_v3"
 		);
-		expect(err.message).toContain("u.<col>");
-		expect(err.message).toContain("outer");
+		expect(err.message).toContain("'u'");
 	});
+});
 
-	it("suggère le contournement 'with one' + let dans le message", () => {
+describe("PA/1 — correlated dans aggregate having (MVP hors-scope)", () => {
+	it("having correlated : refus complex_v3 (lift-lookup câblé sur where uniquement)", () => {
 		const err = assertMongoRefused(
-			"find users as u where u.id in (find orders as o where o.total > u.age pick o.user_id)",
-			"planner_subquery_unsupported"
+			"find users as u group by u.id having count(*) > 0 and exists (find orders as o where o.user_id = u.id) pick u.id",
+			"planner_correlated_subquery_complex_v3"
 		);
-		expect(err.message).toMatch(/with one|let/);
+		expect(err.message).toContain("having");
 	});
 });

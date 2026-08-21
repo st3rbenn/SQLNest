@@ -103,14 +103,21 @@ export const PARITY_CASES: readonly ParityCase[] = [
 		engines: ["postgres", "mongodb"],
 		runtimeMaterialized: ["mongodb"]
 	},
-	// PG-only : correlated (Mongo refuse au planner v3+)
+	// PA/1 (ADR-024-A) — correlated liftée en $lookup{let,pipeline} : compile OK
+	// sur les 2 engines. Nested 2+ niveaux reste hors scope MVP.
 	{
-		id: "subquery-correlated-refused-mongo",
+		id: "subquery-correlated-lift-lookup",
 		source: "find users as u where exists (find orders as o where o.user_id = u.id)",
+		engines: ["postgres", "mongodb"]
+	},
+	// Verrou refus MVP hors-scope : nested 2+ niveaux
+	{
+		id: "subquery-correlated-nested-refused-mongo",
+		source: "find users as u where exists (find orders as o where exists (find items as i where i.tag = u.name))",
 		engines: ["postgres"],
 		expectedRefusal: {
 			engine: "mongodb",
-			code: "planner_subquery_unsupported"
+			code: "planner_correlated_subquery_nested_v3"
 		}
 	},
 	// ─── CTE / let (PM/3) ───────────────────────────────────────────────

@@ -65,15 +65,15 @@ describe("mongoSql / mongoPipeline (ADR-024 D11)", () => {
 });
 
 describe("assertMongoRefused (ADR-024 D11)", () => {
-	it("correlated subquery Mongo → planner_subquery_unsupported", () => {
-		// PM/2 : uncorrelated est désormais accepté sur Mongo (matérialisation
-		// runtime). Seul correlated (reference outer alias) reste refusé au planner.
+	it("correlated subquery nested 2+ niveaux Mongo → refus MVP", () => {
+		// PA/1 : correlated 1 niveau désormais liftée en $lookup{let,pipeline}
+		// sur Mongo. Nested 2+ niveaux reste hors scope MVP → refus dédié.
 		const err = assertMongoRefused(
-			"find users as u where exists (find orders as o where o.user_id = u.id)",
-			"planner_subquery_unsupported"
+			"find users as u where exists (find orders as o where exists (find items as i where i.tag = u.name))",
+			"planner_correlated_subquery_nested_v3"
 		);
 		expect(err).toBeInstanceOf(SnqlError);
-		expect(err.code).toBe("planner_subquery_unsupported");
+		expect(err.code).toBe("planner_correlated_subquery_nested_v3");
 	});
 
 	it("write-join Mongo (PM/4) → codegen aggregate+$merge, plus de refus", () => {
@@ -111,11 +111,11 @@ describe("assertMongoRefused (ADR-024 D11)", () => {
 	it("échec descriptif si code différent de l'attendu", () => {
 		expect(() =>
 			assertMongoRefused(
-				"find users as u where exists (find orders as o where o.user_id = u.id)",
+				"find users as u where exists (find orders as o where exists (find items as i where i.tag = u.name))",
 				"planner_let_unsupported"
 			)
 		).toThrow(
-			/code attendu 'planner_let_unsupported', reçu 'planner_subquery_unsupported'/
+			/code attendu 'planner_let_unsupported', reçu 'planner_correlated_subquery_nested_v3'/
 		);
 	});
 });

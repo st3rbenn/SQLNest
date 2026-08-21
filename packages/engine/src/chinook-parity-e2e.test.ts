@@ -237,15 +237,42 @@ describe.skipIf(!hasBoth)("Chinook parité PG ↔ Mongo", () => {
 	}, 20_000);
 
 	// ═══════════════════════════════════════════════════════════════════════════
-	// Refus explicit — corrélées Mongo → message clair
+	// Correlated subquery (PA/1 — ADR-024-A) : lift-lookup $lookup{let,pipeline}
 	// ═══════════════════════════════════════════════════════════════════════════
 
-	it("corrélée Mongo → refus explicit avec hint (pas d'erreur cryptique)", async () => {
+	it("exists corrélée (customer avec au moins 1 invoice)", async () => {
 		const q = `find customer as c where exists (find invoice as i where i.customer_id = c.customer_id) pick customer_id sort customer_id asc limit 3`;
-		// PG passe natif
-		const pg = await runOn(pgConn, q);
-		expect(pg.length).toBeGreaterThan(0);
-		// Mongo refuse avec un message qui parle de corrélée + hint
-		await expect(runOn(mongoConn, q)).rejects.toThrow(/corrélée|correl/i);
+		const [pg, mongo] = await Promise.all([
+			runOn(pgConn, q),
+			runOn(mongoConn, q)
+		]);
+		expect(normalize(mongo)).toEqual(normalize(pg));
+	}, 20_000);
+
+	it("exists corrélée (album avec au moins 1 track — canon PA/1 roadmap)", async () => {
+		const q = `find album as a where exists (find track as t where t.album_id = a.album_id) pick album_id sort album_id asc limit 5`;
+		const [pg, mongo] = await Promise.all([
+			runOn(pgConn, q),
+			runOn(mongoConn, q)
+		]);
+		expect(normalize(mongo)).toEqual(normalize(pg));
+	}, 20_000);
+
+	it("not exists corrélée (album sans track)", async () => {
+		const q = `find album as a where not exists (find track as t where t.album_id = a.album_id) pick album_id sort album_id asc limit 5`;
+		const [pg, mongo] = await Promise.all([
+			runOn(pgConn, q),
+			runOn(mongoConn, q)
+		]);
+		expect(normalize(mongo)).toEqual(normalize(pg));
+	}, 20_000);
+
+	it("in (subquery corrélée pick col)", async () => {
+		const q = `find customer as c where c.customer_id in (find invoice as i where i.total > 20 pick i.customer_id) pick customer_id sort customer_id asc limit 5`;
+		const [pg, mongo] = await Promise.all([
+			runOn(pgConn, q),
+			runOn(mongoConn, q)
+		]);
+		expect(normalize(mongo)).toEqual(normalize(pg));
 	}, 20_000);
 });

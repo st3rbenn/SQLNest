@@ -32,6 +32,12 @@ export type PlannerErrorCode =
 	// PM/2 — refus dédié D16 correlated dans binding CTE (invisible sans code
 	// dédié : élargit planner_subquery_unsupported avec un message actionnable)
 	| "planner_correlated_subquery_in_cte_binding_unsupported"
+	// PA/1 (ADR-024-A) — correlated subquery Mongo liftée via $lookup{let,pipeline}
+	// (5.0+) : MVP accepte 1 outer field ref sur 1 niveau, refuse les patterns
+	// v3+ (nested 2+ niveaux, disjonction OR/NOT, sub-find complexe).
+	| "planner_correlated_subquery_nested_v3"
+	| "planner_correlated_subquery_in_disjunction_v3"
+	| "planner_correlated_subquery_complex_v3"
 	// CTE / let
 	| "planner_let_unsupported"
 	// PM/3 — refus dédié D17 join CTE↔collection Mongo v1 (materializeLet
@@ -101,6 +107,9 @@ export const PLANNER_ERROR_CODES: ReadonlySet<PlannerErrorCode> =
 		"planner_json_get_compare_ambiguous",
 		"planner_subquery_unsupported",
 		"planner_correlated_subquery_in_cte_binding_unsupported",
+		"planner_correlated_subquery_nested_v3",
+		"planner_correlated_subquery_in_disjunction_v3",
+		"planner_correlated_subquery_complex_v3",
 		"planner_let_unsupported",
 		"planner_cte_body_join_mongo_unsupported",
 		"planner_mongo_cte_write_requires_txn",

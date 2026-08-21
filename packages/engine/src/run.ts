@@ -16,6 +16,7 @@ import {
 	assertTransactionSupported,
 	assertUncorrelatedSubqueryForMaterialize,
 	capabilitiesFor,
+	detectOuterAliasesInSubplan,
 	collectIdentSpans,
 	compensate,
 	getMapper,
@@ -596,9 +597,13 @@ async function resolveSubqueries(
 	): Promise<import("@sqlnest/snql").PlanExpr> => {
 		switch (expr.kind) {
 			case "subquery": {
-				// ADR-024 PM/2 — refus correlated migré au planner (assertUncorrelated
-				// SubqueryForMaterialize dans planner.ts). Ici on est garanti d'avoir
-				// un subplan uncorrelated ; le walker matérialise en 1 shot.
+				// ADR-024 PM/2 → PA/1 (ADR-024-A) — les subqueries CORRELATED sont
+				// laissées dans le plan pour que le codegen Mongo les rewrite en
+				// lift-lookup ($lookup{let,pipeline}). Seules les uncorrelated
+				// passent par la matérialisation runtime en 1 shot.
+				if (detectOuterAliasesInSubplan(expr.plan).length > 0) {
+					return expr;
+				}
 				const rows = await executeInnerSelect(expr.plan);
 				// Une subquery en position `values` d'un `in` est enveloppée juste
 				// en dessous — mais on ne le sait pas ici. On remplace par un array
@@ -611,7 +616,10 @@ async function resolveSubqueries(
 				};
 			}
 			case "exists": {
-				// ADR-024 PM/2 — refus correlated migré au planner.
+				// PA/1 — skip correlated pour lift-lookup côté codegen Mongo.
+				if (detectOuterAliasesInSubplan(expr.subplan).length > 0) {
+					return expr;
+				}
 				const rows = await executeInnerSelect(expr.subplan);
 				// Un literal bool nu n'est pas un predicate valide côté Mongo
 				// ($match refuse `true`). On wrap en compare toujours vrai/faux
@@ -713,7 +721,10 @@ async function resolveSubqueries(
 		values: readonly import("@sqlnest/snql").PlanExpr[]
 	): Promise<readonly import("@sqlnest/snql").PlanExpr[]> => {
 		if (values.length === 1 && values[0]?.kind === "subquery") {
-			// ADR-024 PM/2 — refus correlated migré au planner.
+			// PA/1 — skip correlated pour lift-lookup côté codegen Mongo.
+			if (detectOuterAliasesInSubplan(values[0].plan).length > 0) {
+				return values;
+			}
 			const rows = await executeInnerSelect(values[0].plan);
 			return rows.map((r) => {
 				const keys = Object.keys(r);

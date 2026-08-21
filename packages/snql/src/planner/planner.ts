@@ -740,37 +740,343 @@ function assertSubqueryCapability(
 }
 
 /**
- * ADR-024 PM/2 — walker planner qui rejette les sub-queries corrélées quand
- * l'engine résout par matérialisation (Mongo). Une corrélée nécessiterait
- * une exécution par row outer (N+1) ; la matérialisation en 1 shot ne peut
- * pas la porter. Le rewrite `$lookup` sub-pipeline natif est l'objectif v3+.
+ * ADR-024 PM/2 → PA/1 (ADR-024-A) — walker planner qui gouverne les
+ * sub-queries corrélées côté engine à stratégie `materialize` (Mongo).
  *
- * Détection : linearize le subplan, extrait le scan racine → alias local.
- * Tout `field ref head.<...>` avec `head !== localAlias` = ref outer.
- * Déplacé de `packages/engine/src/run.ts` où le refus était tardif (runtime
- * EngineExecutionError) et incohérent doctrine T2/11-15.
+ * PM/2 (historique) : toute corrélée refusée `planner_subquery_unsupported`
+ * → matérialisation en 1 shot incapable de porter N+1 exécutions.
+ *
+ * PA/1 (courant) : les corrélées liftables via `$lookup{let, pipeline}` (5.0+)
+ * sont acceptées, le codegen Mongo les rewrite en lift-lookup. On ne refuse
+ * plus qu'à l'entrée des patterns non-MVP :
+ *  - corrélée nested 2+ niveaux avec cross-refs → `planner_correlated_subquery_nested_v3`
+ *  - corrélée sous OR/NOT/case (disjonction) → `planner_correlated_subquery_in_disjunction_v3`
+ *  - sub-find complexe (sort/limit/aggregate/join dans le sub) → `planner_correlated_subquery_complex_v3`
+ *
+ * Nom historique conservé pour compat callers (`run.ts`, tests) — voir alias
+ * `assertCorrelatedSubqueryLiftable` ci-dessous.
  */
 export function assertUncorrelatedSubqueryForMaterialize(
 	plan: LogicalPlan,
 	capabilities: Capabilities
 ): void {
-	visitPlanExprs(plan, (expr) => {
-		const subplan: LogicalPlan | null =
-			expr.kind === "subquery"
-				? expr.plan
-				: expr.kind === "exists"
-					? expr.subplan
-					: null;
-		if (subplan === null) return;
-		const outerAliases = detectOuterAliasesInSubplan(subplan);
-		if (outerAliases.length === 0) return;
-		const first = outerAliases[0];
-		throw new SnqlError(
-			`Sub-query corrélée non supportée sur '${capabilities.engine}' — la référence '${first}.<col>' pointe vers un scope outer, la matérialisation runtime ne peut pas la porter (nécessiterait une exécution par row outer). Contournement : refactor en 'find outer with one inner on outer.pk = inner.fk' (join), ou matérialise l'outer via un 'let' séparé. Ticket v3+ : rewrite en $lookup sub-pipeline natif.`,
-			"planner_subquery_unsupported",
-			expr.span
-		);
+	visitPlanRootExprs(plan, (rootExpr, context) => {
+		if (context === "having") {
+			assertNoCorrelatedInHaving(rootExpr, capabilities);
+			return;
+		}
+		assertCorrelatedSubqueryInRootExpr(rootExpr, capabilities);
 	});
+}
+
+/**
+ * PA/1 MVP scope : le lift-lookup n'est câblé que dans `appendStage` case
+ * "filter" du codegen Mongo — le having d'aggregate passe par une autre voie
+ * (`renderAggregatePipeline`) qui n'a pas encore l'extract correspondant.
+ * Refus explicite en amont pour éviter un refus tardif codegen.
+ */
+function assertNoCorrelatedInHaving(
+	root: PlanExpr,
+	capabilities: Capabilities
+): void {
+	const walk = (expr: PlanExpr): void => {
+		switch (expr.kind) {
+			case "subquery":
+			case "exists": {
+				const subplan =
+					expr.kind === "subquery" ? expr.plan : expr.subplan;
+				if (detectOuterAliasesInSubplan(subplan).length > 0) {
+					throw new SnqlError(
+						`Sub-query corrélée dans un 'having' non supportée v1 sur '${capabilities.engine}' (PA/1 MVP : lift-lookup câblé sur le 'where' uniquement) — extrais la corrélée avant le group by, ou utilise 'let' matérialisé.`,
+						"planner_correlated_subquery_complex_v3",
+						expr.span
+					);
+				}
+				return;
+			}
+			case "and":
+			case "or":
+			case "compare":
+			case "arith":
+				walk(expr.left);
+				walk(expr.right);
+				return;
+			case "not":
+			case "isNull":
+			case "cast":
+				walk(expr.operand);
+				return;
+			case "in":
+				walk(expr.target);
+				for (const v of expr.values) walk(v);
+				return;
+			case "call":
+			case "windowCall":
+				for (const a of expr.args) walk(a);
+				return;
+			case "case":
+				for (const b of expr.branches) {
+					walk(b.cond);
+					walk(b.value);
+				}
+				walk(expr.elseValue);
+				return;
+			case "object":
+				for (const e of expr.entries) walk(e.value);
+				return;
+			case "array":
+				for (const i of expr.items) walk(i);
+				return;
+			case "literal":
+			case "field":
+			case "upsertNew":
+				return;
+		}
+	};
+	walk(root);
+}
+
+export { assertUncorrelatedSubqueryForMaterialize as assertCorrelatedSubqueryLiftable };
+
+/**
+ * Walker par-racine du predicate/having : traverse en tracking si on descend
+ * sous une disjonction (OR/NOT/case). Chaque subquery/exists rencontré est
+ * classifié uncorrelated (skip) ou correlated (checks MVP).
+ */
+function assertCorrelatedSubqueryInRootExpr(
+	root: PlanExpr,
+	capabilities: Capabilities
+): void {
+	const walk = (expr: PlanExpr, insideDisjunction: boolean): void => {
+		switch (expr.kind) {
+			case "and":
+				walk(expr.left, insideDisjunction);
+				walk(expr.right, insideDisjunction);
+				return;
+			case "or":
+				walk(expr.left, true);
+				walk(expr.right, true);
+				return;
+			case "not":
+				// Cas spécial `not exists (correlated)` : pattern liftable direct
+				// (émet `{__sq_N: {$eq: []}}`), donc le `not` ne bascule pas en
+				// disjonction. Autres `not(...)` restent traités comme disjonction.
+				walk(
+					expr.operand,
+					expr.operand.kind === "exists" ? insideDisjunction : true
+				);
+				return;
+			case "case":
+				for (const b of expr.branches) {
+					walk(b.cond, true);
+					walk(b.value, true);
+				}
+				walk(expr.elseValue, true);
+				return;
+			case "compare":
+			case "arith":
+				walk(expr.left, insideDisjunction);
+				walk(expr.right, insideDisjunction);
+				return;
+			case "isNull":
+			case "cast":
+				walk(expr.operand, insideDisjunction);
+				return;
+			case "in":
+				walk(expr.target, insideDisjunction);
+				for (const v of expr.values) walk(v, insideDisjunction);
+				return;
+			case "call":
+			case "windowCall":
+				for (const a of expr.args) walk(a, insideDisjunction);
+				return;
+			case "object":
+				for (const e of expr.entries) walk(e.value, insideDisjunction);
+				return;
+			case "array":
+				for (const i of expr.items) walk(i, insideDisjunction);
+				return;
+			case "subquery":
+			case "exists": {
+				const subplan =
+					expr.kind === "subquery" ? expr.plan : expr.subplan;
+				const outerAliases = detectOuterAliasesInSubplan(subplan);
+				if (outerAliases.length === 0) return;
+				const first = outerAliases[0]!;
+				assertCorrelatedSubqueryLiftableShape(
+					subplan,
+					outerAliases,
+					insideDisjunction,
+					capabilities,
+					first,
+					expr.span
+				);
+				return;
+			}
+			case "literal":
+			case "field":
+			case "upsertNew":
+				return;
+		}
+	};
+	walk(root, false);
+}
+
+/**
+ * PA/1 MVP gates — refuse les patterns non-liftables avec un code typé.
+ * Le sub-find liftable = `find <coll> [as a] where <predicate ref outer> [pick col]`.
+ */
+function assertCorrelatedSubqueryLiftableShape(
+	subplan: LogicalPlan,
+	outerAliases: readonly string[],
+	insideDisjunction: boolean,
+	capabilities: Capabilities,
+	firstOuterAlias: string,
+	span: Span | undefined
+): void {
+	if (insideDisjunction) {
+		throw new SnqlError(
+			`Sub-query corrélée sous OR/NOT/case non supportée sur '${capabilities.engine}' (PA/1 MVP : lift-lookup accepte le predicate racine et les AND top-level uniquement) — remonte la corrélée hors de la disjonction, ou refactor en 'with one'. Ticket v3+ : rewrite $lookup dans une $facet branche.`,
+			"planner_correlated_subquery_in_disjunction_v3",
+			span
+		);
+	}
+	if (outerAliases.length > 1) {
+		throw new SnqlError(
+			`Sub-query corrélée référence plusieurs alias outer (${outerAliases.map((a) => `'${a}'`).join(", ")}) non supportée v1 (PA/1 MVP : 1 alias outer max). Ticket v3+ : $lookup{let} multi-vars.`,
+			"planner_correlated_subquery_nested_v3",
+			span
+		);
+	}
+	const ops = linearize(subplan);
+	for (const op of ops) {
+		switch (op.op) {
+			case "scan":
+			case "filter":
+				break;
+			case "project": {
+				for (const f of op.fields) {
+					if (f.expr !== undefined && f.expr.kind !== "field") {
+						throw new SnqlError(
+							`Sub-query corrélée avec projection calculée non supportée v1 (PA/1 MVP : pick de champs simples uniquement) — extrais l'expression avant.`,
+							"planner_correlated_subquery_complex_v3",
+							span
+						);
+					}
+				}
+				break;
+			}
+			case "sort":
+			case "limit":
+			case "aggregate":
+			case "join":
+				throw new SnqlError(
+					`Sub-query corrélée avec stage '${op.op}' non supportée v1 (PA/1 MVP : scan + filter + pick simples uniquement) — refactor via 'let' matérialisé, ou attends le lift-lookup complet v3.`,
+					"planner_correlated_subquery_complex_v3",
+					span
+				);
+		}
+	}
+	visitPlanRootExprs(subplan, (rootExpr) => {
+		const nested = findNestedSubquery(rootExpr);
+		if (nested !== null) {
+			throw new SnqlError(
+				`Sub-query corrélée avec sub-query imbriquée dans le sub-find non supportée v1 (PA/1 MVP : 1 niveau de corrélation) — remonte la seconde au niveau outer. Alias outer référencé : '${firstOuterAlias}'.`,
+				"planner_correlated_subquery_nested_v3",
+				nested.span ?? span
+			);
+		}
+	});
+}
+
+/** Cherche récursivement la première subquery/exists imbriquée dans une expression. */
+function findNestedSubquery(expr: PlanExpr): PlanExpr | null {
+	switch (expr.kind) {
+		case "subquery":
+		case "exists":
+			return expr;
+		case "and":
+		case "or":
+		case "compare":
+		case "arith": {
+			const l = findNestedSubquery(expr.left);
+			if (l !== null) return l;
+			return findNestedSubquery(expr.right);
+		}
+		case "not":
+		case "isNull":
+		case "cast":
+			return findNestedSubquery(expr.operand);
+		case "in": {
+			const t = findNestedSubquery(expr.target);
+			if (t !== null) return t;
+			for (const v of expr.values) {
+				const n = findNestedSubquery(v);
+				if (n !== null) return n;
+			}
+			return null;
+		}
+		case "call":
+		case "windowCall":
+			for (const a of expr.args) {
+				const n = findNestedSubquery(a);
+				if (n !== null) return n;
+			}
+			return null;
+		case "case":
+			for (const b of expr.branches) {
+				const c = findNestedSubquery(b.cond);
+				if (c !== null) return c;
+				const v = findNestedSubquery(b.value);
+				if (v !== null) return v;
+			}
+			return findNestedSubquery(expr.elseValue);
+		case "object":
+			for (const e of expr.entries) {
+				const n = findNestedSubquery(e.value);
+				if (n !== null) return n;
+			}
+			return null;
+		case "array":
+			for (const i of expr.items) {
+				const n = findNestedSubquery(i);
+				if (n !== null) return n;
+			}
+			return null;
+		case "literal":
+		case "field":
+		case "upsertNew":
+			return null;
+	}
+}
+
+/**
+ * Walker qui invoque `visit` sur chaque expression-racine d'un plan (predicate
+ * de filter, having d'aggregate). Contrairement à `visitPlanExprs` qui envoie
+ * chaque sous-expression individuellement, celui-ci envoie la racine complète
+ * pour permettre au caller de tracker le contexte (ex. disjonction).
+ */
+function visitPlanRootExprs(
+	plan: LogicalPlan,
+	visit: (rootExpr: PlanExpr, context: "predicate" | "having") => void
+): void {
+	const ops = linearize(plan);
+	for (const op of ops) {
+		switch (op.op) {
+			case "filter":
+				visit(op.predicate, "predicate");
+				break;
+			case "aggregate":
+				if (op.having !== undefined) visit(op.having, "having");
+				break;
+			case "project":
+			case "sort":
+			case "limit":
+			case "join":
+			case "scan":
+				break;
+		}
+	}
 }
 
 /**

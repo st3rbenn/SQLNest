@@ -187,7 +187,9 @@ export {
 	assertMutationUpsertSupported,
 	assertMutationWriteJoinSupported,
 	assertTransactionSupported,
+	assertCorrelatedSubqueryLiftable,
 	assertUncorrelatedSubqueryForMaterialize,
+	detectOuterAliasesInSubplan,
 	plan,
 	toCompensationOp
 } from "./planner/planner";

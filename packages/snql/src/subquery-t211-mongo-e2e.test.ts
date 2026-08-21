@@ -1,13 +1,13 @@
 /**
- * ADR-024 PM/2 — Sibling parité Mongo pour sub-queries uncorrelated. Mirror
- * de subquery-t211-e2e.test.ts (oracle PG) : mêmes SNQL, vérification que
- * le planner Mongo les ACCEPTE désormais (Q2c requalifié, résolution runtime
- * via `materializeSubplan` — packages/engine/src/mongo/materialize.ts).
+ * ADR-024 PM/2 + PA/1 (ADR-024-A) — Sibling parité Mongo pour sub-queries
+ * uncorrelated (Q2c requalifié PM/2) et correlated liftées (PA/1). Mirror de
+ * subquery-t211-e2e.test.ts (oracle PG) : mêmes SNQL, planner Mongo ACCEPTE.
  *
  * Le shape du pipeline Mongo post-matérialisation dépend des rows exécutées
  * en runtime — non testable ici sans Connection (couvert par les tests
  * d'intégration adapter.int.test.ts et parity-matrix.e2e.test.ts en PM/9).
- * Ici on verrouille uniquement l'acceptance côté planner.
+ * Ici on verrouille uniquement l'acceptance côté planner + verrous refus
+ * MVP hors-scope (nested v3+).
  */
 
 import { describe, expect, it } from "vitest";
@@ -58,39 +58,39 @@ describe("PM/2 — subquery uncorrelated Mongo acceptée (Q2c requalifié)", () 
 	});
 });
 
-describe("PM/2 — subquery correlated Mongo refusée (v3+ hors scope)", () => {
-	it("exists corrélée : refus planner_subquery_unsupported avec message actionnable", () => {
-		const err = assertMongoRefused(
-			"find users as u where exists (find orders as o where o.user_id = u.id)",
-			"planner_subquery_unsupported"
-		);
-		expect(err.message).toContain("corrélée");
-		expect(err.message).toContain("u.<col>");
-		expect(err.message).toContain("Contournement");
+describe("PA/1 (ADR-024-A) — subquery correlated Mongo acceptée via lift-lookup", () => {
+	it("exists corrélée acceptée au planner (lift-lookup $lookup{let,pipeline})", () => {
+		expect(() =>
+			planFor(
+				"find users as u where exists (find orders as o where o.user_id = u.id)",
+				"mongodb"
+			)
+		).not.toThrow();
 	});
 
-	it("in (subquery corrélée) : refus planner_subquery_unsupported", () => {
-		const err = assertMongoRefused(
-			"find users as u where u.id in (find orders as o where o.total > u.age pick o.user_id)",
-			"planner_subquery_unsupported"
-		);
-		expect(err.message).toContain("corrélée");
+	it("in (subquery corrélée) acceptée au planner", () => {
+		expect(() =>
+			planFor(
+				"find users as u where u.id in (find orders as o where o.total > u.age pick o.user_id)",
+				"mongodb"
+			)
+		).not.toThrow();
 	});
 
-	it("not exists corrélée : refus planner_subquery_unsupported", () => {
-		const err = assertMongoRefused(
-			"find users as u where not exists (find orders as o where o.user_id = u.id)",
-			"planner_subquery_unsupported"
-		);
-		expect(err.code).toBe("planner_subquery_unsupported");
+	it("not exists corrélée acceptée au planner", () => {
+		expect(() =>
+			planFor(
+				"find users as u where not exists (find orders as o where o.user_id = u.id)",
+				"mongodb"
+			)
+		).not.toThrow();
 	});
 
-	it("correlated nested (2 niveaux) : refus", () => {
-		// L'inner ref l'outermost (u) via 2 niveaux — matérialisation impossible.
+	it("correlated nested (2 niveaux) : refus planner_correlated_subquery_nested_v3", () => {
 		const err = assertMongoRefused(
 			"find users as u where exists (find orders as o where exists (find items as i where i.order_id = o.id and i.tag = u.name))",
-			"planner_subquery_unsupported"
+			"planner_correlated_subquery_nested_v3"
 		);
-		expect(err.code).toBe("planner_subquery_unsupported");
+		expect(err.message).toContain("MVP");
 	});
 });
