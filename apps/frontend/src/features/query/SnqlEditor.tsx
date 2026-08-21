@@ -33,7 +33,8 @@ import {
 	errorMarkers,
 	type LiveDiagnostic,
 	setErrorSpans,
-	setLiveDiagnostic
+	setLiveDiagnostic,
+	setRawStatementSpan
 } from "./errorMarkers";
 import { snqlCompletion, snqlHighlighting } from "./snql-language";
 import type { SerializedSpan } from "./useRunQuery";
@@ -42,6 +43,13 @@ interface SnqlEditorProps {
 	readonly value: string;
 	readonly onChange: (value: string) => void;
 	readonly onRun: () => void;
+	/** [ADR-023 E/5] Optional Mod-Shift-Enter callback → exec in transaction.
+	 * Ajouté au CM keymap directement plutôt qu'au useHotkeys Mantine du
+	 * parent, car ce dernier ne capture pas les keydowns quand le focus est
+	 * dans le contenu CM (l'éditeur les absorbe avant remontée document).
+	 * Le principe D10 tient : Mod-Enter reste unique exec safe, Mod-Shift-
+	 * Enter est un sur-croît sécurité (tx = rollback sur erreur). */
+	readonly onRunInTransaction?: () => void;
 	/** SchemaModel courant → candidats de complétion (absent = base non introspectée). */
 	readonly schema: SchemaModel | undefined;
 	readonly placeholder?: string;
@@ -57,11 +65,19 @@ interface SnqlEditorProps {
 	 * clear (query valide ou pas d'erreur détectée).
 	 */
 	readonly liveDiagnostic?: LiveDiagnostic | null;
+	/** [ADR-023 E/7.4 / D1] Span du RawStatement racine — quand présent, un
+	 * marker gutter "unsafe" permanent + tooltip s'affiche pour rappeler que
+	 * ce bloc contourne la détection unfiltered. Séparé de liveDiagnostic
+	 * car cette décoration reste visible tant que la source est raw, alors
+	 * que la squiggly peut être écrasée par une autre warning. */
+	readonly rawStatementSpan?: SerializedSpan | null;
 }
 
 /**
  * Contrôleur impératif exposé via `ref` — permet à l'ErrorBlock de commander
- * un focus + scroll sur un span source SNQL précis (clic sur un chip `$N`).
+ * un focus + scroll sur un span source SNQL précis (clic sur un chip `$N`),
+ * et au ConsoleShellInner de rendre le focus après une cancelPending
+ * WriteConfirmBar (ADR-023 E/3).
  */
 export interface SnqlEditorHandle {
 	/**
@@ -70,6 +86,12 @@ export interface SnqlEditorHandle {
 	 * hors des bornes du document.
 	 */
 	focusSpan(span: SerializedSpan): void;
+	/**
+	 * Rend le focus à l'éditeur sans changer la sélection courante. Utilisé
+	 * par WriteConfirmBar → Escape / Annuler pour que le user retourne
+	 * directement dans le flow CodeMirror sans re-cliquer.
+	 */
+	focus(): void;
 }
 
 /**
@@ -154,13 +176,22 @@ const theme = EditorView.theme(
 		},
 		// Squigglies rouges sous les tokens source des erreurs Postgres (Phase 3a).
 		// text-decoration wavy + underline-color : rendu natif partout, pas d'SVG.
+		// Par défaut = danger ; surchargé par sqlnest-diag-severity-{warning,info}
+		// pour les live diags (ADR-023 E/2 D8).
 		".sqlnest-error-mark": {
 			textDecoration: "underline wavy var(--sqlnest-danger)",
 			textDecorationThickness: "1px",
 			textUnderlineOffset: "3px"
 		},
-		// Live diagnostic (sprint T2/live-diag) : barre verticale rouge dans
-		// la gutter, pleine hauteur de la ligne. Style compact type IDE.
+		".sqlnest-error-mark.sqlnest-diag-severity-warning": {
+			textDecoration: "underline wavy var(--sqlnest-warning)"
+		},
+		".sqlnest-error-mark.sqlnest-diag-severity-info": {
+			textDecoration: "underline wavy var(--sqlnest-text-tertiary)"
+		},
+		// Live diagnostic (sprint T2/live-diag) : barre verticale colorée dans
+		// la gutter, pleine hauteur de la ligne. Style compact type IDE. Couleur
+		// routée via data-severity (ADR-023 E/2 D8).
 		".sqlnest-diag-gutter-slot": {
 			width: "3px",
 			padding: 0
@@ -170,6 +201,42 @@ const theme = EditorView.theme(
 			width: "3px",
 			height: "100%",
 			background: "var(--sqlnest-danger)"
+		},
+		".sqlnest-diag-gutter > div[data-severity='warning']": {
+			background: "var(--sqlnest-warning)",
+			width: "3px",
+			height: "100%"
+		},
+		".sqlnest-diag-gutter > div[data-severity='info']": {
+			background: "var(--sqlnest-text-tertiary)",
+			width: "3px",
+			height: "100%"
+		},
+		".sqlnest-diag-gutter > div[data-severity='error']": {
+			background: "var(--sqlnest-danger)",
+			width: "3px",
+			height: "100%"
+		},
+		// [ADR-023 E/7.4 / D1] Décoration permanente RawStatement — icône
+		// warning centré dans une gutter dédiée, tooltip natif au hover via
+		// title=. Distinct de la gutter live-diag (warning/error éphémère).
+		".sqlnest-raw-gutter-slot": {
+			minWidth: "14px",
+			padding: 0,
+			display: "flex",
+			alignItems: "flex-start",
+			justifyContent: "center"
+		},
+		".sqlnest-raw-gutter": {
+			display: "flex",
+			alignItems: "center",
+			justifyContent: "center",
+			width: "14px",
+			height: "18px",
+			color: "var(--sqlnest-warning)",
+			fontSize: 11,
+			cursor: "help",
+			lineHeight: 1
 		},
 		// Tooltip au hover sur un span en erreur live — surface DS + border
 		// danger discret, monospace pour aligner avec le code.
@@ -210,18 +277,30 @@ const theme = EditorView.theme(
  */
 export const SnqlEditor = forwardRef<SnqlEditorHandle, SnqlEditorProps>(
 	function SnqlEditor(
-		{ value, onChange, onRun, schema, placeholder, errorSpans, liveDiagnostic },
+		{
+			value,
+			onChange,
+			onRun,
+			onRunInTransaction,
+			schema,
+			placeholder,
+			errorSpans,
+			liveDiagnostic,
+			rawStatementSpan
+		},
 		ref
 	) {
 		const host = useRef<HTMLDivElement>(null);
 		const view = useRef<EditorView | null>(null);
 		const onChangeRef = useRef(onChange);
 		const onRunRef = useRef(onRun);
+		const onRunInTxRef = useRef(onRunInTransaction);
 		const schemaRef = useRef<SchemaModel | undefined>(schema);
 
 		// Garde les callbacks/schema à jour pour les extensions (créées une seule fois).
 		onChangeRef.current = onChange;
 		onRunRef.current = onRun;
+		onRunInTxRef.current = onRunInTransaction;
 		schemaRef.current = schema;
 
 		// biome-ignore lint/correctness/useExhaustiveDependencies: l'éditeur est monté une fois ; les valeurs vivantes passent par des refs.
@@ -241,6 +320,21 @@ export const SnqlEditor = forwardRef<SnqlEditorHandle, SnqlEditorProps>(
 							key: "Mod-Enter",
 							run: () => {
 								onRunRef.current();
+								return true;
+							}
+						},
+						{
+							// [ADR-023 E/5] Mod-Shift-Enter = exec in tx. Bind ici
+							// (CM keymap) plutôt que useHotkeys parent, car CM capte
+							// les keydowns avant remontée document quand le focus
+							// est dans le contenu — le useHotkeys Mantine ne
+							// déclencherait jamais. Fallback no-op silencieux si
+							// la callback n'est pas fournie (compat rétro).
+							key: "Mod-Shift-Enter",
+							run: () => {
+								const cb = onRunInTxRef.current;
+								if (cb === undefined) return false;
+								cb();
 								return true;
 							}
 						},
@@ -356,6 +450,21 @@ export const SnqlEditor = forwardRef<SnqlEditorHandle, SnqlEditorProps>(
 			editor.dispatch({ effects: setLiveDiagnostic.of(liveDiagnostic ?? null) });
 		}, [diagKey, liveDiagnostic]);
 
+		// [ADR-023 E/7.4 / D1] Sync rawStatementSpan → décoration permanente
+		// (gutter icon "unsafe" + tooltip). Séparé du liveDiag pour rester
+		// visible même quand la squiggly change.
+		const rawKey = useMemo(() => {
+			if (!rawStatementSpan) return "";
+			return `${rawStatementSpan[0]}:${rawStatementSpan[1]}`;
+		}, [rawStatementSpan]);
+		useEffect(() => {
+			const editor = view.current;
+			if (editor === null) return;
+			editor.dispatch({
+				effects: setRawStatementSpan.of(rawStatementSpan ?? null)
+			});
+		}, [rawKey, rawStatementSpan]);
+
 		useImperativeHandle(
 			ref,
 			() => ({
@@ -370,6 +479,9 @@ export const SnqlEditor = forwardRef<SnqlEditorHandle, SnqlEditorProps>(
 						scrollIntoView: true
 					});
 					editor.focus();
+				},
+				focus() {
+					view.current?.focus();
 				}
 			}),
 			[]

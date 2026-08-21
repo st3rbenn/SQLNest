@@ -35,7 +35,50 @@ import {
 } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 import { type CSSProperties, useEffect, useRef, useState } from "react";
+import type { HistoryEntry } from "../schema/console/useConsolePersistence";
 import type { ConsoleTab } from "./useConsoleTabs";
+
+/**
+ * [ADR-023 E/7.3] Petit badge "W" à gauche de chaque entry history — vert
+ * si commit OK, gris + strikethrough si rolled back, absent si select. Le
+ * label est monochar pour ne pas manger la largeur (le source est déjà
+ * tronqué à ~80 chars via ellipsis). Tooltip explicite au hover pour
+ * lever tout doute cross-browser.
+ */
+function HistoryBadge({ entry }: { readonly entry: HistoryEntry }): React.ReactNode {
+	if (entry.written !== true) return null;
+	const rolledBack = entry.rolledBack === true;
+	const bg = rolledBack
+		? "var(--sqlnest-text-tertiary)"
+		: "var(--sqlnest-success)";
+	const label = rolledBack ? "Écriture annulée (rollback)" : "Écriture committée";
+	return (
+		<Tooltip label={label} openDelay={300} withArrow arrowSize={4}>
+			<span
+				aria-label={label}
+				data-testid={
+					rolledBack ? "history-badge-rollback" : "history-badge-committed"
+				}
+				style={{
+					display: "inline-flex",
+					alignItems: "center",
+					justifyContent: "center",
+					width: 16,
+					height: 16,
+					borderRadius: 3,
+					background: bg,
+					color: "var(--sqlnest-surface)",
+					fontSize: 10,
+					fontWeight: 700,
+					textDecoration: rolledBack ? "line-through" : "none",
+					flexShrink: 0
+				}}
+			>
+				W
+			</span>
+		</Tooltip>
+	);
+}
 
 const headerStyle: CSSProperties = {
 	display: "flex",
@@ -235,7 +278,9 @@ export interface ConsoleHeaderProps {
 	readonly onExecute: () => void;
 	readonly onFormat: () => void;
 	readonly onDetach: () => void;
-	readonly history: readonly string[];
+	/** [ADR-023 E/7.3] History enrichi avec metadata write/rollback pour
+	 * badge distinct dans le dropdown. */
+	readonly history: readonly import("../schema/console/useConsolePersistence").HistoryEntry[];
 	readonly onHistorySelect: (source: string) => void;
 	readonly onHistoryClear: () => void;
 	readonly tabs: readonly ConsoleTab[];
@@ -281,6 +326,13 @@ export function ConsoleHeader({
 	extraLeftActions
 }: ConsoleHeaderProps): React.ReactNode {
 	const modKey = useModKeyLabel();
+	// [ADR-023 E/7.3] Filter local 'writes only' du history dropdown —
+	// state éphémère (ne persiste pas cross-session, l'user reset à chaque
+	// ouverture). Utile pour l'audit rapide "qu'est-ce que j'ai écrit ?".
+	const [writesOnly, setWritesOnly] = useState(false);
+	const filteredHistory = writesOnly
+		? history.filter((e) => e.written === true)
+		: history;
 
 	const sensors = useSensors(
 		useSensor(PointerSensor, {
@@ -405,20 +457,64 @@ export function ConsoleHeader({
 						</Tooltip>
 					</Menu.Target>
 					<Menu.Dropdown>
-						{history.map((q) => (
-							<Menu.Item
-								key={q}
-								onClick={() => onHistorySelect(q)}
+						{/* [ADR-023 E/7.3] Filter 'writes only' — audit rapide
+						    "qu'est-ce que j'ai écrit ?". State éphémère par
+						    ouverture du menu. */}
+						<Menu.Label
+							style={{
+								display: "flex",
+								alignItems: "center",
+								gap: 6,
+								fontSize: 11,
+								color: "var(--sqlnest-text-secondary)",
+								cursor: "pointer"
+							}}
+							onClick={() => setWritesOnly((v) => !v)}
+							data-testid="history-writes-only-toggle"
+						>
+							<span
 								style={{
-									fontFamily: "var(--mantine-font-family-monospace)",
-									whiteSpace: "nowrap",
-									overflow: "hidden",
-									textOverflow: "ellipsis"
+									display: "inline-block",
+									width: 10,
+									height: 10,
+									border: "1px solid var(--sqlnest-border)",
+									background: writesOnly
+										? "var(--sqlnest-accent)"
+										: "transparent",
+									borderRadius: 2
 								}}
-							>
-								{q.length > 90 ? `${q.slice(0, 87)}…` : q}
-							</Menu.Item>
-						))}
+							/>
+							Writes only
+						</Menu.Label>
+						{filteredHistory.map((entry, i) => {
+							const q = entry.source;
+							return (
+								<Menu.Item
+									key={`${q}-${i}`}
+									onClick={() => onHistorySelect(q)}
+									style={{
+										fontFamily: "var(--mantine-font-family-monospace)",
+										whiteSpace: "nowrap",
+										overflow: "hidden",
+										textOverflow: "ellipsis",
+										display: "flex",
+										alignItems: "center",
+										gap: 8
+									}}
+									data-testid="history-item"
+								>
+									<HistoryBadge entry={entry} />
+									<span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>
+										{q.length > 80 ? `${q.slice(0, 77)}…` : q}
+									</span>
+								</Menu.Item>
+							);
+						})}
+						{filteredHistory.length === 0 ? (
+							<Menu.Label style={{ fontSize: 11, opacity: 0.6 }}>
+								{writesOnly ? "Aucune écriture dans l'historique" : "Historique vide"}
+							</Menu.Label>
+						) : null}
 						<Menu.Divider />
 						<Menu.Item color="red" onClick={onHistoryClear}>
 							Vider l'historique
@@ -471,10 +567,16 @@ export function ConsoleHeader({
 				) : null}
 
 				<Tooltip
-					label={`Exécuter — ${modKey} ↵`}
+					label={`Exécuter — ${modKey} ↵\nEn transaction — ${modKey} ⇧ ↵`}
 					openDelay={400}
+					multiline
 					styles={{
-						tooltip: { fontSize: 11, padding: "4px 8px", borderRadius: 6 }
+						tooltip: {
+							fontSize: 11,
+							padding: "4px 8px",
+							borderRadius: 6,
+							whiteSpace: "pre-line"
+						}
 					}}
 					withArrow
 					arrowSize={4}

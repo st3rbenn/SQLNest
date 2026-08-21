@@ -25,7 +25,8 @@
  */
 
 import { useHotkeys, useLocalStorage } from "@mantine/hooks";
-import { formatSnql } from "@sqlnest/snql";
+import { formatSnql, parse, tokenize } from "@sqlnest/snql";
+import { showNotification } from "@sqlnest/design-system";
 import {
 	type CSSProperties,
 	useCallback,
@@ -37,13 +38,26 @@ import {
 import { useDbConnections } from "../db-connections/useDbConnections";
 import { useConsolePersistence } from "../schema/console/useConsolePersistence";
 import { useSchema } from "../schema/useSchema";
+import { AutorunRefusedBanner } from "./AutorunRefusedBanner";
 import { runConsoleQuery, useConsoleQuery } from "./consoleQueriesStore";
 import { ConsoleHeader, type ConsoleHeaderVariant } from "./ConsoleHeader";
 import { ConsoleResultsPanel } from "./ConsoleResultsPanel";
 import { SnqlEditor, type SnqlEditorHandle } from "./SnqlEditor";
+import { fetchPreviewCount, type PreviewResult } from "./preview";
+import { classifyRuntimeError } from "./rollbackClassify";
+import {
+	supportsTransactionsForEngine,
+	wrapInTransaction
+} from "./transactionWrap";
+import {
+	collectUnfilteredWrites,
+	hasAnyUnfilteredWrite,
+	type UnfilteredFinding
+} from "./unfilteredWrites";
 import { useConsoleTabs } from "./useConsoleTabs";
 import { useLiveDiagnostics } from "./useLiveDiagnostics";
 import { type SerializedSpan, SnqlRuntimeError } from "./useRunQuery";
+import { WriteConfirmBar } from "./WriteConfirmBar";
 
 /**
  * Type guard défensif : la source pgError peut avoir été sérialisée par
@@ -146,7 +160,9 @@ export function ConsoleShellInner({
 	const schemaQuery = useSchema(connId, teamSlug);
 
 	const tabs = useConsoleTabs(connId, tabsScopeSuffix);
-	const persistence = useConsolePersistence(engine);
+	// [ADR-023 D9] History scopée par connectionId — pas de leak dev→prod
+	// cross-connection.
+	const persistence = useConsolePersistence(engine, connId);
 
 	// La query state vit dans un store singleton (voir consoleQueriesStore)
 	// pour survivre au remount du shell — sinon le switch fullscreen ↔ normal
@@ -203,7 +219,9 @@ export function ConsoleShellInner({
 
 	// Live diagnostic : compile local debounced pendant la frappe. Passé à
 	// l'éditeur pour squigglies + gutter badge + tooltip au hover. Zero I/O.
-	const liveDiagnostic = useLiveDiagnostics(
+	// [ADR-023 E/7.4] Le hook retourne aussi rawStatementSpan pour la
+	// décoration permanente D1 dans SnqlEditor.
+	const { diag: liveDiagnostic, rawStatementSpan } = useLiveDiagnostics(
 		activeSource,
 		engine,
 		schemaQuery.data ?? undefined
@@ -290,18 +308,165 @@ export function ConsoleShellInner({
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
 
+	// [ADR-023 E/3] Pending confirmation state — quand l'user hit ⌘⏎/clic
+	// Exécuter sur une source contenant des unfiltered writes, on ne lance
+	// PAS runConsoleQuery ; on affiche WriteConfirmBar avec les findings, et
+	// on attend le typing du verbe (ou Escape). Le state vit ici (React
+	// local) et pas dans le store singleton — la confirm est une décision
+	// éphémère par tab, pas un état persistant.
+	const [pending, setPending] = useState<readonly UnfilteredFinding[] | null>(
+		null
+	);
+	// [ADR-023 E/4] Preview count fetché en parallèle du gate — la source
+	// rewrite `pick count(*) as _preview_count` est envoyée sur la même
+	// route /query (zéro backend delta), timeout 3s. `null` = pas encore
+	// fetché ou pending null.
+	const [previewResult, setPreviewResult] = useState<PreviewResult | null>(
+		null
+	);
+
+	// [ADR-023 E/3] Reset immédiat si la source change pendant qu'un
+	// pending est actif — l'AST recalculé peut invalider les findings, la
+	// confirmation en attente ne correspond plus au source d'origine.
+	useEffect(() => {
+		setPending(null);
+		setPreviewResult(null);
+	}, [activeSource]);
+
+	// [ADR-023 E/3.5] Le timeout auto-cancel (15s) est maintenant géré par
+	// WriteConfirmBar (countdown visible pour l'user). Le parent ne fait
+	// que respecter le onCancel remonté.
+
+	// [ADR-023 E/5.5 / D16] BroadcastChannel cross-window scopé par
+	// connectionId. Chaque instance de ConsoleShellInner (route fullscreen,
+	// node RF T5, popout window) partage le même canal pour la même
+	// connection. V1 usage : notifier les autres instances qu'un run vient
+	// d'être fired sur cette DB — leur pending state (WriteConfirmBar +
+	// preview count) devient potentiellement stale et doit être cancel
+	// pour éviter que l'user confirme "de mémoire" sur des données déjà
+	// modifiées. Capability tx sync + preview cache = extensions futures.
+	const channelRef = useRef<BroadcastChannel | null>(null);
+	useEffect(() => {
+		if (typeof BroadcastChannel === "undefined") return;
+		const channel = new BroadcastChannel(`sqlnest.console.${connId}`);
+		channelRef.current = channel;
+		channel.onmessage = (event: MessageEvent<unknown>) => {
+			const data = event.data as { type?: string } | null;
+			if (data?.type === "write_executed") {
+				// Une autre window/node a run sur cette connection — nos
+				// findings/preview peuvent être stale. Cancel pending.
+				setPending(null);
+				setPreviewResult(null);
+			}
+		};
+		return () => {
+			channelRef.current = null;
+			channel.close();
+		};
+	}, [connId]);
+
+	// Lance vraiment le run (bypass unfiltered gate — appelé par
+	// confirmExecute après typing OK, ou par execute() si aucun unfiltered).
+	const runNow = useCallback(
+		(src: string) => {
+			// [ADR-023 E/5.5 / D16] Broadcast pré-fire pour warner les autres
+			// windows/nodes de cette connection. Simplification v1 : broadcast
+			// pour tous les runs (SELECT inclus) — coût d'un cancel inutile
+			// négligeable vs risque de miss un write cross-window.
+			channelRef.current?.postMessage({ type: "write_executed" });
+			void runConsoleQuery(queryKey, {
+				connectionId: connId,
+				source: src,
+				teamSlug
+			});
+		},
+		[connId, teamSlug, queryKey]
+	);
+
 	const execute = useCallback(() => {
 		const src = tabs.activeTab.source.trim();
 		if (src === "") return;
-		// Fire-and-forget : le store est notify des changes de state, le
-		// useEffect ci-dessous propage vers `tabs.setLastResult` +
-		// `persistence.addHistory` au done.
-		void runConsoleQuery(queryKey, {
-			connectionId: connId,
-			source: src,
-			teamSlug
-		});
-	}, [tabs, connId, teamSlug, queryKey]);
+		// [ADR-023 E/3] Second gate côté execute() = défense en profondeur.
+		// Parse + walker AVANT tout appel réseau : si findings non vides,
+		// gate le run derrière WriteConfirmBar. Sinon fire direct comme avant.
+		// Si le parse throw (source invalide), l'user voit déjà la squiggly
+		// rouge via useLiveDiagnostics — on laisse passer (le CLI renverra
+		// l'erreur, ADR-012 : cœur ne refuse pas les writes valides).
+		let findings: readonly UnfilteredFinding[] = [];
+		try {
+			findings = collectUnfilteredWrites(parse(tokenize(src)));
+		} catch {
+			// Parse KO — pas de gate (feedback signalé ailleurs par live diag).
+		}
+		if (findings.length > 0) {
+			setPending(findings);
+			// [ADR-023 E/4] Fire preview count en parallèle — pas d'await, on
+			// ne bloque pas l'affichage de la bar. Timeout 3s à l'intérieur.
+			// Le résultat set le state ; si l'user a annulé entre-temps, le
+			// setState arrive sur pending===null → WriteConfirmBar déjà
+			// unmount, aucun effet visible (setState orphelin).
+			setPreviewResult(null);
+			const stmt = parse(tokenize(src));
+			void fetchPreviewCount({
+				originalSource: src,
+				statement: stmt,
+				connectionId: connId,
+				teamSlug
+			}).then(setPreviewResult);
+			return;
+		}
+		runNow(src);
+	}, [tabs, runNow, connId, teamSlug]);
+
+	const confirmExecute = useCallback(() => {
+		const src = tabs.activeTab.source.trim();
+		if (src === "") return;
+		setPending(null);
+		setPreviewResult(null);
+		runNow(src);
+	}, [tabs, runNow]);
+
+	const cancelPending = useCallback(() => {
+		setPending(null);
+		setPreviewResult(null);
+		editorRef.current?.focus();
+	}, []);
+
+	// [ADR-023 E/5] executeInTransaction — shortcut ⌘⇧⏎ "exec in tx".
+	// Bypass la WriteConfirmBar (Q2d typing) car opt-in tx = signal
+	// responsable (D5-amendment) : la tx elle-même est le garde-fou (rollback
+	// sur erreur). Contrôles :
+	//  1. Capability check (D5) — jamais no-op silencieux, toast danger si
+	//     engine incompatible (KV, engine inconnu, Mongo standalone TODO E/8).
+	//  2. Double-wrap detection (D7) — respect intention utilisateur si tx
+	//     racine déjà tapée.
+	//  3. Parse KO → envoie tel quel, le CLI renverra l'erreur.
+	// Clean le pending state actif (l'user a changé d'avis en pleine confirm).
+	const executeInTransaction = useCallback(() => {
+		const src = tabs.activeTab.source.trim();
+		if (src === "") return;
+		if (!supportsTransactionsForEngine(engine)) {
+			showNotification({
+				color: "red",
+				title: "Transactions non supportées",
+				message: `L'engine "${engine}" ne supporte pas les transactions — utilisez Ctrl+⏎ (typing du verbe requis pour un write non filtré).`,
+				autoClose: 4000
+			});
+			return;
+		}
+		let wrappedSource: string;
+		try {
+			const stmt = parse(tokenize(src));
+			wrappedSource = wrapInTransaction(src, stmt).source;
+		} catch {
+			// Parse KO — envoie la source telle quelle sans wrap, l'user
+			// verra l'erreur parser côté CLI. Cohérent execute() classique.
+			wrappedSource = src;
+		}
+		setPending(null);
+		setPreviewResult(null);
+		runNow(wrappedSource);
+	}, [engine, runNow, tabs]);
 
 	// Side-effects post-run — quand une run termine (success ou error), on
 	// propage vers `tabs.setLastResult` (rowCount + timing dans la tab bar)
@@ -320,12 +485,36 @@ export function ConsoleShellInner({
 				timingMs: queryState.timingMs
 			});
 			if (queryState.lastSource !== undefined) {
-				persistence.addHistory(queryState.lastSource);
+				// [ADR-023 E/7.2] Enrichit l'entry avec written flag pour
+				// permettre le badge distinct dans l'history dropdown.
+				persistence.addHistory(queryState.lastSource, {
+					written: queryState.data.written,
+					rolledBack: false
+				});
+			}
+		} else if (
+			queryState.error !== null &&
+			queryState.lastSource !== undefined
+		) {
+			// [ADR-023 E/7.2] Trace les writes rollback dans l'history —
+			// utile pour l'audit post-incident ("j'ai tenté ça, la tx a
+			// rollback"). Les erreurs ordinaires (parse, table absente) ne
+			// sont PAS ajoutées : l'history reste utile, pas polluée.
+			const kind =
+				queryState.error instanceof SnqlRuntimeError
+					? classifyRuntimeError(queryState.error)
+					: "ordinary";
+			if (kind !== "ordinary") {
+				persistence.addHistory(queryState.lastSource, {
+					written: true,
+					rolledBack: true
+				});
 			}
 		}
 	}, [
 		queryState.lastRunAt,
 		queryState.data,
+		queryState.error,
 		queryState.timingMs,
 		queryState.lastSource,
 		tabs,
@@ -344,15 +533,52 @@ export function ConsoleShellInner({
 
 	// Autorun depuis ?autorun=1 — one-shot au mount.
 	const autoranRef = useRef(false);
+	// [ADR-023 E/5.5 / D14] Autorun est un vecteur URL-partagée : un lien
+	// `/query?source=remove+from+users&autorun=1` déclencherait wipe silencieux
+	// à l'ouverture. On refuse l'auto-exec si la source contient un unfiltered
+	// write OU un raw opaque. L'user peut toujours exec manuellement (⌘⏎) après
+	// vérification. Banner permanent + strip `autorun=1` de l'URL pour ne pas
+	// ré-armer au reload (defense in depth : le check reste actif même sans le
+	// query param, mais on veut que la page revienne à un état sain).
+	const [autorunRefused, setAutorunRefused] = useState(false);
 	useEffect(() => {
 		if (
-			initialAutorun &&
-			!autoranRef.current &&
-			tabs.activeTab.source.trim() !== ""
+			!initialAutorun ||
+			autoranRef.current ||
+			tabs.activeTab.source.trim() === ""
 		) {
-			autoranRef.current = true;
-			execute();
+			return;
 		}
+		autoranRef.current = true;
+		const src = tabs.activeTab.source.trim();
+		let refused = false;
+		try {
+			refused = hasAnyUnfilteredWrite(parse(tokenize(src)));
+		} catch {
+			// Parse KO : source syntaxiquement invalide. On laisse l'autorun
+			// tourner — le CLI renverra l'erreur, mais aucun risque de wipe
+			// (parse KO = pas d'exec possible côté cœur). Le typing gate côté
+			// execute() reste actif si l'user re-tape ensuite.
+		}
+		if (refused) {
+			setAutorunRefused(true);
+			// Strip `autorun=1` de l'URL via history.replaceState — pas de
+			// dépendance TanStack Router (moins couplé, marche identique
+			// route/node/popout). Le state React React `autorunRefused` est
+			// la source de vérité pour l'affichage du banner.
+			try {
+				const url = new URL(window.location.href);
+				if (url.searchParams.has("autorun")) {
+					url.searchParams.delete("autorun");
+					window.history.replaceState({}, "", url.toString());
+				}
+			} catch {
+				// window.location peut être indisponible en test (jsdom) —
+				// silencieux, le banner reste affiché quand même.
+			}
+			return;
+		}
+		execute();
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [initialAutorun, tabs.activeTab.source]);
 
@@ -367,6 +593,10 @@ export function ConsoleShellInner({
 				() => tabs.closeTab(activeTabId),
 				{ preventDefault: true }
 			]
+			// [ADR-023 E/5] Mod-Shift-Enter (exec in tx) est routé via le CM
+			// keymap dans SnqlEditor (voir onRunInTransaction prop). Le
+			// useHotkeys Mantine ne capte pas les keydowns quand le focus
+			// est dans CM content — CM les absorbe avant remontée document.
 		],
 		[]
 	);
@@ -407,6 +637,14 @@ export function ConsoleShellInner({
 			/>
 
 			<div ref={bodyRef} style={bodyStyle}>
+				{/* [ADR-023 E/5.5 / D14] Banner permanent affiché quand un
+				    autorun a été refusé pour source unfiltered/raw — dismiss
+				    local via ×, ne re-arme pas l'auto-exec. */}
+				{autorunRefused ? (
+					<AutorunRefusedBanner
+						onDismiss={() => setAutorunRefused(false)}
+					/>
+				) : null}
 				{/* Résultats masqués tant qu'aucune query n'a été lancée — évite
 				    le "vide flou" au premier chargement, laisse l'éditeur
 				    respirer tout seul. Apparaît dès qu'un run est pending / OK /
@@ -425,13 +663,23 @@ export function ConsoleShellInner({
 							value={activeSource}
 							onChange={(v) => tabs.updateSource(activeTabId, v)}
 							onRun={execute}
+							onRunInTransaction={executeInTransaction}
 							schema={schemaQuery.data ?? null}
 							placeholder="get <table> pick <fields>"
 							errorSpans={errorSpans}
 							liveDiagnostic={liveDiagnostic}
+							rawStatementSpan={rawStatementSpan}
 						/>
 					</div>
 				</div>
+				{pending !== null ? (
+					<WriteConfirmBar
+						findings={pending}
+						preview={previewResult}
+						onConfirm={confirmExecute}
+						onCancel={cancelPending}
+					/>
+				) : null}
 				{hasRun ? (
 					<>
 						<div
@@ -452,6 +700,8 @@ export function ConsoleShellInner({
 							isPending={queryState.isPending}
 							timingMs={queryState.timingMs}
 							onFocusSpan={onFocusSpan}
+							engine={engine}
+							lastSource={queryState.lastSource}
 						/>
 					</>
 				) : null}

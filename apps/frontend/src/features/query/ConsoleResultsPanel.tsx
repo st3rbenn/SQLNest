@@ -28,7 +28,13 @@ import { ErrorBlock } from "./ErrorBlock";
 import { ResultsGraphPlaceholder } from "./ResultsGraphPlaceholder";
 import { ResultsJsonView } from "./ResultsJsonView";
 import { ResultsTable } from "./ResultsTable";
-import type { QueryResult, SerializedSpan } from "./useRunQuery";
+import { classifyRuntimeError } from "./rollbackClassify";
+import { supportsTransactionsForEngine } from "./transactionWrap";
+import {
+	type QueryResult,
+	type SerializedSpan,
+	SnqlRuntimeError
+} from "./useRunQuery";
 
 export type ResultsViewMode = "table" | "json" | "graph";
 
@@ -45,6 +51,16 @@ const containerStyle: CSSProperties = {
 	padding: "14px 16px 14px",
 	background: "var(--sqlnest-surface)",
 	borderTop: "1px solid var(--sqlnest-border)"
+};
+
+const partialWritesHeaderStyle: CSSProperties = {
+	padding: "6px 10px",
+	background: "var(--sqlnest-warning-soft)",
+	border: "1px solid var(--sqlnest-warning)",
+	borderRadius: 4,
+	color: "var(--sqlnest-text-primary)",
+	fontSize: 12,
+	lineHeight: 1.4
 };
 
 const statusRowStyle: CSSProperties = {
@@ -128,7 +144,9 @@ export function ConsoleResultsPanel({
 	error,
 	isPending,
 	timingMs,
-	onFocusSpan
+	onFocusSpan,
+	engine,
+	lastSource
 }: {
 	readonly result: QueryResult | undefined;
 	readonly error: Error | null;
@@ -136,6 +154,14 @@ export function ConsoleResultsPanel({
 	readonly timingMs: number | undefined;
 	/** Câble optionnel vers l'éditeur (Phase 3a — jump-to-span depuis ErrorBlock). */
 	readonly onFocusSpan?: (span: SerializedSpan) => void;
+	/** [ADR-023 E/6.4] Engine du run pour détecter le header partial-writes
+	 * (D5) quand un `transaction { … }` tourne sur un engine sans capability
+	 * tx (KV, Mongo standalone). Absent = pas de header (safe fallback). */
+	readonly engine?: string;
+	/** [ADR-023 E/6.4] Source du dernier run — utilisée pour détecter
+	 * `transaction { … }` racine côté frontend sans re-parser à chaque
+	 * render. Absent = pas de header. */
+	readonly lastSource?: string;
 }): React.ReactNode {
 	const [viewMode, setViewMode] = useLocalStorage<ResultsViewMode>({
 		key: VIEW_STORAGE_KEY,
@@ -173,27 +199,79 @@ export function ConsoleResultsPanel({
 		[filteredRows, start, end]
 	);
 
-	const statusColor = error
-		? "var(--sqlnest-danger)"
-		: isPending
-			? "var(--sqlnest-warning)"
-			: result
-				? "var(--sqlnest-success)"
-				: "var(--sqlnest-text-tertiary)";
-	const statusLabel = error
-		? "Erreur"
-		: isPending
-			? "Exécution…"
-			: result
-				? result.written
-					? "Écriture OK"
-					: "Succès"
-				: "Prêt";
+	// [ADR-023 E/6.1+E/6.2+E/6.3] Status derivation — 3 axes qui
+	// s'imbriquent :
+	//   1. isPending → warning "Exécution…" (existant)
+	//   2. error → classifyRuntimeError : rollback_user (neutre "Rollback"),
+	//      rollback_error (danger "Transaction annulée"), ordinary
+	//      (danger "Erreur", existant)
+	//   3. result.written + rowCount (D15) : rowCount>0 vert "Écriture OK",
+	//      rowCount===0 gris neutre "Écriture exécutée — aucune ligne
+	//      affectée" (évite le faux positif audit sur upsert idempotent Mongo)
+	const rollbackKind =
+		error instanceof SnqlRuntimeError ? classifyRuntimeError(error) : null;
+	let statusColor: string;
+	let statusLabel: string;
+	if (isPending) {
+		statusColor = "var(--sqlnest-warning)";
+		statusLabel = "Exécution…";
+	} else if (error) {
+		if (rollbackKind === "rollback_user") {
+			statusColor = "var(--sqlnest-text-secondary)";
+			statusLabel = "Rollback";
+		} else if (rollbackKind === "rollback_error") {
+			statusColor = "var(--sqlnest-danger)";
+			statusLabel = "Transaction annulée";
+		} else {
+			statusColor = "var(--sqlnest-danger)";
+			statusLabel = "Erreur";
+		}
+	} else if (result) {
+		if (result.written) {
+			if (result.rowCount > 0) {
+				statusColor = "var(--sqlnest-success)";
+				statusLabel = "Écriture OK";
+			} else {
+				// D15 : write exécuté sans effet (upsert idempotent, DELETE
+				// sur predicate qui match rien). Couleur neutre — pas de
+				// faux positif audit history.
+				statusColor = "var(--sqlnest-text-secondary)";
+				statusLabel = "Écriture exécutée";
+			}
+		} else {
+			statusColor = "var(--sqlnest-success)";
+			statusLabel = "Succès";
+		}
+	} else {
+		statusColor = "var(--sqlnest-text-tertiary)";
+		statusLabel = "Prêt";
+	}
+
+	// [ADR-023 E/6.4 / D5] Header partial-writes — quand un `transaction {…}`
+	// tourne sur un engine qui ne supporte pas les tx runtime (KV, Mongo
+	// standalone), l'atomicité n'est PAS garantie. On le signale explicitement
+	// pour éviter que l'user croie à un rollback disponible. Détection cheap
+	// via startsWith('transaction') sur lastSource trim — précision suffisante
+	// v1 (les faux positifs = commentaires en tête sont rares).
+	const showPartialWritesHeader =
+		engine !== undefined &&
+		lastSource !== undefined &&
+		result?.written === true &&
+		!supportsTransactionsForEngine(engine) &&
+		lastSource.trimStart().startsWith("transaction");
 
 	return (
 		<div style={containerStyle}>
+			{showPartialWritesHeader ? (
+				<div style={partialWritesHeaderStyle} data-testid="partial-writes-header">
+					⚠ Exécuté sans transaction — writes partiels possibles en cas d'erreur.
+				</div>
+			) : null}
 			<div style={statusRowStyle}>
-				<span style={statusDotStyle(statusColor)}>
+				<span
+					style={statusDotStyle(statusColor)}
+					data-testid="status-pill"
+				>
 					<span style={statusDotBadge(statusColor)} />
 					{statusLabel}
 				</span>
@@ -201,11 +279,16 @@ export function ConsoleResultsPanel({
 					<>
 						<span>·</span>
 						<span>
-							{/* Sprint T2/13 : `pick count` droppe RETURNING → rows=[] mais
-							    rowCount reflète les lignes affectées. On lit rowCount
-							    quand on est en écriture sans payload de rows. */}
+							{/* [ADR-023 D15] Distinction post-run mutation :
+							    - rowCount > 0 : "N ligne(s) affectée(s)"
+							    - rowCount === 0 : "aucune ligne affectée" (évite faux
+							      positif audit sur upsert idempotent Mongo)
+							    Sprint T2/13 : `pick count` droppe RETURNING → rows=[]
+							    mais rowCount reflète les lignes affectées. */}
 							{result.written && rows.length === 0
-								? `${result.rowCount} ligne${result.rowCount > 1 ? "s" : ""} affectée${result.rowCount > 1 ? "s" : ""}`
+								? result.rowCount > 0
+									? `${result.rowCount} ligne${result.rowCount > 1 ? "s" : ""} affectée${result.rowCount > 1 ? "s" : ""}`
+									: "aucune ligne affectée"
 								: `${totalRows} ligne${totalRows > 1 ? "s" : ""}${
 										filter && rows.length !== totalRows
 											? ` (sur ${rows.length} filtrées)`
