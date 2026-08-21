@@ -163,6 +163,38 @@ function writeErrorMessage(op: string, cause: unknown): string {
  * On garde le message natif (ex. `no such collection`, `unknown top-level operator`)
  * et on annote le `codeName` / `code` du driver s'ils sont là.
  */
+/**
+ * ADR-024 PM/7 D6 — abort de nettoyage tx : codes attendus (à avaler
+ * silencieusement) vs codes réseau/timeout (à logger + enrichir l'erreur
+ * finale). Les codes attendus signalent que le serveur a déjà avorté la tx :
+ *  - `NoSuchTransaction` (251) : session sans tx active (déjà avortée).
+ *  - `TransactionNotFound` : idem, variante d'autres versions driver.
+ *  - `WriteConflict` (112) : auto-abort après conflit optimistic locking.
+ *  - Label `TransientTransactionError` : label driver générique tx retryable.
+ */
+function isExpectedAbortError(cause: unknown): boolean {
+	if (!(cause instanceof Error)) return false;
+	const props = cause as {
+		code?: number | string;
+		codeName?: string;
+		errorLabels?: readonly string[];
+	};
+	if (
+		props.codeName === "NoSuchTransaction" ||
+		props.codeName === "TransactionNotFound" ||
+		props.codeName === "WriteConflict"
+	) {
+		return true;
+	}
+	if (props.code === 251 || props.code === 112) {
+		return true;
+	}
+	if (Array.isArray(props.errorLabels) && props.errorLabels.includes("TransientTransactionError")) {
+		return true;
+	}
+	return false;
+}
+
 function describeMongoExecutionError(cause: unknown): string {
 	if (!(cause instanceof Error)) {
 		return "cause inconnue";
@@ -662,10 +694,21 @@ class MongoConnection implements Connection {
 		} catch (cause) {
 			try {
 				await session.abortTransaction();
-			} catch {
-				// abort peut échouer si la tx est déjà avortée par le serveur (ex.
-				// WriteConflict qui auto-abort) — on avale, l'erreur d'origine porte
-				// l'info utile.
+			} catch (abortErr) {
+				// ADR-024 PM/7 D6 — abortTransaction() erreurs enrichies. On avale
+				// les codes attendus (tx déjà avortée par le serveur : WriteConflict,
+				// TransactionNotFound, NoSuchTransaction, TransientTransactionError).
+				// Pour tout autre code (network, timeout) : log + enrichit l'erreur
+				// finale avec {abort_error} — tx orpheline invisible côté serveur
+				// est le pire failure mode (verrous conservés jusqu'à
+				// transactionLifetimeLimitSeconds).
+				const expected = isExpectedAbortError(abortErr);
+				if (!expected) {
+					throw new EngineExecutionError(
+						`Transaction MongoDB échouée AND abort de nettoyage échoué — ${describeMongoExecutionError(cause)} — abort_error: ${describeMongoExecutionError(abortErr)}`,
+						{ cause }
+					);
+				}
 			}
 			throw new EngineExecutionError(
 				`Transaction MongoDB échouée — ${describeMongoExecutionError(cause)}`,

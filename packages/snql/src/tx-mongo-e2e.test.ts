@@ -164,22 +164,38 @@ describe("codegen — mapTransaction Mongo", () => {
 // Refus explicit
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe("codegen — refus explicit Mongo", () => {
-	it("savepoint refusé au codegen", () => {
+describe("PM/7 D5 — refus savepoint au planner Mongo (ADR-024 Q6b)", () => {
+	it("savepoint refusé au planner (assertTransactionSupported walker)", () => {
+		const stmt = parse(
+			tokenize(`transaction { savepoint sp1 { find users pick _id } }`)
+		);
+		if (stmt.operation !== "transaction") throw new Error();
+		const planned = lowerTransaction(stmt);
+		expectCode(
+			() => assertTransactionSupported(planned, MONGODB_CAPABILITIES),
+			"planner_savepoint_mongo_unsupported"
+		);
+	});
+
+	it("savepoint mixé avec read/write refusé au planner", () => {
+		const stmt = parse(
+			tokenize(
+				`transaction { find users pick _id; savepoint sp1 { update users where _id = 1 set is_active = false } }`
+			)
+		);
+		if (stmt.operation !== "transaction") throw new Error();
+		const planned = lowerTransaction(stmt);
+		expectCode(
+			() => assertTransactionSupported(planned, MONGODB_CAPABILITIES),
+			"planner_savepoint_mongo_unsupported"
+		);
+	});
+
+	it("defense-in-depth codegen : refus tardif toujours en place", () => {
 		expectCode(
 			() =>
 				mongoTx(
 					`transaction { savepoint sp1 { find users pick _id } }`
-				),
-			"codegen_mongo_savepoint_unsupported"
-		);
-	});
-
-	it("savepoint imbriqué dans un read/write refusé au codegen", () => {
-		expectCode(
-			() =>
-				mongoTx(
-					`transaction { find users pick _id; savepoint sp1 { update users where _id = 1 set is_active = false } }`
 				),
 			"codegen_mongo_savepoint_unsupported"
 		);

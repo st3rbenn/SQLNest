@@ -491,14 +491,43 @@ export function assertMutationInsertSelectSupported(
  * sémantique différente (session-scoped), à réévaluer plus tard.
  */
 export function assertTransactionSupported(
-	_plan: import("../ir/plan").TransactionPlan,
+	plan: import("../ir/plan").TransactionPlan,
 	capabilities: Capabilities
 ): void {
-	if (capabilities.supports.has("transaction")) return;
-	throw new SnqlError(
-		`'transaction { … }' non supporté sur '${capabilities.engine}' — capability 'transaction' absente. Pour Postgres, cette syntaxe cible BEGIN/COMMIT natif ; les autres engines exécutent les statements individuellement.`,
-		"planner_transaction_unsupported"
-	);
+	if (!capabilities.supports.has("transaction")) {
+		throw new SnqlError(
+			`'transaction { … }' non supporté sur '${capabilities.engine}' — capability 'transaction' absente. Pour Postgres, cette syntaxe cible BEGIN/COMMIT natif ; les autres engines exécutent les statements individuellement.`,
+			"planner_transaction_unsupported"
+		);
+	}
+	// ADR-024 PM/7 D5 — savepoint refusé au planner walker récursif (Mongo
+	// n'a pas d'API rollback partiel dans une session tx). Le refus ex-tardif
+	// dans codegen mongodb.ts:flattenMongoTransactionBody reste en place comme
+	// defense-in-depth. Cohérent doctrine T2/11-15 (refus au planner + squiggly
+	// UI live via useLiveDiagnostics).
+	if (capabilities.engine === "mongodb") {
+		assertNoSavepoint(plan.body, capabilities);
+	}
+}
+
+function assertNoSavepoint(
+	body: readonly import("../ir/plan").TransactionPlanItem[],
+	capabilities: Capabilities
+): void {
+	for (const item of body) {
+		if (item.kind === "savepoint") {
+			// #11 — savepoint nested aussi refusé (walker récursif) même si le
+			// parser accepte savepoint dans savepoint. Le message pointe le nom
+			// racine pour diagnostic.
+			throw new SnqlError(
+				`'savepoint ${item.name} { … }' non supporté sur '${capabilities.engine}' — Mongo n'a pas d'API rollback partiel dans une session tx (ADR-024 Q6b). Refactor : découpe en transactions plus petites et gère la logique compensatoire côté application.`,
+				"planner_savepoint_mongo_unsupported"
+			);
+		}
+		// read/write items ne contiennent pas de savepoints imbriqués (les
+		// TransactionPlanItem.body vit uniquement dans savepoint kind). Pas
+		// besoin de walker profond ici — savepoint racine refusé suffit.
+	}
 }
 
 /**
