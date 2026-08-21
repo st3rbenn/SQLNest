@@ -103,7 +103,8 @@ export const MONGODB_CAPABILITIES: Capabilities = caps(
 		"introspect",
 		"transaction",
 		"upsert",
-		"subquery"
+		"subquery",
+		"cte"
 	],
 	["int", "float", "text", "bool", "date", "timestamp"],
 	{ subqueryStrategy: "materialize" }

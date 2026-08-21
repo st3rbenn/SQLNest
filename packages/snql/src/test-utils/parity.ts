@@ -227,8 +227,14 @@ function dispatchNative(
 			const letPlan = lowerLet(statement, schema);
 			assertLetSupported(letPlan, capabilities);
 			if (mapper.mapLet === undefined) {
-				throw new Error(
-					`${engine}: mapLet non implémenté — un refus assertLetSupported était attendu au planner.`
+				// ADR-024 PM/3 — Mongo a cte capability mais pas mapLet : exécution
+				// runtime via materializeLet (packages/engine/src/run.ts), pas
+				// codegen. Le parity helper ne peut pas produire de NativeQuery ici
+				// — les tests parity de ce feature doivent aller via runQuery avec
+				// un Connection (couvert par parity-matrix.e2e.test.ts en PM/9).
+				throw new SnqlError(
+					`${engine}: let/cte matérialisé au runtime (pas codegen) — utilise runQuery pour tester.`,
+					"parity_helper_runtime_materialized"
 				);
 			}
 			return mapper.mapLet(letPlan);

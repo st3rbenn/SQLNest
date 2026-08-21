@@ -92,12 +92,16 @@ describe("assertMongoRefused (ADR-024 D11)", () => {
 		expect(err.code).toBe("planner_insert_select_unsupported");
 	});
 
-	it("let Mongo → planner_let_unsupported", () => {
+	it("let Mongo (PM/3) → matérialisation runtime, pas de codegen", () => {
+		// Depuis PM/3 : Mongo a cte capability, exécution via materializeLet
+		// runtime (pas codegen). Le parity helper le signale explicitement pour
+		// que le caller sache qu'il faut passer par runQuery + Connection.
 		const err = assertMongoRefused(
 			"let old = find users where inactive = true pick id; find old pick id",
-			"planner_let_unsupported"
+			"parity_helper_runtime_materialized"
 		);
-		expect(err.code).toBe("planner_let_unsupported");
+		expect(err.code).toBe("parity_helper_runtime_materialized");
+		expect(err.message).toContain("runtime");
 	});
 
 	it("échec descriptif si aucune erreur levée", () => {

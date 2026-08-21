@@ -28,6 +28,7 @@ import {
 	lowerTransaction,
 	parse,
 	plan,
+	SnqlError,
 	type SupportedEngine,
 	tokenize
 } from "@sqlnest/snql";
@@ -295,13 +296,27 @@ async function materializeLet(
 	const cteNames = [...materialized.keys()];
 	// Étape 2 : exécute le body selon son type.
 	if (statement.body.operation === "select") {
-		// Body = find. Doit scan directement un CTE (les subqueries pouvant
-		// référencer un CTE sont hors scope Mongo v1 — refusé par le refus
-		// subquery natif).
+		// ADR-024 PM/3 D17 — body doit scan directement un CTE. Le join
+		// CTE↔collection est refusé v1 (materializeLet ne peut mixer données
+		// in-memory et engine dans un même $lookup natif). Message actionable :
+		// matérialise côté application, ou attends portage v2 via temp-collection.
 		if (!materialized.has(statement.body.source.collection)) {
-			throw new EngineExecutionError(
-				`Le body du 'let' doit scan un CTE (parmi ${cteNames.map((n) => `'${n}'`).join(", ")}) sur '${engine}' — le join CTE ↔ vraie collection n'est pas supporté v2.`
+			throw new SnqlError(
+				`Le body du 'let' doit scan un CTE (parmi ${cteNames.map((n) => `'${n}'`).join(", ")}) sur '${engine}' — le join CTE↔collection n'est pas supporté v1. Contournement : matérialise côté application via un let séparé, ou attends portage v2 (temp-collection + $lookup).`,
+				"planner_cte_body_join_mongo_unsupported"
 			);
+		}
+		// D17 additionnel — refus si body.stages contient un `with` sur une vraie
+		// collection alors que la source est un CTE (mix incompatible avec
+		// materialize runtime).
+		for (const stage of statement.body.stages) {
+			if (stage.type === "with" && !materialized.has(stage.collection)) {
+				throw new SnqlError(
+					`Le body du 'let' fait un 'with ${stage.collection}' sur une vraie collection alors que la source est un CTE ('${statement.body.source.collection}') — join CTE↔collection non supporté v1 sur '${engine}'. Contournement : matérialise ${stage.collection} via un let séparé.`,
+					"planner_cte_body_join_mongo_unsupported",
+					stage.span
+				);
+			}
 		}
 		const rows = await runQueryOnCte(
 			statement.body,

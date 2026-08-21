@@ -725,6 +725,11 @@ export function lowerLet(
 			}
 			// ADR-020 (T3/7) : refus shadowing CTE vs table du SchemaModel.
 			// Gated sur schema — sans schema (mode lib / tests unitaires isolés) skip.
+			// ADR-024 PM/3 D2 (partial) : le check est engine-agnostique (fires sur
+			// tout SchemaModel avec la collection en question). Pour Mongo sans
+			// schema disponible au lower (introspection non cachée), le shadow-check
+			// silently skip — divergence potentielle PG throw / Mongo empty rowset.
+			// Fix complet reporté : listCollections() cache au bootstrap CLI.
 			if (schema && schema.collections.some((c) => c.name === b.name)) {
 				throw new SnqlError(
 					`CTE '${b.name}' masque la table '${b.name}' — renomme (ex: 'active_${b.name}', '${b.name}_view').`,

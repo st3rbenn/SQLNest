@@ -404,14 +404,17 @@ describe("planner — capability 'cte'", () => {
 		expect(() => assertLetSupported(plan, POSTGRES_CAPABILITIES)).not.toThrow();
 	});
 
-	it("Mongo refuse cte", () => {
+	it("Mongo supporte cte (PM/3 — matérialisation runtime)", () => {
+		// ADR-024 PM/3 — Mongo a désormais 'cte' capability, résolution via
+		// materializeLet (packages/engine/src/run.ts) qui délègue à
+		// materializeSubplan (ADR-024 D1). Le mapper Mongo n'a PAS mapLet —
+		// l'exécution est runtime, pas codegen.
 		const stmt = parse(tokenize("let a = find users; find a pick id"));
 		if (stmt.operation !== "let") throw new Error();
 		const plan = lowerLet(stmt);
-		expectCode(
-			() => assertLetSupported(plan, MONGODB_CAPABILITIES),
-			"planner_let_unsupported"
-		);
+		expect(() =>
+			assertLetSupported(plan, MONGODB_CAPABILITIES)
+		).not.toThrow();
 	});
 
 	it("KV refuse cte", () => {
