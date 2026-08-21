@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
 import { Route as AuthRouteImport } from './routes/_auth'
 import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated.index'
+import { Route as AuthenticatedParityRouteImport } from './routes/_authenticated.parity'
 import { Route as AuthenticatedPairRouteImport } from './routes/_authenticated.pair'
 import { Route as AuthVerifyEmailRouteImport } from './routes/_auth.verify-email'
 import { Route as AuthSignupRouteImport } from './routes/_auth.signup'
@@ -40,6 +41,11 @@ const AuthRoute = AuthRouteImport.update({
 const AuthenticatedIndexRoute = AuthenticatedIndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
+const AuthenticatedParityRoute = AuthenticatedParityRouteImport.update({
+  id: '/parity',
+  path: '/parity',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
 const AuthenticatedPairRoute = AuthenticatedPairRouteImport.update({
@@ -140,6 +146,7 @@ export interface FileRoutesByFullPath {
   '/signup': typeof AuthSignupRoute
   '/verify-email': typeof AuthVerifyEmailRoute
   '/pair': typeof AuthenticatedPairRoute
+  '/parity': typeof AuthenticatedParityRoute
   '/': typeof AuthenticatedIndexRoute
   '/team/$teamSlug': typeof AuthenticatedTeamTeamSlugRouteWithChildren
   '/canvas/$connId/query': typeof AuthenticatedCanvasConnIdQueryRoute
@@ -159,6 +166,7 @@ export interface FileRoutesByTo {
   '/signup': typeof AuthSignupRoute
   '/verify-email': typeof AuthVerifyEmailRoute
   '/pair': typeof AuthenticatedPairRoute
+  '/parity': typeof AuthenticatedParityRoute
   '/': typeof AuthenticatedIndexRoute
   '/canvas/$connId/query': typeof AuthenticatedCanvasConnIdQueryRoute
   '/team/$teamSlug/drafts': typeof AuthenticatedTeamTeamSlugDraftsRoute
@@ -180,6 +188,7 @@ export interface FileRoutesById {
   '/_auth/signup': typeof AuthSignupRoute
   '/_auth/verify-email': typeof AuthVerifyEmailRoute
   '/_authenticated/pair': typeof AuthenticatedPairRoute
+  '/_authenticated/parity': typeof AuthenticatedParityRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
   '/_authenticated/team/$teamSlug': typeof AuthenticatedTeamTeamSlugRouteWithChildren
   '/_authenticated/canvas/$connId/query': typeof AuthenticatedCanvasConnIdQueryRoute
@@ -201,6 +210,7 @@ export interface FileRouteTypes {
     | '/signup'
     | '/verify-email'
     | '/pair'
+    | '/parity'
     | '/'
     | '/team/$teamSlug'
     | '/canvas/$connId/query'
@@ -220,6 +230,7 @@ export interface FileRouteTypes {
     | '/signup'
     | '/verify-email'
     | '/pair'
+    | '/parity'
     | '/'
     | '/canvas/$connId/query'
     | '/team/$teamSlug/drafts'
@@ -240,6 +251,7 @@ export interface FileRouteTypes {
     | '/_auth/signup'
     | '/_auth/verify-email'
     | '/_authenticated/pair'
+    | '/_authenticated/parity'
     | '/_authenticated/'
     | '/_authenticated/team/$teamSlug'
     | '/_authenticated/canvas/$connId/query'
@@ -279,6 +291,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof AuthenticatedIndexRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/parity': {
+      id: '/_authenticated/parity'
+      path: '/parity'
+      fullPath: '/parity'
+      preLoaderRoute: typeof AuthenticatedParityRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
     '/_authenticated/pair': {
@@ -446,6 +465,7 @@ const AuthenticatedTeamTeamSlugRouteWithChildren =
 
 interface AuthenticatedRouteChildren {
   AuthenticatedPairRoute: typeof AuthenticatedPairRoute
+  AuthenticatedParityRoute: typeof AuthenticatedParityRoute
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
   AuthenticatedTeamTeamSlugRoute: typeof AuthenticatedTeamTeamSlugRouteWithChildren
   AuthenticatedCanvasConnIdQueryRoute: typeof AuthenticatedCanvasConnIdQueryRoute
@@ -454,6 +474,7 @@ interface AuthenticatedRouteChildren {
 
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedPairRoute: AuthenticatedPairRoute,
+  AuthenticatedParityRoute: AuthenticatedParityRoute,
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
   AuthenticatedTeamTeamSlugRoute: AuthenticatedTeamTeamSlugRouteWithChildren,
   AuthenticatedCanvasConnIdQueryRoute: AuthenticatedCanvasConnIdQueryRoute,
