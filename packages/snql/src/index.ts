@@ -190,6 +190,17 @@ export {
 	plan,
 	toCompensationOp
 } from "./planner/planner";
+export type { PlannerErrorCode } from "./planner/errors/registry";
+export { PLANNER_ERROR_CODES, plannerError } from "./planner/errors/registry";
+export {
+	assertMongoPipeline,
+	assertMongoRefused,
+	mongoIntrospect,
+	mongoPipeline,
+	mongoSql,
+	mongoWrite,
+	pgSql
+} from "./test-utils/parity";
 export { linearize } from "./ir/plan";
 export type { LetStatement } from "./parser/ast";
 export type { JoinSources, Row } from "./runtime/compensate";

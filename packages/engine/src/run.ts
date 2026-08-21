@@ -29,11 +29,11 @@ import {
 	parse,
 	plan,
 	type SupportedEngine,
-	toCompensationOp,
 	tokenize
 } from "@sqlnest/snql";
 import type { Connection } from "./adapter";
 import { EngineExecutionError, UnknownEngineError } from "./errors";
+import { materializeSubplan } from "./mongo/materialize";
 
 /** ResultSet enrichi d'un drapeau `written` : distingue une écriture d'une lecture. */
 export type QueryOutcome = ResultSet & {
@@ -341,20 +341,23 @@ async function runQueryOnCte(
 	materialized: Map<string, readonly Row[]>
 ): Promise<readonly Row[]> {
 	const sourceName = query.source.collection;
+	// Court-circuit CTE : source = CTE déjà matérialisé → materializeSubplan
+	// (D1) fait le compensate pur, sans resolveSubqueries — les subqueries
+	// éventuelles dans les stages sont résolues par compensate directement,
+	// comportement historique T3/6.1 préservé.
 	if (materialized.has(sourceName)) {
-		// Source = CTE matérialisé → compensate pur. Les subqueries `in (find
-		// autre_cte …)` dans le predicate se résolvent aussi par compensate car
-		// tout est en RAM à ce stade — pas besoin de walker externe.
-		const lp = lower(query, schema);
-		const linear = linearize(lp);
-		const ops = linear.slice(1).map((op) => toCompensationOp(op));
-		return compensate(ops, [...(materialized.get(sourceName) ?? [])]);
+		return materializeSubplan(
+			lower(query, schema),
+			connection,
+			schema,
+			capabilities,
+			mapper,
+			{ materialized }
+		);
 	}
 	// Source = vraie collection → pipeline engine natif. Étape supplémentaire
 	// pour Mongo/KV : résoudre les subqueries `in (find cte_ou_coll …)` avant
-	// le plan(), sinon le planner refuse (capability subquery absente). Le
-	// walker connaît les CTE matérialisés — un scan sur un CTE court-circuite
-	// l'exécution native et lit les rows RAM directement.
+	// materializeSubplan, sinon le planner refuse (capability subquery absente).
 	let logicalPlan = lower(query, schema);
 	if (!capabilities.supports.has("subquery")) {
 		logicalPlan = await resolveSubqueries(
@@ -366,12 +369,7 @@ async function runQueryOnCte(
 			materialized
 		);
 	}
-	const physical = plan(logicalPlan, capabilities);
-	const native = mapper.map(physical.pushdown);
-	const pushed = await connection.execute(native);
-	return physical.compensation.length === 0
-		? pushed.rows
-		: compensate(physical.compensation, pushed.rows);
+	return materializeSubplan(logicalPlan, connection, schema, capabilities, mapper);
 }
 
 /**
@@ -659,10 +657,11 @@ async function resolveSubqueries(
 	// les subqueries matérialisées. Peut contenir lui-même des subqueries →
 	// résolue par la récursion (on rappelle resolveSubqueries d'abord).
 	//
-	// T3/6.2 v2 A2 : si le subplan est un scan direct sur un CTE déjà
-	// matérialisé (passé via `materialized`), on court-circuite l'exécution
-	// native — les rows sont en RAM. Le compensate applique les stages
-	// (filter/project/sort/limit) directement dessus.
+	// PM/1 D1 — délégué à `materializeSubplan()` (packages/engine/src/mongo/
+	// materialize.ts) qui centralise court-circuit CTE + cap runtime D4.
+	// Ordre : (1) court-circuit CTE via materializeSubplan si scan racine sur
+	// CTE ; (2) sinon resolveSubqueries pour aplatir les subqueries imbriquées
+	// puis materializeSubplan pour le pushdown natif.
 	const executeInnerSelect = async (
 		subPlan: import("@sqlnest/snql").LogicalPlan
 	): Promise<readonly Row[]> => {
@@ -673,9 +672,14 @@ async function resolveSubqueries(
 			scanOp?.op === "scan" &&
 			materialized.has(scanOp.collection)
 		) {
-			const cteRows = [...(materialized.get(scanOp.collection) ?? [])];
-			const ops = linear.slice(1).map((op) => toCompensationOp(op));
-			return compensate(ops, cteRows);
+			return materializeSubplan(
+				subPlan,
+				connection,
+				schema,
+				capabilities,
+				mapper,
+				{ materialized }
+			);
 		}
 		const resolved = await resolveSubqueries(
 			subPlan,
@@ -685,12 +689,7 @@ async function resolveSubqueries(
 			mapper,
 			materialized
 		);
-		const physical = plan(resolved, capabilities);
-		const native = mapper.map(physical.pushdown);
-		const pushed = await connection.execute(native);
-		return physical.compensation.length === 0
-			? pushed.rows
-			: compensate(physical.compensation, pushed.rows);
+		return materializeSubplan(resolved, connection, schema, capabilities, mapper);
 	};
 
 	return walkOp(logicalPlan);

@@ -21,6 +21,11 @@ import {
 	EngineConnectionError,
 	EngineExecutionError
 } from "../errors";
+import {
+	probeMongoFeatures,
+	type MongoEngineFeatures,
+	type MongoFeatures
+} from "./capability-probe";
 import { describeMongoConfig } from "./config";
 import { inferCollection, introspectMongo, type SampledDoc } from "./introspect";
 
@@ -240,11 +245,28 @@ class MongoConnection implements Connection {
 	#client: MongoClient | undefined;
 	readonly #dbName: string;
 	readonly #sampleSize: number;
+	readonly #mongoFeatures: MongoFeatures;
 
-	constructor(client: MongoClient, dbName: string, sampleSize: number) {
+	constructor(
+		client: MongoClient,
+		dbName: string,
+		sampleSize: number,
+		mongoFeatures: MongoFeatures
+	) {
 		this.#client = client;
 		this.#dbName = dbName;
 		this.#sampleSize = sampleSize;
+		this.#mongoFeatures = mongoFeatures;
+	}
+
+	/**
+	 * ADR-024 D3 — features driver détectées au bootstrap, exposées via le
+	 * bag typé `engineFeatures` (discriminé par `kind`). Consommé par run.ts /
+	 * codegen sprint pour émettre `planner_mongo_version_capability_missing`
+	 * avant d'appeler une op qui exige la feature.
+	 */
+	get engineFeatures(): MongoEngineFeatures {
+		return { kind: "mongodb", features: this.#mongoFeatures };
 	}
 
 	async ping(): Promise<PingResult> {
@@ -763,13 +785,18 @@ export const mongoAdapter: EngineAdapter = {
 			client = new MongoClient(config.url, {
 				serverSelectionTimeoutMS: SERVER_SELECTION_TIMEOUT_MS
 			});
+			// Fail-fast : établit et vérifie tout de suite. Ordre important :
+			// (1) connect() ouvre le pool, (2) probe capabilities pour figer la
+			// matrice version × feature (ADR-024 D3), (3) construit la Connection
+			// avec les features cachées, (4) ping() sanity check final.
+			await client.connect();
+			const mongoFeatures = await probeMongoFeatures(client.db(config.database));
 			const connection = new MongoConnection(
 				client,
 				config.database,
-				config.sampleSize
+				config.sampleSize,
+				mongoFeatures
 			);
-			// Fail-fast : établit et vérifie tout de suite.
-			await client.connect();
 			await connection.ping();
 			return connection;
 		} catch (error) {

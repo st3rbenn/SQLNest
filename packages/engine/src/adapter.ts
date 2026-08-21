@@ -34,6 +34,14 @@ export interface Connection {
 	 * ce namespace). Absent = engine sans notion de namespace.
 	 */
 	readonly namespace?: string;
+	/**
+	 * ADR-024 D3 (PM/1) : bag typé exposant les features driver détectées au
+	 * bootstrap (version × topologie). Consommé par run.ts / codegen sprint
+	 * pour émettre `planner_mongo_version_capability_missing` avant d'appeler
+	 * une op qui exige la feature. Chaque adapter définit son propre shape ;
+	 * discriminant `kind` obligatoire (voir MongoEngineFeatures).
+	 */
+	readonly engineFeatures?: { readonly kind: string };
 	/** Vérifie que le moteur répond (aller-retour réseau). Lève si injoignable. */
 	ping(): Promise<PingResult>;
 	/** Lit la structure de la base → SchemaModel unifié. */

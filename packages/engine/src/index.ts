@@ -55,6 +55,16 @@ export {
 	UnknownEngineError
 } from "./errors";
 export { mongoAdapter } from "./mongo/adapter";
+export type {
+	MongoEngineFeatures,
+	MongoFeatures,
+	MongoTopology
+} from "./mongo/capability-probe";
+export {
+	assertMongoFeature,
+	probeMongoFeatures,
+	resolveMongoFeatures
+} from "./mongo/capability-probe";
 export type { MongoConfigInput, MongoConnectionConfig } from "./mongo/config";
 export { describeMongoConfig, resolveMongoConfig } from "./mongo/config";
 export {
@@ -63,6 +73,12 @@ export {
 	introspectMongo,
 	snqlTypeOf
 } from "./mongo/introspect";
+export type { MaterializeOptions } from "./mongo/materialize";
+export {
+	DEFAULT_MATERIALIZE_MAX_ROWS,
+	materializeSubplan,
+	RUNTIME_MONGO_MATERIALIZE_OVERFLOW
+} from "./mongo/materialize";
 export { postgresAdapter } from "./postgres/adapter";
 export {
 	buildSchemaModel,
