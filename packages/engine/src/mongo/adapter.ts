@@ -417,6 +417,18 @@ class MongoConnection implements Connection {
 				const result = await collection.updateMany(filter, update);
 				return { columns: [], rows: [], rowCount: result.matchedCount };
 			}
+			if (query.op === "update-agg-merge") {
+				// ADR-024 PM/4 Q4a — write-join via aggregate + $merge natif.
+				// Le $merge est un stage terminal qui écrit comme side-effect ;
+				// le cursor result est vide. rowCount = 0 (limitation documentée
+				// dans MongoWriteQuery type — 2-pass count optionnel prévu PM/10).
+				const pipeline = hydrateBson(
+					[...query.pipeline],
+					false
+				) as Document[];
+				await collection.aggregate(pipeline).toArray();
+				return { columns: [], rows: [], rowCount: 0 };
+			}
 			if (query.op === "upsert") {
 				// Sprint v3 Mongo : bulkWrite d'updateOne+upsert (atomicité côté
 				// serveur par bulk, pas par transaction). `rowCount` = docs matched
@@ -687,6 +699,17 @@ class MongoConnection implements Connection {
 					: (hydrateBson(query.update, false) as Document);
 				const result = await collection.updateMany(filter, update, { session });
 				return { columns: [], rows: [], rowCount: result.matchedCount };
+			}
+			if (query.op === "update-agg-merge") {
+				// ADR-024 PM/4 Q4a — write-join dans une transaction Mongo.
+				// Fonctionne sur RS 4.2+ (aggregation avec $merge en tx supportée
+				// depuis MongoDB 4.2 replica set). rowCount = 0 (limitation $merge).
+				const pipeline = hydrateBson(
+					[...query.pipeline],
+					false
+				) as Document[];
+				await collection.aggregate(pipeline, { session }).toArray();
+				return { columns: [], rows: [], rowCount: 0 };
 			}
 			if (query.op === "upsert") {
 				const bulkOps = query.operations.map((op) => {

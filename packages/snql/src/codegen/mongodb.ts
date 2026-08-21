@@ -81,6 +81,17 @@ export const mongoMapper: Mapper = {
 				}
 				return { ...base, op: "insert", documents: renderDocuments(plan) };
 			case "update":
+				// ADR-024 PM/4 Q4a — write-join Mongo via aggregate + $merge natif.
+				// Emit un pipeline [$match?, $lookup+$unwind par join, $set, $unset
+				// aliases join, $merge into:self]. Le $merge est terminal, écrit
+				// comme side-effect. Atomicité par-doc via whenMatched='merge'.
+				if (plan.joins !== undefined && plan.joins.length > 0) {
+					return {
+						...base,
+						op: "update-agg-merge",
+						pipeline: renderUpdateJoinPipeline(plan)
+					};
+				}
 				return {
 					...base,
 					op: "update",
@@ -442,6 +453,94 @@ function renderUpdate(
 			value.kind === "field" ? { $ifNull: [operand, null] } : operand;
 	}
 	return literalOnly ? { $set: set } : [{ $set: set }];
+}
+
+/**
+ * ADR-024 PM/4 Q4a — pipeline aggregate + `$merge` pour write-join Mongo.
+ * Le pipeline lit `plan.collection`, joint les tables via `$lookup+$unwind`,
+ * évalue `$set` avec les valeurs jointes (aliases join = `plan.joins[i].as`
+ * → référencés en `$<alias>.<col>` dans les exprs), retire les alias join,
+ * puis `$merge` de retour dans la collection cible.
+ *
+ * Sémantique cross-engine :
+ *  - `with one X` = inner join (equiv PG `UPDATE ... FROM X WHERE l = f`) →
+ *    `$unwind` sans `preserveNullAndEmptyArrays` (docs sans match droppés,
+ *    pas d'update — cohérent PG où le join filtre l'update).
+ *  - `whenMatched: 'merge'` = shallow merge des champs `$set` sur le doc
+ *    existant (cohérent PG UPDATE ... SET semantics).
+ *  - `whenNotMatched: 'discard'` = pas d'insert accidentel (le pipeline ne
+ *    lit que la collection cible, donc chaque doc existe déjà — discard
+ *    est un safeguard contre les edge cases).
+ *
+ * Limitation MVP : rowCount non-reporté. Le `$merge` en tant que stage
+ * terminal ne renvoie rien via le cursor — l'adapter retourne `rowCount=null`
+ * jusqu'à ce que PM/10 branche un 2-pass count optionnel.
+ */
+function renderUpdateJoinPipeline(plan: {
+	readonly collection: string;
+	readonly alias?: string;
+	readonly joins?: readonly import("../ir/plan").PlanUpdateJoin[];
+	readonly assignments: readonly PlanColumnValue[];
+	readonly predicate?: PlanExpr;
+}): MongoStage[] {
+	const pipeline: MongoStage[] = [];
+	// $match — predicate racine sur le doc cible (avant lookup, pour indexer).
+	if (plan.predicate !== undefined) {
+		pipeline.push({
+			$match: renderMatch(plan.predicate, plan.alias, "write")
+		});
+	}
+	// $lookup + $unwind par join. L'alias user (`joins[i].as`) devient le
+	// nom du champ contenant le doc joint — les exprs qui référencent
+	// `alias.col` produiront naturellement `$alias.col`.
+	const joins = plan.joins ?? [];
+	const joinAliases: string[] = [];
+	for (const join of joins) {
+		joinAliases.push(join.as);
+		// foreignField : strip le préfixe alias (`u.id` → `id`) car Mongo
+		// $lookup.foreignField est un path RELATIF à la collection jointe.
+		const foreignPath =
+			join.foreignField.length > 1 && join.foreignField[0] === join.as
+				? join.foreignField.slice(1)
+				: join.foreignField;
+		pipeline.push({
+			$lookup: {
+				from: join.collection,
+				localField: mongoField(join.localField, plan.alias),
+				foreignField: foreignPath.join("."),
+				as: join.as
+			}
+		});
+		pipeline.push({
+			$unwind: {
+				path: `$${join.as}`,
+				preserveNullAndEmptyArrays: false
+			}
+		});
+	}
+	// $set — assignments. Les exprs peuvent référencer les alias join.
+	const setDoc: Record<string, unknown> = {};
+	for (const { column, value } of plan.assignments) {
+		const operand = toExprOperand(value, plan.alias);
+		setDoc[column] =
+			value.kind === "field" ? { $ifNull: [operand, null] } : operand;
+	}
+	pipeline.push({ $set: setDoc });
+	// $unset des alias join — sinon $merge les écrirait dans le doc cible.
+	if (joinAliases.length > 0) {
+		pipeline.push({ $unset: joinAliases });
+	}
+	// $merge terminal — écrit dans la collection cible. whenMatched='merge'
+	// applique un shallow merge (cohérent SET semantics), whenNotMatched=
+	// 'discard' est un safeguard (jamais atteint car source=target).
+	pipeline.push({
+		$merge: {
+			into: plan.collection,
+			whenMatched: "merge",
+			whenNotMatched: "discard"
+		}
+	});
+	return pipeline;
 }
 
 function appendStage(

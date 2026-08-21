@@ -102,6 +102,21 @@ export type MongoWriteQuery = {
 				readonly setOnInsert: Record<string, unknown>;
 			}[];
 	  }
+	| {
+			/**
+			 * ADR-024 PM/4 Q4a — write-join Mongo via aggregate + `$merge`. Le
+			 * codegen produit un pipeline `[$match?, $lookup, $unwind, $set,
+			 * $unset(__j0), $merge{into: <same>, whenMatched: 'merge',
+			 * whenNotMatched: 'discard'}]`. L'adapter exécute via
+			 * `db.collection.aggregate(pipeline).toArray()` — le `$merge` est un
+			 * stage terminal qui écrit comme side-effect. Atomicité par-doc via
+			 * `whenMatched: 'merge'` (Mongo 4.2+). rowCount non-reporté (limitation
+			 * `$merge` : la cursor result est vide) — le caller reçoit rowCount=null.
+			 * D9 perf-warning (join key non-indexée) délivré en PM/10.
+			 */
+			readonly op: "update-agg-merge";
+			readonly pipeline: readonly MongoStage[];
+	  }
 );
 
 /**

@@ -76,12 +76,13 @@ describe("assertMongoRefused (ADR-024 D11)", () => {
 		expect(err.code).toBe("planner_subquery_unsupported");
 	});
 
-	it("write-join Mongo → planner_write_join_unsupported", () => {
-		const err = assertMongoRefused(
-			"update orders with one users as u on user_id = u.id set discount = 0.1",
-			"planner_write_join_unsupported"
+	it("write-join Mongo (PM/4) → codegen aggregate+$merge, plus de refus", () => {
+		// Depuis PM/4 : Mongo supporte write-join via aggregate + $merge natif.
+		// L'ancien planner_write_join_unsupported n'est plus levé.
+		const write = mongoWrite(
+			"update orders with one users as u on user_id = u.id set discount = 0.1"
 		);
-		expect(err.code).toBe("planner_write_join_unsupported");
+		expect(write.op).toBe("update-agg-merge");
 	});
 
 	it("insert-select Mongo → planner_insert_select_unsupported", () => {

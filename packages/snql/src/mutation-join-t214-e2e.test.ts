@@ -201,17 +201,16 @@ describe("codegen PG — UPDATE ... FROM", () => {
 // Planner : capability write-join
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe("planner — capability 'write-join' PG only", () => {
-	it("Mongo refuse update … with one …", () => {
+describe("planner — capability 'write-join' PG + Mongo (PM/4), KV refusé", () => {
+	it("Mongo supporte update … with one … (PM/4 aggregate+$merge)", () => {
 		const stmt = parse(
 			tokenize('update resource with one agency on agency_id = id set status = "x"')
 		);
 		if (stmt.operation !== "update") throw new Error();
 		const mutation = lowerMutation(stmt);
-		expectCode(
-			() => assertMutationWriteJoinSupported(mutation, MONGODB_CAPABILITIES),
-			"planner_write_join_unsupported"
-		);
+		expect(() =>
+			assertMutationWriteJoinSupported(mutation, MONGODB_CAPABILITIES)
+		).not.toThrow();
 	});
 
 	it("KV refuse update … with one …", () => {
