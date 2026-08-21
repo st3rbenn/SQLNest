@@ -155,7 +155,10 @@ export function plan(
  * avec le nom offender, sans compensation possible pour T2 sprint 1 (les
  * fonctions sont scalaires — les émuler côté runtime doublerait le codegen).
  */
-function assertFunctionsSupported(plan: LogicalPlan, capabilities: Capabilities): void {
+function assertFunctionsSupported(
+	plan: LogicalPlan,
+	capabilities: Capabilities
+): void {
 	const unsupported = new Set<string>();
 	visitPlanCalls(plan, (name) => {
 		if (!capabilities.functions.has(name)) {
@@ -172,7 +175,10 @@ function assertFunctionsSupported(plan: LogicalPlan, capabilities: Capabilities)
 }
 
 /** Walker qui invoque `visit(name)` pour chaque call rencontré dans le plan. */
-function visitPlanCalls(plan: LogicalPlan, visit: (name: string) => void): void {
+function visitPlanCalls(
+	plan: LogicalPlan,
+	visit: (name: string) => void
+): void {
 	switch (plan.op) {
 		case "scan":
 			return;
@@ -402,8 +408,12 @@ export function assertMutationCastTargetsSupported(
 		if (plan.predicate !== undefined) visitExprCasts(plan.predicate, visitor);
 	} else if (plan.op === "delete") {
 		if (plan.predicate !== undefined) visitExprCasts(plan.predicate, visitor);
-	} else if (plan.op === "insert" && plan.onConflict?.action.kind === "update") {
-		for (const a of plan.onConflict.action.assignments) visitExprCasts(a.value, visitor);
+	} else if (
+		plan.op === "insert" &&
+		plan.onConflict?.action.kind === "update"
+	) {
+		for (const a of plan.onConflict.action.assignments)
+			visitExprCasts(a.value, visitor);
 		if (plan.onConflict.action.where !== undefined) {
 			visitExprCasts(plan.onConflict.action.where, visitor);
 		}
@@ -445,7 +455,12 @@ export function assertMutationWriteJoinSupported(
 	plan: MutationPlan,
 	capabilities: Capabilities
 ): void {
-	if (plan.op !== "update" || plan.joins === undefined || plan.joins.length === 0) return;
+	if (
+		plan.op !== "update" ||
+		plan.joins === undefined ||
+		plan.joins.length === 0
+	)
+		return;
 	if (capabilities.supports.has("write-join")) return;
 	throw new SnqlError(
 		`'update … with one …' non supporté sur '${capabilities.engine}' — capability 'write-join' absente. Pour Postgres, cette syntaxe cible UPDATE ... FROM natif ; les autres engines matérialisent le join côté application.`,
@@ -527,7 +542,9 @@ export function toCompensationOp(op: LogicalPlan): CompensationOp {
 				op: "project",
 				fields: op.fields,
 				...(op.unique === true ? { unique: true as const } : {}),
-				...(op.distinctOnKeys !== undefined ? { distinctOnKeys: op.distinctOnKeys } : {})
+				...(op.distinctOnKeys !== undefined
+					? { distinctOnKeys: op.distinctOnKeys }
+					: {})
 			};
 		case "sort":
 			return { op: "sort", keys: op.keys };
@@ -670,25 +687,166 @@ function assertJsonPredicatesPg(
  *    aligné Mongo pour cohérence cross-engine.
  */
 /**
- * Sprint T2/11 : refus sub-queries si l'engine n'a pas la capability.
- * Aujourd'hui PG only. Mongo/KV : message dédié pointant T3+ (matérialisation
- * côté application ou attente cross-engine subquery support).
+ * Sprint T2/11 + ADR-024 PM/2 : refus sub-queries selon la capacité et la
+ * stratégie de l'engine.
+ *  - Pas de capability `subquery` (KV) : refus total (uncorrelated ET
+ *    correlated). Message pointant l'attente cross-engine subquery support.
+ *  - Strategy `native` (PG) : tout passe, pushdown SQL natif.
+ *  - Strategy `materialize` (Mongo, PM/2) : uncorrelated OK (résolue via
+ *    `materializeSubplan` au runtime), correlated refusée avec message
+ *    actionnable — matérialisation impose 1 exécution par row outer, infra
+ *    scope-stack v3+ (voir ADR-024 §Q2 requalifié).
  */
 function assertSubqueryCapability(
 	plan: LogicalPlan,
 	capabilities: Capabilities
 ): void {
-	if (capabilities.supports.has("subquery")) return;
+	if (!capabilities.supports.has("subquery")) {
+		visitPlanExprs(plan, (expr) => {
+			if (expr.kind === "subquery" || expr.kind === "exists") {
+				throw new SnqlError(
+					`Sub-query (${expr.kind === "exists" ? "exists" : "in"}) non supportée sur '${capabilities.engine}' — capability 'subquery' absente.`,
+					"planner_subquery_unsupported",
+					expr.span
+				);
+			}
+		});
+		return;
+	}
+	if (capabilities.subqueryStrategy === "materialize") {
+		assertUncorrelatedSubqueryForMaterialize(plan, capabilities);
+	}
+}
+
+/**
+ * ADR-024 PM/2 — walker planner qui rejette les sub-queries corrélées quand
+ * l'engine résout par matérialisation (Mongo). Une corrélée nécessiterait
+ * une exécution par row outer (N+1) ; la matérialisation en 1 shot ne peut
+ * pas la porter. Le rewrite `$lookup` sub-pipeline natif est l'objectif v3+.
+ *
+ * Détection : linearize le subplan, extrait le scan racine → alias local.
+ * Tout `field ref head.<...>` avec `head !== localAlias` = ref outer.
+ * Déplacé de `packages/engine/src/run.ts` où le refus était tardif (runtime
+ * EngineExecutionError) et incohérent doctrine T2/11-15.
+ */
+function assertUncorrelatedSubqueryForMaterialize(
+	plan: LogicalPlan,
+	capabilities: Capabilities
+): void {
 	visitPlanExprs(plan, (expr) => {
-		if (expr.kind === "subquery" || expr.kind === "exists") {
-			throw new SnqlError(
-				`Sub-query (${expr.kind === "exists" ? "exists" : "in"}) non supportée sur '${capabilities.engine}' v1 — matérialise le résultat côté application ou attends le cross-engine subquery support (T3+)`,
-				"planner_subquery_unsupported",
-				expr.span
-			);
-		}
+		const subplan: LogicalPlan | null =
+			expr.kind === "subquery"
+				? expr.plan
+				: expr.kind === "exists"
+					? expr.subplan
+					: null;
+		if (subplan === null) return;
+		const outerAliases = detectOuterAliasesInSubplan(subplan);
+		if (outerAliases.length === 0) return;
+		const first = outerAliases[0];
+		throw new SnqlError(
+			`Sub-query corrélée non supportée sur '${capabilities.engine}' — la référence '${first}.<col>' pointe vers un scope outer, la matérialisation runtime ne peut pas la porter (nécessiterait une exécution par row outer). Contournement : refactor en 'find outer with one inner on outer.pk = inner.fk' (join), ou matérialise l'outer via un 'let' séparé. Ticket v3+ : rewrite en $lookup sub-pipeline natif.`,
+			"planner_subquery_unsupported",
+			expr.span
+		);
 	});
 }
+
+/**
+ * Détecte les alias externes référencés dans un sub-plan — extrait de
+ * `packages/engine/src/run.ts` PM/2 (D2 walker déplacé au planner). Un alias
+ * distinct du scan racine local = corrélation. Récursion sur subquery/exists
+ * imbriqués pour couvrir corrélations 2+ niveaux.
+ */
+function detectOuterAliasesInSubplan(subPlan: LogicalPlan): string[] {
+	const ops = linearize(subPlan);
+	const scan = ops[0];
+	if (scan?.op !== "scan") return [];
+	const localAlias = scan.alias;
+	const found = new Set<string>();
+
+	const scanExpr = (expr: PlanExpr): void => {
+		switch (expr.kind) {
+			case "field":
+				if (expr.path.length > 1) {
+					const head = expr.path[0]!;
+					if (head !== localAlias) found.add(head);
+				}
+				return;
+			case "compare":
+			case "arith":
+			case "and":
+			case "or":
+				scanExpr(expr.left);
+				scanExpr(expr.right);
+				return;
+			case "not":
+				scanExpr(expr.operand);
+				return;
+			case "isNull":
+			case "cast":
+				scanExpr(expr.operand);
+				return;
+			case "call":
+			case "windowCall":
+				for (const a of expr.args) scanExpr(a);
+				return;
+			case "in":
+				scanExpr(expr.target);
+				for (const v of expr.values) scanExpr(v);
+				return;
+			case "case":
+				for (const b of expr.branches) {
+					scanExpr(b.cond);
+					scanExpr(b.value);
+				}
+				scanExpr(expr.elseValue);
+				return;
+			case "object":
+				for (const e of expr.entries) scanExpr(e.value);
+				return;
+			case "array":
+				for (const i of expr.items) scanExpr(i);
+				return;
+			case "subquery":
+				for (const outerHead of detectOuterAliasesInSubplan(expr.plan)) {
+					if (outerHead !== localAlias) found.add(outerHead);
+				}
+				return;
+			case "exists":
+				for (const outerHead of detectOuterAliasesInSubplan(expr.subplan)) {
+					if (outerHead !== localAlias) found.add(outerHead);
+				}
+				return;
+			case "literal":
+			case "upsertNew":
+				return;
+		}
+	};
+
+	for (const op of ops.slice(1)) {
+		switch (op.op) {
+			case "filter":
+				scanExpr(op.predicate);
+				break;
+			case "aggregate":
+				if (op.having !== undefined) scanExpr(op.having);
+				break;
+			case "project":
+				for (const f of op.fields) if (f.expr !== undefined) scanExpr(f.expr);
+				break;
+			case "sort":
+			case "limit":
+			case "join":
+			case "scan":
+				break;
+		}
+	}
+	return [...found];
+}
+
+/** Exposé pour reuse — D16 lowerLet a besoin du même walker. */
+export { detectOuterAliasesInSubplan };
 
 function assertAggregateEngineRestrictions(
 	plan: LogicalPlan,

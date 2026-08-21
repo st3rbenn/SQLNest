@@ -65,9 +65,11 @@ describe("mongoSql / mongoPipeline (ADR-024 D11)", () => {
 });
 
 describe("assertMongoRefused (ADR-024 D11)", () => {
-	it("subquery Mongo → planner_subquery_unsupported", () => {
+	it("correlated subquery Mongo → planner_subquery_unsupported", () => {
+		// PM/2 : uncorrelated est désormais accepté sur Mongo (matérialisation
+		// runtime). Seul correlated (reference outer alias) reste refusé au planner.
 		const err = assertMongoRefused(
-			"find users where id in (find orders pick user_id)",
+			"find users as u where exists (find orders as o where o.user_id = u.id)",
 			"planner_subquery_unsupported"
 		);
 		expect(err).toBeInstanceOf(SnqlError);
@@ -107,7 +109,7 @@ describe("assertMongoRefused (ADR-024 D11)", () => {
 	it("échec descriptif si code différent de l'attendu", () => {
 		expect(() =>
 			assertMongoRefused(
-				"find users where id in (find orders pick user_id)",
+				"find users as u where exists (find orders as o where o.user_id = u.id)",
 				"planner_let_unsupported"
 			)
 		).toThrow(

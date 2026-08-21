@@ -20,8 +20,8 @@ import {
 	KV_CAPABILITIES,
 	lowerLet,
 	MONGODB_CAPABILITIES,
-	parse,
 	POSTGRES_CAPABILITIES,
+	parse,
 	tokenize
 } from "./index";
 import type { SchemaModel } from "./schema/model";
@@ -29,7 +29,11 @@ import type { SchemaModel } from "./schema/model";
 function makeSchema(...names: string[]): SchemaModel {
 	return {
 		engine: "postgres",
-		collections: names.map((name) => ({ name, fields: [], source: { kind: "test" } })),
+		collections: names.map((name) => ({
+			name,
+			fields: [],
+			source: { kind: "test" }
+		})),
 		relations: []
 	} as unknown as SchemaModel;
 }
@@ -51,7 +55,9 @@ function expectCode(fn: () => unknown, code: string): void {
 describe("parser — let CTE", () => {
 	it("`let active = find users where is_active = true; find active pick id`", () => {
 		const stmt = parse(
-			tokenize("let active = find users where is_active = true; find active pick id")
+			tokenize(
+				"let active = find users where is_active = true; find active pick id"
+			)
 		);
 		if (stmt.operation !== "let") throw new Error("let attendu");
 		expect(stmt.bindings).toHaveLength(1);
@@ -91,7 +97,7 @@ describe("parser — let CTE", () => {
 
 	it("refus binding non-select (let x = add ...)", () => {
 		expectCode(
-			() => parse(tokenize('let x = add {n: 1} into t; find users')),
+			() => parse(tokenize("let x = add {n: 1} into t; find users")),
 			"parse_let_binding_not_select"
 		);
 	});
@@ -104,7 +110,10 @@ describe("parser — let CTE", () => {
 	});
 
 	it("refus `let` sans nom", () => {
-		expectCode(() => parse(tokenize("let = find users")), "parse_let_missing_name");
+		expectCode(
+			() => parse(tokenize("let = find users")),
+			"parse_let_missing_name"
+		);
 	});
 
 	it("refus body raw", () => {
@@ -158,7 +167,7 @@ describe("lower — let CTE", () => {
 
 	it("refus update <cte> set …", () => {
 		const stmt = parse(
-			tokenize("let cache = find users; update cache set email = \"x\"")
+			tokenize('let cache = find users; update cache set email = "x"')
 		);
 		if (stmt.operation !== "let") throw new Error();
 		expectCode(() => lowerLet(stmt), "lower_let_write_to_cte");
@@ -190,10 +199,15 @@ describe("lower — let CTE", () => {
 describe("lower T3/7 — shadowing CTE vs table (ADR-020)", () => {
 	it("refus shadow simple (CTE porte le nom d'une collection)", () => {
 		const stmt = parse(
-			tokenize("let users = find users where is_active = true; find users pick email")
+			tokenize(
+				"let users = find users where is_active = true; find users pick email"
+			)
 		);
 		if (stmt.operation !== "let") throw new Error();
-		expectCode(() => lowerLet(stmt, makeSchema("users")), "lower_let_shadows_collection");
+		expectCode(
+			() => lowerLet(stmt, makeSchema("users")),
+			"lower_let_shadows_collection"
+		);
 	});
 
 	it("accepté quand renommé (active_users)", () => {
@@ -209,10 +223,15 @@ describe("lower T3/7 — shadowing CTE vs table (ADR-020)", () => {
 	it("mode lib sans schema : shadow accepté (invariant prod)", () => {
 		// Nom du binding = 'users' (potentiellement shadow), source = 'products' pour éviter self-ref.
 		// Sans schema : shadow check skip → compile OK. Avec schema {users} : shadow détecté.
-		const stmt = parse(tokenize("let users = find products; find users pick id"));
+		const stmt = parse(
+			tokenize("let users = find products; find users pick id")
+		);
 		if (stmt.operation !== "let") throw new Error();
 		expect(() => lowerLet(stmt)).not.toThrow();
-		expectCode(() => lowerLet(stmt, makeSchema("users")), "lower_let_shadows_collection");
+		expectCode(
+			() => lowerLet(stmt, makeSchema("users")),
+			"lower_let_shadows_collection"
+		);
 	});
 
 	it("shadow détecté dans binding chaîné", () => {
@@ -227,7 +246,9 @@ describe("lower T3/7 — shadowing CTE vs table (ADR-020)", () => {
 	});
 
 	it("case-sensitivity exact (Users ≠ users)", () => {
-		const stmt = parse(tokenize("let Users = find users; find Users pick email"));
+		const stmt = parse(
+			tokenize("let Users = find users; find Users pick email")
+		);
 		if (stmt.operation !== "let") throw new Error();
 		expect(() => lowerLet(stmt, makeSchema("users"))).not.toThrow();
 	});
@@ -252,9 +273,54 @@ describe("lower T3/7 — self-ref sans rec (graft ADR-021)", () => {
 
 	it("non-self-ref accepté (`let a = find users; let b = find a`)", () => {
 		const stmt = parse(
-			tokenize("let a = find users; let b = find a where id = 1; find b pick id")
+			tokenize(
+				"let a = find users; let b = find a where id = 1; find b pick id"
+			)
 		);
 		if (stmt.operation !== "let") throw new Error();
+		expect(() => lowerLet(stmt)).not.toThrow();
+	});
+
+	// ADR-024 PM/2 D2 — walker complet bindingReferencesSelf (couvre
+	// subquery/exists dans where/pick/having, pas seulement source + with).
+	it("D2 — self-ref via subquery in-where (`let a = find b where c in (find a pick d)`)", () => {
+		const stmt = parse(
+			tokenize(
+				"let a = find users where id in (find a pick parent_id); find a pick id"
+			)
+		);
+		if (stmt.operation !== "let") throw new Error();
+		expectCode(() => lowerLet(stmt), "lower_let_self_reference_without_rec");
+	});
+
+	it("D2 — self-ref via exists in-where", () => {
+		const stmt = parse(
+			tokenize(
+				"let a = find users where exists (find a pick id); find a pick id"
+			)
+		);
+		if (stmt.operation !== "let") throw new Error();
+		expectCode(() => lowerLet(stmt), "lower_let_self_reference_without_rec");
+	});
+
+	it("D2 — self-ref via not-exists in-where", () => {
+		const stmt = parse(
+			tokenize(
+				"let a = find users where not exists (find a pick id); find a pick id"
+			)
+		);
+		if (stmt.operation !== "let") throw new Error();
+		expectCode(() => lowerLet(stmt), "lower_let_self_reference_without_rec");
+	});
+
+	it("D2 — self-ref via having (aggregate)", () => {
+		const stmt = parse(
+			tokenize(
+				"let a = find users group by dept having count(*) > 0 pick dept, count(*) as n; find a pick dept"
+			)
+		);
+		if (stmt.operation !== "let") throw new Error();
+		// Ce cas passe (having ne référence pas 'a' — c'est la source qui compte).
 		expect(() => lowerLet(stmt)).not.toThrow();
 	});
 });

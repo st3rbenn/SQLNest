@@ -1,6 +1,5 @@
 import { SnqlError } from "../diagnostics";
 import { checkArity, SNQL_FUNCTIONS } from "../functions";
-import { CAST_TARGETS } from "../parser/ast";
 import type {
 	Assignment,
 	CastTarget,
@@ -16,7 +15,14 @@ import type {
 	Stage,
 	UpdateStatement
 } from "../parser/ast";
-import type { Relation, RelationKind, SchemaModel, SnqlType } from "../schema/model";
+import { CAST_TARGETS } from "../parser/ast";
+import { toCompensationOp } from "../planner/planner";
+import type {
+	Relation,
+	RelationKind,
+	SchemaModel,
+	SnqlType
+} from "../schema/model";
 import type {
 	CompareOp,
 	LogicalPlan,
@@ -30,7 +36,6 @@ import type {
 	SqlValue
 } from "./plan";
 import { linearize } from "./plan";
-import { toCompensationOp } from "../planner/planner";
 
 /**
  * Sprint T2/12 : scope d'une query outer visible par une subquery corrélée.
@@ -113,7 +118,6 @@ export function lower(query: Query, schema?: SchemaModel): LogicalPlan {
 }
 
 function lowerInternal(query: Query, schema?: SchemaModel): LogicalPlan {
-
 	// Sprint T2/11.5 : typecheck cross-type predicates si schema dispo.
 	// Fire-early : messages actionnables avant PG remonte du 42883 cryptique.
 	typecheckQuery(query, schema);
@@ -179,10 +183,18 @@ function lowerInternal(query: Query, schema?: SchemaModel): LogicalPlan {
 		// context inutilisable pour filtrer, sub-query needed) — refus AVANT
 		// lowerStage pour message précis.
 		if (stage.type === "where") {
-			refuseWindowCallInPosition(stage.predicate, "lower_window_in_where", "where");
+			refuseWindowCallInPosition(
+				stage.predicate,
+				"lower_window_in_where",
+				"where"
+			);
 		}
 		if (stage.type === "having") {
-			refuseWindowCallInPosition(stage.predicate, "lower_window_in_having", "having");
+			refuseWindowCallInPosition(
+				stage.predicate,
+				"lower_window_in_having",
+				"having"
+			);
 		}
 		// Sprint T2/10 : check sort keys prefix-match distinctOnKeys (parité PG).
 		// Le pick précédent peut avoir posé distinctOnKeys ; ici on vérifie que
@@ -249,8 +261,12 @@ function lowerInternal(query: Query, schema?: SchemaModel): LogicalPlan {
 			continue;
 		}
 		plan = lowerStage(
-			plan, stage, query.source.collection, query.source.alias,
-			schema, groupKeys
+			plan,
+			stage,
+			query.source.collection,
+			query.source.alias,
+			schema,
+			groupKeys
 		);
 		if (stage.type === "pick") {
 			// Sprint T2/7 : si having accumulé, l'injecter dans l'op aggregate.
@@ -264,16 +280,19 @@ function lowerInternal(query: Query, schema?: SchemaModel): LogicalPlan {
 						havingSpan
 					);
 				}
-				const groupKeySet = groupKeys !== undefined
-					? new Set(groupKeys.map((k) => k.join(".")))
-					: undefined;
+				const groupKeySet =
+					groupKeys !== undefined
+						? new Set(groupKeys.map((k) => k.join(".")))
+						: undefined;
 				validateHavingAst(havingExpr, groupKeySet, query.source.alias);
 				const loweredHaving = lowerExpr(havingExpr);
 				plan = {
 					op: "aggregate",
 					input: plan.input,
 					fields: plan.fields,
-					...(plan.groupKeys !== undefined ? { groupKeys: plan.groupKeys } : {}),
+					...(plan.groupKeys !== undefined
+						? { groupKeys: plan.groupKeys }
+						: {}),
 					having: loweredHaving
 				};
 				havingExpr = undefined;
@@ -526,7 +545,8 @@ function collectExprFieldsWithSpans(
 			// Sprint T2/9 : collecte les field refs des args (ex: sum(x) over)
 			// + partitionKeys + sortKeys — comptent tous pour l'alias-check.
 			for (const arg of expr.args) collectExprFieldsWithSpans(arg, out);
-			for (const p of expr.partitionKeys) out.push({ path: p, span: expr.span });
+			for (const p of expr.partitionKeys)
+				out.push({ path: p, span: expr.span });
 			for (const k of expr.sortKeys) out.push({ path: k.path, span: k.span });
 			return;
 		case "subquery":
@@ -600,9 +620,87 @@ export function lowerRaw(
 	return { op: "raw", payload: statement.payload };
 }
 
+/**
+ * ADR-024 D2 (PM/2) — walker complet self-ref d'un binding CTE. Détecte le nom
+ * `name` en tant que collection scannée n'importe où dans la Query : source,
+ * with-join, where/having predicate, pick expr, subquery inline dans where/pick.
+ * Sans ça, `let a = find b where c in (find a pick d)` passe silencieusement en
+ * Mongo matérialisé et Postgres émet du SQL invalide. Cohérent [[ADR-021]] graft.
+ */
 function bindingReferencesSelf(query: Query, name: string): boolean {
+	return queryReferencesName(query, name);
+}
+
+function queryReferencesName(query: Query, name: string): boolean {
 	if (query.source.collection === name) return true;
-	return query.stages.some((s) => s.type === "with" && s.collection === name);
+	return query.stages.some((s) => stageReferencesName(s, name));
+}
+
+function stageReferencesName(
+	stage: Query["stages"][number],
+	name: string
+): boolean {
+	switch (stage.type) {
+		case "where":
+		case "having":
+			return exprReferencesName(stage.predicate, name);
+		case "pick":
+			return stage.fields.some(
+				(f) => f.expr !== undefined && exprReferencesName(f.expr, name)
+			);
+		case "with":
+			return stage.collection === name;
+		case "sort":
+		case "limit":
+		case "group":
+			return false;
+	}
+}
+
+function exprReferencesName(
+	expr: import("../parser/ast").Expr,
+	name: string
+): boolean {
+	switch (expr.type) {
+		case "literal":
+		case "field":
+			return false;
+		case "compare":
+		case "logical":
+		case "arith":
+			return (
+				exprReferencesName(expr.left, name) ||
+				exprReferencesName(expr.right, name)
+			);
+		case "not":
+			return exprReferencesName(expr.operand, name);
+		case "in":
+			return (
+				exprReferencesName(expr.target, name) ||
+				expr.values.some((v) => exprReferencesName(v, name))
+			);
+		case "call":
+		case "windowCall":
+			return expr.args.some((a) => exprReferencesName(a, name));
+		case "cast":
+			return exprReferencesName(expr.operand, name);
+		case "object":
+			return expr.entries.some((e) => exprReferencesName(e.value, name));
+		case "array":
+			return expr.items.some((i) => exprReferencesName(i, name));
+		case "case":
+			return (
+				expr.branches.some(
+					(b) =>
+						exprReferencesName(b.cond, name) ||
+						exprReferencesName(b.value, name)
+				) || exprReferencesName(expr.elseValue, name)
+			);
+		case "subquery":
+			return queryReferencesName(expr.query, name);
+		case "exists":
+			return exprReferencesName(expr.subquery, name);
+	}
 }
 
 /**
@@ -660,9 +758,10 @@ export function lowerLet(
 			);
 		}
 	}
-	const body = statement.body.operation === "select"
-		? lower(statement.body, schema)
-		: lowerMutation(statement.body, schema);
+	const body =
+		statement.body.operation === "select"
+			? lower(statement.body, schema)
+			: lowerMutation(statement.body, schema);
 	return { op: "let", bindings, body };
 }
 
@@ -748,7 +847,8 @@ export function lowerMutation(
 				);
 			}
 		}
-		if (statement.predicate !== undefined) assertNoBareCallPredicate(statement.predicate);
+		if (statement.predicate !== undefined)
+			assertNoBareCallPredicate(statement.predicate);
 		const assignments = statement.assignments.map((assignment) => ({
 			column: assignment.column,
 			value: lowerExpr(assignment.value)
@@ -778,7 +878,9 @@ export function lowerMutation(
 			);
 		}
 		const predicate =
-			statement.predicate !== undefined ? lowerExpr(statement.predicate) : undefined;
+			statement.predicate !== undefined
+				? lowerExpr(statement.predicate)
+				: undefined;
 		if (predicate !== undefined) {
 			refuseAggregateInPosition(
 				predicate,
@@ -787,8 +889,12 @@ export function lowerMutation(
 			);
 			assertNoCallInWrite(predicate);
 		}
-		const rrc = statement.returnRowCount === true ? { returnRowCount: true as const } : {};
-		const aliasOpt = statement.alias !== undefined ? { alias: statement.alias } : {};
+		const rrc =
+			statement.returnRowCount === true
+				? { returnRowCount: true as const }
+				: {};
+		const aliasOpt =
+			statement.alias !== undefined ? { alias: statement.alias } : {};
 		const joinsOpt = loweredJoins.length > 0 ? { joins: loweredJoins } : {};
 		return predicate !== undefined
 			? {
@@ -816,7 +922,8 @@ export function lowerMutation(
 			statement.collection
 		);
 	}
-	if (statement.predicate !== undefined) assertNoBareCallPredicate(statement.predicate);
+	if (statement.predicate !== undefined)
+		assertNoBareCallPredicate(statement.predicate);
 	if (statement.predicate !== undefined) {
 		refuseWindowCallInPosition(
 			statement.predicate,
@@ -825,7 +932,9 @@ export function lowerMutation(
 		);
 	}
 	const predicate =
-		statement.predicate !== undefined ? lowerExpr(statement.predicate) : undefined;
+		statement.predicate !== undefined
+			? lowerExpr(statement.predicate)
+			: undefined;
 	if (predicate !== undefined) {
 		// Sprint T2/6 : aggregate dans predicate de delete — refus AVANT write.
 		refuseAggregateInPosition(
@@ -835,7 +944,8 @@ export function lowerMutation(
 		);
 		assertNoCallInWrite(predicate);
 	}
-	const rrcDelete = statement.returnRowCount === true ? { returnRowCount: true as const } : {};
+	const rrcDelete =
+		statement.returnRowCount === true ? { returnRowCount: true as const } : {};
 	return predicate !== undefined
 		? {
 				op: "delete",
@@ -947,9 +1057,8 @@ function levenshtein(a: string, b: string): number {
 		dp[0] = i;
 		for (let j = 1; j <= n; j += 1) {
 			const tmp = dp[j]!;
-			dp[j] = a[i - 1] === b[j - 1]
-				? prev
-				: 1 + Math.min(prev, dp[j]!, dp[j - 1]!);
+			dp[j] =
+				a[i - 1] === b[j - 1] ? prev : 1 + Math.min(prev, dp[j]!, dp[j - 1]!);
 			prev = tmp;
 		}
 	}
@@ -982,7 +1091,12 @@ function lowerUpdateJoins(
 		// Validate local field is a source column (schema disponible).
 		if (sourceColumns !== null) {
 			const localHead = stage.localField[0];
-			if (localHead !== undefined && !sourceColumns.has(localHead) && localHead !== statement.collection && localHead !== statement.alias) {
+			if (
+				localHead !== undefined &&
+				!sourceColumns.has(localHead) &&
+				localHead !== statement.collection &&
+				localHead !== statement.alias
+			) {
 				// Autorise cross-ref à un alias déjà déclaré côté joins précédents
 				const priorAliases = new Set(out.map((j) => j.as));
 				if (!priorAliases.has(localHead)) {
@@ -1024,7 +1138,8 @@ function collectMutationAliases(
 function containsAggregateAst(expr: Expr): boolean {
 	if (expr.type === "call") {
 		const entry = SNQL_FUNCTIONS.get(expr.name);
-		if (entry?.kind === "aggregate" || entry?.kind === "aggregateMulti") return true;
+		if (entry?.kind === "aggregate" || entry?.kind === "aggregateMulti")
+			return true;
 		for (const arg of expr.args) if (containsAggregateAst(arg)) return true;
 		return false;
 	}
@@ -1035,7 +1150,9 @@ function containsAggregateAst(expr: Expr): boolean {
 		case "compare":
 		case "logical":
 		case "arith":
-			return containsAggregateAst(expr.left) || containsAggregateAst(expr.right);
+			return (
+				containsAggregateAst(expr.left) || containsAggregateAst(expr.right)
+			);
 		case "not":
 			return containsAggregateAst(expr.operand);
 		case "in":
@@ -1075,7 +1192,8 @@ function firstAggregateSpanAst(
 ): import("../lexer/token").Span | undefined {
 	if (expr.type === "call") {
 		const entry = SNQL_FUNCTIONS.get(expr.name);
-		if (entry?.kind === "aggregate" || entry?.kind === "aggregateMulti") return expr.span;
+		if (entry?.kind === "aggregate" || entry?.kind === "aggregateMulti")
+			return expr.span;
 		for (const arg of expr.args) {
 			const s = firstAggregateSpanAst(arg);
 			if (s !== undefined) return s;
@@ -1089,7 +1207,9 @@ function firstAggregateSpanAst(
 		case "compare":
 		case "logical":
 		case "arith":
-			return firstAggregateSpanAst(expr.left) ?? firstAggregateSpanAst(expr.right);
+			return (
+				firstAggregateSpanAst(expr.left) ?? firstAggregateSpanAst(expr.right)
+			);
 		case "not":
 			return firstAggregateSpanAst(expr.operand);
 		case "in": {
@@ -1177,7 +1297,8 @@ function validateInAggWrapperAst(
 					expr.span
 				);
 			}
-			for (const arg of expr.args) validateInAggWrapperAst(arg, true, groupKeySet, sourceAlias);
+			for (const arg of expr.args)
+				validateInAggWrapperAst(arg, true, groupKeySet, sourceAlias);
 			return;
 		}
 		if (expr.name === "if" && expr.args.length === 3) {
@@ -1189,7 +1310,12 @@ function validateInAggWrapperAst(
 					condSpan
 				);
 			}
-			validateInAggWrapperAst(expr.args[0]!, insideAgg, groupKeySet, sourceAlias);
+			validateInAggWrapperAst(
+				expr.args[0]!,
+				insideAgg,
+				groupKeySet,
+				sourceAlias
+			);
 			for (const branchIdx of [1, 2]) {
 				const branch = expr.args[branchIdx]!;
 				const branchAggSpan = firstAggregateSpanAst(branch);
@@ -1204,7 +1330,8 @@ function validateInAggWrapperAst(
 			}
 			return;
 		}
-		for (const arg of expr.args) validateInAggWrapperAst(arg, insideAgg, groupKeySet, sourceAlias);
+		for (const arg of expr.args)
+			validateInAggWrapperAst(arg, insideAgg, groupKeySet, sourceAlias);
 		return;
 	}
 	switch (expr.type) {
@@ -1234,14 +1361,25 @@ function validateInAggWrapperAst(
 			validateInAggWrapperAst(expr.right, insideAgg, groupKeySet, sourceAlias);
 			return;
 		case "not":
-			validateInAggWrapperAst(expr.operand, insideAgg, groupKeySet, sourceAlias);
+			validateInAggWrapperAst(
+				expr.operand,
+				insideAgg,
+				groupKeySet,
+				sourceAlias
+			);
 			return;
 		case "in":
 			validateInAggWrapperAst(expr.target, insideAgg, groupKeySet, sourceAlias);
-			for (const v of expr.values) validateInAggWrapperAst(v, insideAgg, groupKeySet, sourceAlias);
+			for (const v of expr.values)
+				validateInAggWrapperAst(v, insideAgg, groupKeySet, sourceAlias);
 			return;
 		case "cast":
-			validateInAggWrapperAst(expr.operand, insideAgg, groupKeySet, sourceAlias);
+			validateInAggWrapperAst(
+				expr.operand,
+				insideAgg,
+				groupKeySet,
+				sourceAlias
+			);
 			return;
 		case "object": {
 			for (const e of expr.entries) {
@@ -1300,7 +1438,12 @@ function validateInAggWrapperAst(
 					elseSpan
 				);
 			}
-			validateInAggWrapperAst(expr.elseValue, insideAgg, groupKeySet, sourceAlias);
+			validateInAggWrapperAst(
+				expr.elseValue,
+				insideAgg,
+				groupKeySet,
+				sourceAlias
+			);
 			return;
 		}
 	}
@@ -1317,7 +1460,8 @@ export function firstAggregateSpan(
 ): import("../lexer/token").Span | undefined {
 	if (expr.kind === "call") {
 		const entry = SNQL_FUNCTIONS.get(expr.name);
-		if (entry?.kind === "aggregate" || entry?.kind === "aggregateMulti") return expr.span;
+		if (entry?.kind === "aggregate" || entry?.kind === "aggregateMulti")
+			return expr.span;
 		for (const arg of expr.args) {
 			const s = firstAggregateSpan(arg);
 			if (s !== undefined) return s;
@@ -1488,7 +1632,10 @@ function assertNoCallInWrite(expr: PlanExpr): void {
  * paramétrer avec span, et remontés dans le pgError pour cibler une row
  * fautive sur unique/FK violation).
  */
-function lowerInsert(statement: InsertStatement, schema?: SchemaModel): MutationPlan {
+function lowerInsert(
+	statement: InsertStatement,
+	schema?: SchemaModel
+): MutationPlan {
 	// Sprint T2/14 : INSERT SELECT — `add (find … pick a, b) into t`.
 	// Le mapping cols cibles est inféré du `pick` (`x as tgt_col` → tgt_col,
 	// sinon dernier segment du path). Refus si pas de pick, si onConflict
@@ -1510,7 +1657,8 @@ function lowerInsert(statement: InsertStatement, schema?: SchemaModel): Mutation
 	}
 
 	const rowSpans: (import("../lexer/token").Span | undefined)[] = [];
-	const cellSpans: (readonly (import("../lexer/token").Span | undefined)[])[] = [];
+	const cellSpans: (readonly (import("../lexer/token").Span | undefined)[])[] =
+		[];
 	const rows = statement.rows.map((row) => {
 		const byColumn = new Map<string, Expr>();
 		for (const field of row.fields) {
@@ -1562,10 +1710,17 @@ function lowerInsert(statement: InsertStatement, schema?: SchemaModel): Mutation
 			);
 		}
 	}
-	const onConflict = statement.onConflict !== undefined
-		? lowerOnConflict(statement.onConflict, columnSet, sourceColumns, statement.collection)
-		: undefined;
-	const returnRowCount = statement.returnRowCount === true ? { returnRowCount: true as const } : {};
+	const onConflict =
+		statement.onConflict !== undefined
+			? lowerOnConflict(
+					statement.onConflict,
+					columnSet,
+					sourceColumns,
+					statement.collection
+				)
+			: undefined;
+	const returnRowCount =
+		statement.returnRowCount === true ? { returnRowCount: true as const } : {};
 
 	return {
 		op: "insert",
@@ -1645,9 +1800,15 @@ function lowerOnConflict(
 		column: a.column,
 		value: lowerUpsertExpr(a.value, insertColumns, sourceColumns, collection)
 	}));
-	const where = clause.action.where !== undefined
-		? lowerUpsertExpr(clause.action.where, insertColumns, sourceColumns, collection)
-		: undefined;
+	const where =
+		clause.action.where !== undefined
+			? lowerUpsertExpr(
+					clause.action.where,
+					insertColumns,
+					sourceColumns,
+					collection
+				)
+			: undefined;
 	// Refus aggregate/window/subquery/call-null-write dans les upsert exprs
 	// (parité update ordinaire).
 	for (const [i, a] of loweredAssignments.entries()) {
@@ -1733,7 +1894,12 @@ function rewriteUpsertNew(
 			}
 			// path bare `col` ou `<collection>.col` réfère la row existante en DB.
 			// PG résout naturellement au nom de la table cible.
-			if (sourceColumns !== null && head !== undefined && node.path.length >= 2 && head !== collection) {
+			if (
+				sourceColumns !== null &&
+				head !== undefined &&
+				node.path.length >= 2 &&
+				head !== collection
+			) {
 				throw new SnqlError(
 					`'${head}' n'est ni 'new' ni '${collection}' dans '${node.path.join(".")}' — dans 'on conflict', seuls le champ bare (row existante) et 'new.col' (row proposée) sont autorisés`,
 					"lower_unknown_alias",
@@ -1754,7 +1920,11 @@ function rewriteUpsertNew(
 		case "isNull":
 			return { ...node, operand: rec(node.operand) };
 		case "in":
-			return { ...node, target: rec(node.target), values: node.values.map(rec) };
+			return {
+				...node,
+				target: rec(node.target),
+				values: node.values.map(rec)
+			};
 		case "arith":
 			return { ...node, left: rec(node.left), right: rec(node.right) };
 		case "call":
@@ -1857,7 +2027,8 @@ function lowerInsertSelect(
 		}
 	}
 	const sourcePlan = lower(sourceQuery, schema);
-	const rrc = statement.returnRowCount === true ? { returnRowCount: true as const } : {};
+	const rrc =
+		statement.returnRowCount === true ? { returnRowCount: true as const } : {};
 	return {
 		op: "insert",
 		collection: statement.collection,
@@ -1946,9 +2117,10 @@ function checkColumnsAvailable(
 			// le dernier segment (`name`) comme col output — check contre ça.
 			// Sans ce fallback, un `sort ar.name` après `pick a.title, ar.name`
 			// refuse à tort car path[0]='ar' n'est pas une col de la source.
-			const column = key.path.length > 1
-				? key.path[key.path.length - 1] ?? ""
-				: key.path[0] ?? "";
+			const column =
+				key.path.length > 1
+					? (key.path[key.path.length - 1] ?? "")
+					: (key.path[0] ?? "");
 			if (!available.has(column) && !sourceColumns.has(column)) {
 				throw new SnqlError(
 					`La colonne '${column}' n'existe pas dans le pick précédent ni dans la source — vérifie l'orthographe ou ajoute-la au pick.`,
@@ -1988,9 +2160,8 @@ function checkColumnsAvailable(
 		// Même règle qu'au sort : path préfixé (`ar.name`) → check contre le
 		// dernier segment (col output après pick). Une col nue conserve
 		// l'ancien comportement.
-		const column = path.length > 1
-			? path[path.length - 1] ?? ""
-			: path[0] ?? "";
+		const column =
+			path.length > 1 ? (path[path.length - 1] ?? "") : (path[0] ?? "");
 		if (!available.has(column)) {
 			throw new SnqlError(
 				`La colonne '${column}' a été retirée par un 'pick' précédent — placez 'pick' après cette étape.`,
@@ -2109,21 +2280,30 @@ function lowerStage(
 				);
 			}
 			// Sprint T2/10 : DISTINCT / DISTINCT ON validations.
-			if ((stage.unique === true || stage.distinctOnKeys !== undefined) && groupKeys !== undefined) {
+			if (
+				(stage.unique === true || stage.distinctOnKeys !== undefined) &&
+				groupKeys !== undefined
+			) {
 				throw new SnqlError(
 					"'pick unique' et 'group by' non combinables — les deux dédup mais différemment ; utilise l'un ou l'autre",
 					"lower_unique_with_group",
 					stage.span
 				);
 			}
-			if ((stage.unique === true || stage.distinctOnKeys !== undefined) && hasAggregate) {
+			if (
+				(stage.unique === true || stage.distinctOnKeys !== undefined) &&
+				hasAggregate
+			) {
 				throw new SnqlError(
 					"'pick unique' avec aggregate non supporté — l'aggregate produit déjà une row par groupe, unique est redondant ou ambigu",
 					"lower_unique_with_aggregate",
 					stage.span
 				);
 			}
-			if ((stage.unique === true || stage.distinctOnKeys !== undefined) && hasWindowCall) {
+			if (
+				(stage.unique === true || stage.distinctOnKeys !== undefined) &&
+				hasWindowCall
+			) {
 				throw new SnqlError(
 					"'pick unique' avec window function non supporté — les deux opèrent sur des rows différentes ; sépare en deux queries",
 					"lower_unique_with_window",
@@ -2131,9 +2311,10 @@ function lowerStage(
 				);
 			}
 			// groupKeys are alias-stripped already. Build the lookup set from them.
-			const groupKeySet = groupKeys !== undefined
-				? new Set(groupKeys.map((k) => k.join(".")))
-				: undefined;
+			const groupKeySet =
+				groupKeys !== undefined
+					? new Set(groupKeys.map((k) => k.join(".")))
+					: undefined;
 			if (hasAggregate || groupKeys !== undefined) {
 				for (const f of stage.fields) {
 					if (f.expr !== undefined) {
@@ -2179,9 +2360,7 @@ function lowerStage(
 						throw new SnqlError(
 							`'unique on (${keyStr})' — key '${keyStr}' absente des fields projetés ; ajoute '${keyStr}' à pick ou retire-la de 'on'`,
 							"lower_unique_on_key_not_projected",
-							stage.distinctOnKeys![i]!.length > 0
-								? stage.span
-								: stage.span
+							stage.distinctOnKeys![i]!.length > 0 ? stage.span : stage.span
 						);
 					}
 				}
@@ -2191,7 +2370,9 @@ function lowerStage(
 				input,
 				fields,
 				...(stage.unique === true ? { unique: true as const } : {}),
-				...(strippedDistinctKeys !== undefined ? { distinctOnKeys: strippedDistinctKeys } : {})
+				...(strippedDistinctKeys !== undefined
+					? { distinctOnKeys: strippedDistinctKeys }
+					: {})
 			};
 		}
 		case "sort":
@@ -2418,9 +2599,7 @@ function lowerExpr(expr: Expr): PlanExpr {
 				expr.values.length === 1 && expr.values[0]?.type === "subquery";
 			if (isSubqueryVariant) {
 				const subExpr = expr.values[0]! as Expr & { type: "subquery" };
-				const pickStage = subExpr.query.stages.find(
-					(s) => s.type === "pick"
-				);
+				const pickStage = subExpr.query.stages.find((s) => s.type === "pick");
 				if (pickStage === undefined || pickStage.type !== "pick") {
 					throw new SnqlError(
 						"'in (subquery)' — la sub-query doit avoir un 'pick' avec exactement 1 field",
@@ -2551,7 +2730,8 @@ function lowerExpr(expr: Expr): PlanExpr {
 function assertCondIsBoolShaped(cond: Expr, ctx: "case" | "if"): void {
 	const kind = literalKindOrNull(cond);
 	if (kind === null || kind === "boolean") return;
-	const errCode = ctx === "case" ? "lower_case_cond_type" : "lower_if_cond_type";
+	const errCode =
+		ctx === "case" ? "lower_case_cond_type" : "lower_if_cond_type";
 	const prefix = ctx === "case" ? "case { cond -> … }" : "if(cond, …, …)";
 	throw new SnqlError(
 		`${prefix} : cond doit être booléen — reçu littéral ${kind}`,
@@ -2759,11 +2939,7 @@ function lowerCall(expr: Expr & { type: "call" }): PlanExpr {
 	}
 	// count() nu (sans star, 0 args) — piège UX : arity accepte 0-1 pour count
 	// afin de laisser passer count(*), mais count() seul n'a pas de sémantique.
-	if (
-		expr.name === "count" &&
-		expr.star !== true &&
-		expr.args.length === 0
-	) {
+	if (expr.name === "count" && expr.star !== true && expr.args.length === 0) {
 		throw new SnqlError(
 			"count() sans argument — utilise 'count(*)' pour compter les rows ou 'count(<expr>)' pour compter les non-null",
 			"lower_call_count_missing_arg",
@@ -2862,10 +3038,7 @@ function lowerCall(expr: Expr & { type: "call" }): PlanExpr {
 	// gardes `case`. cond bool-shaped + branches homogènes (then/else).
 	if (entry.name === "if" && expr.args.length === 3) {
 		assertCondIsBoolShaped(expr.args[0]!, "if");
-		assertBranchLiteralsHomogeneous(
-			[expr.args[1]!, expr.args[2]!],
-			"if"
-		);
+		assertBranchLiteralsHomogeneous([expr.args[1]!, expr.args[2]!], "if");
 	}
 	// Sprint T2/6 : forward star/unique flags sur PlanCall — le codegen les
 	// consomme via ctx.star / ctx.unique.
@@ -2970,7 +3143,9 @@ function firstWindowCallSpanAst(
 		case "compare":
 		case "logical":
 		case "arith":
-			return firstWindowCallSpanAst(expr.left) ?? firstWindowCallSpanAst(expr.right);
+			return (
+				firstWindowCallSpanAst(expr.left) ?? firstWindowCallSpanAst(expr.right)
+			);
 		case "not":
 			return firstWindowCallSpanAst(expr.operand);
 		case "in": {
@@ -2998,7 +3173,8 @@ function firstWindowCallSpanAst(
 			return undefined;
 		case "case": {
 			for (const b of expr.branches) {
-				const s = firstWindowCallSpanAst(b.cond) ?? firstWindowCallSpanAst(b.value);
+				const s =
+					firstWindowCallSpanAst(b.cond) ?? firstWindowCallSpanAst(b.value);
 				if (s !== undefined) return s;
 			}
 			return firstWindowCallSpanAst(expr.elseValue);
@@ -3232,7 +3408,14 @@ function numberRawToValue(raw: string): SqlValue {
  *  - array : opaque
  *  - unknown : wildcard (schema absent, field non-résolu, call sans type)
  */
-type TypeGroup = "numeric" | "string" | "bool" | "date" | "json" | "array" | "unknown";
+type TypeGroup =
+	| "numeric"
+	| "string"
+	| "bool"
+	| "date"
+	| "json"
+	| "array"
+	| "unknown";
 
 function snqlTypeGroup(t: SnqlType): TypeGroup {
 	if (t === "int" || t === "bigint" || t === "float" || t === "decimal") {
@@ -3384,7 +3567,9 @@ function resolveFieldTypeInAst(
 			const outerScope = outerScopeStack[i]!;
 			const matchesAlias = outerScope.alias === head;
 			if (matchesAlias) {
-				const coll = schema.collections.find((c) => c.name === outerScope.collection);
+				const coll = schema.collections.find(
+					(c) => c.name === outerScope.collection
+				);
 				return coll?.fields.find((f) => f.name === rest)?.type ?? "unknown";
 			}
 		}

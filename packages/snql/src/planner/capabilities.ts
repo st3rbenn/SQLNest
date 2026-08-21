@@ -1,4 +1,4 @@
-import { SNQL_FUNCTIONS, type EngineName } from "../functions";
+import { type EngineName, SNQL_FUNCTIONS } from "../functions";
 import type { Capability, CastTarget } from "../ir/plan";
 
 /**
@@ -15,23 +15,35 @@ export interface Capabilities {
 	readonly supports: ReadonlySet<Capability>;
 	readonly functions: ReadonlySet<string>;
 	readonly castTargets: ReadonlySet<CastTarget>;
+	/**
+	 * ADR-024 PM/2 — stratégie d'exécution des sub-queries si `supports.has(
+	 * "subquery")`. 'native' : pushdown SQL/pipeline natif (PG, SELECT imbriqué).
+	 * 'materialize' : runtime via `materializeSubplan` (Mongo, résolution
+	 * uncorrelated côté runtime + refus correlated au planner). Absent = pas
+	 * de subquery support du tout (KV, refus au planner).
+	 */
+	readonly subqueryStrategy?: "native" | "materialize";
 }
 
 function caps(
 	engine: EngineName,
 	supported: readonly Capability[],
-	castTargets: readonly CastTarget[]
+	castTargets: readonly CastTarget[],
+	extras: { readonly subqueryStrategy?: "native" | "materialize" } = {}
 ): Capabilities {
 	// Baseline Mongo 5.0+ assumée pour les fonctions sprint 3
 	// ($dateTrunc / $dateAdd / $dateDiff / $replaceAll). Ticket futur :
 	// introduire Capabilities.mongoServerVersion pour version gating côté
 	// planner et rejeter à la compilation plutôt qu'au runtime cryptique.
-	return {
+	const base: Capabilities = {
 		engine,
 		supports: new Set(supported),
 		functions: SNQL_FUNCTIONS.forEngine(engine),
 		castTargets: new Set(castTargets)
 	};
+	return extras.subqueryStrategy === undefined
+		? base
+		: { ...base, subqueryStrategy: extras.subqueryStrategy };
 }
 
 /** Relationnel complet (lecture). Tous les casts canoniques supportés.
@@ -45,8 +57,25 @@ function caps(
  * via `BEGIN [ISOLATION LEVEL X] / COMMIT / ROLLBACK` + SAVEPOINT natifs. */
 export const POSTGRES_CAPABILITIES: Capabilities = caps(
 	"postgres",
-	["scan", "filter", "project", "join", "aggregate", "sort", "paginate", "mutate", "subquery", "upsert", "write-join", "insert-select", "transaction", "introspect", "cte"],
-	["int", "float", "text", "bool", "date", "timestamp", "json"]
+	[
+		"scan",
+		"filter",
+		"project",
+		"join",
+		"aggregate",
+		"sort",
+		"paginate",
+		"mutate",
+		"subquery",
+		"upsert",
+		"write-join",
+		"insert-select",
+		"transaction",
+		"introspect",
+		"cte"
+	],
+	["int", "float", "text", "bool", "date", "timestamp", "json"],
+	{ subqueryStrategy: "native" }
 );
 
 /**
@@ -55,11 +84,29 @@ export const POSTGRES_CAPABILITIES: Capabilities = caps(
  * Sprint TxMongo : 'transaction' ajouté — bloc atomique via RS session
  * (startTransaction/commit/abort). Requiert Mongo en replica set (standalone
  * n'accepte pas les transactions).
+ * ADR-024 PM/2 : 'subquery' ajouté avec strategy='materialize' — le planner
+ * accepte les sub-queries uncorrelated (résolues via `materializeSubplan` au
+ * runtime, ADR-024 D1) ; correlated reste refusée au planner via
+ * `planner_subquery_unsupported` (ADR-024 D16 dédié pour CTE bindings).
  */
 export const MONGODB_CAPABILITIES: Capabilities = caps(
 	"mongodb",
-	["scan", "filter", "project", "join", "aggregate", "sort", "paginate", "mutate", "introspect", "transaction", "upsert"],
-	["int", "float", "text", "bool", "date", "timestamp"]
+	[
+		"scan",
+		"filter",
+		"project",
+		"join",
+		"aggregate",
+		"sort",
+		"paginate",
+		"mutate",
+		"introspect",
+		"transaction",
+		"upsert",
+		"subquery"
+	],
+	["int", "float", "text", "bool", "date", "timestamp"],
+	{ subqueryStrategy: "materialize" }
 );
 
 /**

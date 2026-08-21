@@ -5,19 +5,22 @@
 
 import { describe, expect, it } from "vitest";
 import { SnqlError } from "./diagnostics";
-import type { Capability } from "./ir/plan";
 import { SNQL_FUNCTIONS } from "./functions";
 import { compile, plan, planFor } from "./index";
+import { lowerMutation } from "./ir/lower";
+import type { Capability } from "./ir/plan";
 import { tokenize } from "./lexer/lexer";
 import { parse } from "./parser/parser";
-import { lowerMutation } from "./ir/lower";
 
 const scanOnlyKv = {
 	engine: "kv",
 	supports: new Set<Capability>(["scan"]),
 	functions: SNQL_FUNCTIONS.forEngine("kv"),
 	castTargets: new Set<import("./ir/plan").CastTarget>([
-		"int", "float", "text", "bool"
+		"int",
+		"float",
+		"text",
+		"bool"
 	])
 };
 
@@ -99,7 +102,9 @@ describe("lower sub-queries", () => {
 
 	it("sub-query dans update where refusée", () => {
 		// compile() est read-only, on passe par parse + lowerMutation direct.
-		const stmt = parse(tokenize(`update t where id in (find u pick id) set x = 1`));
+		const stmt = parse(
+			tokenize(`update t where id in (find u pick id) set x = 1`)
+		);
 		if (stmt.operation !== "update") throw new Error("attendu update");
 		expectCode(() => lowerMutation(stmt), "lower_subquery_in_write");
 	});
@@ -117,9 +122,7 @@ describe("lower sub-queries", () => {
 
 describe("codegen PG", () => {
 	it("in (find ... pick ...) → IN (SELECT ...)", () => {
-		expect(
-			pgSql("find u where id in (find t pick user_id)").text
-		).toBe(
+		expect(pgSql("find u where id in (find t pick user_id)").text).toBe(
 			`SELECT * FROM "u" WHERE "id" IN (SELECT "user_id" FROM "t")`
 		);
 	});
@@ -132,9 +135,8 @@ describe("codegen PG", () => {
 
 	it("sub-query avec where + pick", () => {
 		expect(
-			pgSql(
-				`find u where id in (find t where active = true pick owner_id)`
-			).text
+			pgSql(`find u where id in (find t where active = true pick owner_id)`)
+				.text
 		).toBe(
 			`SELECT * FROM "u" WHERE "id" IN (SELECT "owner_id" FROM "t" WHERE "active" = $1)`
 		);
@@ -151,28 +153,26 @@ describe("codegen PG", () => {
 // Planner : refus Mongo/KV
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe("planner refus Mongo/KV", () => {
-	it("in (subquery) sur Mongo refusé via planFor", () => {
-		expectCode(
-			() => planFor("find u where id in (find t pick uid)", "mongodb"),
-			"planner_subquery_unsupported"
-		);
+describe("planner Mongo (ADR-024 PM/2 — subquery uncorrelated via matérialisation)", () => {
+	it("in (subquery) uncorrelated sur Mongo : accepté au planner (résolution runtime)", () => {
+		// PM/2 : Mongo a maintenant 'subquery' capability avec strategy='materialize'.
+		// L'uncorrelated passe au planner ; le runtime résout via `materializeSubplan`
+		// (packages/engine/src/mongo/materialize.ts, ADR-024 D1) avant codegen final.
+		expect(() =>
+			planFor("find u where id in (find t pick uid)", "mongodb")
+		).not.toThrow();
 	});
 
-	it("exists (subquery) sur Mongo refusé via planFor", () => {
-		expectCode(
-			() => planFor("find u where exists (find t)", "mongodb"),
-			"planner_subquery_unsupported"
-		);
+	it("exists (subquery) uncorrelated sur Mongo : accepté au planner", () => {
+		expect(() =>
+			planFor("find u where exists (find t)", "mongodb")
+		).not.toThrow();
 	});
 
-	it("sub-query sur KV (scan-only) refusée", () => {
+	it("sub-query sur KV (scan-only) refusée (capability 'subquery' absente)", () => {
 		const logical = compile("find u where id in (find t pick uid)", {
 			engine: "postgres"
 		}).plan;
-		expectCode(
-			() => plan(logical, scanOnlyKv),
-			"planner_subquery_unsupported"
-		);
+		expectCode(() => plan(logical, scanOnlyKv), "planner_subquery_unsupported");
 	});
 });
