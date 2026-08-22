@@ -109,7 +109,7 @@ export interface ConnectOptions {
 	readonly frontendUrl: string;
 	/** Ouvrir le browser automatiquement (défaut: true). */
 	readonly openBrowserOnDisplay?: boolean;
-	/** Nom de la DSN LOCALE à servir cette session (C.13). Envoyé au backend
+	/** Nom de la DSN LOCALE à servir cette session. Envoyé au backend
 	 *  au POST /pairings et utilisé pour :
 	 *   - scoper le fingerprint effectif SHA256(pubkey || "|" || cliConnectionName)
 	 *     → un même install CLI peut servir N DBs distinctes côté serveur
@@ -169,12 +169,12 @@ export async function connect(opts: ConnectOptions): Promise<ConnectResult> {
 	// ─── 2. POST /pairings ────────────────────────────────────────────
 	// On envoie `cliConnectionName` : le backend l'utilise pour scoper le
 	// fingerprint effectif → un même install CLI peut servir N DBs
-	// distinctes côté serveur (C.13).
-	// T4/5 : on calcule aussi le db_fingerprint + db_schema_checksum côté
-	// CLI (best-effort — silencieux si DSN inaccessible). Envoyés dès le
-	// pair pour que le backend détecte au /approve qu'une db_connection
-	// existe déjà pour cette DB (multi-CLI reuse) et auto-fill le name
-	// côté frontend /pair → user click Approve sans typing.
+	// distinctes côté serveur.
+	// On calcule aussi le db_fingerprint + db_schema_checksum côté CLI
+	// (best-effort — silencieux si DSN inaccessible). Envoyés dès le pair
+	// pour que le backend détecte au /approve qu'une db_connection existe
+	// déjà pour cette DB (multi-CLI reuse) et auto-fill le name côté
+	// frontend /pair → user click Approve sans typing.
 	const [prePairFingerprint, prePairChecksum] = opts.cliConnectionName
 		? await Promise.all([
 				computeTunnelFingerprint(opts.cliConnectionName),
@@ -187,9 +187,9 @@ export async function connect(opts: ConnectOptions): Promise<ConnectResult> {
 		prePairFingerprint,
 		prePairChecksum
 	);
-	// P/2 (ADR-022 D7) : prefill le code dans l'URL — évite à l'user de
-	// taper les 8 chars dans PairPage. Le dash n'est pas un caractère
-	// réservé RFC 3986, encodeURIComponent le laisse intact.
+	// Prefill le code dans l'URL — évite à l'user de taper les 8 chars
+	// dans PairPage. Le dash n'est pas un caractère réservé RFC 3986,
+	// encodeURIComponent le laisse intact.
 	const connectUrl = `${opts.frontendUrl.replace(TRAILING_SLASH_RE, "")}/pair?code=${encodeURIComponent(pairing.code)}`;
 	const expiresAt = new Date(pairing.expiresAt);
 
@@ -231,18 +231,18 @@ export async function connect(opts: ConnectOptions): Promise<ConnectResult> {
 	}
 
 	// ─── 5. Sign + authenticate ───────────────────────────────────────
-	// T4/1 Step 6 : calcule le fingerprint de l'INSTANCE DB via
-	// `computeTunnelFingerprint`. Best-effort — si la DSN n'est pas
-	// configurée ou que le server ne répond pas, on continue sans (le
-	// backend backfill au prochain connect). L'authenticate reste
-	// fonctionnel même sans fingerprint (rétro-compat CLI legacy).
+	// Calcule le fingerprint de l'INSTANCE DB via `computeTunnelFingerprint`.
+	// Best-effort — si la DSN n'est pas configurée ou que le server ne
+	// répond pas, on continue sans (le backend backfill au prochain
+	// connect). L'authenticate reste fonctionnel même sans fingerprint
+	// (rétro-compat CLI legacy).
 	const dbFingerprint = opts.cliConnectionName
 		? await computeTunnelFingerprint(opts.cliConnectionName)
 		: null;
 	if (process.env.NODE_ENV === "development") {
-		// Trace dev-only : facilite le debug du flow T4/1 (sans polluer la
-		// prod). Format compact, aucune donnée sensible (fingerprint = hash
-		// dérivé de system_identifier PG / replSet Mongo).
+		// Trace dev-only : facilite le debug du flow fingerprint (sans
+		// polluer la prod). Format compact, aucune donnée sensible
+		// (fingerprint = hash dérivé de system_identifier PG / replSet Mongo).
 		process.stderr.write(
 			`[sqlnest dev] cliConnectionName=${JSON.stringify(opts.cliConnectionName)} dbFingerprint=${JSON.stringify(dbFingerprint)}\n`
 		);
@@ -263,7 +263,7 @@ export async function connect(opts: ConnectOptions): Promise<ConnectResult> {
 	// Le `connectionName` retourné pilote `resolveLocalConnectionUrl` dans
 	// le serve loop — il DOIT être le nom de la DSN LOCALE, pas le nom
 	// serveur (les 2 peuvent diverger si l'user renomme sa db_connection).
-	// Fallback sur deviceLabel pour les cas legacy (single-DSN sans C.13).
+	// Fallback sur deviceLabel pour les cas legacy (single-DSN).
 	const localConnectionName = opts.cliConnectionName ?? deviceLabel;
 	const tunnelEntry: TunnelEntry = {
 		id: auth.tunnelId,
@@ -310,8 +310,8 @@ export async function connect(opts: ConnectOptions): Promise<ConnectResult> {
  * les relances suivantes utilisent l'auto-resume propre.
  *
  * Mode single-DSN (`cliConnectionName === null`) : matche une entry
- * sans `connection_name` (comportement legacy pré-C.13, safe car un
- * seul tunnel par install).
+ * sans `connection_name` (comportement legacy, safe car un seul tunnel
+ * par install).
  */
 export function findResumableTunnel(
 	tunnels: readonly TunnelEntry[],

@@ -31,7 +31,7 @@ import type {
  *
  * Une pipeline Mongo est **intrinsèquement ordonnée** (chaque stage nourrit le
  * suivant), donc l'ordre de l'IR mappe 1:1 sur les stages — pas besoin
- * d'imbrication (contrairement à SQL). Voir [[ADR-006]].
+ * d'imbrication (contrairement à SQL). 
  *
  * Sûreté : les valeurs sont inline dans les objets BSON (données, pas de chaîne
  * concaténée) → pas de surface d'injection.
@@ -79,7 +79,7 @@ export const mongoMapper: Mapper = {
 						operations: renderUpsertOperations(plan)
 					};
 				}
-				// ADR-024 PM/5 Q5a — insert-select Mongo via aggregate + $merge
+				// insert-select Mongo via aggregate + $merge
 				// dans une collection différente. Le sourcePlan est rendu comme
 				// pipeline normale via mongoMapper.map ; on ajoute $merge terminal.
 				if (plan.sourcePlan !== undefined) {
@@ -102,7 +102,7 @@ export const mongoMapper: Mapper = {
 				}
 				return { ...base, op: "insert", documents: renderDocuments(plan) };
 			case "update":
-				// ADR-024 PM/4 Q4a — write-join Mongo via aggregate + $merge natif.
+				// write-join Mongo via aggregate + $merge natif.
 				// Emit un pipeline [$match?, $lookup+$unwind par join, $set, $unset
 				// aliases join, $merge into:self]. Le $merge est terminal, écrit
 				// comme side-effect. Atomicité par-doc via whenMatched='merge'.
@@ -128,7 +128,7 @@ export const mongoMapper: Mapper = {
 		}
 	},
 	/**
-	 * Sprint T3/1 : passe l'IntrospectPlan tel quel au shape MongoIntrospectQuery.
+	 * passe l'IntrospectPlan tel quel au shape MongoIntrospectQuery.
 	 * L'adapter Mongo dispatch selon `plan.kind` (list-tables → db.listCollections
 	 * sur la DB de la connection). Namespace (DB name) déjà dans la connection —
 	 * l'adapter n'a pas besoin de le lire depuis ctx.
@@ -152,7 +152,7 @@ export const mongoMapper: Mapper = {
 			: { engine: "mongodb", kind: "mongo-transaction", steps };
 	},
 	/**
-	 * Sprint T3/4 : `raw {...}` Mongo → MongoRawQuery pour db.runCommand().
+	 * `raw {...}` Mongo → MongoRawQuery pour db.runCommand().
 	 * L'Expr.object est évalué en Record<string, unknown> — refuse toute
 	 * expression non-literal (field, call, etc. n'ont pas de sens dans une
 	 * command). Refus explicit d'un `raw "SQL"` (payload PG sur engine Mongo).
@@ -194,7 +194,7 @@ function flattenMongoTransactionBody(
 				write: mongoMapper.mapMutation(item.plan) as MongoWriteQuery
 			});
 		} else {
-			// PA/5 (ADR-024-A) — savepoint préservé comme step dédié (plus flatten).
+			// savepoint préservé comme step dédié (plus flatten).
 			// L'adapter Mongo capture snapshot pre-write + compensation runtime si
 			// erreur dans le body. Les gates MVP (nested, upsert, write-join,
 			// insert-select, raw) sont refusés au planner en amont.
@@ -448,7 +448,7 @@ function renderDocuments(
 }
 
 /**
- * PA/4 (ADR-024-A) — filtre write Mongo qui route via `$expr` + `$convert`
+ * filtre write Mongo qui route via `$expr` + `$convert`
  * quand le predicate contient un cast (non-json). Sinon fallback sur la forme
  * `renderMatch` classique (idiomatique champ↔littéral indexable).
  *
@@ -544,7 +544,7 @@ function renderUpdate(
 }
 
 /**
- * ADR-024 PM/4 Q4a — pipeline aggregate + `$merge` pour write-join Mongo.
+ * pipeline aggregate + `$merge` pour write-join Mongo.
  * Le pipeline lit `plan.collection`, joint les tables via `$lookup+$unwind`,
  * évalue `$set` avec les valeurs jointes (aliases join = `plan.joins[i].as`
  * → référencés en `$<alias>.<col>` dans les exprs), retire les alias join,
@@ -562,7 +562,7 @@ function renderUpdate(
  *
  * Limitation MVP : rowCount non-reporté. Le `$merge` en tant que stage
  * terminal ne renvoie rien via le cursor — l'adapter retourne `rowCount=null`
- * jusqu'à ce que PM/10 branche un 2-pass count optionnel.
+ * jusqu'à ce que branche un 2-pass count optionnel.
  */
 function renderUpdateJoinPipeline(plan: {
 	readonly collection: string;
@@ -640,7 +640,7 @@ function appendStage(
 		case "scan":
 			return;
 		case "filter": {
-			// PA/1 (ADR-024-A) — extract les subqueries correlated en $lookup{let,
+			// extract les subqueries correlated en $lookup{let,
 			// pipeline} liftés AVANT le $match, remplace-les par des refs à des
 			// slots synthétiques __sq_N, puis $unset les slots après le $match.
 			const lifted = extractCorrelatedLookups(op.predicate, alias);
@@ -660,7 +660,7 @@ function appendStage(
 			return;
 		}
 		case "project": {
-			// Sprint T2/9 : windowCalls dans project.fields → $setWindowFields
+			// windowCalls dans project.fields → $setWindowFields
 			// AVANT $project (assign compute per row, réf en alias). Le project
 			// final projette les alias comme des field refs directs.
 			const windowSlots = extractWindowCallsToSlots(op.fields, alias);
@@ -668,7 +668,7 @@ function appendStage(
 			pipeline.push({
 				$project: renderProject(op.fields, alias, windowSlots.slotByKey)
 			});
-			// Sprint T2/10 : DISTINCT / DISTINCT ON via $group + $first APRÈS
+			// DISTINCT / DISTINCT ON via $group + $first APRÈS
 			// $project (les fields projetés sont déjà top-level, plus simple).
 			if (op.unique === true || op.distinctOnKeys !== undefined) {
 				appendDistinctStages(pipeline, op);
@@ -676,8 +676,8 @@ function appendStage(
 			return;
 		}
 		case "aggregate": {
-			// Sprint T2/6 : PAIRE [$group{_id:null,...accs}, $project{_id:0,...renames}]
-			// via SSA extract. Sprint T2/7 : op.groupKeys peuplé → `_id: <keys>`
+			// PAIRE [$group{_id:null,...accs}, $project{_id:0,...renames}]
+			// via SSA extract. op.groupKeys peuplé → `_id: <keys>`
 			// non-null (flat object), $project inclut les groupKeys ; op.having
 			// → SSA extract sur having aussi (aggregates partagent slots avec
 			// pick), $match {$expr:...} après $project, $unset des slots
@@ -695,7 +695,7 @@ function appendStage(
 			return;
 		}
 		case "sort": {
-			// Sprint T2/7 : $sort après $project doit référencer les champs projetés.
+			// $sort après $project doit référencer les champs projetés.
 			// Si une sort key référence un field DROPPÉ par le project précédent, on
 			// insère $sort AVANT $project — sort opère alors sur les docs sources
 			// qui contiennent encore le field (aligné SQL ORDER BY sur FROM col).
@@ -758,7 +758,7 @@ function appendStage(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PA/1 (ADR-024-A) — Correlated subquery lift-lookup ($lookup{let,pipeline})
+// Correlated subquery lift-lookup ($lookup{let,pipeline})
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface CorrelatedLift {
@@ -1134,7 +1134,7 @@ function renderMongoAggExpr(
 							expr.span
 						);
 					}
-					// PA/4 write context : pas de scope outer déclaré → path traité
+					// write context : pas de scope outer déclaré → path traité
 					// comme un champ local nested (dot-notation Mongo).
 					return `$${expr.path.join(".")}`;
 				}
@@ -1195,7 +1195,7 @@ function renderMongoAggExpr(
 		}
 		default:
 			throw new SnqlError(
-				`Expression '${expr.kind}' non supportée dans un sub-pipeline correlated Mongo MVP (PA/1)`,
+				`Expression '${expr.kind}' non supportée dans un sub-pipeline correlated Mongo MVP`,
 				"codegen_mongo_subquery_unsupported",
 				expr.span
 			);
@@ -1220,7 +1220,7 @@ function mergeMatchDocs(
 }
 
 /**
- * Sprint T2/6 : SSA extract pour un stage aggregate. Décompose les fields en :
+ * SSA extract pour un stage aggregate. Décompose les fields en :
  *  - `groupStage` : {_id: null, __agg_0: {$sum:...}, __agg_1: {$avg:...}, ...}
  *  - `projectStage` : {_id: 0, <alias>: <expr>, ...} — chaque expression
  *    référence les slots __agg_N via `$__agg_N`.
@@ -1243,7 +1243,7 @@ function renderAggregatePipeline(
 	havingExpr?: unknown;
 	havingSlots: readonly string[];
 } {
-	// Sprint T2/7 : _id = null si pas de group by, sinon flat object
+	// _id = null si pas de group by, sinon flat object
 	// {<lastSeg>: '$<path>'} — noms canoniques stables cross-key. Un mono-key
 	// `group by year` → `_id: {year: '$year'}`. Multi-key `group by year, code`
 	// → `_id: {year: '$year', code: '$code'}`.
@@ -1257,7 +1257,7 @@ function renderAggregatePipeline(
 	const groupStage: Record<string, unknown> =
 		groupKeys !== undefined ? { _id: groupIdInner } : { _id: null };
 	const projectStage: Record<string, unknown> = { _id: 0 };
-	// Sprint T2/7 : projette les groupKeys depuis _id via `$_id.<lastSeg>`.
+	// projette les groupKeys depuis _id via `$_id.<lastSeg>`.
 	if (groupKeys !== undefined) {
 		for (const key of groupKeys) {
 			const lastSeg = key[key.length - 1] as string;
@@ -1302,7 +1302,7 @@ function renderAggregatePipeline(
 	}
 
 	/**
-	 * Sprint T2/8 : wrap le slot d'un aggregateMulti avec le post-processing
+	 * wrap le slot d'un aggregateMulti avec le post-processing
 	 * approprié (sortArray + string_agg reduce). Appliqué en $project après
 	 * le $group.
 	 *
@@ -1391,7 +1391,7 @@ function renderAggregatePipeline(
 				}
 				const key = aggKeyOf(expr as PlanExpr & { kind: "call" });
 				// count/sum/avg(unique x) : 2-stage $addToSet + fold hardcodé.
-				// ADR-024 PM/6 item #5 : sum(unique) et avg(unique) réutilisent le
+				// item #5 : sum(unique) et avg(unique) réutilisent le
 				// même pattern SSA que count(unique) — le slot uSet stocke un set
 				// des valeurs distinctes non-null, le project fold via $size / $sum /
 				// $avg selon la fonction.
@@ -1441,7 +1441,7 @@ function renderAggregatePipeline(
 				slotCounter += 1;
 				slotByKey.set(key, slot);
 				groupStage[slot] = accBody as Record<string, unknown>;
-				// Sprint T2/8 : post-processing aggregateMulti — $sortArray si
+				// post-processing aggregateMulti — $sortArray si
 				// sortKeys, $reduce pour string_agg (concat), $filter pour
 				// string_agg NULL-skip.
 				if (entry.kind === "aggregateMulti") {
@@ -1484,9 +1484,9 @@ function renderAggregatePipeline(
 			};
 		}
 		if (expr.kind === "cast") {
-			// ADR-024 PM/6 #7 : cast(_ as json) no-op sur Mongo (BSON = JSON natif),
-			// D8 squiggly INFO éditeur alerte sur `cast(str as json)` (trap type).
-			// PA/7 (ADR-024-A) : cast(<string literal> as json) parsé au lower vers
+			// #7 : cast(_ as json) no-op sur Mongo (BSON = JSON natif),
+			// squiggly INFO éditeur alerte sur `cast(str as json)` (trap type).
+			// cast(<string literal> as json) parsé au lower vers
 			// object/array literal — l'operand est déjà transformé. mongoRenderCast
 			// centralise le rendu ($dateTrunc pour target="date", $convert sinon).
 			const inner = transformExpr(expr.operand, insideAggArg);
@@ -1560,7 +1560,7 @@ function renderAggregatePipeline(
 		);
 	}
 
-	// Sprint T2/7 : lookup rapide pour reconnaître les path-only fields comme
+	// lookup rapide pour reconnaître les path-only fields comme
 	// group keys — alias-stripped, dernière-seg = clé du _id.
 	const groupKeyLastSegs = new Set<string>();
 	if (groupKeys !== undefined) {
@@ -1569,7 +1569,7 @@ function renderAggregatePipeline(
 			if (last !== undefined) groupKeyLastSegs.add(last);
 		}
 	}
-	// Sprint T2/7 : map key stable (fully-qualified last-seg join) → project
+	// map key stable (fully-qualified last-seg join) → project
 	// alias name — utile pour having qui référence les aggregates par leur
 	// alias post-$project. Peuplé au fur et à mesure de la traversée des fields.
 	const aggKeyToProjectAlias = new Map<string, string>();
@@ -1607,7 +1607,7 @@ function renderAggregatePipeline(
 		}
 	}
 
-	// Sprint T2/7 : traverse having pour extraire ses aggregates (partagent le
+	// traverse having pour extraire ses aggregates (partagent le
 	// slot map). Field refs matchant un group key → `$<lastSeg>` post-project.
 	// Aggregates avec alias existant → `$<alias>` ; sinon nouveau slot projeté
 	// nommé __hslot_N (unset après $match).
@@ -1673,7 +1673,7 @@ function renderAggregatePipeline(
 			};
 		}
 		if (expr.kind === "cast") {
-			// PA/7 : cast(_ as json) déjà résolu au lower pour les string literals ;
+			// cast(_ as json) déjà résolu au lower pour les string literals;
 			// operand non-literal → no-op (BSON = JSON natif). mongoRenderCast
 			// centralise $dateTrunc pour target="date", $convert sinon.
 			return mongoRenderCast(
@@ -1743,7 +1743,7 @@ function renderAggregatePipeline(
 }
 
 /**
- * Sprint T2/10 : émet les stages Mongo pour DISTINCT / DISTINCT ON après un
+ * émet les stages Mongo pour DISTINCT / DISTINCT ON après un
  * $project. Deux variantes :
  *
  *  - `unique` seul (SELECT DISTINCT) : $group par TOUS les fields output,
@@ -1808,7 +1808,7 @@ function renderProject(
 	let picksId = false;
 	for (const field of fields) {
 		if (field.expr !== undefined) {
-			// Sprint T2/9 : si l'expr est un windowCall, référencer le slot
+			// si l'expr est un windowCall, référencer le slot
 			// précalculé par $setWindowFields (au lieu de tenter toExprOperand
 			// qui ne saurait pas gérer windowCall).
 			if (field.expr.kind === "windowCall" && windowSlots !== undefined) {
@@ -1854,7 +1854,7 @@ function renderProject(
 }
 
 /**
- * Sprint T2/9 : clé stable pour dédup les windowCalls identiques (même fn +
+ * clé stable pour dédup les windowCalls identiques (même fn +
  * partition + sort) — deux fields référençant le même windowCall partagent
  * un seul slot dans $setWindowFields.
  */
@@ -1867,7 +1867,7 @@ function windowCallKey(expr: PlanExpr & { kind: "windowCall" }): string {
 }
 
 /**
- * Sprint T2/9 : scanne les fields pour extraire les windowCalls, produit les
+ * scanne les fields pour extraire les windowCalls, produit les
  * $setWindowFields stages à insérer avant $project. Retourne aussi le
  * slotByKey pour que renderProject référence `$__win_N` au lieu d'essayer de
  * rendre l'expression.
@@ -1998,7 +1998,7 @@ function renderMatch(
 				? negateMatch(expr.operand, alias)
 				: { $nor: [renderMatch(expr.operand, alias, mode)] };
 		case "isNull": {
-			// Sprint 4 : is null sur un call JSON hoistable → `{path: {$exists: bool}}`.
+			// is null sur un call JSON hoistable → `{path: {$exists: bool}}`.
 			// `where json_get(doc, 'k') is null` équivaut à `not $exists` (missing key).
 			// `is not null` équivaut à `$exists: true`.
 			if (expr.operand.kind === "call") {
@@ -2074,7 +2074,7 @@ function renderMatch(
 				expr.span
 			);
 		case "windowCall":
-			// Sprint T2/9 : windowCall en where refusé au lower — defense.
+			// windowCall en where refusé au lower — defense.
 			throw new SnqlError(
 				"Window function dans un prédicat non supporté (refusé au lower normalement)",
 				"codegen_mongo_predicate",
@@ -2082,7 +2082,7 @@ function renderMatch(
 			);
 		case "subquery":
 		case "exists":
-			// Sprint T2/11 : sub-queries refusées au planner (Mongo n'a pas
+			// sub-queries refusées au planner (Mongo n'a pas
 			// la capability). Defense — jamais atteint normalement.
 			throw new SnqlError(
 				"Sub-query dans un prédicat Mongo non supportée (planner_subquery_unsupported attendu avant)",
@@ -2090,7 +2090,7 @@ function renderMatch(
 				expr.span
 			);
 		case "upsertNew":
-			// Sprint T2/13 : upsert refusé au planner sur Mongo (capability upsert
+			// upsert refusé au planner sur Mongo (capability upsert
 			// absente). Defense — jamais atteint normalement.
 			throw new SnqlError(
 				"'new.<col>' Mongo non supporté (upsert refusé au planner)",
@@ -2181,7 +2181,7 @@ function negateMatch(
 				expr.span
 			);
 		case "windowCall":
-			// Sprint T2/9 : négation d'un windowCall refusé (refusé au lower).
+			// négation d'un windowCall refusé (refusé au lower).
 			throw new SnqlError(
 				"Négation d'un window function non supportée",
 				"codegen_mongo_predicate",
@@ -2215,7 +2215,7 @@ const NEGATED_COMPARE: Readonly<Record<CompareOp, string>> = {
 };
 
 /**
- * Opérateur SNQL inverse pour la négation via hoist (sprint 4). `not (json_has_key
+ * Opérateur SNQL inverse pour la négation via hoist. `not (json_has_key
  * = true)` doit hoister comme `json_has_key = false` avec op inversé. Undefined
  * = pas de hoist négation (like : forme complexe $not+$regex+$ne préservée).
  */
@@ -2234,7 +2234,7 @@ function negateCompare(
 	right: PlanExpr,
 	alias: string | undefined
 ): Record<string, unknown> {
-	// Mirror sprint 4 : hoist JSON dans la négation. `not (json_get(x,'k')='v')`
+	// Mirror hoist JSON dans la négation. `not (json_get(x,'k')='v')`
 	// et `not (json_has_key(x,'k')=true)` doivent produire l'inverse hoisté
 	// natif (sinon fallback $expr non-indexable via composition not/$eq).
 	const negatedOp = NEGATED_HOIST_OP[op];
@@ -2307,7 +2307,7 @@ function renderCompare(
 	if (op === "like") {
 		return renderLike(left, right, alias);
 	}
-	// Sprint 4 : hoist JSON via mongoMatchHoist si applicable. Traduit
+	// hoist JSON via mongoMatchHoist si applicable. Traduit
 	// `where json_get(doc, 'a', 'b') = 'v'` en `{'doc.a.b': 'v'}` indexable
 	// natif (au lieu du fallback $expr COLLSCAN).
 	const hoisted = tryMongoMatchHoist(op, left, right, alias, mode);
@@ -2326,7 +2326,7 @@ function renderCompare(
 	// Repli $expr : en écriture, on refuse — deux codes selon l'origine :
 	//  - call / cast (fonction ou cast dans un prédicat write, non hoisté) :
 	//    message actionnable pointant vers un pattern hoistable ou matérialisation
-	//    côté application (nouveau `codegen_mongo_write_expr_predicate` sprint 4).
+	// côté application (nouveau `codegen_mongo_write_expr_predicate`).
 	//  - vrais champ↔champ : ancien message conservé (`codegen_mongo_write_field_compare`).
 	if (mode === "write") {
 		const isExprLike =
@@ -2448,7 +2448,7 @@ function toExprOperand(expr: PlanExpr, alias: string | undefined): unknown {
 				"codegen_missing_function_mapping"
 			);
 		}
-		// Sprint T2/6 : propage star/unique (defense-in-depth ; les aggregates
+		// propage star/unique (defense-in-depth; les aggregates
 		// arrivent normalement via renderAggregatePipeline, pas ici).
 		return entry.engines.mongodb(expr.args, {
 			renderExpr: (arg) => toExprOperand(arg as PlanExpr, alias),
@@ -2457,7 +2457,7 @@ function toExprOperand(expr: PlanExpr, alias: string | undefined): unknown {
 		});
 	}
 	if (expr.kind === "cast") {
-		// PA/7 (ADR-024-A) : mongoRenderCast centralise le rendu — no-op sur json
+		// mongoRenderCast centralise le rendu — no-op sur json
 		// (BSON = JSON natif, string literals déjà parsés au lower), $dateTrunc
 		// unit:"day" pour target="date" (émule PG date-only, comble div #15),
 		// $convert sinon avec $ifNull wrap sur field pour parité NULL PG.
@@ -2469,7 +2469,7 @@ function toExprOperand(expr: PlanExpr, alias: string | undefined): unknown {
 	}
 	if (expr.kind === "object") {
 		// BSON natif — chaque value passe par toExprOperand récursif qui applique
-		// $literal wrap sur strings $-préfixées (infra sprint 1). Les guards Mongo
+		// $literal wrap sur strings $-préfixées (infra). Les guards Mongo
 		// (dollar/dot keys) sont refusés au planner AVANT d'arriver ici.
 		const out: Record<string, unknown> = {};
 		for (const entry of expr.entries) {
@@ -2482,7 +2482,7 @@ function toExprOperand(expr: PlanExpr, alias: string | undefined): unknown {
 		return expr.items.map((item) => toExprOperand(item, alias));
 	}
 	if (expr.kind === "case") {
-		// Sprint T2/5 : `$switch` natif Mongo. Sémantique `case`/`then` (bool
+		// `$switch` natif Mongo. Sémantique `case`/`then` (bool
 		// évalué → then), avec `default` obligatoire (miroir de l'else surface).
 		return {
 			$switch: {
@@ -2494,7 +2494,7 @@ function toExprOperand(expr: PlanExpr, alias: string | undefined): unknown {
 			}
 		};
 	}
-	// Sprint T2/5 : compare/and/or/not/isNull/in en forme $expr — nécessaires
+	// compare/and/or/not/isNull/in en forme $expr — nécessaires
 	// dès que ces nodes apparaissent comme sous-expressions (cond d'un case/if,
 	// arg d'un call, etc.). Avant, ces cas étaient invisibles car la surface
 	// ne permettait pas de sous-prédicats dans les expressions. Le lower `case`
@@ -2571,7 +2571,7 @@ export const MONGO_CAST_TYPE: Readonly<
 };
 
 /**
- * PA/7 (ADR-024-A) — helper centralisé pour rendre un `cast(x as target)`
+ * helper centralisé pour rendre un `cast(x as target)`
  * Mongo. Comble partiellement divergence #15 (BSON collapse date/timestamp)
  * pour `target = "date"` : au lieu de `$convert{to:"date"}` (timestamp full),
  * émet `$dateTrunc{date, unit:"day", timezone:"UTC"}` pour émuler PG date-only.
@@ -2635,7 +2635,7 @@ function mongoField(
 const REGEX_SPECIAL = /[.*+?^${}()|[\]\\]/;
 
 /**
- * Sprint 4 — hoist opt-in d'un `call` vers dot-notation Mongo native
+ * hoist opt-in d'un `call` vers dot-notation Mongo native
  * indexable. Consomme `entry.mongoMatchHoist` :
  *  - kind='value' (json_get) : `{path: <op literal>}` — réutilise la logique
  *    fast-path field/literal existante (write mode inclus : ne → $nin[v,null]).

@@ -158,16 +158,16 @@ export function ConsoleResultsPanel({
 	readonly timingMs: number | undefined;
 	/** Câble optionnel vers l'éditeur (Phase 3a — jump-to-span depuis ErrorBlock). */
 	readonly onFocusSpan?: (span: SerializedSpan) => void;
-	/** [ADR-023 E/6.4] Engine du run pour détecter le header partial-writes
-	 * (D5) quand un `transaction { … }` tourne sur un engine sans capability
-	 * tx (KV, Mongo standalone). Absent = pas de header (safe fallback). */
+	/** Engine du run pour détecter le header partial-writes quand un
+	 * `transaction { … }` tourne sur un engine sans capability tx (KV,
+	 * Mongo standalone). Absent = pas de header (safe fallback). */
 	readonly engine?: string;
-	/** [ADR-023 E/6.4] Source du dernier run — utilisée pour détecter
-	 * `transaction { … }` racine côté frontend sans re-parser à chaque
-	 * render. Absent = pas de header. */
+	/** Source du dernier run — utilisée pour détecter `transaction { … }`
+	 * racine côté frontend sans re-parser à chaque render. Absent = pas
+	 * de header. */
 	readonly lastSource?: string;
-	/** [PM/10 D10] Schema consommé par ResultsPlanView pour compile local et
-	 * afficher les stages du native query avec badges. */
+	/** Schema consommé par ResultsPlanView pour compile local et afficher
+	 * les stages du native query avec badges. */
 	readonly schema?: SchemaModel;
 }): React.ReactNode {
 	const [viewMode, setViewMode] = useLocalStorage<ResultsViewMode>({
@@ -206,13 +206,12 @@ export function ConsoleResultsPanel({
 		[filteredRows, start, end]
 	);
 
-	// [ADR-023 E/6.1+E/6.2+E/6.3] Status derivation — 3 axes qui
-	// s'imbriquent :
-	//   1. isPending → warning "Exécution…" (existant)
+	// Status derivation — 3 axes qui s'imbriquent :
+	//   1. isPending → warning "Exécution…"
 	//   2. error → classifyRuntimeError : rollback_user (neutre "Rollback"),
 	//      rollback_error (danger "Transaction annulée"), ordinary
-	//      (danger "Erreur", existant)
-	//   3. result.written + rowCount (D15) : rowCount>0 vert "Écriture OK",
+	//      (danger "Erreur")
+	//   3. result.written + rowCount : rowCount>0 vert "Écriture OK",
 	//      rowCount===0 gris neutre "Écriture exécutée — aucune ligne
 	//      affectée" (évite le faux positif audit sur upsert idempotent Mongo)
 	const rollbackKind =
@@ -239,9 +238,9 @@ export function ConsoleResultsPanel({
 				statusColor = "var(--sqlnest-success)";
 				statusLabel = "Écriture OK";
 			} else {
-				// D15 : write exécuté sans effet (upsert idempotent, DELETE
-				// sur predicate qui match rien). Couleur neutre — pas de
-				// faux positif audit history.
+				// Write exécuté sans effet (upsert idempotent, DELETE sur
+				// predicate qui match rien). Couleur neutre — pas de faux
+				// positif audit history.
 				statusColor = "var(--sqlnest-text-secondary)";
 				statusLabel = "Écriture exécutée";
 			}
@@ -254,12 +253,12 @@ export function ConsoleResultsPanel({
 		statusLabel = "Prêt";
 	}
 
-	// [ADR-023 E/6.4 / D5] Header partial-writes — quand un `transaction {…}`
-	// tourne sur un engine qui ne supporte pas les tx runtime (KV, Mongo
-	// standalone), l'atomicité n'est PAS garantie. On le signale explicitement
-	// pour éviter que l'user croie à un rollback disponible. Détection cheap
-	// via startsWith('transaction') sur lastSource trim — précision suffisante
-	// v1 (les faux positifs = commentaires en tête sont rares).
+	// Header partial-writes — quand un `transaction {…}` tourne sur un
+	// engine qui ne supporte pas les tx runtime (KV, Mongo standalone),
+	// l'atomicité n'est PAS garantie. On le signale explicitement pour
+	// éviter que l'user croie à un rollback disponible. Détection cheap
+	// via startsWith('transaction') sur lastSource trim — précision
+	// suffisante (les faux positifs = commentaires en tête sont rares).
 	const showPartialWritesHeader =
 		engine !== undefined &&
 		lastSource !== undefined &&
@@ -286,12 +285,12 @@ export function ConsoleResultsPanel({
 					<>
 						<span>·</span>
 						<span>
-							{/* [ADR-023 D15] Distinction post-run mutation :
+							{/* Distinction post-run mutation :
 							    - rowCount > 0 : "N ligne(s) affectée(s)"
 							    - rowCount === 0 : "aucune ligne affectée" (évite faux
 							      positif audit sur upsert idempotent Mongo)
-							    Sprint T2/13 : `pick count` droppe RETURNING → rows=[]
-							    mais rowCount reflète les lignes affectées. */}
+							    `pick count` droppe RETURNING → rows=[] mais rowCount
+							    reflète les lignes affectées. */}
 							{result.written && rows.length === 0
 								? result.rowCount > 0
 									? `${result.rowCount} ligne${result.rowCount > 1 ? "s" : ""} affectée${result.rowCount > 1 ? "s" : ""}`

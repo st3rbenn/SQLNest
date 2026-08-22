@@ -10,11 +10,10 @@ export interface GetCanvasResult {
 /**
  * Lit le canvas d'un utilisateur pour une db_connection donnée.
  *
- * ─── T4/4 : résolution cross-device ────────────────────────────────────
  * Passe par `resolveCanvasByConnection` qui match dans l'ordre :
  *   1. `(user, team, db_fingerprint)` — même instance DB, autre CLI
  *   2. `(user, team) + checksum ∈ historique` — même dump, autre container
- *   3. `(user, connection_id)` — canvas legacy pré-T4/4
+ *   3. `(user, connection_id)` — canvas legacy
  * → `null` si aucun match (le handler HTTP répond 404).
  */
 export async function getCanvasState(

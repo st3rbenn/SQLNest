@@ -68,7 +68,7 @@ describe("lexer", () => {
 		expect(kinds).toEqual(["verb", "ident", "keyword", "number", "eof"]);
 	});
 
-	describe("sprint T2/5 : token `arrow` (`->`)", () => {
+	describe("token `arrow` (`->`)", () => {
 		it("`->` adjacent → 1 token arrow", () => {
 			expect(tokenize("a->b").map((t) => [t.kind, t.value])).toEqual([
 				["ident", "a"],

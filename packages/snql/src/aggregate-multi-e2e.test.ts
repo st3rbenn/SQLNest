@@ -1,5 +1,5 @@
 /**
- * Sprint T2/8 aggregateMulti E2E — array_agg / string_agg / json_agg avec
+ * aggregateMulti E2E — array_agg / string_agg / json_agg avec
  * sort intra-call. Parser + lower + codegen PG/Mongo + runtime KV.
  */
 
@@ -93,7 +93,7 @@ describe("lower aggregateMulti", () => {
 	});
 
 	it("string_agg(unique x, sep sort k) — fast-path unique accepte 2+ args pour aggregateMulti", () => {
-		// Régression E2E : le fast-path unique de T2/6 refusait structurellement
+		// Régression E2E : le fast-path unique de refusait structurellement
 		// les args supplémentaires, mais string_agg(unique x, sep) en a besoin.
 		expect(() =>
 			pgSql(

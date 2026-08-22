@@ -45,9 +45,9 @@ import { useSchema } from "../schema/useSchema";
 interface Props {
 	readonly connectionId: string;
 	readonly isOnline: boolean;
-	/** Snapshot persisté du dernier rendu (C.15). Utilisé comme fallback
-	 *  quand `isOnline === false` — au lieu d'afficher « CLI hors ligne »
-	 *  vide, on re-render depuis le snapshot (theme-aware).
+	/** Snapshot persisté du dernier rendu. Utilisé comme fallback quand
+	 *  `isOnline === false` — au lieu d'afficher « CLI hors ligne » vide,
+	 *  on re-render depuis le snapshot (theme-aware).
 	 *  `null` si l'user n'a jamais save le canvas de cette connection. */
 	readonly snapshot?: PreviewSnapshot | null;
 }
@@ -117,20 +117,20 @@ export function MiniSchemaPreview({ connectionId, isOnline, snapshot }: Props) {
 		prevOnlineRef.current = isOnline;
 	}, [isOnline, connectionId, queryClient]);
 
-	// PRIORITÉ ABSOLUE au snapshot précalculé (C.15 → C.18). Le snapshot
-	// est capturé à partir du VRAI état du canvas (positions RF + frames +
-	// hidden), donc la preview affiche EXACTEMENT ce que l'user voit dans
-	// le canvas — pas de divergence par ELK settings différents.
+	// PRIORITÉ ABSOLUE au snapshot précalculé. Le snapshot est capturé à
+	// partir du VRAI état du canvas (positions RF + frames + hidden), donc
+	// la preview affiche EXACTEMENT ce que l'user voit dans le canvas —
+	// pas de divergence par ELK settings différents.
 	//
 	// Sans ce shortcut, `PreviewSvg` recalcule via canvas_state (positions
 	// user si complètes) OU ELK dense (buildPreviewLayout) qui diffère du
 	// buildLayout du canvas. Un canvas partiellement bougé + reste en ELK
-	// standard produisait deux vues incohérentes. Bug rapporté 2026-08-07.
+	// standard produisait deux vues incohérentes.
 	//
-	// C.19 : quand CLI offline mais snapshot dispo, on garde la preview
-	// et on ajoute un badge « hors ligne » discret en top-right. L'user
-	// voit ce qu'il connaît + le status, au lieu d'un « CLI hors ligne »
-	// qui masque tout.
+	// Quand CLI offline mais snapshot dispo, on garde la preview et on
+	// ajoute un badge « hors ligne » discret en top-right. L'user voit ce
+	// qu'il connaît + le status, au lieu d'un « CLI hors ligne » qui
+	// masque tout.
 	if (snapshot && snapshot.nodes.length > 0) {
 		return (
 			<div style={wrapperStyle}>
@@ -461,8 +461,8 @@ function PreviewSvgBody({
 	);
 }
 
-/** Rend un snapshot persisté (C.15). Utilisé comme fallback quand le CLI
- *  est offline — le snapshot contient déjà nodes/edges/frames précalculés,
+/** Rend un snapshot persisté. Utilisé comme fallback quand le CLI est
+ *  offline — le snapshot contient déjà nodes/edges/frames précalculés,
  *  on n'a qu'à mapper vers les types internes + calculer la bbox de la
  *  vue. Theme-aware (couleurs calculées via `colorFor`, pas stockées). */
 function PreviewSvgFromSnapshot({

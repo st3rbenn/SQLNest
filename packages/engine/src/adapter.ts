@@ -29,17 +29,17 @@ export interface PingResult {
 export interface Connection {
 	readonly engine: string;
 	/**
-	 * Sprint T3/1 : namespace runtime — PG schema (search_path), Mongo DB
-	 * name. Utilisé par le codegen d'introspection (`list tables` filtre par
-	 * ce namespace). Absent = engine sans notion de namespace.
+	 * Namespace runtime — PG schema (search_path), Mongo DB name. Utilisé par
+	 * le codegen d'introspection (`list tables` filtre par ce namespace).
+	 * Absent = engine sans notion de namespace.
 	 */
 	readonly namespace?: string;
 	/**
-	 * ADR-024 D3 (PM/1) : bag typé exposant les features driver détectées au
-	 * bootstrap (version × topologie). Consommé par run.ts / codegen sprint
-	 * pour émettre `planner_mongo_version_capability_missing` avant d'appeler
-	 * une op qui exige la feature. Chaque adapter définit son propre shape ;
-	 * discriminant `kind` obligatoire (voir MongoEngineFeatures).
+	 * Bag typé exposant les features driver détectées au bootstrap (version ×
+	 * topologie). Consommé par run.ts / codegen pour émettre
+	 * `planner_mongo_version_capability_missing` avant d'appeler une op qui
+	 * exige la feature. Chaque adapter définit son propre shape ; discriminant
+	 * `kind` obligatoire (voir MongoEngineFeatures).
 	 */
 	readonly engineFeatures?: { readonly kind: string };
 	/** Vérifie que le moteur répond (aller-retour réseau). Lève si injoignable. */
@@ -49,9 +49,9 @@ export interface Connection {
 	/** Exécute une requête native (le pushdown) et renvoie un ResultSet normalisé. */
 	execute(query: NativeQuery): Promise<ResultSet>;
 	/**
-	 * Sprint T4/1 : identifiant opaque **stable** de l'instance DB, indépendant
-	 * du device qui s'y connecte. Le backend l'utilise pour ré-associer un
-	 * même canvas d'un Mac vers un Windows (ou après un revoke/re-add local).
+	 * Identifiant opaque **stable** de l'instance DB, indépendant du device qui
+	 * s'y connecte. Le backend l'utilise pour ré-associer un même canvas d'un
+	 * Mac vers un Windows (ou après un revoke/re-add local).
 	 *
 	 * Contract : deux CLI qui pointent la MÊME instance DB (même serveur,
 	 * même database) retournent le MÊME string. Deux instances distinctes
@@ -68,11 +68,7 @@ export interface Connection {
 /**
  * Le **contrat** qu'un moteur implémente pour brancher SNQL dessus (couche 1,
  * « Connexion »). Ajouter un moteur = implémenter ce contrat, sans toucher au
- * langage. Voir le vault : `04 - Engines/Engine Adapter Interface`.
- *
- * Slice 5 couvre le cycle de vie de connexion (`connect` → `ping` → `close`).
- * `introspect` (→ SchemaModel) et `execute` (→ ResultSet) arrivent aux slices
- * 6 et 7.
+ * langage.
  */
 export interface EngineAdapter {
 	/** Identifiant stable du moteur : `"postgres"`, `"mongodb"`, … */

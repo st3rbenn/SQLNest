@@ -35,7 +35,7 @@ export function compensate(
 				out = out.filter((row) => evalBool(op.predicate, row) === true);
 				break;
 			case "project": {
-				// Sprint T2/9 : si des windowCalls dans project.fields, préciser
+				// si des windowCalls dans project.fields, préciser
 				// leurs valeurs par row (bucket partition + sort + assign
 				// row_number/rank/dense_rank), injecter comme fields dans les
 				// rows, puis projectRow les lit comme valeurs déjà résolues.
@@ -43,7 +43,7 @@ export function compensate(
 				out = preprocessed.rows.map((row) =>
 					projectRow(row, op.fields, preprocessed.windowSlots)
 				);
-				// Sprint T2/10 : DISTINCT / DISTINCT ON post-projection. Look-ahead
+				// DISTINCT / DISTINCT ON post-projection. Look-ahead
 				// vers le sort suivant : PG DISTINCT ON dédup APRÈS ORDER BY,
 				// donc on doit trier AVANT de dédup pour parité. Le lower a
 				// validé que le sort prefix matche distinctOnKeys.
@@ -68,8 +68,8 @@ export function compensate(
 				out = joinRows(out, op, sources);
 				break;
 			case "aggregate": {
-				// Sprint T2/6 : fold sur toute la collection → 1 row output.
-				// Sprint T2/7 : groupKeys peuplé → bucket par clés puis fold
+				// fold sur toute la collection → 1 row output.
+				// groupKeys peuplé → bucket par clés puis fold
 				// chaque bucket ; having filtre les buckets output.
 				out = op.groupKeys !== undefined
 					? bucketFoldAggregate(op.fields, op.groupKeys, op.having, out)
@@ -96,7 +96,7 @@ interface JoinOp {
  *  - `kind: "join"` (many-to-one/one-to-one, LEFT JOIN Mongo natif via
  *    `$lookup + $unwind{preserveNullAndEmptyArrays:true}`) : produit N rows
  *    par LEFT row (cartesian), garde le LEFT si aucun match avec `as: undefined`.
- *    Câblé PA/2 (ADR-024-A) pour honorer la sémantique join↔real coll matérialisée.
+ * Câblé pour honorer la sémantique join↔real coll matérialisée.
  */
 function joinRows(
 	left: readonly Row[],
@@ -162,7 +162,7 @@ function evalValue(expr: PlanExpr, row: Row): unknown {
 		return evalArith(expr.op, evalValue(expr.left, row), evalValue(expr.right, row));
 	}
 	if (expr.kind === "call") {
-		// Sprint T2/5 : dispatch registre KV. Si l'entrée expose un renderer
+		// dispatch registre KV. Si l'entrée expose un renderer
 		// `kv`, on le délègue (short-circuit possible côté renderer — cf.
 		// `kvIf` qui n'évalue jamais les deux branches). Sans renderer, la
 		// fn est inconnue de KV → planner l'a filtrée en amont (Capabilities
@@ -178,7 +178,7 @@ function evalValue(expr: PlanExpr, row: Row): unknown {
 		);
 	}
 	if (expr.kind === "case") {
-		// Sprint T2/5 : short-circuit strict. Chaque cond évaluée dans l'ordre,
+		// short-circuit strict. Chaque cond évaluée dans l'ordre,
 		// premier `=== true` STRICT → sa value. null/false/undefined/0/'' →
 		// on passe à la suivante (parité PG 3VL, pas de truthy JS). Si aucune
 		// branche match → elseValue (obligatoire à la surface).
@@ -209,7 +209,7 @@ function evalValue(expr: PlanExpr, row: Row): unknown {
 		return expr.items.map((item) => evalValue(item, row));
 	}
 	if (expr.kind === "windowCall") {
-		// Sprint T2/9 : defense-in-depth — les windowCalls sont pre-processed
+		// defense-in-depth — les windowCalls sont pre-processed
 		// par preprocessWindowCalls avant projectRow ; arriver ici = bug de
 		// sync codegen/runtime (windowCall dans un contexte non-project).
 		throw new SnqlError(
@@ -218,7 +218,7 @@ function evalValue(expr: PlanExpr, row: Row): unknown {
 		);
 	}
 	if (expr.kind === "subquery" || expr.kind === "exists") {
-		// Sprint T2/11 : sub-queries refusées au planner (KV n'a pas la
+		// sub-queries refusées au planner (KV n'a pas la
 		// capability). Defense — jamais atteint normalement.
 		throw new SnqlError(
 			`Runtime KV : sub-query rencontrée — planner_subquery_unsupported attendu avant (bug de sync)`,
@@ -226,7 +226,7 @@ function evalValue(expr: PlanExpr, row: Row): unknown {
 		);
 	}
 	if (expr.kind === "upsertNew") {
-		// Sprint T2/13 : upsert refusé au planner (KV n'a pas la capability
+		// upsert refusé au planner (KV n'a pas la capability
 		// upsert). Defense — jamais atteint normalement.
 		throw new SnqlError(
 			`Runtime KV : 'new.<col>' rencontré — capability 'upsert' absente (bug de sync)`,
@@ -423,7 +423,7 @@ function coerceBool(value: unknown): boolean | null {
 	return Boolean(value);
 }
 
-// --- Sprint T2/6 : aggregate fold ------------------------------------------
+// --- aggregate fold ------------------------------------------
 
 /**
  * Fold sur toute la collection → 1 row output. Chaque field.expr est évalué
@@ -451,7 +451,7 @@ function foldAggregate(
 }
 
 /**
- * Sprint T2/7 : bucket rows par groupKeys, fold chaque bucket, applique
+ * bucket rows par groupKeys, fold chaque bucket, applique
  * having (si présent), retourne les rows passantes.
  *
  * Clé bucket = `JSON.stringify(keyValues)` — stable et distingue
@@ -551,7 +551,7 @@ function evalAggregateExpr(
 		}
 		if (entry.kind === "aggregate" || entry.kind === "aggregateMulti") {
 			return entry.engines.kv(expr.args, {
-				// Sprint T2/8 : renderExpr pour aggregateMulti sert à évaluer le
+				// renderExpr pour aggregateMulti sert à évaluer le
 				// literal `sep` de string_agg (via evalValue direct — pas de row).
 				// Pour les scalaires wrappés, on descend via evalAggregateExpr.
 				renderExpr: (a) =>
@@ -562,7 +562,7 @@ function evalAggregateExpr(
 				evalPerRow: (a, r) => evalValue(a as PlanExpr, r as Row),
 				...(expr.star === true ? { star: true } : {}),
 				...(expr.unique === true ? { unique: true } : {}),
-				// Sprint T2/8 : sortKeys propagé pour aggregateMulti (kvArrayAgg
+				// sortKeys propagé pour aggregateMulti (kvArrayAgg
 				// & co l'utilisent pour trier avant collecte).
 				...(expr.sortKeys !== undefined && expr.sortKeys.length > 0
 					? { sortKeys: expr.sortKeys }
@@ -575,7 +575,7 @@ function evalAggregateExpr(
 	}
 	if (expr.kind === "literal") return expr.value;
 	if (expr.kind === "field") {
-		// Sprint T2/7 : field bare dans having ou dans pick.expr peut référencer
+		// field bare dans having ou dans pick.expr peut référencer
 		// une group key — dans ce cas on résout via groupKeyRow (toutes les rows
 		// du bucket partagent la même valeur).
 		if (groupKeyRow !== undefined) {
@@ -678,7 +678,7 @@ function projectRow(
 }
 
 /**
- * Sprint T2/9 : clé stable pour dédup les windowCalls identiques côté KV.
+ * clé stable pour dédup les windowCalls identiques côté KV.
  * Miroir de `windowCallKey` dans mongodb.ts.
  */
 function windowCallKvKey(expr: PlanExpr & { kind: "windowCall" }): string {
@@ -690,7 +690,7 @@ function windowCallKvKey(expr: PlanExpr & { kind: "windowCall" }): string {
 }
 
 /**
- * Sprint T2/9 : pre-processing des windowCalls dans un project. Pour chaque
+ * pre-processing des windowCalls dans un project. Pour chaque
  * windowCall unique (par name+partition+sort) :
  *  1. Bucket les rows par partition keys (JSON.stringify).
  *  2. Sort chaque bucket par sortKeys.
@@ -703,7 +703,7 @@ function windowCallKvKey(expr: PlanExpr & { kind: "windowCall" }): string {
  * Retourne les rows enrichies + slotByKey pour projectRow.
  */
 /**
- * Sprint T2/10 : applique DISTINCT / DISTINCT ON sur les rows post-projection.
+ * applique DISTINCT / DISTINCT ON sur les rows post-projection.
  *
  * - `unique` seul : dédup via canonicalKey sur tous les fields output,
  *   preserving order (Set-based, 1re occurrence conservée).
@@ -823,7 +823,7 @@ function preprocessWindowCalls(
 				else if (w.name === "dense_rank") value = currentDenseRank;
 				else {
 					throw new Error(
-						`Runtime KV : window '${w.name}' non implémenté (sprint T2/10+)`
+						`Runtime KV : window '${w.name}' non implémenté (+)`
 					);
 				}
 				entry.row[slot] = value;

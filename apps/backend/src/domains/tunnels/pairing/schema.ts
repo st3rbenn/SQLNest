@@ -16,9 +16,9 @@ const ED25519_PUBKEY_HEX = /^[0-9a-fA-F]{64}$/;
 const ED25519_SIG_HEX = /^[0-9a-fA-F]{128}$/;
 
 // ─── shared: fingerprint hints ─────────────────────────────────────────
-// T4/5 : le CLI envoie ses 2 identifiants DB dès le POST /pairings pour
-// que le backend puisse détecter au /approve qu'une db_connection existe
-// déjà pour cette DB dans la team → auto-fill device_name + réutiliser la
+// Le CLI envoie ses 2 identifiants DB dès le POST /pairings pour que le
+// backend puisse détecter au /approve qu'une db_connection existe déjà
+// pour cette DB dans la team → auto-fill device_name + réutiliser la
 // connection au /authenticate (multi-CLI par db_connection).
 export const DbFingerprintField = z
 	.string()
@@ -41,9 +41,9 @@ export const CreatePairingBody = z.object({
 	cliPubkeyEd25519: z
 		.string()
 		.regex(ED25519_PUBKEY_HEX, "Ed25519 pubkey doit être 64 chars hex"),
-	/** Nom de la DSN locale que ce CLI veut servir cette session (C.13).
-	 *  Optionnel pour compat avec les CLI legacy (pré-C.13) qui n'envoient
-	 *  rien → le backend fallback à un fingerprint pubkey-only.
+	/** Nom de la DSN locale que ce CLI veut servir cette session.
+	 *  Optionnel pour compat avec les CLI legacy qui n'envoient rien → le
+	 *  backend fallback à un fingerprint pubkey-only.
 	 *  Un CLI récent DOIT l'envoyer quand plusieurs DSN sont configurées
 	 *  localement pour éviter les collisions côté serveur. */
 	cliConnectionName: z
@@ -52,7 +52,7 @@ export const CreatePairingBody = z.object({
 		.min(1, "Le nom de connection CLI ne peut pas être vide")
 		.max(100, "Nom trop long (max 100)")
 		.optional(),
-	/** T4/5 : voir DbFingerprintField. Envoyé dès le POST /pairings pour
+	/** Voir DbFingerprintField. Envoyé dès le POST /pairings pour
 	 *  détection cross-CLI au approve. */
 	dbFingerprint: DbFingerprintField,
 	dbSchemaChecksum: DbSchemaChecksumField
@@ -88,7 +88,7 @@ export const StatusPairingResponse = z.object({
 	/** Peuplé UNIQUEMENT quand :
 	 *   - la requête vient d'un user authentifié (cookie session),
 	 *   - le fingerprint du CLI (hash de sa pubkey Ed25519) matche une
-	 *     `db_connection` existante de ce user (pairing idempotent C.6).
+	 *     `db_connection` existante de ce user (pairing idempotent).
 	 *  L'UI /connect s'en sert pour adapter le flow : au lieu de demander
 	 *  un `deviceName`, elle affiche "Reconnexion à <name>" — évite le
 	 *  piège UX "l'user tape un nom qui sera ignoré". */
@@ -109,8 +109,7 @@ export type StatusPairingResponseT = z.infer<typeof StatusPairingResponse>;
 export const ApprovePairingBody = z.object({
 	/** Nom court choisi par le user pour la nouvelle db_connection.
 	 *
-	 *  ─── Optionnel depuis C.7 ──────────────────────────────────────────
-	 *  Si le CLI (fingerprint) est déjà connu de l'user (voir
+	 *  Optionnel : si le CLI (fingerprint) est déjà connu de l'user (voir
 	 *  `existingConnection` dans `StatusPairingResponse`), le champ est
 	 *  facultatif — le backend autofill avec le nom existant. L'UI /connect
 	 *  cache le champ dans ce cas pour éviter le piège "je tape un nom qui
@@ -144,7 +143,7 @@ export const AuthenticateBody = z.object({
 		.string()
 		.regex(ED25519_SIG_HEX, "Signature Ed25519 doit être 128 chars hex"),
 	/**
-	 * T4/1 Step 6 : fingerprint de l'INSTANCE DB (calculé côté CLI via
+	 * Fingerprint de l'INSTANCE DB (calculé côté CLI via
 	 * `Connection.fingerprint()`). Optionnel — un CLI legacy ou une DSN
 	 * inaccessible au moment de l'authenticate laisse le champ vide.
 	 * Backend :
@@ -152,7 +151,7 @@ export const AuthenticateBody = z.object({
 	 *    l'identité stable de la DB, dérivée de son system_identifier PG /
 	 *    replSet name Mongo).
 	 *  - Si présent + nouvelle connection : stocké à l'INSERT.
-	 *  - v2 : lookup prioritaire par (team, db_fingerprint) pour re-pair
+	 *  - Lookup prioritaire par (team, db_fingerprint) pour re-pair
 	 *    cross-device sur la même DB depuis un autre CLI.
 	 */
 	dbFingerprint: z
@@ -194,16 +193,16 @@ export const AuthenticateTokenBody = z.object({
 		.trim()
 		.min(1, "Le nom est requis")
 		.max(100, "Nom trop long (max 100)"),
-	/** Nom de la DSN locale au CLI (C.13). Utilisé pour scoper le
-	 *  fingerprint : SHA256(pubkey || "|" || cliConnectionName). Optionnel
-	 *  pour compat CLI legacy. */
+	/** Nom de la DSN locale au CLI. Utilisé pour scoper le fingerprint :
+	 *  SHA256(pubkey || "|" || cliConnectionName). Optionnel pour compat
+	 *  CLI legacy. */
 	cliConnectionName: z
 		.string()
 		.trim()
 		.min(1, "Le nom de connection CLI ne peut pas être vide")
 		.max(100, "Nom trop long (max 100)")
 		.optional(),
-	/** T4/1 Step 6 — voir AuthenticateBody.dbFingerprint (même sémantique). */
+	/** Voir AuthenticateBody.dbFingerprint (même sémantique). */
 	dbFingerprint: z
 		.string()
 		.trim()
@@ -223,30 +222,30 @@ export type AuthenticateTokenResponseT = z.infer<
 >;
 
 // ─── POST /api/tunnels/heartbeat ───────────────────────────────────────
-// T4/1.5 : le CLI envoie périodiquement (ou au boot du serve loop) le
-// fingerprint de l'INSTANCE DB pour un tunnel existant. Résout le
-// problème "authenticate skip via findResumableTunnel" — le fingerprint
-// arrive au backend même sans re-pair. Auth : Bearer tn_... du tunnel
-// session (le token clair prouve la possession du CLI mandaté).
+// Le CLI envoie périodiquement (ou au boot du serve loop) le fingerprint
+// de l'INSTANCE DB pour un tunnel existant. Résout le problème
+// "authenticate skip via findResumableTunnel" — le fingerprint arrive au
+// backend même sans re-pair. Auth : Bearer tn_... du tunnel session (le
+// token clair prouve la possession du CLI mandaté).
 
 export const HeartbeatBody = z.object({
-	/** T4/1 : voir AuthenticateBody.dbFingerprint. */
+	/** Voir AuthenticateBody.dbFingerprint. */
 	dbFingerprint: z
 		.string()
 		.trim()
 		.min(1)
 		.max(200)
 		.optional(),
-	/** T4/2 (prêt à recevoir) : checksum de la STRUCTURE (schéma) — hash
-	 *  déterministe des cols/FKs. Détecte les évolutions de schéma entre
-	 *  connects. Base pour invalidation cache + alertes diff. */
+	/** Checksum de la STRUCTURE (schéma) — hash déterministe des cols/FKs.
+	 *  Détecte les évolutions de schéma entre connects. Base pour
+	 *  invalidation cache + alertes diff. */
 	dbSchemaChecksum: z
 		.string()
 		.trim()
 		.min(1)
 		.max(200)
 		.optional(),
-	/** PM/10 D8 fix — engine réel du CLI (détecté depuis le scheme DSN local :
+	/** Engine réel du CLI (détecté depuis le scheme DSN local :
 	 *  postgres/postgresql → "postgres", mongodb/mongodb+srv → "mongodb"). Le
 	 *  backend backfill db_connection.engine si différent — corrige les rows
 	 *  historiquement stockées avec DEFAULT_ENGINE="postgres" par le pairing.

@@ -230,10 +230,10 @@ export const team = pgTable(
 		// alors les rename user). Pour une team custom (V2) le name est
 		// stocké tel quel.
 		name: text("name").notNull().default(""),
-		// C.21 UX fix : marker qui distingue la team perso auto-créée
-		// à la signup des futures teams collaboratives (V2). Piloté par
-		// `createPersonalTeam` (true) vs `createTeam(name)` (false, V2).
-		// Frontend s'en sert pour calculer le display name dynamiquement.
+		// Marker qui distingue la team perso auto-créée à la signup des futures
+		// teams collaboratives (V2). Piloté par `createPersonalTeam` (true) vs
+		// `createTeam(name)` (false, V2). Frontend s'en sert pour calculer le
+		// display name dynamiquement.
 		isPersonal: boolean("is_personal").notNull().default(false),
 		ownerId: text("owner_id")
 			.notNull()
@@ -270,31 +270,31 @@ export const canvasState = pgTable(
 		userId: text("user_id")
 			.notNull()
 			.references(() => user.id, { onDelete: "cascade" }),
-		// T4/4 : nullable + SET NULL — le canvas SURVIT si la db_connection
-		// est supprimée (un autre CLI/device sur la même DB peut encore
-		// pointer dessus via (team, db_fingerprint) ou checksum match).
-		// Historiquement NOT NULL + CASCADE ; le refactor cross-device
-		// impose la survie du canvas indépendamment d'une connection unique.
+		// Nullable + SET NULL — le canvas SURVIT si la db_connection est
+		// supprimée (un autre CLI/device sur la même DB peut encore pointer
+		// dessus via (team, db_fingerprint) ou checksum match). Historiquement
+		// NOT NULL + CASCADE ; le refactor cross-device impose la survie du
+		// canvas indépendamment d'une connection unique.
 		connectionId: uuid("db_connection_id").references(
 			() => dbConnection.id,
 			{ onDelete: "set null" }
 		),
-		// T4/4 : team qui possède le canvas (V1 = team perso). Scope le
-		// lookup par (team, db_fingerprint) et l'isolation cross-team.
-		// Nullable pour les rows legacy antérieures au refactor — backfill
-		// au premier accès (voir get.ts).
+		// Team qui possède le canvas (V1 = team perso). Scope le lookup par
+		// (team, db_fingerprint) et l'isolation cross-team. Nullable pour les
+		// rows legacy antérieures au refactor — backfill au premier accès
+		// (voir get.ts).
 		teamId: uuid("team_id").references(() => team.id, {
 			onDelete: "cascade"
 		}),
-		// T4/4 : identité INSTANCE DB (system_identifier PG, replSet Mongo).
-		// Priorité 1 du lookup canvas cross-device. Nullable rétro-compat.
+		// Identité INSTANCE DB (system_identifier PG, replSet Mongo). Priorité
+		// 1 du lookup canvas cross-device. Nullable rétro-compat.
 		dbFingerprint: text("db_fingerprint"),
-		// T4/4 : historique des checksums structure vus. Un CLI qui arrive
-		// avec un checksum courant matchant N'IMPORTE lequel de l'array
-		// trouve le canvas. Permet le partage cross-docker (2 dumps
-		// identiques ont le même checksum initial) + la survie aux
-		// migrations (Mac migre → nouveau checksum append à l'array, mais
-		// canvas reste). Cap 20 entrées pour éviter growth infini.
+		// Historique des checksums structure vus. Un CLI qui arrive avec un
+		// checksum courant matchant N'IMPORTE lequel de l'array trouve le
+		// canvas. Permet le partage cross-docker (2 dumps identiques ont le
+		// même checksum initial) + la survie aux migrations (Mac migre →
+		// nouveau checksum append à l'array, mais canvas reste). Cap 20
+		// entrées pour éviter growth infini.
 		dbSchemaChecksums: text("db_schema_checksums")
 			.array()
 			.notNull()
@@ -310,9 +310,9 @@ export const canvasState = pgTable(
 			.defaultNow()
 	},
 	(t) => [
-		// T4/4 : canvas moderne — unique (user, team, fp) quand fp connu.
-		// Un même user avec 2 db_connections Mac + Windows sur la MÊME DB
-		// (même db_fingerprint) partage 1 canvas.
+		// Canvas moderne — unique (user, team, fp) quand fp connu. Un même
+		// user avec 2 db_connections Mac + Windows sur la MÊME DB (même
+		// db_fingerprint) partage 1 canvas.
 		uniqueIndex("canvas_user_team_fp_unique")
 			.on(t.userId, t.teamId, t.dbFingerprint)
 			.where(sql`${t.dbFingerprint} IS NOT NULL`),
@@ -330,9 +330,9 @@ export const canvasState = pgTable(
 );
 
 // ─── canvas_checksum_event ───────────────────────────────────────────────
-// T4/4 : audit trail append-only des checksums vus par un canvas au fil du
-// temps. Alimenté à chaque heartbeat/authenticate qui apporte un checksum
-// (nouveau OU répété — nouveauté logged pour timeline stricte). L'array
+// Audit trail append-only des checksums vus par un canvas au fil du temps.
+// Alimenté à chaque heartbeat/authenticate qui apporte un checksum (nouveau
+// OU répété — nouveauté logged pour timeline stricte). L'array
 // `canvas_state.db_schema_checksums` reste l'index de lookup rapide ; cette
 // table est la source de vérité audit (qui, quand, depuis quelle CLI).
 //
@@ -448,30 +448,30 @@ export const tunnelPairing = pgTable(
 		// Persisté ici parce qu'il est copié dans `db_connection.name` au
 		// consume — évite un re-prompt.
 		deviceName: text("device_name"),
-		// Nom de la DSN locale que le CLI veut servir CETTE session (C.13).
-		// Distinct de `deviceName` (qui est le nom user-facing côté serveur)
-		// — ce champ sert UNIQUEMENT à scoper le fingerprint effectif :
+		// Nom de la DSN locale que le CLI veut servir CETTE session. Distinct
+		// de `deviceName` (qui est le nom user-facing côté serveur) — ce champ
+		// sert UNIQUEMENT à scoper le fingerprint effectif :
 		// `SHA256(pubkey || "|" || cliConnectionName)`. Permet à un même
 		// install CLI (une seule keypair) de servir plusieurs DBs distinctes
 		// côté serveur, chacune ayant sa propre db_connection.
-		// NULL = CLI legacy (pré-C.13) → fingerprint = SHA256(pubkey) seul.
+		// NULL = CLI legacy → fingerprint = SHA256(pubkey) seul.
 		cliConnectionName: text("cli_connection_name"),
-		// T4/5 : le CLI envoie son db_fingerprint (identité INSTANCE DB)
-		// dès le POST /pairings pour que le backend détecte au approve si
-		// cette DB est déjà connue (autre CLI dans la même team ayant
-		// pair-é la MÊME instance) → auto-fill le device_name existant et
-		// réutiliser la db_connection au authenticate (1 db_connection
-		// physique pour N tunnels CLI). Absent = CLI legacy pré-T4/5,
-		// flow classique (nouvelle db_connection).
+		// Le CLI envoie son db_fingerprint (identité INSTANCE DB) dès le POST
+		// /pairings pour que le backend détecte au approve si cette DB est
+		// déjà connue (autre CLI dans la même team ayant pair-é la MÊME
+		// instance) → auto-fill le device_name existant et réutiliser la
+		// db_connection au authenticate (1 db_connection physique pour N
+		// tunnels CLI). Absent = CLI legacy, flow classique (nouvelle
+		// db_connection).
 		dbFingerprint: text("db_fingerprint"),
-		// T4/5 : idem, checksum structure pour fallback cross-docker
-		// (2 dumps identiques ont même checksum mais fp différent).
+		// Idem, checksum structure pour fallback cross-docker (2 dumps
+		// identiques ont même checksum mais fp différent).
 		dbSchemaChecksum: text("db_schema_checksum"),
-		// C.21.4 : la team dans laquelle la db_connection sera créée.
-		// Renseignée au moment du /approve (l'user choisit dans quelle
-		// team ce CLI est intégré). Reste nullable pour compat CLI legacy
-		// / routes globales pre-C.21 — le fallback dans
-		// `authenticatePairing` prend la team perso de l'user si NULL.
+		// La team dans laquelle la db_connection sera créée. Renseignée au
+		// moment du /approve (l'user choisit dans quelle team ce CLI est
+		// intégré). Reste nullable pour compat CLI legacy / routes globales
+		// historiques — le fallback dans `authenticatePairing` prend la team
+		// perso de l'user si NULL.
 		teamId: uuid("team_id").references(() => team.id, {
 			onDelete: "cascade"
 		}),
@@ -514,31 +514,31 @@ export const dbConnection = pgTable(
 		userId: text("user_id")
 			.notNull()
 			.references(() => user.id, { onDelete: "cascade" }),
-		// C.21.2 : team scope. Chaque db_connection appartient à une team ;
-		// l'owner de la team en a la propriété exclusive (V1). Une même DSN
-		// CLI peut être pair-ée dans 2 teams distinctes du même user → 2
-		// db_connection différentes, chacune avec son canvas_state.
+		// Team scope. Chaque db_connection appartient à une team ; l'owner
+		// de la team en a la propriété exclusive (V1). Une même DSN CLI peut
+		// être pair-ée dans 2 teams distinctes du même user → 2 db_connection
+		// différentes, chacune avec son canvas_state.
 		//
 		// FK team cascade : DELETE team → toutes ses db_connection (+ leurs
 		// tunnel_session + canvas_state en chaîne).
 		//
 		// `user_id` reste porté pour la compat historique et l'audit ("qui
 		// a pair-é ce CLI"), mais l'AUTORISATION passe par team_id → owner
-		// (voir middleware `requireTeamAccess` en C.21.3).
+		// (voir middleware `requireTeamAccess`).
 		teamId: uuid("team_id")
 			.notNull()
 			.references(() => team.id, { onDelete: "cascade" }),
 		// Nom court choisi par le user au moment du pairing (`prod`, `staging`,
-		// `local`). Unique par team (C.21.2 : plus par user — un même user
-		// peut avoir la même DSN dans 2 teams distinctes).
+		// `local`). Unique par team (plus par user — un même user peut avoir
+		// la même DSN dans 2 teams distinctes).
 		name: text("name").notNull(),
 		// SHA-256 hex (64 chars) de la clé pub Ed25519 du CLI. Pas la pub elle-
 		// même — on garde uniquement l'empreinte pour l'audit dashboard, la
 		// pub complète vit dans `tunnel_pairing` (jusqu'au consume) puis dans
 		// la session tunnel active (Bloc 2).
 		cliFingerprint: text("cli_fingerprint").notNull(),
-		// T4/1 : fingerprint de l'INSTANCE DB (indépendant du CLI qui s'y
-		// connecte). Format `<engine>:<opaque>` — ex `pg:7331234/apollon`,
+		// Fingerprint de l'INSTANCE DB (indépendant du CLI qui s'y connecte).
+		// Format `<engine>:<opaque>` — ex `pg:7331234/apollon`,
 		// `mongo:rs0/prod`, `pg-fallback:abc.../db` si pg_control_system
 		// refusé. Permet à un user de retrouver son canvas depuis un 2e
 		// device (Mac + Windows) — le backend match `(team, db_fingerprint)`
@@ -546,14 +546,14 @@ export const dbConnection = pgTable(
 		// rétro-compat : les vieilles db_connection sont backfillées au
 		// premier connect qui l'envoie.
 		dbFingerprint: text("db_fingerprint"),
-		// T4/2 : checksum de la STRUCTURE (schéma) — hash déterministe des
-		// cols/FKs/types. Change si migration (ADD COLUMN, etc.), stable si
-		// pas de diff. Complémentaire de dbFingerprint (identité INSTANCE) :
-		// même DB + schéma modifié = même fingerprint + checksum différent.
-		// Débloque : invalidation cache SchemaModel côté CLI/frontend,
-		// alerte "structure changée", diff des versions. Nullable pour
-		// rétro-compat + CLIs qui ne le remontent pas encore. Format :
-		// `<engine>:<hex>` — ex `pg:md5deadbeef...`, `mongo:sha256abc...`.
+		// Checksum de la STRUCTURE (schéma) — hash déterministe des cols/FKs/
+		// types. Change si migration (ADD COLUMN, etc.), stable si pas de
+		// diff. Complémentaire de dbFingerprint (identité INSTANCE) : même DB
+		// + schéma modifié = même fingerprint + checksum différent. Débloque :
+		// invalidation cache SchemaModel côté CLI/frontend, alerte "structure
+		// changée", diff des versions. Nullable pour rétro-compat + CLIs qui
+		// ne le remontent pas encore. Format : `<engine>:<hex>` — ex
+		// `pg:md5deadbeef...`, `mongo:sha256abc...`.
 		dbSchemaChecksum: text("db_schema_checksum"),
 		// Ex "postgres". Enum côté app, texte libre côté DB pour permettre
 		// l'ajout de Mongo (v1.1) sans migration.
@@ -566,7 +566,7 @@ export const dbConnection = pgTable(
 			.defaultNow(),
 		// Bump à chaque frame reçue du CLI. Indicateur "CLI online" côté UI.
 		lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
-		// Snapshot précalculé du dernier rendu de preview (C.15). Structure :
+		// Snapshot précalculé du dernier rendu de preview. Structure :
 		// `{ nodes: [{id,x,y,w,h}], edges: [{source,target}], frames:
 		// [{key,label,hue,x,y,w,h}] }`. Alimenté par le frontend au save
 		// du canvas. Sert de fallback rendu pour `MiniSchemaPreview` quand
@@ -580,15 +580,15 @@ export const dbConnection = pgTable(
 			.defaultNow()
 	},
 	(t) => [
-		// C.21.2 — Indexes team-scoped (les user-scoped historiques ont
-		// été droppés en 0013, redondants en V1 et bloquants en V2 où
-		// un user peut avoir plusieurs teams).
+		// Indexes team-scoped (les user-scoped historiques ont été droppés
+		// en 0013, redondants en V1 et bloquants en V2 où un user peut avoir
+		// plusieurs teams).
 		//
 		// Une team ne peut pas avoir 2 connexions nommées "prod".
 		uniqueIndex("db_connection_team_name_unique").on(t.teamId, t.name),
-		// Pairing idempotent scopé team (C.21.2) : un même install CLI
-		// (fingerprint) peut être pair-é dans 2 teams distinctes → 2
-		// db_connection. Dans la même team, second pairing = UPDATE.
+		// Pairing idempotent scopé team : un même install CLI (fingerprint)
+		// peut être pair-é dans 2 teams distinctes → 2 db_connection. Dans
+		// la même team, second pairing = UPDATE.
 		uniqueIndex("db_connection_team_fingerprint_unique").on(
 			t.teamId,
 			t.cliFingerprint
@@ -597,7 +597,7 @@ export const dbConnection = pgTable(
 		index("db_connection_team_id_idx").on(t.teamId),
 		// Retrouver toutes les connexions liées à un CLI (reconnect, audit).
 		index("db_connection_fingerprint_idx").on(t.cliFingerprint),
-		// T4/1 : lookup rapide au pairing par instance DB (team + db_fingerprint).
+		// Lookup rapide au pairing par instance DB (team + db_fingerprint).
 		// Non-unique volontairement : la même DB depuis 2 CLIs distincts crée
 		// 2 rows (chaque CLI a son cli_fingerprint). V2 : proposer merge UX.
 		index("db_connection_team_db_fingerprint_idx").on(
@@ -639,13 +639,13 @@ export const tunnelSession = pgTable(
 			.references(() => dbConnection.id, { onDelete: "cascade" }),
 		// SHA-256 hex du clair. Unique — la validation d'un token WS = 1 lookup.
 		hash: text("hash").notNull(),
-		// T4/5 : fingerprint du CLI QUI A OUVERT cette session tunnel. Peut
-		// différer de `dbConnection.cliFingerprint` (le "créateur" primaire)
-		// quand plusieurs CLI se pair-e à la MÊME db_connection (Mac +
-		// Windows sur même DB via lookup db_fingerprint). Le WS handshake
-		// vérifie la sig contre CE fingerprint, pas celui de la db_connection.
-		// Nullable pour rétro-compat : les sessions antérieures au refactor
-		// tombent en fallback sur `db_connection.cli_fingerprint` côté auth.
+		// Fingerprint du CLI QUI A OUVERT cette session tunnel. Peut différer
+		// de `dbConnection.cliFingerprint` (le "créateur" primaire) quand
+		// plusieurs CLI se pair-e à la MÊME db_connection (Mac + Windows sur
+		// même DB via lookup db_fingerprint). Le WS handshake vérifie la sig
+		// contre CE fingerprint, pas celui de la db_connection. Nullable pour
+		// rétro-compat : les sessions antérieures au refactor tombent en
+		// fallback sur `db_connection.cli_fingerprint` côté auth.
 		cliFingerprint: text("cli_fingerprint"),
 		createdAt: timestamp("created_at", { withTimezone: true })
 			.notNull()

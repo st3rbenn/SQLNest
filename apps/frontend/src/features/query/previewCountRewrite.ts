@@ -1,26 +1,25 @@
 /**
  * previewCountRewrite — transforme une source SNQL contenant un write en une
- * source SNQL équivalente qui ne fait QUE compter les rows affectées ([[ADR-023]]
- * E/4). Envoyée sur la même route `/query` que le run normal, avec le même
- * body {source} — ZÉRO backend delta ([[ADR-012]] préservé).
+ * source SNQL équivalente qui ne fait QUE compter les rows affectées.
+ * Envoyée sur la même route `/query` que le run normal, avec le même body
+ * {source} — ZÉRO backend delta.
  *
- * ─── Cas supportés ───────────────────────────────────────────────────
+ * Cas supportés :
  *  - `remove from t [where P]` → `find t [where P] pick count(*) as _preview_count`
  *  - `update t [as a] [with one X on l=f] [where P] set …` →
  *    `find t [as a] [with one X on l=f] [where P] pick count(*) as _preview_count`
  *  - `add (find X … pick …) into t` → `find X … pick count(*) as _preview_count` (drop le
  *    stage `pick` original, ajoute `pick count(*) as _preview_count`)
  *
- * ─── Cas non-supportés (retourne null → "aperçu indisponible") ────────
- *  - `raw` (opaque, [[ADR-019]] — D1 warn systématique mais count impossible)
+ * Cas non-supportés (retourne null → "aperçu indisponible") :
+ *  - `raw` (opaque — warn systématique mais count impossible)
  *  - `add {doc} into t` (documents literal — count trivial = nb rows, pas de
  *    roundtrip nécessaire ; le parent peut afficher `stmt.rows.length` direct)
  *  - `add {…} into t on conflict …` (upsert — imprévisible insert vs update
  *    sans exécuter réellement)
- *  - `transaction { … }` / `savepoint { … }` (multi-stmt — v1 punt)
+ *  - `transaction { … }` / `savepoint { … }` (multi-stmt)
  *  - `let x = … in <mutation>` (bindings + body, complexe à recomposer)
  *
- * ─── Extraction via .span ────────────────────────────────────────────
  * On ne re-génère PAS le SNQL depuis l'AST (pas de generator inverse dans
  * @sqlnest/snql). À la place, on extrait les sous-strings source via leur
  * Span et on recompose. Chaque construct (predicate, join, stage) porte
@@ -91,8 +90,8 @@ function rewriteUpdate(
 	if (stmt.alias !== undefined) {
 		parts.push(`as ${stmt.alias}`);
 	}
-	// Joins mutation T2/14 (`with one X on l=f`) : on préserve les spans
-	// tels quels — le stage `with` a exactement le même shape en find qu'en
+	// Joins mutation (`with one X on l=f`) : on préserve les spans tels
+	// quels — le stage `with` a exactement le même shape en find qu'en
 	// update, cf. UpdateStatement.joins: readonly Stage[].
 	const hasJoins = stmt.joins !== undefined && stmt.joins.length > 0;
 	if (hasJoins) {
@@ -106,7 +105,7 @@ function rewriteUpdate(
 	parts.push("pick count(*) as _preview_count");
 	return {
 		source: parts.join(" "),
-		// D17 disclaimer : un INNER JOIN qui ne matche pas tout drop les rows
+		// Disclaimer : un INNER JOIN qui ne matche pas tout drop les rows
 		// sans correspondance — le count peut différer si le join a des
 		// filtres implicites. Affiché sous le nombre dans WriteConfirmBar.
 		note: hasJoins

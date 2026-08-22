@@ -390,9 +390,9 @@ export default function tunnelsRoute(fastify: FastifyInstance) {
 	);
 
 	// ─── POST /heartbeat (backfill fingerprint / checksum sur resumed) ─
-	// T4/1.5 : résout le trou où findResumableTunnel skip authenticate.
-	// Le CLI POST ici au boot du serve loop (et périodiquement) avec le
-	// token du tunnel + fingerprint DB + checksum schéma.
+	// Résout le trou où findResumableTunnel skip authenticate. Le CLI POST
+	// ici au boot du serve loop (et périodiquement) avec le token du
+	// tunnel + fingerprint DB + checksum schéma.
 	instance.post(
 		"/heartbeat",
 		{

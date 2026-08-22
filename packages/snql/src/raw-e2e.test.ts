@@ -1,5 +1,5 @@
 /**
- * Sprint T3/4 — Escape hatch `raw "SQL"` / `raw {...}`.
+ * Escape hatch `raw "SQL"` / `raw {...}`.
  *
  * Couvre :
  *  - parser  : `raw "..."` (SQL) et `raw {...}` (Mongo command) ; refus

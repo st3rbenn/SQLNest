@@ -164,7 +164,7 @@ describe("codegen — mapTransaction Mongo", () => {
 // Refus explicit
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe("PA/5 (ADR-024-A) — savepoint Mongo accepté via compensation logique in-session", () => {
+describe("savepoint Mongo accepté via compensation logique in-session", () => {
 	it("savepoint simple accepté au planner (walker assertSavepointLiftable)", () => {
 		const stmt = parse(
 			tokenize(`transaction { savepoint sp1 { find users pick _id } }`)

@@ -1,5 +1,5 @@
 /**
- * Sprint T2/10 DISTINCT E2E — pick unique / pick unique on (keys).
+ * DISTINCT E2E — pick unique / pick unique on (keys).
  * Parser + lower + codegen PG/Mongo + runtime KV dedup.
  */
 

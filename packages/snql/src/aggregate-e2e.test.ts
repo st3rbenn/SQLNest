@@ -1,5 +1,5 @@
 /**
- * Sprint T2/6 Aggregates E2E — lexer + parser + lower + planner + codegen
+ * Aggregates E2E — lexer + parser + lower + planner + codegen
  * PG/Mongo + runtime KV. Corpus `count / sum / avg / min / max` + `count(*)`
  * + modifier `unique`. Parité cross-engine + refus positions non-agg.
  */
@@ -15,8 +15,8 @@ import { parse } from "./parser/parser";
 import { compile, plan } from "./index";
 
 // Moteur "scan-only" — force le pipeline entier à passer en compensation KV.
-// Réutilise le pattern conditional-t25-e2e.test.ts : exercice réel du runtime.
-// Sprint T2/6 : PAS de 'aggregate' dans supports → l'aggregate op passe en
+// Réutilise le pattern conditional-e2e.test.ts : exercice réel du runtime.
+// PAS de 'aggregate' dans supports → l'aggregate op passe en
 // compensation runtime KV (foldAggregate).
 const scanOnly = {
 	engine: "scan-only",
@@ -227,7 +227,7 @@ describe("lower op='aggregate' + wrappers", () => {
 		).not.toThrow();
 	});
 
-	it("greatest(max(price), 1000) autorisé (composition T2/5 + T2/6)", () => {
+	it("greatest(max(price), 1000) autorisé (composition +)", () => {
 		expect(() =>
 			pgSql("find p pick greatest(max(price), 1000) as ceiling")
 		).not.toThrow();
@@ -375,7 +375,7 @@ describe("codegen Mongo", () => {
 		expect(JSON.stringify(proj.$project.safe_sum)).toContain("$__agg_0");
 	});
 
-	it("sum(unique x) sur Mongo → SSA slot $addToSet + $sum (ADR-024 PM/6 #5)", () => {
+	it("sum(unique x) sur Mongo → SSA slot $addToSet + $sum (#5)", () => {
 		const pipeline = mongoPipeline("find o pick sum(unique amount) as s");
 		const groupStage = pipeline.find((s) => "$group" in s) as {
 			$group: Record<string, unknown>;
@@ -397,7 +397,7 @@ describe("codegen Mongo", () => {
 		expect(projectStage.$project.s).toEqual({ $sum: `$${uSlot!}` });
 	});
 
-	it("avg(unique x) sur Mongo → SSA slot $addToSet + $avg (ADR-024 PM/6 #5)", () => {
+	it("avg(unique x) sur Mongo → SSA slot $addToSet + $avg (#5)", () => {
 		const pipeline = mongoPipeline("find o pick avg(unique amount) as a");
 		const projectStage = pipeline.find((s) => "$project" in s) as {
 			$project: Record<string, unknown>;

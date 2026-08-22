@@ -1,14 +1,13 @@
 /**
  * preview — fetch un aperçu "N lignes seraient affectées" avant confirmation
- * d'un write non filtré ([[ADR-023]] E/4). Réutilise `runQueryRequest` avec
- * une source rewrite `pick count` — envoyée sur la MÊME route `/query` que
- * les runs normaux, avec le même body {source} — ZÉRO backend delta
- * ([[ADR-012]] préservé strictement).
+ * d'un write non filtré. Réutilise `runQueryRequest` avec une source rewrite
+ * `pick count` — envoyée sur la MÊME route `/query` que les runs normaux,
+ * avec le même body {source} — ZÉRO backend delta.
  *
- * ─── Contrat ─────────────────────────────────────────────────────────
+ * Contrat :
  * - Timeout 3s hard : sur grosses tables sans index sur predicate, le
  *   count peut être coûteux ; on préfère afficher "aperçu indisponible
- *   (timeout)" plutôt que faire attendre l'user, cf. [[ADR-023]] Risque 4.
+ *   (timeout)" plutôt que faire attendre l'user.
  * - Rewrite unavailable (raw / upsert / transaction / let) → return
  *   `{status:'unavailable', reason}` sans roundtrip.
  * - Erreur d'exec (parser, moteur, driver) → return `{status:'unavailable',
@@ -38,7 +37,7 @@ export type PreviewResult =
 
 /** Cap dur pour l'aperçu — sur une table 100M sans index le count peut
  * prendre 30s, l'user hit ⌘⏎ et attend un rendu instantané. On préfère
- * "indisponible" à "attente longue". Voir [[ADR-023]] Risque 4. */
+ * "indisponible" à "attente longue". */
 const PREVIEW_TIMEOUT_MS = 3000;
 
 export interface PreviewInput {

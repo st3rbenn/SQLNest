@@ -369,7 +369,7 @@ describe.skipIf(!DATABASE_URL)("/api/tunnels — device flow", () => {
 			expect(body.existingConnection).toBeNull();
 		});
 
-		test("existingConnection peuplé si user auth + fingerprint match (C.7)", async () => {
+		test("existingConnection peuplé si user auth + fingerprint match", async () => {
 			const { cookie, userId } = await createTestUser(
 				app,
 				"reco-status@example.com",
@@ -892,7 +892,7 @@ describe.skipIf(!DATABASE_URL)("/api/tunnels — device flow", () => {
 			expect((clearHits[0]! as { n: number }).n).toBe(0);
 		});
 
-		test("T4/1 : dbFingerprint fourni → stocké sur la db_connection", async () => {
+		test("dbFingerprint fourni → stocké sur la db_connection", async () => {
 			const { userId } = await createTestUser(
 				app,
 				"fp-new@example.com",
@@ -926,7 +926,7 @@ describe.skipIf(!DATABASE_URL)("/api/tunnels — device flow", () => {
 			expect(conns[0]!.dbFingerprint).toBe("postgres:9876543210/chinook");
 		});
 
-		test("T4/1 : dbFingerprint omis → col reste NULL (rétro-compat CLI legacy)", async () => {
+		test("dbFingerprint omis → col reste NULL (rétro-compat CLI legacy)", async () => {
 			const { userId } = await createTestUser(
 				app,
 				"fpomit@example.com",
@@ -959,11 +959,11 @@ describe.skipIf(!DATABASE_URL)("/api/tunnels — device flow", () => {
 			expect(conns[0]!.dbFingerprint).toBeNull();
 		});
 
-		test("T4/5 : 2 CLI distincts sur même db_fingerprint → même db_connection + canvas partagé", async () => {
-			// T4/5 renforce T4/4 : plus de 2 db_connections dupliquées (Mac +
-			// Windows). Windows RÉUTILISE la db_connection Mac via lookup
-			// (team, db_fingerprint). 1 db_connection physique, 2 tunnel_session
-			// (chacun son cli_fingerprint). Canvas partagé automatiquement.
+		test("2 CLI distincts sur même db_fingerprint → même db_connection + canvas partagé", async () => {
+			// Plus de 2 db_connections dupliquées (Mac + Windows). Windows
+			// RÉUTILISE la db_connection Mac via lookup (team, db_fingerprint).
+			// 1 db_connection physique, 2 tunnel_session (chacun son
+			// cli_fingerprint). Canvas partagé automatiquement.
 			const { userId } = await createTestUser(
 				app,
 				"cross-dev@example.com",
@@ -1021,11 +1021,11 @@ describe.skipIf(!DATABASE_URL)("/api/tunnels — device flow", () => {
 			expect(winAuth.statusCode).toBe(200);
 			const winConn = (winAuth.json() as { connectionId: string })
 				.connectionId;
-			// T4/5 : MÊME db_connection (pas de dupliqué).
+			// MÊME db_connection (pas de dupliqué).
 			expect(winConn).toBe(macConn);
 
 			// GET canvas depuis Windows → DOIT retourner le payload écrit
-			// par Mac (canvas partagé via T4/4).
+			// par Mac (canvas partagé).
 			const winCanvas = await getCanvasState(app.db, userId, winConn);
 			expect(winCanvas).not.toBeNull();
 			expect(
@@ -1045,7 +1045,7 @@ describe.skipIf(!DATABASE_URL)("/api/tunnels — device flow", () => {
 			expect(canvasCount.length).toBe(1);
 		});
 
-		test("T4/4 : heartbeat append checksum + insert canvas_checksum_event", async () => {
+		test("heartbeat append checksum + insert canvas_checksum_event", async () => {
 			const { userId } = await createTestUser(
 				app,
 				"hb-cs-audit@example.com",
@@ -1127,7 +1127,7 @@ describe.skipIf(!DATABASE_URL)("/api/tunnels — device flow", () => {
 			expect(events.map((e) => e.checksum).sort()).toEqual([cs1, cs2]);
 		});
 
-		test("T4/1 : re-authenticate avec dbFingerprint sur connection existante → backfill", async () => {
+		test("re-authenticate avec dbFingerprint sur connection existante → backfill", async () => {
 			const { userId } = await createTestUser(
 				app,
 				"fp-back@example.com",
@@ -1183,7 +1183,7 @@ describe.skipIf(!DATABASE_URL)("/api/tunnels — device flow", () => {
 			expect(conns[0]!.dbFingerprint).toBe("mongo:rs0/chinook");
 		});
 
-		test("re-pairing avec même pubkey → réutilise db_connection (idempotent C.6)", async () => {
+		test("re-pairing avec même pubkey → réutilise db_connection (idempotent)", async () => {
 			const { userId } = await createTestUser(
 				app,
 				"repair@example.com",
@@ -1362,7 +1362,7 @@ describe.skipIf(!DATABASE_URL)("/api/tunnels — device flow", () => {
 	});
 
 	// ═══════════════════════════════════════════════════════════════
-	// POST /heartbeat — T4/1.5
+	// POST /heartbeat
 	// ═══════════════════════════════════════════════════════════════
 	describe("POST /heartbeat", () => {
 		async function pairAndGetToken(code: string, email: string, pw: string) {

@@ -1,5 +1,5 @@
 /**
- * Sprint T2/13 : full upsert + `pick count`.
+ * full upsert + `pick count`.
  *
  * Couvre :
  *  - parser  : on conflict (keys) [ignore | edit set ... [where ...]] + pick count

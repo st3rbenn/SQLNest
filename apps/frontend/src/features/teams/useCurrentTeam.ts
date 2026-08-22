@@ -1,16 +1,14 @@
 /**
- * Hook + type pour la team courante (C.21.5).
+ * Hook + type pour la team courante.
  *
  * Consommé par les hooks team-aware (useDbConnections, useSchema,
  * useRunQuery, useCanvasSync, previewSnapshotClient). En dehors des
  * routes team-scoped, `useCurrentTeamSlug()` retourne `null` — les
- * hooks fallback alors sur les URLs legacy (`/api/db-connections/*`)
- * jusqu'à C.21.7 où le fallback disparaît.
+ * hooks fallback alors sur les URLs legacy (`/api/db-connections/*`).
  *
- * ─── Tolérant hors Router ────────────────────────────────────────────
- * Les tests unitaires qui mount un composant sans `RouterProvider`
- * (`useCanvasSync.test.ts`) crasheraient sur `useMatches()` sinon. On
- * try/catch et fallback à `null`.
+ * Tolérant hors Router : les tests unitaires qui mount un composant sans
+ * `RouterProvider` (`useCanvasSync.test.ts`) crasheraient sur
+ * `useMatches()` sinon. On try/catch et fallback à `null`.
  */
 
 import { useMatches } from "@tanstack/react-router";

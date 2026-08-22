@@ -3,8 +3,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { useConsolePersistence } from "./useConsolePersistence";
 
 /**
- * Tests de la persistence [[ADR-023]] E/7.1 — HistoryEntry + scoping
- * per-connection + migration soft depuis old string entries.
+ * Tests de la persistence — HistoryEntry + scoping per-connection +
+ * migration soft depuis old string entries.
  */
 
 const GLOBAL_KEY = "sqlnest:canvas-console:history";

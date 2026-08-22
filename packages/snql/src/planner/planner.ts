@@ -20,7 +20,7 @@ import type { Capabilities } from "./capabilities";
  */
 export type CompensationOp =
 	| { readonly op: "filter"; readonly predicate: PlanExpr }
-	// Sprint T2/10 : unique / distinctOnKeys propagés en compensation KV.
+	// unique / distinctOnKeys propagés en compensation KV.
 	| {
 			readonly op: "project";
 			readonly fields: readonly PlanProjectField[];
@@ -35,14 +35,14 @@ export type CompensationOp =
 			readonly as: string;
 			readonly localField: readonly string[];
 			readonly foreignField: readonly string[];
-			// PA/2 (ADR-024-A) — sémantique cross-engine préservée : "join" =
+			// sémantique cross-engine préservée : "join" =
 			// LEFT JOIN unwind (many-to-one/one-to-one), "embed" = 1-to-many array
 			// non aplati. Défaut "embed" pour compat historique quand omis.
 			readonly kind?: "join" | "embed";
 	  }
-	// Sprint T2/6 : agrégation scalaire fold. Runtime KV implémente via
-	// foldAggregate (1 row output sprint 6). groupKeys undefined = fold sur
-	// toute la collection ; sprint 7 le peuple pour bucket + having.
+	// agrégation scalaire fold. Runtime KV implémente via
+	// foldAggregate (1 row output). groupKeys undefined = fold sur
+	// toute la collection; le peuple pour bucket + having.
 	| {
 			readonly op: "aggregate";
 			readonly fields: readonly PlanProjectField[];
@@ -104,10 +104,10 @@ export function plan(
 	// Guards JSON engine-specific : redirige cast(json_get) et compare direct
 	// json_get vers les alternatives actionnables avant que PG throw 42883.
 	assertJsonPredicatesPg(logical, capabilities);
-	// Sprint T2/6 : refus sum(unique)/avg(unique) sur Mongo (2-stage $addToSet
-	// spec reportée sprint 8 avec aggregateMulti). count(unique) marche partout.
+	// refus sum(unique)/avg(unique) sur Mongo (2-stage $addToSet
+	// spec reportée avec aggregateMulti). count(unique) marche partout.
 	assertAggregateEngineRestrictions(logical, capabilities);
-	// Sprint T2/11 : refus sub-queries si l'engine n'a pas la capability
+	// refus sub-queries si l'engine n'a pas la capability
 	// (Mongo/KV v1). Message actionable.
 	assertSubqueryCapability(logical, capabilities);
 
@@ -156,7 +156,7 @@ export function plan(
 /**
  * Vérifie que toutes les fonctions référencées dans le plan sont supportées par
  * l'engine cible (via `capabilities.functions`). Lève `planner_unsupported_function`
- * avec le nom offender, sans compensation possible pour T2 sprint 1 (les
+ * avec le nom offender, sans compensation possible pour (les
  * fonctions sont scalaires — les émuler côté runtime doublerait le codegen).
  */
 function assertFunctionsSupported(
@@ -256,13 +256,13 @@ function visitExprCalls(expr: PlanExpr, visit: (name: string) => void): void {
 			visitExprCalls(expr.elseValue, visit);
 			return;
 		case "windowCall":
-			// Sprint T2/9 : visite le nom + args (partition/sort keys sont
+			// visite le nom + args (partition/sort keys sont
 			// des paths, aucune fonction dedans).
 			visit(expr.name);
 			for (const arg of expr.args) visitExprCalls(arg, visit);
 			return;
 		case "subquery":
-			// Sprint T2/11 : descend dans le subplan pour vérifier ses
+			// descend dans le subplan pour vérifier ses
 			// fonctions supportées (cohérence engine sur toute la query).
 			visitPlanCalls(expr.plan, visit);
 			return;
@@ -270,7 +270,7 @@ function visitExprCalls(expr: PlanExpr, visit: (name: string) => void): void {
 			visitPlanCalls(expr.subplan, visit);
 			return;
 		case "upsertNew":
-			// Sprint T2/13 : leaf, aucune fn à visiter.
+			// leaf, aucune fn à visiter.
 			return;
 	}
 }
@@ -432,7 +432,7 @@ export function assertMutationCastTargetsSupported(
 }
 
 /**
- * PA/4 (ADR-024-A) — refuse au planner les casts type coercitifs ambigus
+ * refuse au planner les casts type coercitifs ambigus
  * (`bool`, `date`, `timestamp`) dans le predicate d'un update/delete Mongo.
  *
  * Motif : Mongo `$convert` truthy sur string non-vide (tout devient true sauf
@@ -538,7 +538,7 @@ function findFirstCoerciveCast(
 }
 
 /**
- * Sprint T2/13 : refuse `add {…} into t on conflict (…) …` si l'engine cible
+ * refuse `add {…} into t on conflict (…) …` si l'engine cible
  * n'a pas la capability `upsert`. Message actionable : Mongo a un upsert
  * natif mais sémantique différente (updateOne(upsert:true) sur un full doc),
  * pas de v1 côté SQLNest.
@@ -556,7 +556,7 @@ export function assertMutationUpsertSupported(
 }
 
 /**
- * Sprint T2/14 : refuse `update t with one X on l=f set …` si l'engine cible
+ * refuse `update t with one X on l=f set …` si l'engine cible
  * n'a pas la capability `write-join`. Message actionable : PG natif via
  * `UPDATE ... FROM` ; Mongo passe par `aggregate + $merge` (à réévaluer plus
  * tard), KV n'a pas la notion de join.
@@ -579,7 +579,7 @@ export function assertMutationWriteJoinSupported(
 }
 
 /**
- * Sprint T2/14 : refuse `add (find …) into t` si l'engine cible n'a pas la
+ * refuse `add (find …) into t` si l'engine cible n'a pas la
  * capability `insert-select`. PG natif via `INSERT INTO ... SELECT`.
  */
 export function assertMutationInsertSelectSupported(
@@ -595,7 +595,7 @@ export function assertMutationInsertSelectSupported(
 }
 
 /**
- * Sprint T2/15 : refuse `transaction { … }` si l'engine cible n'a pas la
+ * refuse `transaction { … }` si l'engine cible n'a pas la
  * capability `transaction`. PG only v1 (BEGIN/COMMIT natif). Mongo/KV
  * hors scope — Mongo a des transactions multi-doc en replica set mais
  * sémantique différente (session-scoped), à réévaluer plus tard.
@@ -610,9 +610,9 @@ export function assertTransactionSupported(
 			"planner_transaction_unsupported"
 		);
 	}
-	// PA/5 (ADR-024-A) FLAGSHIP — savepoint Mongo accepté via compensation
+	// FLAGSHIP — savepoint Mongo accepté via compensation
 	// logique in-session (snapshot pre-write + inverse ops sur erreur). Refus
-	// PM/7 D5 remplacé par gates MVP : nested, upsert, write-join, insert-select,
+	// remplacé par gates MVP : nested, upsert, write-join, insert-select,
 	// raw {} → refus dédié. Le codegen mongodb.ts:flattenMongoTransactionBody
 	// préserve désormais les savepoints comme step spécial (plus flatten).
 	if (capabilities.engine === "mongodb") {
@@ -629,7 +629,7 @@ function assertSavepointLiftable(
 		if (item.kind === "savepoint") {
 			if (insideSavepoint) {
 				throw new SnqlError(
-					`'savepoint ${item.name} { … }' imbriqué non supporté v1 sur '${capabilities.engine}' — MVP PA/5 accepte 1 niveau. Refactor : aplatis en savepoint séquentiels.`,
+					`'savepoint ${item.name} { … }' imbriqué non supporté v1 sur '${capabilities.engine}' — MVP accepte 1 niveau. Refactor : aplatis en savepoint séquentiels.`,
 					"planner_savepoint_nested_v3",
 					undefined
 				);
@@ -647,7 +647,7 @@ function assertSavepointBodyAnalyzable(
 	for (const item of body) {
 		if (item.kind === "savepoint") {
 			throw new SnqlError(
-				`'savepoint ${item.name} { … }' imbriqué dans 'savepoint ${savepointName}' non supporté v1 (MVP PA/5 : 1 niveau).`,
+				`'savepoint ${item.name} { … }' imbriqué dans 'savepoint ${savepointName}' non supporté v1 (MVP 1 niveau).`,
 				"planner_savepoint_nested_v3"
 			);
 		}
@@ -675,7 +675,7 @@ function assertSavepointBodyAnalyzable(
 }
 
 /**
- * Sprint T3/1 : refuse `list tables` / `describe …` / etc. si l'engine cible
+ * refuse `list tables` / `describe …` / etc. si l'engine cible
  * n'a pas la capability `introspect`. Message actionable pointant les
  * alternatives (raw commands côté power user).
  */
@@ -691,7 +691,7 @@ export function assertIntrospectSupported(
 }
 
 /**
- * Sprint T3/6 : refuse `let x = ...; body` si l'engine n'a pas la capability
+ * refuse `let x = ...; body` si l'engine n'a pas la capability
  * `cte`. Mongo pourrait matérialiser via $lookup sub-pipeline mais complexité
  * pas justifiée v1 — l'user peut re-écrire manuellement en subquery.
  */
@@ -750,7 +750,7 @@ export function toCompensationOp(op: LogicalPlan): CompensationOp {
 }
 
 /**
- * Guards JSON engine-specific (sprint 4). Actifs uniquement pour Postgres —
+ * Guards JSON engine-specific. Actifs uniquement pour Postgres
  * `cast(json_get(...) as T)` et `json_get(...) op literal` produisent des
  * SQL invalides (42883) car PG n'a pas de cast direct jsonb→primitive ni
  * d'opérateur jsonb=text. Redirection actionnable vers `json_get_text`.
@@ -758,7 +758,7 @@ export function toCompensationOp(op: LogicalPlan): CompensationOp {
  *
  * Sprint object-literals ajoute 3 guards :
  *  - `cast({...} as json)` : redondant, l'object literal est déjà de type json
- *  - `cast({...} as text)` : sérialisation non supportée v1 (json_stringify sprint 6+)
+ * `cast({...} as text)` : sérialisation non supportée v1 (json_stringify)
  *  - `cast({...} as int|float|bool|date|timestamp)` : impossible, utilise json_get_*
  *  - Refus `where col = {...}` sur Mongo (divergence order-sensitivity)
  *  - Refus `arith` sur object/array literal (opération non définie)
@@ -781,7 +781,7 @@ function assertJsonPredicatesPg(
 				}
 				if (expr.target === "text") {
 					throw new SnqlError(
-						`Sérialisation d'un ${operandKind} literal en text non supportée v1 — attends json_stringify() (sprint 6+)`,
+						`Sérialisation d'un ${operandKind} literal en text non supportée v1 — attends json_stringify() ()`,
 						"plan_cast_literal_to_text",
 						expr.span
 					);
@@ -802,17 +802,17 @@ function assertJsonPredicatesPg(
 				expr.right.kind === "array")
 		) {
 			throw new SnqlError(
-				"Opération arithmétique avec un object/array literal non définie — utilise json_merge (sprint 6+)",
+				"Opération arithmétique avec un object/array literal non définie — utilise json_merge ()",
 				"lower_arith_object_literal",
 				expr.span
 			);
 		}
-		// ADR-024 PM/6 item #12 — retiré : `where col = {n:1}` sur Mongo est
+		// item #12 — retiré : `where col = {n:1}` sur Mongo est
 		// désormais autorisé. La comparaison BSON object literal fonctionne
 		// nativement côté driver (ordre des clés préservé lors de la
 		// sérialisation). Divergence order-sensitivity documentée dans
-		// divergences.yaml (PM/8) via squiggly INFO éditeur (D8).
-		// Sprint 4 guards existants — PG only
+		// divergences.yaml via squiggly INFO éditeur.
+		// guards existants — PG only
 		if (capabilities.engine !== "postgres") return;
 		// Cas 1 : cast(json_get(...) as <primitive>) → planner_cast_from_jsonb_unsupported
 		if (
@@ -845,23 +845,23 @@ function assertJsonPredicatesPg(
 }
 
 /**
- * Sprint T2/6 : restrictions engine-spécifiques sur les aggregates.
+ * restrictions engine-spécifiques sur les aggregates.
  *  - Mongo : sum(unique x) / avg(unique x) refusés v6 (2-stage $addToSet
- *    reporté sprint 8 avec aggregateMulti). count(unique) marche partout.
+ * reporté avec aggregateMulti). count(unique) marche partout.
  *  - PG accepte SUM/AVG(DISTINCT x) nativement, aucune restriction.
  *  - KV : sum(unique)/avg(unique) impl à venir (matérialisable), refus v6
  *    aligné Mongo pour cohérence cross-engine.
  */
 /**
- * Sprint T2/11 + ADR-024 PM/2 : refus sub-queries selon la capacité et la
+ * + refus sub-queries selon la capacité et la
  * stratégie de l'engine.
  *  - Pas de capability `subquery` (KV) : refus total (uncorrelated ET
  *    correlated). Message pointant l'attente cross-engine subquery support.
  *  - Strategy `native` (PG) : tout passe, pushdown SQL natif.
- *  - Strategy `materialize` (Mongo, PM/2) : uncorrelated OK (résolue via
+ * Strategy `materialize` (Mongo, ) : uncorrelated OK (résolue via
  *    `materializeSubplan` au runtime), correlated refusée avec message
  *    actionnable — matérialisation impose 1 exécution par row outer, infra
- *    scope-stack v3+ (voir ADR-024 §Q2 requalifié).
+ * scope-stack v3+ (voir § requalifié).
  */
 function assertSubqueryCapability(
 	plan: LogicalPlan,
@@ -885,13 +885,13 @@ function assertSubqueryCapability(
 }
 
 /**
- * ADR-024 PM/2 → PA/1 (ADR-024-A) — walker planner qui gouverne les
+ * → walker planner qui gouverne les
  * sub-queries corrélées côté engine à stratégie `materialize` (Mongo).
  *
- * PM/2 (historique) : toute corrélée refusée `planner_subquery_unsupported`
+ * (historique) : toute corrélée refusée `planner_subquery_unsupported`
  * → matérialisation en 1 shot incapable de porter N+1 exécutions.
  *
- * PA/1 (courant) : les corrélées liftables via `$lookup{let, pipeline}` (5.0+)
+ * (courant) : les corrélées liftables via `$lookup{let, pipeline}` (5.0+)
  * sont acceptées, le codegen Mongo les rewrite en lift-lookup. On ne refuse
  * plus qu'à l'entrée des patterns non-MVP :
  *  - corrélée nested 2+ niveaux avec cross-refs → `planner_correlated_subquery_nested_v3`
@@ -915,7 +915,7 @@ export function assertUncorrelatedSubqueryForMaterialize(
 }
 
 /**
- * PA/1 MVP scope : le lift-lookup n'est câblé que dans `appendStage` case
+ * MVP scope : le lift-lookup n'est câblé que dans `appendStage` case
  * "filter" du codegen Mongo — le having d'aggregate passe par une autre voie
  * (`renderAggregatePipeline`) qui n'a pas encore l'extract correspondant.
  * Refus explicite en amont pour éviter un refus tardif codegen.
@@ -932,7 +932,7 @@ function assertNoCorrelatedInHaving(
 					expr.kind === "subquery" ? expr.plan : expr.subplan;
 				if (detectOuterAliasesInSubplan(subplan).length > 0) {
 					throw new SnqlError(
-						`Sub-query corrélée dans un 'having' non supportée v1 sur '${capabilities.engine}' (PA/1 MVP : lift-lookup câblé sur le 'where' uniquement) — extrais la corrélée avant le group by, ou utilise 'let' matérialisé.`,
+						`Sub-query corrélée dans un 'having' non supportée v1 sur '${capabilities.engine}' (MVP : lift-lookup câblé sur le 'where' uniquement) — extrais la corrélée avant le group by, ou utilise 'let' matérialisé.`,
 						"planner_correlated_subquery_complex_v3",
 						expr.span
 					);
@@ -1068,7 +1068,7 @@ function assertCorrelatedSubqueryInRootExpr(
 }
 
 /**
- * PA/1 MVP gates — refuse les patterns non-liftables avec un code typé.
+ * MVP gates — refuse les patterns non-liftables avec un code typé.
  * Le sub-find liftable = `find <coll> [as a] where <predicate ref outer> [pick col]`.
  */
 function assertCorrelatedSubqueryLiftableShape(
@@ -1081,14 +1081,14 @@ function assertCorrelatedSubqueryLiftableShape(
 ): void {
 	if (insideDisjunction) {
 		throw new SnqlError(
-			`Sub-query corrélée sous OR/NOT/case non supportée sur '${capabilities.engine}' (PA/1 MVP : lift-lookup accepte le predicate racine et les AND top-level uniquement) — remonte la corrélée hors de la disjonction, ou refactor en 'with one'. Ticket v3+ : rewrite $lookup dans une $facet branche.`,
+			`Sub-query corrélée sous OR/NOT/case non supportée sur '${capabilities.engine}' (MVP : lift-lookup accepte le predicate racine et les AND top-level uniquement) — remonte la corrélée hors de la disjonction, ou refactor en 'with one'. Ticket v3+ : rewrite $lookup dans une $facet branche.`,
 			"planner_correlated_subquery_in_disjunction_v3",
 			span
 		);
 	}
 	if (outerAliases.length > 1) {
 		throw new SnqlError(
-			`Sub-query corrélée référence plusieurs alias outer (${outerAliases.map((a) => `'${a}'`).join(", ")}) non supportée v1 (PA/1 MVP : 1 alias outer max). Ticket v3+ : $lookup{let} multi-vars.`,
+			`Sub-query corrélée référence plusieurs alias outer (${outerAliases.map((a) => `'${a}'`).join(", ")}) non supportée v1 (MVP : 1 alias outer max). Ticket v3+ : $lookup{let} multi-vars.`,
 			"planner_correlated_subquery_nested_v3",
 			span
 		);
@@ -1103,7 +1103,7 @@ function assertCorrelatedSubqueryLiftableShape(
 				for (const f of op.fields) {
 					if (f.expr !== undefined && f.expr.kind !== "field") {
 						throw new SnqlError(
-							`Sub-query corrélée avec projection calculée non supportée v1 (PA/1 MVP : pick de champs simples uniquement) — extrais l'expression avant.`,
+							`Sub-query corrélée avec projection calculée non supportée v1 (MVP : pick de champs simples uniquement) — extrais l'expression avant.`,
 							"planner_correlated_subquery_complex_v3",
 							span
 						);
@@ -1116,7 +1116,7 @@ function assertCorrelatedSubqueryLiftableShape(
 			case "aggregate":
 			case "join":
 				throw new SnqlError(
-					`Sub-query corrélée avec stage '${op.op}' non supportée v1 (PA/1 MVP : scan + filter + pick simples uniquement) — refactor via 'let' matérialisé, ou attends le lift-lookup complet v3.`,
+					`Sub-query corrélée avec stage '${op.op}' non supportée v1 (MVP : scan + filter + pick simples uniquement) — refactor via 'let' matérialisé, ou attends le lift-lookup complet v3.`,
 					"planner_correlated_subquery_complex_v3",
 					span
 				);
@@ -1126,7 +1126,7 @@ function assertCorrelatedSubqueryLiftableShape(
 		const nested = findNestedSubquery(rootExpr);
 		if (nested !== null) {
 			throw new SnqlError(
-				`Sub-query corrélée avec sub-query imbriquée dans le sub-find non supportée v1 (PA/1 MVP : 1 niveau de corrélation) — remonte la seconde au niveau outer. Alias outer référencé : '${firstOuterAlias}'.`,
+				`Sub-query corrélée avec sub-query imbriquée dans le sub-find non supportée v1 (MVP : 1 niveau de corrélation) — remonte la seconde au niveau outer. Alias outer référencé : '${firstOuterAlias}'.`,
 				"planner_correlated_subquery_nested_v3",
 				nested.span ?? span
 			);
@@ -1226,7 +1226,7 @@ function visitPlanRootExprs(
 
 /**
  * Détecte les alias externes référencés dans un sub-plan — extrait de
- * `packages/engine/src/run.ts` PM/2 (D2 walker déplacé au planner). Un alias
+ * `packages/engine/src/run.ts`. Un alias
  * distinct du scan racine local = corrélation. Récursion sur subquery/exists
  * imbriqués pour couvrir corrélations 2+ niveaux.
  */
@@ -1317,7 +1317,7 @@ function detectOuterAliasesInSubplan(subPlan: LogicalPlan): string[] {
 	return [...found];
 }
 
-/** Exposé pour reuse — D16 lowerLet a besoin du même walker. */
+/** Exposé pour reuse — lowerLet a besoin du même walker. */
 export { detectOuterAliasesInSubplan };
 
 function assertAggregateEngineRestrictions(
@@ -1325,7 +1325,7 @@ function assertAggregateEngineRestrictions(
 	capabilities: Capabilities
 ): void {
 	if (capabilities.engine === "postgres") return;
-	// ADR-024 PM/6 item #5 — sum(unique)/avg(unique) désormais supportés sur
+	// item #5 — sum(unique)/avg(unique) désormais supportés sur
 	// Mongo via SSA slot 2-stage $addToSet + $sum/$avg (mongodb.ts). KV reste
 	// hors scope. Le refus n'est levé que pour les engines non-supportés.
 	if (capabilities.engine === "mongodb") return;

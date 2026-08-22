@@ -10,7 +10,7 @@
  *
  * Cette clé est utilisée par `aead.ts` pour chiffrer les payloads
  * applicatifs — le backend voit passer du ciphertext qu'il ne peut pas
- * lire (règle sécu E2E du plan Bloc 7).
+ * lire (règle sécu E2E).
  *
  * ─── Choix crypto ─────────────────────────────────────────────────────
  *   - X25519 pour l'ECDH — même bibliothèque `@noble/curves` que

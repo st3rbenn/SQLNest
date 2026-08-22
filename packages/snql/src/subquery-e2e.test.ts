@@ -1,5 +1,5 @@
 /**
- * Sprint T2/11 sub-queries uncorrelated E2E — `in (find ...)` + `exists (find ...)`.
+ * sub-queries uncorrelated E2E — `in (find...)` + `exists (find...)`.
  * Parser + lower + codegen PG (natif) + refus Mongo/KV.
  */
 
@@ -121,13 +121,13 @@ describe("lower sub-queries", () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe("codegen PG", () => {
-	it("in (find ... pick ...) → IN (SELECT ...)", () => {
+	it("in (find... pick...) → IN (SELECT...)", () => {
 		expect(pgSql("find u where id in (find t pick user_id)").text).toBe(
 			`SELECT * FROM "u" WHERE "id" IN (SELECT "user_id" FROM "t")`
 		);
 	});
 
-	it("exists (find ...) → EXISTS (SELECT * FROM ...)", () => {
+	it("exists (find...) → EXISTS (SELECT * FROM...)", () => {
 		expect(pgSql(`find u where exists (find t)`).text).toBe(
 			`SELECT * FROM "u" WHERE EXISTS (SELECT * FROM "t")`
 		);
@@ -142,7 +142,7 @@ describe("codegen PG", () => {
 		);
 	});
 
-	it("not exists (find ...) → NOT EXISTS", () => {
+	it("not exists (find...) → NOT EXISTS", () => {
 		expect(pgSql(`find u where not exists (find t)`).text).toBe(
 			`SELECT * FROM "u" WHERE (NOT EXISTS (SELECT * FROM "t"))`
 		);
@@ -153,11 +153,11 @@ describe("codegen PG", () => {
 // Planner : refus Mongo/KV
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe("planner Mongo (ADR-024 PM/2 — subquery uncorrelated via matérialisation)", () => {
+describe("planner Mongo (subquery uncorrelated via matérialisation)", () => {
 	it("in (subquery) uncorrelated sur Mongo : accepté au planner (résolution runtime)", () => {
-		// PM/2 : Mongo a maintenant 'subquery' capability avec strategy='materialize'.
+		// Mongo a maintenant 'subquery' capability avec strategy='materialize'.
 		// L'uncorrelated passe au planner ; le runtime résout via `materializeSubplan`
-		// (packages/engine/src/mongo/materialize.ts, ADR-024 D1) avant codegen final.
+		// (packages/engine/src/mongo/materialize.ts) avant codegen final.
 		expect(() =>
 			planFor("find u where id in (find t pick uid)", "mongodb")
 		).not.toThrow();

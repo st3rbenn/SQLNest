@@ -297,7 +297,7 @@ describe.skipIf(!DATABASE_URL)(
 			expect(tokens[0]!.lastUsedAt).toBeInstanceOf(Date);
 		});
 
-		test("re-pairing avec même pubkey → réutilise db_connection (idempotent C.6)", async () => {
+		test("re-pairing avec même pubkey → réutilise db_connection (idempotent)", async () => {
 			const { cookie } = await createTestUser(
 				app,
 				"idempotent@example.com",

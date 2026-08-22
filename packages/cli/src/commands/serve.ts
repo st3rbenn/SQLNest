@@ -82,8 +82,8 @@ export async function serveTunnel(opts: ServeTunnelOptions): Promise<number> {
 
 	opts.onEvent?.({ kind: "connecting" });
 
-	// T4/1.5 : heartbeat au boot du serve loop — envoie fingerprint DB +
-	// schema checksum au backend même quand `findResumableTunnel` a skip
+	// Heartbeat au boot du serve loop — envoie fingerprint DB + schema
+	// checksum au backend même quand `findResumableTunnel` a skip
 	// l'authenticate. Best-effort : silencieux si offline ou DSN down, le
 	// backend backfill au prochain heartbeat qui réussit. Fire-and-forget
 	// pour ne pas bloquer le serve.
@@ -115,9 +115,9 @@ export async function serveTunnel(opts: ServeTunnelOptions): Promise<number> {
 				return result;
 			} catch (err) {
 				const message = err instanceof Error ? err.message : String(err);
-				// Détail structuré Postgres (Phase 3a) — remonté au frontend pour
-				// permettre `$N → span source SNQL`. Absent quand la cause n'est
-				// pas une erreur pg (connect timeout, config, etc.).
+				// Détail structuré Postgres — remonté au frontend pour permettre
+				// `$N → span source SNQL`. Absent quand la cause n'est pas une
+				// erreur pg (connect timeout, config, etc.).
 				const pgError =
 					err instanceof EngineExecutionError ? err.pgError : undefined;
 				opts.onEvent?.({
@@ -219,18 +219,18 @@ async function dispatchOp(
 }
 
 /**
- * T4/1.5 : envoie le heartbeat au backend avec le fingerprint DB (T4/1) +
- * le schema checksum (T4/2). Best-effort — fire-and-forget dans le serve.
- * Calcul parallèle des 2 métadonnées pour minimiser le temps de boot.
- * Log stderr en dev uniquement pour tracer le flow sans polluer la prod.
+ * Envoie le heartbeat au backend avec le fingerprint DB + le schema
+ * checksum. Best-effort — fire-and-forget dans le serve. Calcul parallèle
+ * des 2 métadonnées pour minimiser le temps de boot. Log stderr en dev
+ * uniquement pour tracer le flow sans polluer la prod.
  */
 async function sendBootHeartbeat(opts: ServeTunnelOptions): Promise<void> {
 	const [dbFingerprint, dbSchemaChecksum] = await Promise.all([
 		computeTunnelFingerprint(opts.connectionName, opts.env),
 		computeTunnelSchemaChecksum(opts.connectionName, opts.env)
 	]);
-	// PM/10 D8 fix — engine détecté (scheme DSN) envoyé au heartbeat pour
-	// backfill db_connection.engine côté backend (pairing historique stocke
+	// Engine détecté (scheme DSN) envoyé au heartbeat pour backfill
+	// db_connection.engine côté backend (pairing historique stocke
 	// DEFAULT_ENGINE="postgres" en dur, ne distingue pas Mongo).
 	const engine = detectEngineFromConnectionName(opts.connectionName, opts.env);
 	if (process.env.NODE_ENV === "development") {

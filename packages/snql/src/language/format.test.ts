@@ -120,7 +120,7 @@ describe("format — pick multi-ligne + object literal item", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Sprint T2/15 : transaction + savepoint + `;` séparateur
+// transaction + savepoint + `;` séparateur
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe("format — transaction bloc", () => {
@@ -258,7 +258,7 @@ describe("format — on-conflict edit action reste inline", () => {
 	});
 });
 
-describe("format — let CTE (T3/6)", () => {
+describe("format — let CTE", () => {
 	it("un let + body — `;` en fin de ligne, body sur nouvelle ligne", () => {
 		expect(fmt('let x = find users; find x pick email')).toBe(
 			'let x = find users;\nfind x\n  pick email'

@@ -35,7 +35,7 @@ import type {
  * l'évaluation SQL ; sinon on matérialise le SELECT courant en sous-requête.
  *
  * Le `join` (with) est **embed** : chaque ligne reçoit un tableau JSON des lignes
- * droites matchées, via une sous-requête corrélée `json_agg` (→ ADR-008).
+ * droites matchées, via une sous-requête corrélée `json_agg` (→ ).
  *
  * Sûreté : valeurs TOUJOURS paramétrées ; identifiants validés puis quotés.
  */
@@ -75,7 +75,7 @@ export const postgresMapper: Mapper = {
 		};
 	},
 	/**
-	 * Sprint T2/15 : rend un TransactionPlan en SqlTransaction pré-flat avec
+	 * rend un TransactionPlan en SqlTransaction pré-flat avec
 	 * savepoints. Chaque statement porte sa propre ParamList (les $1..$N sont
 	 * scopés au statement — l'engine bind par statement).
 	 */
@@ -87,7 +87,7 @@ export const postgresMapper: Mapper = {
 			: { engine: "postgres", kind: "transaction", steps };
 	},
 	/**
-	 * Sprint T3/1 : rend un IntrospectPlan en SqlQuery via `information_schema`.
+	 * rend un IntrospectPlan en SqlQuery via `information_schema`.
 	 * Le namespace (PG schema, ex: "public") vient du context runtime — fallback
 	 * "public" si absent (default PG standard). Query text stable, params bindés.
 	 */
@@ -125,7 +125,7 @@ export const postgresMapper: Mapper = {
 				"codegen_introspect_unsupported"
 			);
 		}
-		// T3/2.3 : stages pipeline (where/pick/sort/limit) → SELECT wrapper.
+		// stages pipeline (where/pick/sort/limit) → SELECT wrapper.
 		const text = plan.postOps !== undefined && plan.postOps.length > 0
 			? wrapIntrospectWithPostOps(baseText, plan.postOps, params)
 			: baseText;
@@ -138,7 +138,7 @@ export const postgresMapper: Mapper = {
 		};
 	},
 	/**
-	 * Sprint T3/4 : `raw "SQL"` → SqlQuery text-only, params vides. Refus
+	 * `raw "SQL"` → SqlQuery text-only, params vides. Refus
 	 * explicit d'un `raw {...}` (payload Mongo sur engine PG).
 	 */
 	mapRaw(plan: RawPlan): NativeQuery {
@@ -157,7 +157,7 @@ export const postgresMapper: Mapper = {
 		};
 	},
 	/**
-	 * Sprint T3/6 : `WITH b1 AS (SQL1), b2 AS (SQL2) BODY_SQL`. Les bindings
+	 * `WITH b1 AS (SQL1), b2 AS (SQL2) BODY_SQL`. Les bindings
 	 * et le body partagent la MÊME ParamList — les $N s'incrémentent
 	 * séquentiellement à travers tout le WITH+BODY (PG bind par position
 	 * globale, pas par CTE). Un binding référence un binding précédent en
@@ -231,11 +231,11 @@ function renderWriteAsSqlQuery(plan: MutationPlan): SqlQuery {
 /**
  * Codegen des mutations. Valeurs TOUJOURS paramétrées, identifiants quotés.
  * `RETURNING *` : `execute` récupère les lignes affectées (et leur nombre).
- * Sprint T2/13 : `returnRowCount === true` droppe le `RETURNING *` — le
+ * `returnRowCount === true` droppe le `RETURNING *` — le
  * driver renvoie alors seulement rowCount (rows = []).
  */
 /**
- * Sprint T3/2 : SQL de `describe <table>`. Un seul SELECT — LEFT JOIN sur
+ * SQL de `describe <table>`. Un seul SELECT — LEFT JOIN sur
  * les vues d'information_schema pour agréger PK et FK dans la même ligne
  * que la colonne. `$1` = schéma (search_path), `$2` = nom de table.
  *
@@ -295,7 +295,7 @@ function describeTableSql(ns: string, target: string): string {
 }
 
 /**
- * Sprint T3/3 : SQL de `list indexes [on <table>]`. `pg_index` porte les
+ * SQL de `list indexes [on <table>]`. `pg_index` porte les
  * flags (unique/primary), `pg_class` les noms, `pg_attribute` les colonnes.
  * `string_agg(...)` reconstruit la liste des cols dans l'ordre déclaré
  * (`indkey` est un int[] positionnel). $1 = namespace, $2 = table (opt).
@@ -320,7 +320,7 @@ function listIndexesSql(ns: string, target: string | undefined): string {
 }
 
 /**
- * Sprint T3/2.3 : wrap la query d'introspection en subquery et applique les
+ * wrap la query d'introspection en subquery et applique les
  * postOps (filter/project/sort/limit) via un SELECT wrapper standard. Les
  * $N nouveaux (predicates, limit) sont ajoutés au ParamList commun — l'ordre
  * séquentiel `$1..$N` reste bind-safe côté driver PG.
@@ -381,7 +381,7 @@ function renderMutation(plan: MutationPlan, params: ParamList): string {
 		case "insert": {
 			const cols = plan.columns.map(quoteIdent).join(", ");
 			const returning = plan.returnRowCount === true ? "" : " RETURNING *";
-			// Sprint T2/14 : INSERT SELECT — pas de VALUES, on injecte le
+			// INSERT SELECT — pas de VALUES, on injecte le
 			// SELECT rendu depuis sourcePlan. Les $N sont partagés avec le
 			// ParamList courant (bindés séquentiellement, ordre préservé).
 			if (plan.sourcePlan !== undefined) {
@@ -409,7 +409,7 @@ function renderMutation(plan: MutationPlan, params: ParamList): string {
 			const set = plan.assignments
 				.map((a) => `${quoteIdent(a.column)} = ${renderExpr(a.value, params)}`)
 				.join(", ");
-			// Sprint T2/14 : `UPDATE t [AS a] [SET ...] [FROM x AS b, y AS c]
+			// `UPDATE t [AS a] [SET...] [FROM x AS b, y AS c]
 			// [WHERE (join keys) AND (predicate)]`.
 			const target = plan.alias !== undefined
 				? `${quoteIdent(plan.collection)} AS ${quoteIdent(plan.alias)}`
@@ -436,7 +436,7 @@ function renderMutation(plan: MutationPlan, params: ParamList): string {
 }
 
 /**
- * Sprint T2/13 : rend une clause ON CONFLICT PG. `ignore` → `DO NOTHING`.
+ * rend une clause ON CONFLICT PG. `ignore` → `DO NOTHING`.
  * `update` → `DO UPDATE SET c = expr [WHERE p]`. Les `new.<col>` sont déjà
  * lowered en PlanExpr.upsertNew → renderExpr émet `EXCLUDED."col"`.
  */
@@ -488,7 +488,7 @@ function renderValue(
 
 // Phases = ordre d'évaluation logique d'un SELECT. Une étape ne peut rejoindre le
 // SELECT courant que si sa phase ne « recule » pas (et si son slot est libre).
-// Sprint T2/7 : ordre canonique SNQL aligné SQL évaluation :
+// ordre canonique SNQL aligné SQL évaluation :
 // with(join) → where(filter) → group → having → pick(project) → sort → limit.
 // Cela permet à sort de référencer les alias du pick (comme ORDER BY après SELECT en SQL).
 const PHASE = {
@@ -523,11 +523,11 @@ interface Select {
 	where: PlanExpr[];
 	joins: JoinSpec[];
 	project: readonly PlanProjectField[] | null;
-	// Sprint T2/7 : GROUP BY / HAVING slots. Peuplés quand un aggregate op est
+	// GROUP BY / HAVING slots. Peuplés quand un aggregate op est
 	// absorbé et qu'il porte des groupKeys/having. Null par défaut.
 	groupKeys: readonly (readonly string[])[] | null;
 	having: PlanExpr | null;
-	// Sprint T2/10 : DISTINCT / DISTINCT ON.
+	// DISTINCT / DISTINCT ON.
 	distinct: boolean;
 	distinctOnKeys: readonly (readonly string[])[] | null;
 	order: readonly PlanSortKey[] | null;
@@ -602,9 +602,9 @@ function canAbsorb(sel: Select, op: LogicalPlan): boolean {
 		case "project":
 		case "aggregate":
 			// La SELECT-list est indépendante de WHERE/ORDER BY/LIMIT : un `project`
-			// (ou `aggregate` sprint T2/6, même slot mutex) peut rejoindre le SELECT
+			// (ou `aggregate` même slot mutex) peut rejoindre le SELECT
 			// courant tant que son slot est libre. PG accepte SELECT agg FROM t sans
-			// GROUP BY natif (implicit grouping) → zero refactor sprint 6.
+			// GROUP BY natif (implicit grouping) → zero refactor.
 			return sel.project === null;
 		case "sort":
 			return sel.order === null && sel.maxPhase <= PHASE.sort;
@@ -634,15 +634,15 @@ function absorb(sel: Select, op: LogicalPlan): void {
 			return;
 		case "project":
 			sel.project = op.fields;
-			// Sprint T2/10 : DISTINCT / DISTINCT ON absorbés dans le SELECT.
+			// DISTINCT / DISTINCT ON absorbés dans le SELECT.
 			if (op.unique === true) sel.distinct = true;
 			if (op.distinctOnKeys !== undefined) sel.distinctOnKeys = op.distinctOnKeys;
 			sel.maxPhase = Math.max(sel.maxPhase, PHASE.project);
 			return;
 		case "aggregate":
-			// Sprint T2/6 : aggregate rend une SELECT-list comme project pour PG
+			// aggregate rend une SELECT-list comme project pour PG
 			// (implicit grouping sans GROUP BY quand aucun field bare).
-			// Sprint T2/7 : GROUP BY explicit quand op.groupKeys non-empty ;
+			// GROUP BY explicit quand op.groupKeys non-empty;
 			// HAVING quand op.having présent.
 			sel.project = op.fields;
 			if (op.groupKeys !== undefined) {
@@ -668,7 +668,7 @@ function absorb(sel: Select, op: LogicalPlan): void {
 }
 
 function renderSelect(sel: Select, params: ParamList): string {
-	// Sprint T2/10 : DISTINCT / DISTINCT ON insérés entre SELECT et la liste.
+	// DISTINCT / DISTINCT ON insérés entre SELECT et la liste.
 	// DISTINCT ON prend priorité si les 2 sont set (parser ne permet pas
 	// mais defense).
 	let selectPrefix = "SELECT";
@@ -871,7 +871,7 @@ function renderExpr(expr: PlanExpr, params: ParamList): string {
 				return "FALSE";
 			}
 			const target = renderExpr(expr.target, params);
-			// Sprint T2/11 : `x in (subquery)` — le subquery se rend déjà en
+			// `x in (subquery)` — le subquery se rend déjà en
 			// `(SELECT ...)`, donc pas de parens supplémentaires. Détecte le
 			// cas single-value=subquery.
 			if (
@@ -902,8 +902,8 @@ function renderExpr(expr: PlanExpr, params: ParamList): string {
 					"codegen_missing_function_mapping"
 				);
 			}
-			// Sprint T2/6 : propage star/unique flags aux renderers aggregates.
-			// Sprint T2/8 : propage sortKeys aux renderers aggregateMulti.
+			// propage star/unique flags aux renderers aggregates.
+			// propage sortKeys aux renderers aggregateMulti.
 			// Les renderers scalar existants ignorent ces flags (backward compat).
 			return entry.engines.postgres(expr.args, {
 				renderExpr: (arg) => renderExpr(arg as PlanExpr, params),
@@ -959,7 +959,7 @@ function renderExpr(expr: PlanExpr, params: ParamList): string {
 			return `(CASE ${whens} ELSE ${elseSql} END)`;
 		}
 		case "windowCall": {
-			// Sprint T2/9 : `FN() OVER (PARTITION BY ... ORDER BY ...)`. Le
+			// `FN() OVER (PARTITION BY... ORDER BY...)`. Le
 			// renderer window (pgRowNumber/pgRank/pgDenseRank) retourne juste
 			// `FN()` ; on append la clause OVER.
 			const entry = SNQL_FUNCTIONS.get(expr.name);
@@ -991,17 +991,17 @@ function renderExpr(expr: PlanExpr, params: ParamList): string {
 			return `${fnSql} OVER (${parts.join(" ")})`;
 		}
 		case "subquery": {
-			// Sprint T2/11 : `(SELECT ...)` inline. Le sous-plan est rendu via
+			// `(SELECT...)` inline. Le sous-plan est rendu via
 			// renderPlan avec les mêmes params (les $N sont partagés — tous
 			// bindés séquentiellement). Le résultat est wrappé en parens.
 			return `(${renderPlan(expr.plan, params)})`;
 		}
 		case "exists": {
-			// Sprint T2/11 : `EXISTS (SELECT ... )`. Idem — sous-plan inline.
+			// `EXISTS (SELECT... )`. Idem — sous-plan inline.
 			return `EXISTS (${renderPlan(expr.subplan, params)})`;
 		}
 		case "upsertNew":
-			// Sprint T2/13 : `new.<col>` dans `on conflict edit set/where` → PG
+			// `new.<col>` dans `on conflict edit set/where` → PG
 			// binde la row proposée sous l'alias `EXCLUDED`.
 			return `EXCLUDED.${quoteIdent(expr.column)}`;
 	}
@@ -1074,7 +1074,7 @@ function renderPath(path: readonly string[]): string {
 }
 
 /**
- * Sprint T2/14 : rend un path pour une clé de join mutation. Si le path
+ * rend un path pour une clé de join mutation. Si le path
  * n'a qu'un segment (col bare), on préfixe avec `alias` pour éviter les
  * ambiguïtés (`t.col = x.col`). Sinon on rend tel quel (path déjà qualifié).
  */

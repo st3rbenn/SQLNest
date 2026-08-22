@@ -352,7 +352,7 @@ function CanvasInner({
 		setHiddenIds
 	});
 
-	// Sync serveur du snapshot de preview (C.15) — compute + PUT le rendu
+	// Sync serveur du snapshot de preview — compute + PUT le rendu
 	// précalculé qui alimentera le fallback gallery quand le CLI est offline.
 	// Débounce 5 s, best-effort (une erreur ne bloque JAMAIS le canvas).
 	usePreviewSnapshotSync({

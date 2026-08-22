@@ -1,7 +1,7 @@
 /**
- * Sprint T2/12 correlated exists + ScopeStack E2E — la subquery peut lire
+ * correlated exists + ScopeStack E2E — la subquery peut lire
  * les alias de la query outer via un scope stack module-level. Complète le
- * uncorrelated T2/11 sans casser la rétrocompat.
+ * uncorrelated sans casser la rétrocompat.
  */
 
 import { describe, expect, it } from "vitest";
@@ -63,7 +63,7 @@ describe("correlated exists", () => {
 		).not.toThrow();
 	});
 
-	it("uncorrelated exists reste OK (rétrocompat T2/11)", () => {
+	it("uncorrelated exists reste OK (rétrocompat)", () => {
 		expect(() =>
 			pgSql(`find users as u where exists (find orders)`)
 		).not.toThrow();
@@ -109,7 +109,7 @@ describe("correlated in (subquery)", () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe("codegen PG correlated", () => {
-	it("exists corrélée → EXISTS (SELECT ... WHERE outer.col = inner.col)", () => {
+	it("exists corrélée → EXISTS (SELECT... WHERE outer.col = inner.col)", () => {
 		const { text } = pgSql(
 			`find users as u where exists (find orders as o where o.user_id = u.id)`
 		);
@@ -118,7 +118,7 @@ describe("codegen PG correlated", () => {
 		);
 	});
 
-	it("in (subquery corrélée) → IN (SELECT ...)", () => {
+	it("in (subquery corrélée) → IN (SELECT...)", () => {
 		const { text } = pgSql(
 			`find users as u where u.id in (find orders as o where o.total > u.age pick o.user_id)`
 		);

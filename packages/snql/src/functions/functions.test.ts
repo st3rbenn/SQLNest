@@ -4,10 +4,9 @@ import { checkArity, describeArity } from "./arity";
 import { SNQL_FUNCTIONS, createRegistry, type FunctionEntry } from "./index";
 
 describe("call node — registry + arity", () => {
-	it("SNQL_FUNCTIONS contient les 40 builtins (sprint 1 + 3 + 4 + T2/5 + T2/6 + T2/8 + T2/9) + 7 reserved", () => {
+	it("SNQL_FUNCTIONS contient les 40 builtins + 7 reserved", () => {
 		expect(SNQL_FUNCTIONS.names()).toEqual(
 			new Set([
-				// sprint 1
 				"upper",
 				"lower",
 				"length",
@@ -16,51 +15,51 @@ describe("call node — registry + arity", () => {
 				"coalesce",
 				"now",
 				"concat",
-				// sprint 3 string
+				// string
 				"trim",
 				"ltrim",
 				"rtrim",
 				"substring",
 				"replace",
 				"strpos",
-				// sprint 3 number
+				// number
 				"floor",
 				"ceil",
-				// sprint 3 date
+				// date
 				"today",
 				"date_part",
 				"date_trunc",
 				"date_add",
 				"date_diff",
-				// sprint 3 reserved
+				// reserved
 				"regex_replace",
-				// sprint 4 JSON
+				// JSON
 				"json_get",
 				"json_get_text",
 				"json_has_key",
 				"json_typeof",
-				// sprint object-literals JSON PG-only
+				// JSON PG-only
 				"json_contains",
-				// sprint T2/5 conditional
+				// conditional
 				"if",
 				"nullif",
 				"greatest",
 				"least",
-				// sprint T2/6 aggregates scalaires
+				// aggregates scalaires
 				"count",
 				"sum",
 				"avg",
 				"min",
 				"max",
-				// sprint T2/8 aggregates multi
+				// aggregates multi
 				"array_agg",
 				"string_agg",
 				"json_agg",
-				// sprint T2/9 window functions
+				// window functions
 				"row_number",
 				"rank",
 				"dense_rank",
-				// sprint 4 reserved
+				// reserved
 				"json_set",
 				"json_delete",
 				"json_merge",
@@ -72,9 +71,9 @@ describe("call node — registry + arity", () => {
 		);
 	});
 
-	it("forEngine expose les fonctions supportées par engine (41 PG / 41 Mongo / 16 KV — PA/8 json_contains Mongo)", () => {
-		// Sprint T2/9 : +3 window fns (row_number/rank/dense_rank) cross-engine.
-		// PA/8 (ADR-024-A) : json_contains Mongo débloqué → Mongo passe 40 → 41.
+	it("forEngine expose les fonctions supportées par engine (41 PG / 41 Mongo / 16 KV — json_contains Mongo)", () => {
+		// +3 window fns (row_number/rank/dense_rank) cross-engine.
+		// json_contains Mongo débloqué → Mongo passe 40 → 41.
 		// Total : PG 38+3=41, Mongo 37+3+1=41, KV 13+3=16.
 		expect(SNQL_FUNCTIONS.forEngine("postgres").size).toBe(41);
 		expect(SNQL_FUNCTIONS.forEngine("mongodb").size).toBe(41);
@@ -162,7 +161,7 @@ describe("call node — parser + lower + codegen PG", () => {
 	});
 
 	it("call range : round(cast(x as float), 3) — fix E2E RNAcentral", () => {
-		// Le cas qui a explosé sprint 2 : cast(x as float) → double precision,
+		// Le cas qui a explosé cast(x as float) → double precision,
 		// puis round(double, int) → 42883. B++ absorbe le quirk.
 		expect(sqlOf("find t pick round(cast(rate as float), 3) as r")).toBe(
 			`SELECT ROUND((CAST("rate" AS double precision))::numeric, $1)::double precision AS "r" FROM "t"`
@@ -207,7 +206,7 @@ describe("call node — erreurs lower", () => {
 		);
 	});
 
-	it("call `propagate` autorisé en write (sprint 3 — writeNullBehavior activé)", () => {
+	it("call `propagate` autorisé en write (writeNullBehavior activé)", () => {
 		// upper est déclaré `writeNullBehavior: "propagate"` → passe en write.
 		const stmt = parse(tokenize("update t where upper(name) = \"X\" set y = 1"));
 		if (stmt.operation !== "update") throw new Error("attendu update");

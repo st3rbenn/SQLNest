@@ -18,10 +18,10 @@ const SINGLE: Readonly<Record<string, TokenKind>> = {
 	"{": "lbrace",
 	"}": "rbrace",
 	":": "colon",
-	";": "semicolon", // Sprint T2/15 : séparateur `transaction { s; s }`
+	";": "semicolon", // séparateur `transaction { s; s }`
 	"+": "plus",
-	// Sprint T2/5 : `-` retiré de SINGLE, géré dans scanOperator avec lookahead
-	// sur `>` pour émettre `arrow` (2-char token, symétrique aux !=/<=/>=).
+	// `-` retiré de SINGLE, géré dans scanOperator avec lookahead sur `>` pour
+	// émettre `arrow` (2-char token, symétrique aux !=/<=/>=).
 	"*": "star",
 	"/": "slash",
 	"%": "percent",
@@ -169,9 +169,9 @@ class Lexer {
 			}
 			return true;
 		}
-		// Sprint T2/5 : `-` géré ici (retiré de SINGLE). Lookahead sur `>`
-		// pour émettre `arrow` (`->`). Whitespace-strict : `- >` reste 2 tokens
-		// séparés (minus + op '>'), cohérent avec !=/<=/>= existants.
+		// `-` géré ici (retiré de SINGLE). Lookahead sur `>` pour émettre
+		// `arrow` (`->`). Whitespace-strict : `- >` reste 2 tokens séparés
+		// (minus + op '>'), cohérent avec !=/<=/>= existants.
 		if (c === "-") {
 			this.advance();
 			if (this.peek() === ">") {

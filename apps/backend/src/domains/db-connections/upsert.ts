@@ -1,14 +1,14 @@
 /**
  * `upsertDbConnectionByFingerprint` — pairing idempotent au niveau
- * `(team_id, cli_fingerprint)` (C.21.2, avant : `(user_id, ...)`).
+ * `(team_id, cli_fingerprint)`.
  *
- * ─── Problème résolu (C.6) ────────────────────────────────────────────
- * Avant : chaque `sqlnest connect` INSERT une nouvelle `db_connection`,
- * même si la keypair Ed25519 du CLI était identique. Résultat : un user
- * qui stop/relance son CLI se retrouvait avec un DOUBLON, et le
- * `canvas_state` rattaché à l'ancienne connection devenait invisible.
+ * Problème résolu : avant, chaque `sqlnest connect` INSERT une nouvelle
+ * `db_connection`, même si la keypair Ed25519 du CLI était identique.
+ * Résultat : un user qui stop/relance son CLI se retrouvait avec un
+ * DOUBLON, et le `canvas_state` rattaché à l'ancienne connection devenait
+ * invisible.
  *
- * ─── Contrat (C.21.2 : scope team) ────────────────────────────────────
+ * Contrat :
  *   - Si `(team_id, cli_fingerprint)` existe → UPDATE `active_since` /
  *     `last_seen_at`, garde le `name` existant, retourne le même `id`.
  *   - Sinon → INSERT normal. Pré-check du conflit `(team_id, name)` pour
@@ -16,20 +16,17 @@
  *     lève un `unique_violation` cryptique.
  *   - Le `userId` est stocké comme héritage historique (audit : "qui a
  *     pair-é ce CLI") ; l'AUTORISATION passe par team → owner (voir
- *     `requireTeamAccess`, C.21.3).
+ *     `requireTeamAccess`).
  *
  * Le `name` saisi par l'user au pairing est utilisé UNIQUEMENT à
  * l'INSERT. Pour un CLI déjà connu (fingerprint match dans cette team),
- * le nouveau name est SILENCIEUSEMENT IGNORÉ (compromis UX : le user
- * peut renommer sa connection via un futur dashboard).
+ * le nouveau name est SILENCIEUSEMENT IGNORÉ.
  *
- * ─── Race window ──────────────────────────────────────────────────────
- * Le lookup + INSERT/UPDATE est appelé dans une transaction externe (le
- * caller wrap dans `db.transaction`). Deux pairings concurrents avec la
- * même pubkey pour la même team seraient serialisés par l'index unique
- * `(team_id, cli_fingerprint)` — la course perdante lève
- * `unique_violation` sur l'INSERT et le caller peut retry. Pratique :
- * cas rarissime.
+ * Race window : le lookup + INSERT/UPDATE est appelé dans une transaction
+ * externe (le caller wrap dans `db.transaction`). Deux pairings concurrents
+ * avec la même pubkey pour la même team seraient serialisés par l'index
+ * unique `(team_id, cli_fingerprint)` — la course perdante lève
+ * `unique_violation` sur l'INSERT et le caller peut retry. Cas rarissime.
  */
 
 import { schema as dbSchema } from "@sqlnest/db";
@@ -39,17 +36,17 @@ import { computeCliFingerprint } from "../tunnels/pairing/crypto";
 
 export interface UpsertConnectionOptions {
 	readonly userId: string;
-	/** Team qui possédera la db_connection (V1 = team perso de l'user,
-	 *  V2 = choix explicite au pairing). Scope l'INSERT ET le lookup
-	 *  idempotent (`(team_id, fingerprint)`). */
+	/** Team qui possédera la db_connection (team perso de l'user par
+	 *  défaut, choix explicite au pairing à terme). Scope l'INSERT ET le
+	 *  lookup idempotent (`(team_id, fingerprint)`). */
 	readonly teamId: string;
 	/** Pubkey Ed25519 du CLI — reçue en STRING (hex ou base64 selon le
 	 *  flow). Utilisée avec `cliConnectionName` pour produire le fingerprint
 	 *  effectif via `computeCliFingerprint`. */
 	readonly cliPubkey: string;
-	/** Nom de la DSN LOCALE au CLI (C.13). Utilisé UNIQUEMENT pour scoper
-	 *  le fingerprint effectif — permet à un même install CLI de gérer N
-	 *  db_connection distinctes côté serveur. `null` = CLI legacy pré-C.13,
+	/** Nom de la DSN LOCALE au CLI. Utilisé UNIQUEMENT pour scoper le
+	 *  fingerprint effectif — permet à un même install CLI de gérer N
+	 *  db_connection distinctes côté serveur. `null` = CLI legacy,
 	 *  fingerprint = SHA256(pubkey) seul. */
 	readonly cliConnectionName: string | null;
 	/** Name saisi par l'user au pairing (côté serveur — apparaît dans la
@@ -58,18 +55,18 @@ export interface UpsertConnectionOptions {
 	readonly name: string;
 	readonly engine: string;
 	/**
-	 * T4/1 : fingerprint de l'INSTANCE DB (indépendant du CLI). Absent
-	 * quand le CLI est legacy (<= T3) ou quand la DSN n'a pas encore été
-	 * ouverte au moment de l'upsert. Si présent :
+	 * Fingerprint de l'INSTANCE DB (indépendant du CLI). Absent quand le
+	 * CLI est legacy ou quand la DSN n'a pas encore été ouverte au moment
+	 * de l'upsert. Si présent :
 	 *  - stocké sur la db_connection créée/matchée (backfill si absent).
-	 *  - v2 : lookup prioritaire `(team, db_fingerprint)` pour switch
-	 *    cross-device automatique. V1 : juste backfill.
+	 *  - Lookup prioritaire `(team, db_fingerprint)` pour switch
+	 *    cross-device automatique.
 	 */
 	readonly dbFingerprint?: string | null;
 	/**
-	 * T4/2 : checksum de la structure DB (voir schema.dbConnection). Même
+	 * Checksum de la structure DB (voir schema.dbConnection). Même
 	 * sémantique de backfill que dbFingerprint. Change à chaque migration
-	 * DB → invalidation cache + alerte diff côté UI (v2).
+	 * DB → invalidation cache + alerte diff côté UI.
 	 */
 	readonly dbSchemaChecksum?: string | null;
 }
@@ -81,7 +78,7 @@ export type UpsertConnectionResult =
 			/** `true` si la connection a été créée, `false` si on a réutilisé une
 			 *  connection existante (fingerprint match). */
 			readonly wasCreated: boolean;
-			/** T4/5 : `true` si la connection a été réutilisée via match db_fingerprint
+			/** `true` si la connection a été réutilisée via match db_fingerprint
 			 *  (multi-CLI sur MÊME instance DB) — le CLI courant a un cli_fingerprint
 			 *  DIFFÉRENT de celui de la connection primaire, mais on skip la création
 			 *  d'une nouvelle row et on partage la même db_connection (chacun a son
@@ -123,9 +120,9 @@ export async function upsertDbConnectionByFingerprint(
 			);
 		}
 		// UPDATE activeSince + lastSeenAt — le user vient de re-pair, on
-		// signale que le tunnel est actif. T4/1 : backfill dbFingerprint
-		// s'il est fourni ET absent — les vieilles db_connection gagnent
-		// leur fingerprint au premier connect du CLI T4-aware.
+		// signale que le tunnel est actif. Backfill dbFingerprint s'il est
+		// fourni ET absent — les vieilles db_connection gagnent leur
+		// fingerprint au premier connect d'un CLI récent.
 		const patch: {
 			activeSince: ReturnType<typeof sql>;
 			lastSeenAt: ReturnType<typeof sql>;
@@ -151,12 +148,12 @@ export async function upsertDbConnectionByFingerprint(
 		return { ok: true, connectionId: row.id, wasCreated: false };
 	}
 
-	// 2. T4/5 — MULTI-CLI REUSE : si le CLI courant a un cli_fingerprint
-	//    différent (Windows après Mac) MAIS on trouve une db_connection dans
-	//    la team qui pointe vers la MÊME DB → RÉUTILISER cette connection.
-	//    Un seul row db_connection par DB logique, plusieurs tunnel_session
-	//    (1 par CLI) chacun avec son propre cli_fingerprint. Résout le pb
-	//    "2× apollon dans la gallery".
+	// 2. MULTI-CLI REUSE : si le CLI courant a un cli_fingerprint différent
+	//    (Windows après Mac) MAIS on trouve une db_connection dans la team
+	//    qui pointe vers la MÊME DB → RÉUTILISER cette connection. Un seul
+	//    row db_connection par DB logique, plusieurs tunnel_session (1 par
+	//    CLI) chacun avec son propre cli_fingerprint. Résout le pb "2×
+	//    apollon dans la gallery".
 	//
 	//    Priorité :
 	//      1) `(team, db_fingerprint)` — match INSTANCE stricte (backup/restore
@@ -255,10 +252,10 @@ export async function upsertDbConnectionByFingerprint(
 		return { ok: false, reason: "name_conflict" };
 	}
 
-	// 4. INSERT normal. T4/4 remplace le clone T4/3 par le canvas partagé
-	//    natif via (user, team, db_fingerprint) + historique de checksums —
-	//    la nouvelle db_connection résout automatiquement au bon canvas au
-	//    premier GET/PUT via `resolveCanvasByConnection`. Rien à cloner ici.
+	// 4. INSERT normal. Le canvas partagé natif via (user, team,
+	//    db_fingerprint) + historique de checksums — la nouvelle
+	//    db_connection résout automatiquement au bon canvas au premier
+	//    GET/PUT via `resolveCanvasByConnection`. Rien à cloner ici.
 	const inserted = await tx
 		.insert(dbSchema.dbConnection)
 		.values({
@@ -267,12 +264,12 @@ export async function upsertDbConnectionByFingerprint(
 			name: opts.name,
 			cliFingerprint: fingerprint,
 			engine: opts.engine,
-			// T4/1 : peut être undefined (Drizzle → col NULL) pour les CLIs
-			// legacy ou quand la DSN n'a pas encore été ouverte au pairing.
+			// Peut être undefined (Drizzle → col NULL) pour les CLIs legacy
+			// ou quand la DSN n'a pas encore été ouverte au pairing.
 			...(opts.dbFingerprint !== undefined && opts.dbFingerprint !== null
 				? { dbFingerprint: opts.dbFingerprint }
 				: {}),
-			// T4/2 : idem — nullable, backfill au premier heartbeat qui l'envoie.
+			// Idem — nullable, backfill au premier heartbeat qui l'envoie.
 			...(opts.dbSchemaChecksum !== undefined &&
 			opts.dbSchemaChecksum !== null
 				? { dbSchemaChecksum: opts.dbSchemaChecksum }

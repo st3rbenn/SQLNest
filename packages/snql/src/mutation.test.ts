@@ -259,7 +259,7 @@ describe("mutations → MongoDB", () => {
 		});
 	});
 
-	it("write non filtré : filtre vide = toutes les lignes (assumé, ADR-012)", () => {
+	it("write non filtré : filtre vide = toutes les lignes (assumé, )", () => {
 		expect(mongo("remove from logs")).toMatchObject({ filter: {} });
 		expect(mongo("update t set a = 1")).toMatchObject({ filter: {} });
 	});

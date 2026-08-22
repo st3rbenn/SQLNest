@@ -38,7 +38,7 @@ export interface Field {
 	/** 0..1 pour l'inféré (fréquence d'apparition en sampling). Absent = certain. */
 	readonly confidence?: number;
 	/**
-	 * Sprint T2/13.5 : true si la colonne a un DEFAULT côté DB. Combiné avec
+	 * true si la colonne a un DEFAULT côté DB. Combiné avec
 	 * `nullable`, permet à l'autocomplete de distinguer :
 	 *   - `nullable: false && !hasDefault` → OBLIGATOIRE (l'user DOIT fournir la valeur)
 	 *   - autre → facultatif (nullable ou default couvre l'absence)
@@ -46,7 +46,7 @@ export interface Field {
 	 */
 	readonly hasDefault?: boolean;
 	/**
-	 * Sprint T2/13.5 : labels valides pour un type enum. Peuplé par
+	 * labels valides pour un type enum. Peuplé par
 	 * l'introspection PG (pg_enum). Utilisé par le complete (suggestions
 	 * après `col:`) et un futur typecheck lower (refus tôt des invalides).
 	 * Absent quand `type !== "enum"`.

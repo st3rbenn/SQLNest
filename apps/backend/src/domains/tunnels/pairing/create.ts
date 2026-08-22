@@ -4,7 +4,7 @@
  * Le CLI appelle cette action au démarrage de `sqlnest connect`. Le backend
  * n'a AUCUNE session utilisateur à ce moment (le CLI n'est pas encore lié
  * à un compte). C'est donc une route publique — le rate-limit par IP
- * (Bloc 2, routes) empêche l'énumération.
+ * empêche l'énumération.
  *
  * TTL 5 minutes (`PAIRING_TTL_MS`) — assez pour ouvrir un onglet, se
  * connecter à SQLNest si nécessaire, et saisir le code. Assez court pour
@@ -30,10 +30,10 @@ export interface CreatePairingResult {
 }
 
 export interface CreatePairingOptions {
-	/** Nom de la DSN locale au CLI (C.13). NULL = CLI legacy pré-C.13. */
+	/** Nom de la DSN locale au CLI. NULL = CLI legacy. */
 	cliConnectionName?: string | null;
-	/** Team dans laquelle la db_connection sera créée à l'authenticate
-	 *  (C.21.4). Renseignée par les routes team-scoped depuis le browser.
+	/** Team dans laquelle la db_connection sera créée à l'authenticate.
+	 *  Renseignée par les routes team-scoped depuis le browser.
 	 *  NULL = pairing initié par le flow global public (CLI → POST
 	 *  /api/tunnels/pairings sans savoir la team) → l'authenticate
 	 *  fallback à la team perso de l'user. */
@@ -44,7 +44,6 @@ export interface CreatePairingOptions {
 /**
  * INSERT un pairing pending et retourne le code affichable.
  *
- * ─── Retry ─────────────────────────────────────────────────────────────
  * L'alphabet Crockford 8 chars donne 40 bits d'entropie — collision
  * extrêmement improbable (moins de 1e-8 pour 10k codes actifs à un
  * instant t, avec TTL 5 min). Pas de retry sur duplicate key : si ça
@@ -75,8 +74,8 @@ export async function createPairing(
 		cliConnectionName,
 		teamId,
 		expiresAt,
-		// T4/5 : peut être NULL si CLI legacy ou DSN inaccessible au pair.
-		// Le backend approve/authenticate détecte le match db_fingerprint et
+		// Peut être NULL si CLI legacy ou DSN inaccessible au pair. Le
+		// backend approve/authenticate détecte le match db_fingerprint et
 		// évite la création d'une db_connection dupliquée (multi-CLI reuse).
 		...(dbFingerprint !== null ? { dbFingerprint } : {}),
 		...(dbSchemaChecksum !== null ? { dbSchemaChecksum } : {})

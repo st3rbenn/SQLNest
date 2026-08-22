@@ -4,15 +4,14 @@
 
 import z from "zod/v4";
 
-/** Snapshot précalculé d'un rendu de preview (C.15). Alimenté par le
- *  frontend au save du canvas, réutilisé côté client pour rendre la
- *  preview quand le CLI est offline (au lieu de "CLI hors ligne").
- *  Léger (~2-10 KB JSON), theme-agnostic (les couleurs sont calculées
- *  au render, pas stockées).
+/** Snapshot précalculé d'un rendu de preview. Alimenté par le frontend
+ *  au save du canvas, réutilisé côté client pour rendre la preview quand
+ *  le CLI est offline (au lieu de "CLI hors ligne"). Léger (~2-10 KB
+ *  JSON), theme-agnostic (les couleurs sont calculées au render, pas
+ *  stockées).
  *
- *  ─── Bornes ───────────────────────────────────────────────────────
- *  Cap 200 nodes / 500 edges / 50 frames pour éviter les payloads
- *  abusifs. Un schéma de plus grande taille est rare en preview
+ *  Bornes : cap 200 nodes / 500 edges / 50 frames pour éviter les
+ *  payloads abusifs. Un schéma de plus grande taille est rare en preview
  *  gallery ; au pire, le client tronque.
  */
 export const PreviewSnapshotSchema = z.object({
@@ -66,12 +65,12 @@ export const ListDbConnectionsResponse = z.object({
 			/** `true` si un CLI est actuellement connecté au tunnel WSS pour
 			 *  cette connection (registry in-memory). Utilisé côté frontend
 			 *  pour :
-			 *   - afficher un badge "online" dans la gallery (v1.x)
+			 *   - afficher un badge "online" dans la gallery
 			 *   - auto-refetch le schema quand le CLI reconnecte
 			 *     (transition false→true déclenche invalidation cache). */
 			isOnline: z.boolean(),
-			/** Dernier snapshot de preview persisté (C.15). `null` tant que
-			 *  l'user n'a pas ouvert le canvas au moins une fois. */
+			/** Dernier snapshot de preview persisté. `null` tant que l'user
+			 *  n'a pas ouvert le canvas au moins une fois. */
 			lastPreviewSnapshot: PreviewSnapshotSchema.nullable()
 		})
 	)
@@ -83,7 +82,7 @@ export type ListDbConnectionsResponseT = z.infer<
 	typeof ListDbConnectionsResponse
 >;
 
-// ─── PUT /api/db-connections/:id/preview-snapshot (C.15) ────────────
+// ─── PUT /api/db-connections/:id/preview-snapshot ─────────────────────
 export const PutPreviewSnapshotBody = z.object({
 	snapshot: PreviewSnapshotSchema
 });

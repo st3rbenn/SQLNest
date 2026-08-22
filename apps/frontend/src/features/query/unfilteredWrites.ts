@@ -1,43 +1,42 @@
 /**
  * Walker AST — collecte les écritures non filtrées (unfiltered writes) d'un
- * Statement SNQL. Fondation de [[ADR-023]] E/2 : couvre les 8 variantes AST
- * via récursion Transaction / Savepoint / Let, sans re-inventer la traversée.
+ * Statement SNQL. Couvre les variantes AST via récursion Transaction /
+ * Savepoint / Let, sans re-inventer la traversée.
  *
- * ─── Ce qui est détecté ───────────────────────────────────────────────────
+ * Ce qui est détecté :
  *  - `unfiltered_update` — UpdateStatement sans `.predicate` racine (peu importe
- *    `.joins` : D4 — un `update t with one X on l=f set …` sans predicate reste
+ *    `.joins` — un `update t with one X on l=f set …` sans predicate reste
  *    unfiltered pour la table cible t).
  *  - `unfiltered_delete` — DeleteStatement sans `.predicate`.
  *  - `bulk_copy_insert` — InsertStatement avec `.sourceQuery` dont aucun stage
- *    n'est un `where` (D6 : `add (find users pick *) into archive` copie toute
+ *    n'est un `where` (`add (find users pick *) into archive` copie toute
  *    la source, warn distinct du bucket unfiltered).
- *  - `raw_opaque` — tout RawStatement (D1 : le payload SQL/Mongo est opaque
- *    au parser, warn systématique cohérent [[ADR-019]]).
+ *  - `raw_opaque` — tout RawStatement (le payload SQL/Mongo est opaque au
+ *    parser, warn systématique).
  *
- * ─── Ce qui n'est PAS détecté (intentionnel) ──────────────────────────────
- *  - `OnConflictClause.action.where` (D3) — un upsert `add {…} into t on
+ * Ce qui n'est PAS détecté (intentionnel) :
+ *  - `OnConflictClause.action.where` — un upsert `add {…} into t on
  *    conflict (id) edit set x = new.x` SANS where global est normal : les
  *    keys de conflit bornent déjà le sous-set. Le walker IGNORE ce where.
  *  - Les CTE bindings d'un `let` (`.bindings[].query`) — read-only par
  *    contrat lower (writes refusés au lower `lower_let_write_in_cte`).
- *  - Les predicates tautologiques (`where 1 = 1`) — ADR-012 tolère "l'user
- *    assume". Documenté comme limite dans le tooltip du badge safe mode.
+ *  - Les predicates tautologiques (`where 1 = 1`) — l'user assume.
+ *    Documenté comme limite dans le tooltip du badge safe mode.
  *  - Un InsertStatement avec `.rows` (documents littéraux) sans sourceQuery :
  *    le count est borné par le nombre de rows tapées, pas wipe-scale.
  *
- * ─── Récursion ────────────────────────────────────────────────────────────
+ * Récursion :
  *  - Transaction → body[] (Query|Insert|Update|Delete|Savepoint)
  *  - Savepoint → body[] récursif (savepoint dans savepoint autorisé au parse)
  *  - Let → .body single (Query|Insert|Update|Delete — pas Transaction, refusé
  *    au parse, verrouillé par test unitaire au cas où l'union s'élargit)
  *  - Savepoint racine (standalone) traité comme si dans une tx implicite
- *    (D2-amendment : l'user compose sa tx en tapant les savepoints d'abord,
- *    doit voir le warning en construction — même si le lower refuse l'exec)
+ *    (l'user compose sa tx en tapant les savepoints d'abord, doit voir le
+ *    warning en construction — même si le lower refuse l'exec)
  *
- * ─── Purity ───────────────────────────────────────────────────────────────
  * Fonction pure — pas d'I/O, pas de state global, pas de mutation. Testable
- * en isolation, réutilisable dans le gate `execute()` (E/3), dans l'autorun
- * guard (D14 / E/5.5), et dans le live diagnostic (E/2.3).
+ * en isolation, réutilisable dans le gate `execute()`, dans l'autorun
+ * guard, et dans le live diagnostic.
  */
 
 import type {
@@ -62,8 +61,8 @@ export type UnfilteredKind =
 /**
  * Un finding = un span source (ancre pour squiggly/tooltip) + son kind (pour
  * choisir label + severity) + le verbe tel qu'écrit par l'user + la cible
- * (nom collection). Les 2 derniers permettent au TextInput E/3 de calculer
- * la string exacte à retaper (`REMOVE FROM users`).
+ * (nom collection). Les 2 derniers permettent au TextInput de calculer la
+ * string exacte à retaper (`REMOVE FROM users`).
  */
 export interface UnfilteredFinding {
 	readonly span: Span;
@@ -74,7 +73,7 @@ export interface UnfilteredFinding {
 
 /**
  * Descend le statement et retourne TOUS les writes non filtrés découverts,
- * dans l'ordre d'apparition (utile pour E/3 qui liste par ligne). Un
+ * dans l'ordre d'apparition (utile pour lister par ligne). Un
  * `transaction { remove from users; remove from orders }` retourne 2
  * findings distincts, pas un warning global.
  */
@@ -99,13 +98,13 @@ function walk(stmt: Statement, out: UnfilteredFinding[]): void {
 			checkInsert(stmt, out);
 			return;
 		case "raw":
-			// D1 : payload opaque au parser — warn systématique.
+			// Payload opaque au parser — warn systématique.
 			out.push({
 				span: stmt.span,
 				kind: "raw_opaque",
 				verb: "raw",
 				// La cible d'un raw n'est pas connue au niveau AST (SQL brut opaque
-				// pour PG, command doc pour Mongo). Le TextInput E/3 demandera au
+				// pour PG, command doc pour Mongo). Le TextInput demandera au
 				// user de retaper le mot "RAW" seul comme confirmation.
 				target: "RAW"
 			});
@@ -114,8 +113,8 @@ function walk(stmt: Statement, out: UnfilteredFinding[]): void {
 			walkBody(stmt.body, out);
 			return;
 		case "savepoint":
-			// D2-amendment : walker se déclenche AUSSI sur savepoint racine
-			// standalone (usage typique : composer une tx en tapant d'abord les
+			// Le walker se déclenche AUSSI sur savepoint racine standalone
+			// (usage typique : composer une tx en tapant d'abord les
 			// savepoints — le user doit voir le warning en construction).
 			walkBody(stmt.body, out);
 			return;
@@ -173,10 +172,10 @@ function walkLetBody(
 }
 
 function checkUpdate(stmt: UpdateStatement, out: UnfilteredFinding[]): void {
-	// D4 : la présence de `.joins` ne compte PAS comme filter — un
-	// `update t with one X on l=f set …` sans .predicate reste unfiltered
-	// pour la table cible t (INNER JOIN qui match tout ≠ filter). Le lower
-	// refuse déjà `with many` donc la surface est bornée à 1-to-1/many-to-one.
+	// La présence de `.joins` ne compte PAS comme filter — un `update t
+	// with one X on l=f set …` sans .predicate reste unfiltered pour la
+	// table cible t (INNER JOIN qui match tout ≠ filter). Le lower refuse
+	// déjà `with many` donc la surface est bornée à 1-to-1/many-to-one.
 	if (stmt.predicate === undefined) {
 		out.push({
 			span: stmt.span,
@@ -199,12 +198,12 @@ function checkDelete(stmt: DeleteStatement, out: UnfilteredFinding[]): void {
 }
 
 function checkInsert(stmt: InsertStatement, out: UnfilteredFinding[]): void {
-	// D6 : bulk-copy = insert-select dont le SELECT sous-jacent n'a aucun
-	// stage `where`. Copier toute users vers archive = doubling data à grande
-	// échelle. Séparé du bucket unfiltered pour préserver le vocabulaire
-	// ADR-012 (destructif vs massif). D3 : le where éventuel de
-	// stmt.onConflict.action est IGNORÉ — c'est un filtre partiel sur les
-	// rows en conflit, pas un filtre unfiltered.
+	// Bulk-copy = insert-select dont le SELECT sous-jacent n'a aucun
+	// stage `where`. Copier toute users vers archive = doubling data à
+	// grande échelle. Séparé du bucket unfiltered pour distinguer
+	// destructif vs massif. Le where éventuel de stmt.onConflict.action
+	// est IGNORÉ — c'est un filtre partiel sur les rows en conflit, pas
+	// un filtre unfiltered.
 	if (stmt.sourceQuery !== undefined && !hasWhereStage(stmt.sourceQuery)) {
 		out.push({
 			span: stmt.span,
@@ -223,9 +222,9 @@ function hasWhereStage(query: Query): boolean {
 }
 
 /**
- * Utilitaire d'exposition — permet au ConsoleShellInner (E/3 gate execute)
- * et au route autorun (E/5.5 D14) de tester rapidement "y a-t-il au moins un
- * write dangereux" sans allouer un tableau si non nécessaire.
+ * Utilitaire d'exposition — permet au ConsoleShellInner (gate execute) et
+ * au route autorun de tester rapidement "y a-t-il au moins un write
+ * dangereux" sans allouer un tableau si non nécessaire.
  */
 export function hasAnyUnfilteredWrite(stmt: Statement): boolean {
 	return collectUnfilteredWrites(stmt).length > 0;

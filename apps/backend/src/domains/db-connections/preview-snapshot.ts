@@ -1,13 +1,12 @@
 /**
  * `putPreviewSnapshot` — enregistre le snapshot précalculé du dernier
- * rendu de preview d'une `db_connection` (C.15).
+ * rendu de preview d'une `db_connection`.
  *
- * ─── Contexte ────────────────────────────────────────────────────────
- * Sans snapshot, la gallery affiche "CLI hors ligne" dès que l'user
- * n'a plus son CLI actif. Avec, elle re-render le dernier état connu
- * côté client (theme-aware, léger : quelques KB de JSON).
+ * Sans snapshot, la gallery affiche "CLI hors ligne" dès que l'user n'a
+ * plus son CLI actif. Avec, elle re-render le dernier état connu côté
+ * client (theme-aware, léger : quelques KB de JSON).
  *
- * ─── Contrat ─────────────────────────────────────────────────────────
+ * Contrat :
  *   - Auth cookie requise (route sous `requireUser`).
  *   - `connectionId` DOIT appartenir au user (WHERE user_id — pas de
  *     404 fuit vs 403 : on renvoie `ok: false, reason: "not_found"`

@@ -1,25 +1,24 @@
 /**
- * ADR-024 PM/8 D7 — Registre unique des divergences sémantiques PG↔Mongo.
+ * Registre unique des divergences sémantiques PG↔Mongo.
  *
  * Une divergence = un comportement où Mongo et Postgres produisent des
  * résultats différents pour la même source SNQL. Certaines sont mitigées par
  * un shim runtime (coût ≤ 1 op, sémantique PG reproductible exactement),
- * d'autres restent documentées et surfacées à l'user via squiggly INFO éditeur
- * (D8, livré PM/10). Le critère de gouvernance vient de Q7c ADR-024 :
- *   « harmoniser SI coût ≤ 1 opérateur pipeline ET sémantique PG reproductible
- *     exactement, sinon documenter ».
+ * d'autres restent documentées et surfacées à l'user via squiggly INFO
+ * éditeur. Critère de gouvernance : harmoniser SI coût ≤ 1 opérateur
+ * pipeline ET sémantique PG reproductible exactement, sinon documenter.
  *
  * Ce fichier est la source de vérité consommée par :
  *  1. le planner (émission de `plan_semantic_divergence_write` en write context) ;
- *  2. l'UI éditeur (squiggly INFO tooltip inline, PM/10 via D8) ;
- *  3. les release notes générées (PM/10 D20) ;
- *  4. la parity-matrix (PM/9 D12) — whitelist explicite pour les cas où le
- *     diff bit-à-bit est attendu.
+ *  2. l'UI éditeur (squiggly INFO tooltip inline) ;
+ *  3. les release notes générées ;
+ *  4. la parity-matrix — whitelist explicite pour les cas où le diff
+ *     bit-à-bit est attendu.
  *
  * Chaque entrée = un code stable, un comportement PG, un comportement Mongo,
  * une mitigation (`shim` | `refus` | `warn`), et un test-mirror-id pour lier
  * au sibling test .test.ts. Toute PR qui touche une divergence DOIT mettre à
- * jour cette table + le test correspondant. Sinon CI fail (PM/9 gate).
+ * jour cette table + le test correspondant. Sinon CI fail (gate).
  */
 
 export type DivergenceMitigation = "shim" | "refus" | "warn";
@@ -31,13 +30,13 @@ export interface DivergenceEntry {
 	readonly mongoBehavior: string;
 	readonly mitigation: DivergenceMitigation;
 	/**
-	 * Cible du warning INFO (D8) — SNQL construct spécifique surfacé à l'user
+	 * Cible du warning INFO — SNQL construct spécifique surfacé à l'user
 	 * via squiggly. Ex: `concat` (fonction), `cast(str as json)` (pattern).
 	 * `undefined` = warning global sans anchor (release notes seulement).
 	 */
 	readonly userFacingHint?: string;
 	/**
-	 * Message actionnable pour le squiggly INFO éditeur (D8). Court, terse,
+	 * Message actionnable pour le squiggly INFO éditeur. Court, terse,
 	 * sans jargon. Cohérent [[feedback-no-ai-slop-labels]].
 	 */
 	readonly hintMessage?: string;
@@ -45,8 +44,8 @@ export interface DivergenceEntry {
 }
 
 /**
- * Divergences #13-#16 : historiques du roadmap SNQL — Parité Mongo. Chacune
- * suit le critère de gouvernance Q7c formalisé ADR-024.
+ * Divergences #13-#16 : issues historiques de la parité Mongo. Chacune suit
+ * le critère de gouvernance formalisé.
  */
 export const DIVERGENCES: readonly DivergenceEntry[] = [
 	{
@@ -56,8 +55,8 @@ export const DIVERGENCES: readonly DivergenceEntry[] = [
 		mongoBehavior: "Mongo $concat propage NULL",
 		mitigation: "shim",
 		userFacingHint: "concat",
-		hintMessage: "Mongo propage NULL — shim $ifNull en projection émule PG.CONCAT (parité livrée PM/8)",
-		testMirrorId: "PM/8-concat-null-shim"
+		hintMessage: "Mongo propage NULL — shim $ifNull en projection émule PG.CONCAT (parité livrée)",
+		testMirrorId: "-concat-null-shim"
 	},
 	{
 		code: "cast_bool_truthy",
@@ -86,7 +85,7 @@ export const DIVERGENCES: readonly DivergenceEntry[] = [
 		userFacingHint: "!=",
 		hintMessage: "Mongo NULL-aware sur write — ajoute `or x is null` pour parité PG stricte"
 	},
-	// ADR-024 D18 — 4 divergences supplémentaires surfacées par l'adversarial
+	// 4 divergences supplémentaires surfacées par l'adversarial
 	// (invisibles avant port des 4 blockers, silent-corruption).
 	{
 		code: "not_in_null_ambiguous",
@@ -135,7 +134,7 @@ export function divergenceByCode(
 
 /**
  * Liste les hints attachés à un construct SNQL donné (ex: `concat`, `!=`,
- * `cast(_ as bool)`). Consommé par le squiggly INFO éditeur (PM/10 D8) pour
+ * `cast(_ as bool)`). Consommé par le squiggly INFO éditeur pour
  * afficher un tooltip in-context sur les usages à risque.
  */
 export function hintsForConstruct(

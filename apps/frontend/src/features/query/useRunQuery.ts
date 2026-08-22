@@ -86,8 +86,8 @@ export class SnqlRuntimeError extends Error {
 export interface RunQueryInput {
 	readonly connectionId: string;
 	readonly source: string;
-	/** C.21.5 : si présent, appelle la route team-scoped ; sinon la
-	 *  route legacy (transitionnel, supprimée en C.21.7). */
+	/** Si présent, appelle la route team-scoped ; sinon la route legacy
+	 *  (transitionnel). */
 	readonly teamSlug?: string | null;
 }
 

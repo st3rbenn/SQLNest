@@ -12,11 +12,11 @@
  * `sqlnest-postgres-app` port 5434). `describe.skipIf(!DATABASE_URL)`
  * saute proprement quand la base est absente (CI sans docker par exemple).
  *
- * ─── Modèle testé (C.5) ───────────────────────────────────────────────
- * canvas_state est rattaché à `(user_id, db_connection_id)` — un canvas
- * par (user × connection). Chaque test crée d'abord une db_connection
- * fake pour son user via le helper `createTestConnection`, puis exerce
- * les endpoints avec le connectionId retourné.
+ * Modèle testé : canvas_state est rattaché à `(user_id,
+ * db_connection_id)` — un canvas par (user × connection). Chaque test
+ * crée d'abord une db_connection fake pour son user via le helper
+ * `createTestConnection`, puis exerce les endpoints avec le connectionId
+ * retourné.
  */
 
 import { randomBytes } from "node:crypto";

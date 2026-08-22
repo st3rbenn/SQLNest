@@ -1,7 +1,7 @@
 /**
- * Routes `/api/teams/*` — méta-info des teams de l'user (C.21.3).
+ * Routes `/api/teams/*` — méta-info des teams de l'user.
  *
- * ─── Endpoints (tous protégés par requireUser) ────────────────────────
+ * Endpoints (tous protégés par requireUser) :
  *   GET  /api/teams/me                      → { teams: [...] }
  *   GET  /api/teams/me/default              → team perso (crée lazy)
  *   GET  /api/teams/:slug                   → { id, slug, name, createdAt }

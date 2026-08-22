@@ -1,15 +1,15 @@
 /**
- * Routes team-scoped `/api/teams/:slug/canvas-state` (C.21.3).
+ * Routes team-scoped `/api/teams/:slug/canvas-state` :
  *
  *   GET    /api/teams/:slug/canvas-state?connectionId=<uuid>
  *   PUT    /api/teams/:slug/canvas-state          (body: connectionId+payload)
  *   DELETE /api/teams/:slug/canvas-state?connectionId=<uuid>
  *
- * Décision (C.21.2/3) : `canvas_state` reste scopé par `user_id` — chaque
- * user a SON canvas pour une connection donnée. L'AUTORISATION passe
- * par team : on vérifie que la connection appartient à la team, puis on
- * lit/écrit le canvas de l'user. En V2 (plusieurs users dans une team),
- * chaque éditeur garde son propre layout (positions perso, non partagées).
+ * `canvas_state` reste scopé par `user_id` — chaque user a SON canvas
+ * pour une connection donnée. L'AUTORISATION passe par team : on vérifie
+ * que la connection appartient à la team, puis on lit/écrit le canvas de
+ * l'user. Avec plusieurs users dans une team, chaque éditeur garde son
+ * propre layout (positions perso, non partagées).
  */
 
 import { sql } from "drizzle-orm";

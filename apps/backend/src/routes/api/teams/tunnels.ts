@@ -1,23 +1,16 @@
 /**
- * Routes team-scoped `/api/teams/:slug/tunnels/*` (C.21.3).
- *
- * Miroir de `routes/api/tunnels/root.ts` pour les routes qui touchent
- * un pairing lié à une team précise :
+ * Routes team-scoped `/api/teams/:slug/tunnels/*` :
  *
  *   POST /api/teams/:slug/tunnels/pairings
  *   GET  /api/teams/:slug/tunnels/pairings/:code/status
  *   POST /api/teams/:slug/tunnels/pairings/:code/approve
  *
- * ─── Notes ──────────────────────────────────────────────────────────
- * - Le device flow `POST /api/tunnels/authenticate` (le CLI présente
- *   sa signature) reste PUBLIC + non team-scoped : le CLI ne connaît
- *   pas la team (choisie côté user au moment du /approve). En C.21.4
- *   on ajoutera `tunnel_pairing.team_id` pour transporter le choix du
- *   `/approve` vers le `/authenticate`.
- * - En C.21.3 la team n'est pas encore stockée sur le pairing : le
- *   fallback dans `authenticatePairing` prend la team perso de
- *   l'user. Tant qu'un user n'a qu'une seule team (V1), le comporte-
- *   ment est identique à un pairing team-scoped explicite. */
+ * Miroir de `routes/api/tunnels/root.ts` pour les routes qui touchent
+ * un pairing lié à une team précise. Le device flow
+ * `POST /api/tunnels/authenticate` (le CLI présente sa signature) reste
+ * PUBLIC + non team-scoped : le CLI ne connaît pas la team (choisie côté
+ * user au moment du /approve). `tunnel_pairing.team_id` transporte le
+ * choix du `/approve` vers le `/authenticate`. */
 
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
@@ -84,8 +77,8 @@ export default function teamsTunnelsRoute(fastify: FastifyInstance) {
 		async (request, reply) => {
 			assertTeamAccess(request);
 			try {
-				// C.21.4 : le pairing est créé DÉJÀ scopé à la team courante —
-				// à l'authenticate, `authenticatePairing` lira `pairing.teamId`
+				// Le pairing est créé DÉJÀ scopé à la team courante — à
+				// l'authenticate, `authenticatePairing` lira `pairing.teamId`
 				// pour créer la db_connection dans la bonne team, sans avoir
 				// besoin de fallback.
 				const result = await createPairing(
@@ -172,7 +165,7 @@ export default function teamsTunnelsRoute(fastify: FastifyInstance) {
 				return reply.code(400).send({ message: "Code invalide" });
 			}
 
-			// C.21.4 : `teamIdOverride` = request.team.id — enforce que la
+			// `teamIdOverride` = request.team.id — enforce que la
 			// db_connection sera créée dans CETTE team, même si le pairing
 			// avait un team_id différent (rare : l'user a scanné un code
 			// depuis une autre team). Garantit l'invariant URL ↔ team.

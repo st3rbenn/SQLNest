@@ -32,8 +32,8 @@ import { inferCollection, introspectMongo, type SampledDoc } from "./introspect"
 const SERVER_SELECTION_TIMEOUT_MS = 10_000;
 
 /**
- * Sprint T3/2 : shape stable rendu par `describe <table>`. Identique côté PG
- * (le SQL produit ces mêmes colonnes) → l'UI n'a pas à brancher sur l'engine.
+ * Shape stable rendu par `describe <table>`. Identique côté PG (le SQL
+ * produit ces mêmes colonnes) → l'UI n'a pas à brancher sur l'engine.
  */
 const DESCRIBE_COLUMNS: readonly ResultColumn[] = [
 	{ name: "name", type: "string", nullable: false },
@@ -45,8 +45,8 @@ const DESCRIBE_COLUMNS: readonly ResultColumn[] = [
 ];
 
 /**
- * Sprint T3/3 : shape stable de `list indexes`. Identique côté PG (le SQL
- * pg_index produit ces mêmes colonnes) → l'UI n'a pas à brancher sur l'engine.
+ * Shape stable de `list indexes`. Identique côté PG (le SQL pg_index produit
+ * ces mêmes colonnes) → l'UI n'a pas à brancher sur l'engine.
  */
 const INDEXES_COLUMNS: readonly ResultColumn[] = [
 	{ name: "name", type: "string", nullable: false },
@@ -164,9 +164,9 @@ function writeErrorMessage(op: string, cause: unknown): string {
  * et on annote le `codeName` / `code` du driver s'ils sont là.
  */
 /**
- * ADR-024 PM/7 D6 — abort de nettoyage tx : codes attendus (à avaler
- * silencieusement) vs codes réseau/timeout (à logger + enrichir l'erreur
- * finale). Les codes attendus signalent que le serveur a déjà avorté la tx :
+ * Abort de nettoyage tx : codes attendus (à avaler silencieusement) vs codes
+ * réseau/timeout (à logger + enrichir l'erreur finale). Les codes attendus
+ * signalent que le serveur a déjà avorté la tx :
  *  - `NoSuchTransaction` (251) : session sans tx active (déjà avortée).
  *  - `TransactionNotFound` : idem, variante d'autres versions driver.
  *  - `WriteConflict` (112) : auto-abort après conflit optimistic locking.
@@ -220,14 +220,14 @@ function describeMongoExecutionError(cause: unknown): string {
  * disponible côté caller.
  */
 /**
- * Sprint T3/4 : normalise le résultat d'un db.runCommand() en Row[]. Les
- * commands Mongo retournent des shapes hétérogènes — on inspecte les champs
- * courants qui portent un batch de docs (`cursor.firstBatch` pour aggregate/
- * find, `values` pour distinct, `results` pour explain). Sinon on renvoie
- * le document entier comme une seule row (le user écrit sa command, il sait).
+ * Normalise le résultat d'un db.runCommand() en Row[]. Les commands Mongo
+ * retournent des shapes hétérogènes — on inspecte les champs courants qui
+ * portent un batch de docs (`cursor.firstBatch` pour aggregate/find, `values`
+ * pour distinct, `results` pour explain). Sinon on renvoie le document entier
+ * comme une seule row (le user écrit sa command, il sait).
  */
 /**
- * Sprint T3/4 : Mongo exige `cursor` sur les commandes streamées. Sans lui,
+ * Mongo exige `cursor` sur les commandes streamées. Sans lui,
  * `db.command({aggregate: ..., pipeline: [...]})` échoue avec « The 'cursor'
  * option is required, except for aggregate with the explain argument ».
  * Whitelist des commandes concernées — pour les autres (drop, insert, count
@@ -292,10 +292,10 @@ class MongoConnection implements Connection {
 	}
 
 	/**
-	 * ADR-024 D3 — features driver détectées au bootstrap, exposées via le
-	 * bag typé `engineFeatures` (discriminé par `kind`). Consommé par run.ts /
-	 * codegen sprint pour émettre `planner_mongo_version_capability_missing`
-	 * avant d'appeler une op qui exige la feature.
+	 * Features driver détectées au bootstrap, exposées via le bag typé
+	 * `engineFeatures` (discriminé par `kind`). Consommé par run.ts / codegen
+	 * pour émettre `planner_mongo_version_capability_missing` avant d'appeler
+	 * une op qui exige la feature.
 	 */
 	get engineFeatures(): MongoEngineFeatures {
 		return { kind: "mongodb", features: this.#mongoFeatures };
@@ -323,8 +323,8 @@ class MongoConnection implements Connection {
 	}
 
 	/**
-	 * Sprint T4/1 : fingerprint MongoDB. Mongo n'a pas de `system_identifier`
-	 * comme PG — le mieux qu'on ait de stable :
+	 * Fingerprint MongoDB. Mongo n'a pas de `system_identifier` comme PG —
+	 * le mieux qu'on ait de stable :
 	 *  1. `replSetGetStatus.set` (nom du replica set) — dispo si l'user est
 	 *     dans un cluster répliqué (RS) ou sharded. Stable, unique par cluster.
 	 *  2. Fallback : SHA256(host:port/dbname) — instable si l'user connecte via
@@ -450,10 +450,10 @@ class MongoConnection implements Connection {
 				return { columns: [], rows: [], rowCount: result.matchedCount };
 			}
 			if (query.op === "update-agg-merge") {
-				// ADR-024 PM/4 Q4a — write-join via aggregate + $merge natif.
-				// Le $merge est un stage terminal qui écrit comme side-effect ;
-				// le cursor result est vide. rowCount = 0 (limitation documentée
-				// dans MongoWriteQuery type — 2-pass count optionnel prévu PM/10).
+				// Write-join via aggregate + $merge natif. Le $merge est un stage
+				// terminal qui écrit comme side-effect ; le cursor result est
+				// vide. rowCount = 0 (limitation documentée dans MongoWriteQuery
+				// type — 2-pass count optionnel prévu).
 				const pipeline = hydrateBson(
 					[...query.pipeline],
 					false
@@ -462,14 +462,12 @@ class MongoConnection implements Connection {
 				return { columns: [], rows: [], rowCount: 0 };
 			}
 			if (query.op === "insert-select-agg-merge") {
-				// ADR-024 PM/5 Q5a — insert-select via aggregate + $merge dans
-				// collection cible. D19-revised (validation E2E chinook-mongo
-				// 2026-08-21) : $merge NE PEUT PAS être utilisé DANS une session tx
-				// Mongo (contrainte driver, toutes versions Mongo 4.2+). D19
-				// original ("tx obligatoire") est inversé : hors session OK,
-				// dans session refus au codegen (#executeWriteInSession). Le
-				// $merge whenMatched='fail' gère les duplicate keys ; non-atomique
-				// sur batch mid-failure — divergence documentée dans registre D7.
+				// Insert-select via aggregate + $merge dans collection cible.
+				// $merge NE PEUT PAS être utilisé DANS une session tx Mongo
+				// (contrainte driver, toutes versions Mongo 4.2+) : hors
+				// session OK, dans session refus au codegen
+				// (#executeWriteInSession). Le $merge whenMatched='fail' gère
+				// les duplicate keys ; non-atomique sur batch mid-failure.
 				const sourceColl = this.#requireDb().collection(query.sourceCollection);
 				const pipeline = hydrateBson(
 					[...query.pipeline],
@@ -513,9 +511,9 @@ class MongoConnection implements Connection {
 	}
 
 	/**
-	 * Sprint T3/1 : dispatch introspection Mongo. `list-tables` → listCollections
-	 * sur la DB courante, filtre sur les collections user (`type: "collection"`)
-	 * pour exclure les views/system.
+	 * Dispatch introspection Mongo. `list-tables` → listCollections sur la DB
+	 * courante, filtre sur les collections user (`type: "collection"`) pour
+	 * exclure les views/system.
 	 */
 	async #executeIntrospect(
 		query: Extract<NativeQuery, { kind: "mongo-introspect" }>
@@ -616,11 +614,11 @@ class MongoConnection implements Connection {
 	}
 
 	/**
-	 * Sprint T3/4 : escape hatch `raw {...}` Mongo → db.runCommand(document).
-	 * Le résultat est aplati en Row[] : on inspecte les champs classiques d'une
-	 * réponse Mongo (`cursor.firstBatch`, `results`, `values`) pour extraire
-	 * des rows ; sinon on renvoie le document brut comme une seule row. Aucun
-	 * shape stable — c'est l'user qui écrit la command et lit le résultat.
+	 * Escape hatch `raw {...}` Mongo → db.runCommand(document). Le résultat
+	 * est aplati en Row[] : on inspecte les champs classiques d'une réponse
+	 * Mongo (`cursor.firstBatch`, `results`, `values`) pour extraire des rows ;
+	 * sinon on renvoie le document brut comme une seule row. Aucun shape
+	 * stable — c'est l'user qui écrit la command et lit le résultat.
 	 */
 	async #executeRaw(
 		query: Extract<NativeQuery, { kind: "mongo-raw" }>
@@ -653,8 +651,8 @@ class MongoConnection implements Connection {
 	}
 
 	/**
-	 * Sprint TxMongo : bloc `transaction { … }` sur Mongo (requiert un replica
-	 * set côté serveur). Une session unique porte startTransaction → commit ou
+	 * Bloc `transaction { … }` sur Mongo (requiert un replica set côté
+	 * serveur). Une session unique porte startTransaction → commit ou
 	 * abort. Chaque step reçoit `{ session }` — sans ça, le driver exécute
 	 * la commande hors transaction et le rollback ne réagira pas dessus.
 	 *
@@ -695,7 +693,7 @@ class MongoConnection implements Connection {
 				} else if (step.kind === "write") {
 					lastResult = await this.#executeWriteInSession(step.write, session);
 				} else {
-					// PA/5 (ADR-024-A) — savepoint via compensation logique in-session.
+					// Savepoint via compensation logique in-session.
 					lastResult = await this.#executeSavepoint(step, session);
 				}
 			}
@@ -705,12 +703,12 @@ class MongoConnection implements Connection {
 			try {
 				await session.abortTransaction();
 			} catch (abortErr) {
-				// ADR-024 PM/7 D6 — abortTransaction() erreurs enrichies. On avale
-				// les codes attendus (tx déjà avortée par le serveur : WriteConflict,
-				// TransactionNotFound, NoSuchTransaction, TransientTransactionError).
-				// Pour tout autre code (network, timeout) : log + enrichit l'erreur
-				// finale avec {abort_error} — tx orpheline invisible côté serveur
-				// est le pire failure mode (verrous conservés jusqu'à
+				// abortTransaction() erreurs enrichies. On avale les codes attendus
+				// (tx déjà avortée par le serveur : WriteConflict, TransactionNotFound,
+				// NoSuchTransaction, TransientTransactionError). Pour tout autre
+				// code (network, timeout) : log + enrichit l'erreur finale avec
+				// {abort_error} — tx orpheline invisible côté serveur est le pire
+				// failure mode (verrous conservés jusqu'à
 				// transactionLifetimeLimitSeconds).
 				const expected = isExpectedAbortError(abortErr);
 				if (!expected) {
@@ -730,10 +728,10 @@ class MongoConnection implements Connection {
 	}
 
 	/**
-	 * Sprint TxMongo : variante scopée session de #executeWrite. Duplique
-	 * volontairement la logique de dispatch (insert/update/delete) pour passer
-	 * `{ session }` au driver — impossible à factoriser proprement sans
-	 * complexifier la signature publique. L'atomicité de la transaction rend
+	 * Variante scopée session de #executeWrite. Duplique volontairement la
+	 * logique de dispatch (insert/update/delete) pour passer `{ session }` au
+	 * driver — impossible à factoriser proprement sans complexifier la
+	 * signature publique. L'atomicité de la transaction rend
 	 * `writeErrorMessage` moins pertinent (partial insert impossible dans une
 	 * tx qui rollback), mais on garde le format pour homogénéité.
 	 */
@@ -764,9 +762,9 @@ class MongoConnection implements Connection {
 				return { columns: [], rows: [], rowCount: result.matchedCount };
 			}
 			if (query.op === "update-agg-merge") {
-				// ADR-024 PM/4 Q4a — write-join dans une transaction Mongo.
-				// Fonctionne sur RS 4.2+ (aggregation avec $merge en tx supportée
-				// depuis MongoDB 4.2 replica set). rowCount = 0 (limitation $merge).
+				// Write-join dans une transaction Mongo. Fonctionne sur RS 4.2+
+				// (aggregation avec $merge en tx supportée depuis MongoDB 4.2
+				// replica set). rowCount = 0 (limitation $merge).
 				const pipeline = hydrateBson(
 					[...query.pipeline],
 					false
@@ -775,14 +773,14 @@ class MongoConnection implements Connection {
 				return { columns: [], rows: [], rowCount: 0 };
 			}
 			if (query.op === "insert-select-agg-merge") {
-				// ADR-024-A PA/3 — insert-select DANS session tx via matérialisation
-				// client + insertMany (le $merge natif est interdit en session tx, cf
-				// D19-revised). Le pipeline est split : (a) source-fetch = toutes les
-				// stages avant $merge (retourne des docs), (b) $merge terminal droppé.
+				// Insert-select DANS session tx via matérialisation client +
+				// insertMany (le $merge natif est interdit en session tx). Le
+				// pipeline est split : (a) source-fetch = toutes les stages avant
+				// $merge (retourne des docs), (b) $merge terminal droppé.
 				// insertMany écrit atomiquement dans la même session tx. Whole-tx
-				// rollback protège en cas d'erreur. Non-atomique par-doc sur duplicate
-				// key (insertMany ordonné throw à la première collision) — même
-				// sémantique que $merge whenMatched='fail' hors tx.
+				// rollback protège en cas d'erreur. Non-atomique par-doc sur
+				// duplicate key (insertMany ordonné throw à la première collision)
+				// — même sémantique que $merge whenMatched='fail' hors tx.
 				const sourceColl = this.#requireDb().collection(query.sourceCollection);
 				const stagesBeforeMerge = query.pipeline.filter(
 					(s) => !("$merge" in s)
@@ -841,12 +839,12 @@ class MongoConnection implements Connection {
 	}
 
 	/**
-	 * PA/5 (ADR-024-A) FLAGSHIP — savepoint Mongo via compensation logique
-	 * in-session. Pour chaque write du body : capture snapshot pre-write (find
-	 * touched via session), exec le write, retient la compensation. Sur erreur
-	 * dans un write du body : apply toutes les compensations retenues en REVERSE
-	 * order dans la MÊME session tx, puis absorbe l'erreur (savepoint rollback
-	 * partiel). La whole-tx continue au step suivant, semantique parité PG.
+	 * Savepoint Mongo via compensation logique in-session. Pour chaque write
+	 * du body : capture snapshot pre-write (find touched via session), exec le
+	 * write, retient la compensation. Sur erreur dans un write du body : apply
+	 * toutes les compensations retenues en REVERSE order dans la MÊME session
+	 * tx, puis absorbe l'erreur (savepoint rollback partiel). La whole-tx
+	 * continue au step suivant, sémantique parité PG.
 	 *
 	 * Sur erreur transient (WriteConflict, TransactionAborted, NoSuchTransaction),
 	 * la session est déjà marquée aborted par le driver ; les compensations
@@ -917,9 +915,9 @@ class MongoConnection implements Connection {
 	}
 
 	/**
-	 * PA/5 — exécute un write dans une session tx ET retourne la compensation
-	 * inverse à appliquer si le savepoint doit rollback. Snapshot pre-write
-	 * capturé côté RAM avant l'exec (find via session, cohérence intra-tx).
+	 * Exécute un write dans une session tx ET retourne la compensation inverse
+	 * à appliquer si le savepoint doit rollback. Snapshot pre-write capturé
+	 * côté RAM avant l'exec (find via session, cohérence intra-tx).
 	 */
 	async #execWriteWithCompensation(
 		query: import("@sqlnest/snql").MongoWriteQuery,
@@ -1034,7 +1032,7 @@ class MongoConnection implements Connection {
 }
 
 /**
- * PA/5 — extrait les noms de fields écrits par un update Mongo (forme classique
+ * Extrait les noms de fields écrits par un update Mongo (forme classique
  * `{$set: {...}}` ou pipeline `[{$set: {...}}]`). Utilisé pour builder la
  * projection du snapshot pre-write (retenir les old values seulement pour les
  * champs qui vont être modifiés).
@@ -1052,11 +1050,11 @@ function extractUpdateFields(update: unknown): string[] {
 }
 
 /**
- * Sprint TxMongo : mapping IsolationLevel SNQL → options de transaction Mongo
- * (`readConcern` + `writeConcern`). Absence d'isolation → défauts Mongo
- * (snapshot read + local write) — l'user n'a rien demandé, on ne surspécifie
- * pas. IsolationLevel SNQL a 3 valeurs (parser-enum fermé) : pas de default
- * case, la switch est exhaustive.
+ * Mapping IsolationLevel SNQL → options de transaction Mongo (`readConcern` +
+ * `writeConcern`). Absence d'isolation → défauts Mongo (snapshot read + local
+ * write) — l'user n'a rien demandé, on ne surspécifie pas. IsolationLevel SNQL
+ * a 3 valeurs (parser-enum fermé) : pas de default case, la switch est
+ * exhaustive.
  */
 function mongoTransactionOptions(
 	iso: import("@sqlnest/snql").IsolationLevel | undefined
@@ -1096,8 +1094,8 @@ export const mongoAdapter: EngineAdapter = {
 			});
 			// Fail-fast : établit et vérifie tout de suite. Ordre important :
 			// (1) connect() ouvre le pool, (2) probe capabilities pour figer la
-			// matrice version × feature (ADR-024 D3), (3) construit la Connection
-			// avec les features cachées, (4) ping() sanity check final.
+			// matrice version × feature, (3) construit la Connection avec les
+			// features cachées, (4) ping() sanity check final.
 			await client.connect();
 			const mongoFeatures = await probeMongoFeatures(client.db(config.database));
 			const connection = new MongoConnection(

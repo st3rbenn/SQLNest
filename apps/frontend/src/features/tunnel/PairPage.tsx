@@ -1,23 +1,23 @@
 /**
  * Page `/team/:slug/pair` — finalise le pairing device flow lancé par le
- * CLI (`sqlnest connect`). Décisions figées : [[ADR-022]].
+ * CLI (`sqlnest connect`).
  *
- * ─── Flow user ────────────────────────────────────────────────────────
- *   1. `sqlnest connect` → CLI ouvre `/pair?code=ABCD-1234` (prefill D7).
+ * Flow user :
+ *   1. `sqlnest connect` → CLI ouvre `/pair?code=ABCD-1234` (prefill).
  *   2. Le code est déjà dans l'input → debounce 350 ms → GET `/status`
- *      surface `existingConnection` (cascade fp/checksum, ADR-017) :
+ *      surface `existingConnection` (cascade fp/checksum) :
  *      - **Premier pairing** (`existingConnection == null`) — titre
  *        « Nouveau canvas », input Code + input Nom + bouton « Autoriser ».
  *      - **Reconnaissance** (`existingConnection != null`) — titre
  *        « Reconnexion à <name> », code preview verrouillé (ancre
- *        anti-phishing Q2), bouton « Confirmer & ouvrir <name> ».
- *   3. Banner identité au-dessus du form (Q1(b) micro-confirm) : rappelle
- *      quel user va approuver l'attach du CLI à la db_connection.
- *   4. Click Confirmer → refetch session (D2) puis, en reconnaissance,
- *      re-poll `/status` (D3 mitigation stale fp post `docker down/up`).
- *      POST `/approve` → `setSuccess`.
+ *        anti-phishing), bouton « Confirmer & ouvrir <name> ».
+ *   3. Banner identité au-dessus du form : rappelle quel user va
+ *      approuver l'attach du CLI à la db_connection.
+ *   4. Click Confirmer → refetch session puis, en reconnaissance, re-poll
+ *      `/status` (mitigation stale fp post `docker down/up`). POST
+ *      `/approve` → `setSuccess`.
  *   5. Poll `/db-connections` jusqu'à trouver l'entry cible + isOnline,
- *      prefetch canvas data, navigate direct au canvas (Q5(a) + D4).
+ *      prefetch canvas data, navigate direct au canvas.
  */
 
 import { Loader, TextInput } from "@mantine/core";
@@ -105,10 +105,10 @@ const codeChipStyle: CSSProperties = {
 	color: "var(--sqlnest-text-secondary)"
 };
 
-// P/5 (ADR-022 Q6a) — illustration au-dessus du form, différenciée
-// selon le variant (premier vs reconnaissance). Rend visible la cascade
-// silencieuse ADR-017 côté frontend : `IconRefresh` sur reconnaissance
-// = signal fort « on retrouve ta DB », complément du titre `PageHead`.
+// Illustration au-dessus du form, différenciée selon le variant (premier
+// vs reconnaissance). Rend visible la cascade silencieuse côté frontend :
+// `IconRefresh` sur reconnaissance = signal fort « on retrouve ta DB »,
+// complément du titre `PageHead`.
 const heroIconStyle: CSSProperties = {
 	display: "flex",
 	justifyContent: "center",
@@ -120,10 +120,10 @@ const heroIconReconnectStyle: CSSProperties = {
 	color: "var(--sqlnest-accent)"
 };
 
-// Q2 rationale (ADR-022) : en reconnaissance, le code Crockford reste
-// l'ancre anti-phishing du device flow. On l'affiche en gros, verrouillé
-// (pas de TextInput éditable), pour que l'user vérifie visuellement qu'il
-// matche celui affiché dans son terminal AVANT de confirmer.
+// En reconnaissance, le code Crockford reste l'ancre anti-phishing du
+// device flow. On l'affiche en gros, verrouillé (pas de TextInput
+// éditable), pour que l'user vérifie visuellement qu'il matche celui
+// affiché dans son terminal AVANT de confirmer.
 const codePreviewLabelStyle: CSSProperties = {
 	fontSize: 11,
 	fontWeight: 500,
@@ -209,9 +209,9 @@ export function PairPage() {
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
 	const teamSlug = useCurrentTeamSlug();
-	// P/2 (ADR-022 D7) : le CLI ouvre `/pair?code=XXXX-XXXX` — on hydrate
-	// l'input avec cette valeur. Le `useEffect` de debounce `/status` en
-	// bas se déclenche automatiquement dès que `normalize(code).length === 8`.
+	// Le CLI ouvre `/pair?code=XXXX-XXXX` — on hydrate l'input avec cette
+	// valeur. Le `useEffect` de debounce `/status` en bas se déclenche
+	// automatiquement dès que `normalize(code).length === 8`.
 	const { code: prefilledCode } = PairRoute.useSearch();
 	const { data: session } = useCurrentUser();
 	const [code, setCode] = useState(prefilledCode ?? "");
@@ -261,9 +261,9 @@ export function PairPage() {
 		}
 		setIsSubmitting(true);
 		try {
-			// D2 (ADR-022) : refetch la session AU SUBMIT — la page peut
-			// être restée ouverte plus longtemps que le cookie Better Auth
-			// (approve attache un CLI à une db_connection team-scoped, effet
+			// Refetch la session AU SUBMIT — la page peut être restée
+			// ouverte plus longtemps que le cookie Better Auth (approve
+			// attache un CLI à une db_connection team-scoped, effet
 			// persistant ; on ne doit pas approuver avec un cookie mort).
 			// Sur `data === null`, redirect vers login avec `?redirect=`
 			// pointant sur ce même /pair — même contrat que le guard
@@ -276,10 +276,10 @@ export function PairPage() {
 				void navigate({ to: "/login", search: { redirect: returnPath } });
 				return;
 			}
-			// D3 (ADR-022) — en mode reconnaissance, re-poll `/status` juste
-			// avant l'approve. Si l'user a fait `docker-compose down && up`
-			// entre le mount et le click, le `system_identifier` PG a changé
-			// → nouveau `db_fingerprint` → la cascade backend ne match plus,
+			// En mode reconnaissance, re-poll `/status` juste avant
+			// l'approve. Si l'user a fait `docker-compose down && up` entre
+			// le mount et le click, le `system_identifier` PG a changé →
+			// nouveau `db_fingerprint` → la cascade backend ne match plus,
 			// l'user allait "reconnecter" à une db_connection stale. On
 			// downgrade transparent vers le flow premier pairing (l'input
 			// deviceName apparaît) sans surprise sécurité.
@@ -319,9 +319,9 @@ export function PairPage() {
 		}
 	}
 
-	// P/3 (ADR-022 Q5a + D4) — post-approve on va DIRECT au canvas de la
-	// db_connection pair-ée, plus vers la gallery. On unifie premier
-	// pairing et reconnaissance derrière un même poll :
+	// Post-approve on va DIRECT au canvas de la db_connection pair-ée,
+	// plus vers la gallery. On unifie premier pairing et reconnaissance
+	// derrière un même poll :
 	//
 	//   1. Poll `/db-connections` jusqu'à trouver l'entry cible
 	//      (par id si la cascade fp/checksum a matché, sinon par nom)

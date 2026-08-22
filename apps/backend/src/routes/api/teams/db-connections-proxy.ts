@@ -1,5 +1,5 @@
 /**
- * Routes team-scoped proxifiées vers le CLI (C.21.3).
+ * Routes team-scoped proxifiées vers le CLI :
  *
  *   GET  /api/teams/:slug/db-connections/:id/schema
  *   POST /api/teams/:slug/db-connections/:id/query

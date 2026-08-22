@@ -140,14 +140,13 @@ export default fp(
 			},
 			// Policy C (suite) — annule les tokens OAuth avant insert/update en DB.
 			//
-			// ─── C.21.1 hook user.create.after ────────────────────────────
-			// À la signup (email/password OU OAuth premier login), on
-			// auto-crée la team « Personal » de l'user. `createPersonalTeam`
-			// est idempotent — si le fallback lazy de `/api/teams/me/default`
-			// a déjà couru en amont (race browser rapide), l'INSERT est
-			// skipé et on log juste. Une erreur ici est loggée mais
-			// N'ANNULE PAS le signup — la route `/api/teams/me/default`
-			// fera le rattrapage au premier fetch.
+			// Hook user.create.after : à la signup (email/password OU OAuth
+			// premier login), on auto-crée la team « Personal » de l'user.
+			// `createPersonalTeam` est idempotent — si le fallback lazy de
+			// `/api/teams/me/default` a déjà couru en amont (race browser
+			// rapide), l'INSERT est skipé et on log juste. Une erreur ici est
+			// loggée mais N'ANNULE PAS le signup — la route
+			// `/api/teams/me/default` fera le rattrapage au premier fetch.
 			databaseHooks: {
 				account: {
 					create: {
@@ -185,7 +184,7 @@ export default fp(
 							} catch (err) {
 								fastify.log.error(
 									{ err, userId: createdUser.id },
-									"C.21.1 hook: failed to create personal team on signup — fallback lazy créera au premier fetch"
+									"user.create.after hook: failed to create personal team on signup — fallback lazy créera au premier fetch"
 								);
 							}
 						}

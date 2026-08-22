@@ -2,7 +2,7 @@
  * Language service — complétion SNQL **schema-aware**, pure et testable.
  *
  * L'éditeur manipule en permanence du SNQL **incomplet/invalide** (`get users |
- * where a` + curseur). Plutôt qu'une grammaire d'éditeur séparée (ADR-009), on
+ * where a` + curseur). Plutôt qu'une grammaire d'éditeur séparée, on
  * **réutilise le lexer du cœur** (`tokenize`) pour lire le contexte au curseur :
  * le lexer EST le Token Dictionary → une seule source de vérité, zéro dérive
  * entre deux grammaires. Le [[SchemaModel]] fournit les candidats (collections,
@@ -34,7 +34,7 @@ export interface SnqlCompletion {
 	/** Texte réellement inséré si différent du label (ex. clause `on` complète). */
 	readonly apply?: string;
 	/**
-	 * Sprint T2/13.6 : hint pour un renderer surface (CM6) qui veut fabriquer
+	 * hint pour un renderer surface (CM6) qui veut fabriquer
 	 * un apply function smart (auto-indent, guillemets pour string, curseur
 	 * positionné). Absent = pas de smart-apply, le renderer insère `label` nu.
 	 *  - "string" : type texte/uuid/enum — insérer `label: "|"` (curseur entre guillemets)
@@ -64,13 +64,13 @@ const PRIMARY_VERBS: readonly {
 	// affichés avec l'icône keyword mais dans la même palette top-level.
 	{ label: "list", detail: "introspection", type: "keyword" },
 	{ label: "describe", detail: "introspection", type: "keyword" },
-	// T3/4 : `raw` escape hatch — dernier recours documenté.
+	// `raw` escape hatch — dernier recours documenté.
 	{ label: "raw", detail: "escape hatch (SQL/Mongo brut)", type: "keyword" },
-	// T3/6 : `let` — CTE binding, préfixe une requête plus grosse.
+	// `let` — CTE binding, préfixe une requête plus grosse.
 	{ label: "let", detail: "CTE (let x = find ...; body)", type: "keyword" }
 ];
 
-/** Sous-commandes reconnues après `list` (T3/1 + T3/3). */
+/** Sous-commandes reconnues après `list` (+). */
 const LIST_SUBCOMMANDS: readonly string[] = ["tables", "schemas", "indexes"];
 
 /**
@@ -137,7 +137,7 @@ export function completeSnql(
 		return { from, options: [] };
 	}
 
-	// Sprint T2/13.6 : le smart-apply insère `col: "|"` avec curseur entre
+	// le smart-apply insère `col: "|"` avec curseur entre
 	// guillemets — le préfixe contient alors un `"` ouvert que le lexer refuse
 	// (`lex_unterminated_string`). On détecte le cas via un compte des `"` non
 	// échappés dans le préfixe (impair = string ouverte) et on ajoute une
@@ -152,12 +152,12 @@ export function completeSnql(
 		return { from, options: [] };
 	}
 
-	// Sprint T2/13.5 : pour un `add {...} into t`, l'user tape souvent le doc
+	// pour un `add {...} into t`, l'user tape souvent le doc
 	// AVANT `into t`. On tokenise aussi le suffixe pour retrouver la target,
 	// sinon on ne pourrait rien proposer dans un doc quand l'user commence par
 	// `add {|`. Silence si suffixe non-tokenisable.
 	let suffixToks: Token[] = [];
-	// Sprint T2/13.6 : si le curseur est dans une string ouverte, le suffixe
+	// si le curseur est dans une string ouverte, le suffixe
 	// démarre par le reste de la string (jusqu'au `"` fermant). Skippe-le
 	// pour tokeniser proprement le reste (`into resource`).
 	const suffixSlice = insideOpenString
@@ -176,7 +176,7 @@ export function completeSnql(
 }
 
 /**
- * Sprint T2/13.6 : true ssi le curseur est à l'intérieur d'une string
+ * true ssi le curseur est à l'intérieur d'une string
  * ouverte (nombre impair de `"` non-échappés dans le préfixe). Ignore les
  * quotes échappées `\"`. Simple mais suffisant : les single-quotes SNQL
  * suivent le même contrat et sont couvertes symétriquement plus tard si
@@ -232,7 +232,7 @@ function contextOptions(
 	const operation = operationOf(toks);
 	const scope = extractScope(toks, operation);
 
-	// Sprint T2/13.5 : contexte doc d'insert (`add {…}`) ou set d'update
+	// contexte doc d'insert (`add {…}`) ou set d'update
 	// (`update t set c1 = …, c2 = …`) — propose les cols de la target avec
 	// badges obligatoire/facultatif, skip celles déjà tapées.
 	const docCtx = insertDocContext(toks, suffixToks);
@@ -244,7 +244,7 @@ function contextOptions(
 		return setCompletions(setCtx, schema, last, insideOpenString);
 	}
 
-	// T3/1+T3/2 : introspection verbs (soft-keyword). En tête de statement
+	// +introspection verbs (soft-keyword). En tête de statement
 	// uniquement — les mots `list`/`describe` restent utilisables comme
 	// idents ailleurs (ex. `pick x as list`), donc pas de spécial-case au-delà.
 	if (last.kind === "ident" && toks.length === 1) {
@@ -257,13 +257,13 @@ function contextOptions(
 		}
 	}
 
-	// T3/2.3 : après une commande d'introspection, dispatch spécifique — les
+	// après une commande d'introspection, dispatch spécifique — les
 	// stages `pick`/`where`/`sort` réfèrent aux cols du shape de sortie, pas
 	// aux cols d'une collection schema (qui n'existent pas ici).
-	// T3/2.4 : `for <col1>, <col2>` propose les cols de la table cible.
+	// `for <col1>, <col2>` propose les cols de la table cible.
 	const introContext = introspectContextOf(toks);
 	if (introContext !== null) {
-		// T3/3 : `list indexes on |` → collections (la table cible du filter).
+		// `list indexes on |` → collections (la table cible du filter).
 		if (
 			introContext.kind === "list-indexes" &&
 			last.kind === "keyword" &&
@@ -377,7 +377,7 @@ interface IntrospectContext {
 }
 
 /**
- * T3/2.3 + T3/3 : détecte une commande d'introspection en tête de flux et
+ * + détecte une commande d'introspection en tête de flux et
  * retourne le shape de sortie + la table cible quand pertinent. Retourne
  * null si non-introspect ou sous-commande inconnue.
  */
@@ -437,7 +437,7 @@ function introspectContextOf(toks: readonly Token[]): IntrospectContext | null {
 }
 
 /**
- * T3/2.4 : candidats après `for ` — les noms que le shortcut peut cibler.
+ * candidats après `for ` — les noms que le shortcut peut cibler.
  *  - describe-table : cols de la table cible (via schema).
  *  - list-tables : noms de collections (la liste des tables).
  */
@@ -455,7 +455,7 @@ function forShortcutTargets(
 }
 
 /**
- * T3/2.4 : détecte si le dernier token pertinent est un `for` soft-kw dans
+ * détecte si le dernier token pertinent est un `for` soft-kw dans
  * un contexte introspect — utilisé par le dispatch pour proposer les cibles
  * du shortcut plutôt qu'un stage.
  */
@@ -501,7 +501,7 @@ function remainingIntrospectStages(
 		}
 	}
 	const out: SnqlCompletion[] = [];
-	// T3/3 : `on <table>` proposé après `list indexes` (kind spécifique, jamais
+	// `on <table>` proposé après `list indexes` (kind spécifique, jamais
 	// pertinent après `list tables`/`describe`/etc.). Précède `for` — ordre
 	// canonique `list indexes on t for … where … pick … sort … limit`.
 	const ctx = introspectContextOf(toks);
@@ -513,7 +513,7 @@ function remainingIntrospectStages(
 	) {
 		out.push({ label: "on", type: "keyword", detail: "table cible" });
 	}
-	// T3/2.4 : `for` en tête tant que non déjà consommé, tant qu'aucun stage
+	// `for` en tête tant que non déjà consommé, tant qu'aucun stage
 	// classique n'a démarré (l'ordre canonique impose for AVANT where/pick/...).
 	if (!sawFor && seen.size === 0) {
 		out.push({ label: "for", type: "keyword", detail: "filtre rapide" });
@@ -801,7 +801,7 @@ function onForeignCollection(toks: readonly Token[]): string | undefined {
 	return coll?.kind === "ident" ? coll.value : undefined;
 }
 
-// --- Sprint T2/13.5 : contexte doc/set schema-aware ------------------------
+// --- contexte doc/set schema-aware ------------------------
 
 /**
  * Contexte détecté au curseur pour un doc d'insert ou une set d'update — la
@@ -1082,7 +1082,7 @@ function fieldsForDoc(
 }
 
 /**
- * Sprint T2/13.6 : classifie un `SnqlType` pour choisir le format d'insertion.
+ * classifie un `SnqlType` pour choisir le format d'insertion.
  * string/uuid/enum → wrappé en guillemets, numeric/bool/date/json → nu, autre
  * → raw (`: ` sans quote — laisse l'user finir).
  */
@@ -1131,7 +1131,7 @@ function fieldDetailForDoc(
 }
 
 /**
- * Sprint T2/13.5 : suggestions de valeur pour une col enum.
+ * suggestions de valeur pour une col enum.
  * Format inséré = `"<label>"` (guillemets inclus — parité surface SNQL) sauf
  * si l'user a déjà tapé une ouverture de guillemet (cas rare vu qu'on est
  * juste après `:` en général). CM6 gèrera le prefix-match.
@@ -1148,7 +1148,7 @@ function valueSuggestions(
 	const field = coll.fields.find((f) => f.name === ctx.currentColumn);
 	if (field === undefined || field.enumValues === undefined) return [];
 
-	// Sprint T2/13.6 : le smart-apply insère `col: "|"` avec curseur entre les
+	// le smart-apply insère `col: "|"` avec curseur entre les
 	// guillemets — insideOpenString détecte ce cas et on insère le label nu
 	// (sans re-wrap). `last.kind === "string"` couvre le cas symétrique où
 	// l'user a explicitement tapé `col: "foo"` puis revient dedans (le lexer

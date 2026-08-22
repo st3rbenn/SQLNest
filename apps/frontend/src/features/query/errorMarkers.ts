@@ -39,11 +39,10 @@ export const setErrorSpans = StateEffect.define<readonly SerializedSpan[]>();
  * séquentielles : parser stops au 1er problème, lower/planner idem).
  * `null` clear.
  *
- * Sprint ADR-023 E/2 (D8) : ajout de `severity` — un walker "unfiltered
- * write" (voir `unfilteredWrites.ts`) émet des `warning` (couleur amber) qui
- * doivent être distingués visuellement des `error` de parse/lower (couleur
- * danger rouge, comportement legacy). `severity` optionnel — par défaut
- * `'error'` pour rétrocompat.
+ * Le walker "unfiltered write" (voir `unfilteredWrites.ts`) émet des
+ * `warning` (couleur amber) qui doivent être distingués visuellement des
+ * `error` de parse/lower (couleur danger rouge, comportement legacy).
+ * `severity` optionnel — par défaut `'error'` pour rétrocompat.
  *
  *  - `'error'`   — parse/lower a échoué, source syntaxiquement invalide (rouge danger).
  *  - `'warning'` — source valide mais dangereuse (unfiltered delete/update, bulk copy, raw opaque) — amber.
@@ -63,11 +62,11 @@ function severityOf(diag: LiveDiagnostic): LiveDiagnosticSeverity {
 }
 
 /**
- * [ADR-023 E/7.4 / D1] Décoration permanente pour un RawStatement racine.
- * Séparée du liveDiag (qui peut être écrasé par une squiggly unfiltered) —
- * tant que la source est un raw, l'icône "unsafe" reste dans la gutter et
- * son tooltip explique que ce bloc bypass la détection AST. Passe `null`
- * pour clear (source non-raw ou source invalide).
+ * Décoration permanente pour un RawStatement racine. Séparée du liveDiag
+ * (qui peut être écrasé par une squiggly unfiltered) — tant que la source
+ * est un raw, l'icône "unsafe" reste dans la gutter et son tooltip
+ * explique que ce bloc bypass la détection AST. Passe `null` pour clear
+ * (source non-raw ou source invalide).
  */
 export const setRawStatementSpan = StateEffect.define<SerializedSpan | null>();
 
@@ -230,8 +229,8 @@ const liveDiagTooltip = hoverTooltip((view, pos) => {
 	};
 });
 
-/** [ADR-023 E/7.4] StateField pour le span RawStatement racine — permanent
- * tant que la source est un raw. */
+/** StateField pour le span RawStatement racine — permanent tant que la
+ * source est un raw. */
 const rawStatementField = StateField.define<SerializedSpan | null>({
 	create: () => null,
 	update(current, tr) {

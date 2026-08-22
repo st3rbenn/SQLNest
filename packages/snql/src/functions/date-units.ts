@@ -1,11 +1,11 @@
 /**
- * Whitelists d'units pour les fonctions date_* du sprint 3. Centralisées ici
+ * Whitelists d'units pour les fonctions date_* du. Centralisées ici
  * pour être lues par (a) le lower via `argEnum` (validation + suggestion
  * Levenshtein), (b) les renderers PG/Mongo qui font un switch statique.
  *
  * Chaque fonction a sa propre whitelist : `date_part` (le plus riche, inclut
  * dow/doy/epoch), `date_trunc` (pas de dow/doy/epoch — n'ont pas de sens en
- * troncation), `date_add` (idem trunc), `date_diff` (**réduit sprint 3** à
+ * troncation), `date_add` (idem trunc), `date_diff` (**réduit ** à
  * day/hour/minute/second car week/month/quarter/year ont une divergence PG
  * AGE calendrier vs Mongo boundary-crossing irréductible sans émulation).
  */
@@ -46,10 +46,10 @@ export const DATE_ADD_UNITS = [
 	"second"
 ] as const;
 
-// Sprint 3 : units calendaires (week/month/quarter/year) EXCLUES — PG AGE vs
+// units calendaires (week/month/quarter/year) EXCLUES — PG AGE vs
 // Mongo boundary-crossing divergent sur les bords calendaires (ex: entre
 // 2026-01-31 et 2026-02-01, PG dit "1 day", Mongo boundary dit "1 month" si
-// on demande month). Résolution sprint 4 avec émulation ou 2 canoniques
+// on demande month). Résolution avec émulation ou 2 canoniques
 // distinctes (date_diff_age vs date_diff_boundary).
 export const DATE_DIFF_UNITS = [
 	"day",

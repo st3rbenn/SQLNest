@@ -1,7 +1,7 @@
 /**
- * Route legacy `/canvas/:connId` (C.21.7) — redirect vers
+ * Route legacy `/canvas/:connId` — redirect vers
  * `/team/:defaultSlug/canvas/:connId`. Conservée pour les bookmarks
- * historiques (avant C.21). La vraie route est team-scoped.
+ * historiques. La vraie route est team-scoped.
  */
 
 import { queryOptions } from "@tanstack/react-query";

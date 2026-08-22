@@ -318,7 +318,7 @@ describe("completeSnql — robustesse", () => {
 		).toEqual(["users", "orders"]);
 	});
 
-	// T3/2.2 : après `list ` / `describe `, orienter vers sous-commande / tables.
+	// après `list ` / `describe `, orienter vers sous-commande / tables.
 	it("`list ` propose les sous-commandes (tables/schemas/indexes)", () => {
 		expect(labels("list ")).toEqual(["tables", "schemas", "indexes"]);
 	});
@@ -333,7 +333,7 @@ describe("completeSnql — robustesse", () => {
 		expect(labels("describe u")).toEqual(["users", "orders"]);
 	});
 
-	// T3/2.3 : autocomplete des rows de sortie après pick/where/sort
+	// autocomplete des rows de sortie après pick/where/sort
 	it("`describe users pick ` propose les cols du shape describe", () => {
 		expect(labels("describe users pick ")).toEqual([
 			"name",
@@ -397,7 +397,7 @@ describe("completeSnql — robustesse", () => {
 		expect(labels("describe users pick name ")).toEqual(["where", "sort", "limit"]);
 	});
 
-	// T3/2.4 : `for <col1>, <col2>` shortcut
+	// `for <col1>, <col2>` shortcut
 	it("`describe users for ` propose les cols de la table cible", () => {
 		expect(labels("describe users for ")).toEqual([
 			"id",
@@ -420,7 +420,7 @@ describe("completeSnql — robustesse", () => {
 		expect(labels("list tables for ")).toEqual(["users", "orders"]);
 	});
 
-	// T3/3 : list schemas + list indexes
+	// list schemas + list indexes
 	it("`list schemas ` propose stages restants (pas de target)", () => {
 		expect(labels("list schemas ")).toEqual(["for", "where", "pick", "sort", "limit"]);
 	});

@@ -1,5 +1,5 @@
 /**
- * Sprint T2/15 — Transaction bloc atomique (`transaction [isolation …] { stmt; stmt }`).
+ * Transaction bloc atomique (`transaction [isolation …] { stmt; stmt }`).
  *
  * Couvre :
  *  - lexer   : ; = semicolon token
@@ -91,7 +91,7 @@ describe("parser — transaction bloc", () => {
 		expect(stmt.body).toHaveLength(1);
 	});
 
-	it("transaction { stmt; stmt; stmt } multi avec ; obligatoire", () => {
+	it("transaction { stmt; stmt; stmt } multi avec; obligatoire", () => {
 		const stmt = parse(
 			tokenize(
 				'transaction { find users pick id; update users set is_active = true; remove from users where id = 999 }'
@@ -101,7 +101,7 @@ describe("parser — transaction bloc", () => {
 		expect(stmt.body).toHaveLength(3);
 	});
 
-	it("trailing ; toléré", () => {
+	it("trailing; toléré", () => {
 		const stmt = parse(
 			tokenize("transaction { find users pick id; find users pick email; }")
 		);
@@ -153,7 +153,7 @@ describe("parser — transaction bloc", () => {
 		);
 	});
 
-	it("refus ; manquant entre stmts", () => {
+	it("refus; manquant entre stmts", () => {
 		expectCode(
 			() => parse(tokenize("transaction { find users pick id find users pick email }")),
 			"parse_transaction_missing_semicolon"
@@ -271,7 +271,7 @@ describe("planner — capability 'transaction'", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Lower : typecheck propagé (T2/11.5)
+// Lower : typecheck propagé
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe("lower — typecheck propagé aux stmts internes", () => {

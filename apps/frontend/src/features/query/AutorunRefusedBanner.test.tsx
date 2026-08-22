@@ -12,7 +12,7 @@ function render(node: ReactNode) {
 	return rawRender(<DesignSystemProvider>{node}</DesignSystemProvider>);
 }
 
-describe("AutorunRefusedBanner [ADR-023 D14]", () => {
+describe("AutorunRefusedBanner", () => {
 	it("rend le message et le shortcut Ctrl+⏎", () => {
 		render(<AutorunRefusedBanner onDismiss={vi.fn()} />);
 		expect(screen.getByTestId("autorun-refused-banner")).toBeDefined();

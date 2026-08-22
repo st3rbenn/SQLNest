@@ -1,5 +1,5 @@
 /**
- * Sprint T3/1+T3/2 — Introspection tier-1 : `list tables` + `describe <t>`.
+ * +Introspection tier-1 : `list tables` + `describe <t>`.
  *
  * Couvre :
  *  - parser  : `list tables` / `describe t` détectés avant check verb,
@@ -131,7 +131,7 @@ describe("planner — capability 'introspect'", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// T3/2 — describe <table>
+// describe <table>
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe("parser — describe <table>", () => {
@@ -176,10 +176,10 @@ describe("codegen PG — describe <table>", () => {
 		expect(native.text).toContain("information_schema.columns");
 		expect(native.text).toContain("PRIMARY KEY");
 		expect(native.text).toContain("FOREIGN KEY");
-		// T3/2.1 : enum PG (USER-DEFINED) → udt_name lisible ('RESOURCE_STATUS').
+		// enum PG (USER-DEFINED) → udt_name lisible ('RESOURCE_STATUS').
 		expect(native.text).toContain("USER-DEFINED");
 		expect(native.text).toContain("udt_name");
-		// T3/2.2 : column_default nettoyé des `::TYPE` casts (typename quoted
+		// column_default nettoyé des `::TYPE` casts (typename quoted
 		// OU unquoted) — l'UI voit `'synced'` au lieu de `'synced'::"NOMADIA…"`.
 		expect(native.text).toContain("regexp_replace(c.column_default");
 		expect(native.text).toContain("$1");
@@ -230,7 +230,7 @@ describe("codegen Mongo — describe <table>", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// T3/2.3 — pipeline stages après introspection
+// pipeline stages après introspection
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe("parser — stages après introspection", () => {
@@ -251,7 +251,7 @@ describe("parser — stages après introspection", () => {
 		expect(stmt.stages!.map((s) => s.type)).toEqual(["where", "sort", "limit"]);
 	});
 
-	it("refus `describe users with X on ...`", () => {
+	it("refus `describe users with X on...`", () => {
 		expectCode(
 			() => parse(tokenize("describe users with orders on id = user_id")),
 			"parse_introspect_stage_unsupported"
@@ -317,7 +317,7 @@ describe("Mongo compensate — postOps sur listCollections", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// T3/2.4 — `for` filter shortcut
+// `for` filter shortcut
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe("parser — `for` shortcut", () => {
@@ -367,7 +367,7 @@ describe("parser — `for` shortcut", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// T3/3 — list schemas + list indexes
+// list schemas + list indexes
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe("parser — `list schemas` / `list indexes`", () => {

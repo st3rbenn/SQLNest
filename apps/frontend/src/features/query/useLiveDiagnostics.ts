@@ -8,17 +8,17 @@
  *   à l'user le temps de finir de taper un token).
  * - Étape 1 : parse + lower via `parse(tokenize(source))` + dispatch
  *   lower{Mutation|Transaction|Let|...}. Erreurs → severity 'error' (rouge).
- * - Étape 2 : ADR-023 E/2.3 — si le lower passe, `collectUnfilteredWrites`
- *   walk l'AST pour détecter les writes non filtrés (delete/update sans
- *   predicate racine, insert-select sans where dans sourceQuery, raw
- *   opaque, walk récursif transaction/savepoint/let). Findings → severity
- *   'warning' (amber). Un seul warning à la fois (le premier finding) —
- *   E/3 listera tous les findings dans le TextInput de confirmation.
+ * - Étape 2 : si le lower passe, `collectUnfilteredWrites` walk l'AST
+ *   pour détecter les writes non filtrés (delete/update sans predicate
+ *   racine, insert-select sans where dans sourceQuery, raw opaque, walk
+ *   récursif transaction/savepoint/let). Findings → severity 'warning'
+ *   (amber). Un seul warning à la fois (le premier finding) — les autres
+ *   sont listés dans la surface confirmation.
  * - Source vide → null (rien à valider).
  * - Erreurs "obviously incomplete" (source trop courte, se termine par un
  *   opérateur/comma) → null (bruit pendant la frappe). Le guard s'applique
- *   AUSSI au check unfiltered (D11) pour éviter les squigglies pendant
- *   qu'on tape `remove from users wh…`.
+ *   AUSSI au check unfiltered pour éviter les squigglies pendant qu'on
+ *   tape `remove from users wh…`.
  *
  * ─── Sécurité ────────────────────────────────────────────────────────
  * Le compile est CÔTÉ CLIENT — aucune requête réseau, aucun accès DB.
@@ -88,10 +88,10 @@ export function useLiveDiagnostics(
 		const handle = setTimeout(() => {
 			try {
 				const statement = parse(tokenize(source));
-				// [ADR-023 D1 / E/7.4] Décoration Raw permanente : dès qu'on
-				// détecte operation === 'raw', extract le span pour render
-				// le gutter icon "unsafe" (indépendant du live diag warn qui
-				// peut être overwrite par une squiggly unfiltered plus loin).
+				// Décoration Raw permanente : dès qu'on détecte
+				// operation === 'raw', extract le span pour render le gutter
+				// icon "unsafe" (indépendant du live diag warn qui peut être
+				// overwrite par une squiggly unfiltered plus loin).
 				const rawStatementSpan: SerializedSpan | null =
 					statement.operation === "raw"
 						? [
@@ -101,12 +101,12 @@ export function useLiveDiagnostics(
 						: null;
 				// Étape 1 : lower schema-aware (parse/lower/plan errors).
 				validateStatement(statement, engine, schema);
-				// Étape 2 (ADR-023 E/2.3) : détection unfiltered writes après
-				// lower réussi. La détection ne s'applique QUE sur source
-				// syntaxiquement + sémantiquement valide — évite les warnings
-				// parasites pendant qu'on tape (D11 guard isObviouslyIncomplete
-				// déjà appliqué en amont ; le lower success confirme que la
-				// source est complète et cohérente).
+				// Étape 2 : détection unfiltered writes après lower réussi.
+				// La détection ne s'applique QUE sur source syntaxiquement +
+				// sémantiquement valide — évite les warnings parasites pendant
+				// qu'on tape (guard isObviouslyIncomplete déjà appliqué en
+				// amont ; le lower success confirme que la source est complète
+				// et cohérente).
 				const findings = collectUnfilteredWrites(statement);
 				if (findings.length > 0) {
 					setState({
@@ -115,10 +115,11 @@ export function useLiveDiagnostics(
 					});
 					return;
 				}
-				// Étape 3 (PM/10 D8) — divergence hints INFO squiggly bleu discret.
-				// Émises seulement quand engine === "mongodb" (PG = référence, pas
-				// de divergence à surfacer). Priorité inférieure aux warnings :
-				// n'affichée que si aucun warning unfiltered n'a précédé.
+				// Étape 3 — divergence hints INFO squiggly bleu discret.
+				// Émises seulement quand engine === "mongodb" (PG = référence,
+				// pas de divergence à surfacer). Priorité inférieure aux
+				// warnings : n'affichée que si aucun warning unfiltered n'a
+				// précédé.
 				if (engine === "mongodb") {
 					const hints = collectDivergenceHints(statement);
 					if (hints.length > 0) {
@@ -128,10 +129,10 @@ export function useLiveDiagnostics(
 						});
 						return;
 					}
-					// Étape 4 (PM/10 D9) — perf hints INFO pour les patterns non-
-					// indexables Mongo (cast dans predicate write PA/4, correlated
-					// subquery PA/1). Priorité inférieure aux divergences (info
-					// correction avant info perf).
+					// Étape 4 — perf hints INFO pour les patterns non-indexables
+					// Mongo (cast dans predicate write, correlated subquery).
+					// Priorité inférieure aux divergences (info correction avant
+					// info perf).
 					const perf = collectPerfHints(statement);
 					if (perf.length > 0) {
 						setState({
@@ -172,8 +173,8 @@ export function useLiveDiagnostics(
  * remontent telles quelles et déclenchent la squiggly + tooltip.
  *
  * Le statement est passé en argument (déjà parsé) plutôt que la source string
- * — évite un double parse quand le walker unfiltered (ADR-023 E/2.3) tourne
- * sur le même statement dans la foulée.
+ * — évite un double parse quand le walker unfiltered tourne sur le même
+ * statement dans la foulée.
  */
 function validateStatement(
 	statement: Statement,
@@ -217,7 +218,7 @@ function validateStatement(
 /**
  * Convertit un finding "unfiltered write" en LiveDiagnostic warning. Suffixe
  * `(1/N)` quand plusieurs findings coexistent pour signaler que d'autres
- * suivent — E/3 les listera tous dans la surface confirmation.
+ * suivent — la surface confirmation les listera tous.
  */
 function findingToDiagnostic(
 	finding: UnfilteredFinding,
@@ -236,8 +237,8 @@ function findingToDiagnostic(
 }
 
 /**
- * PM/10 D8 — convertit un divergence hint en LiveDiagnostic `info`. Squiggly
- * bleu discret + tooltip hint depuis le registre `divergences-mongo-vs-pg`.
+ * Convertit un divergence hint en LiveDiagnostic `info`. Squiggly bleu
+ * discret + tooltip hint depuis le registre `divergences-mongo-vs-pg`.
  * Suffixe `(1/N)` idem findings quand plusieurs hints coexistent.
  */
 function hintToDiagnostic(
@@ -253,9 +254,9 @@ function hintToDiagnostic(
 }
 
 /**
- * PM/10 D9 — convertit un perf hint en LiveDiagnostic `info` (même canal
- * visual que D8, distinct sémantiquement via le préfixe "⚡ perf:" dans le
- * message). Squiggly bleu discret + tooltip explique la cause + refactor.
+ * Convertit un perf hint en LiveDiagnostic `info` (même canal visual que
+ * les divergences, distinct sémantiquement via le préfixe "⚡ perf:" dans
+ * le message). Squiggly bleu discret + tooltip explique la cause + refactor.
  */
 function perfToDiagnostic(hint: PerfHint, total: number): LiveDiagnostic {
 	const suffix = total > 1 ? ` (1/${total})` : "";

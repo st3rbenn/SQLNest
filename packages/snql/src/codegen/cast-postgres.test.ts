@@ -20,7 +20,7 @@ function mutation(source: string): { text: string; params: readonly unknown[] } 
 	return { text: nat.text, params: nat.params };
 }
 
-describe("codegen postgres — cast (T2 sprint 2)", () => {
+describe("codegen postgres — cast ()", () => {
 	it("cast(x as int) en pick → CAST(x AS bigint)", () => {
 		expect(sql("get t pick cast(x as int) as x_int").text).toBe(
 			`SELECT CAST("x" AS bigint) AS "x_int" FROM "t"`

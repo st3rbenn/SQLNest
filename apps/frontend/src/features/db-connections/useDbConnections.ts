@@ -2,11 +2,11 @@ import { useQuery } from "@tanstack/react-query";
 
 const API_BASE = window.CONTEXT.apiBaseUrl;
 
-/** Snapshot précalculé d'un rendu de preview (C.15) — miroir du zod
- *  backend `PreviewSnapshotSchema`. Persisté par le frontend au save du
- *  canvas, réutilisé comme fallback quand le CLI est offline. Structure
- *  minimale (positions + edges + frames), le rendering se fait via le
- *  même `<PreviewSvg>` que quand le CLI est online → theme-aware. */
+/** Snapshot précalculé d'un rendu de preview — miroir du zod backend
+ *  `PreviewSnapshotSchema`. Persisté par le frontend au save du canvas,
+ *  réutilisé comme fallback quand le CLI est offline. Structure minimale
+ *  (positions + edges + frames), le rendering se fait via le même
+ *  `<PreviewSvg>` que quand le CLI est online → theme-aware. */
 export interface PreviewSnapshot {
 	readonly nodes: ReadonlyArray<{
 		readonly id: string;
@@ -50,8 +50,8 @@ export interface DbConnection {
 	 *  connection (calc côté backend depuis le registry in-memory). Change
 	 *  en temps quasi-réel via le poll `refetchInterval: 5s` du hook. */
 	readonly isOnline: boolean;
-	/** Snapshot du dernier rendu de preview (C.15). `null` tant que l'user
-	 *  n'a pas ouvert le canvas au moins une fois. Sert de fallback rendu
+	/** Snapshot du dernier rendu de preview. `null` tant que l'user n'a
+	 *  pas ouvert le canvas au moins une fois. Sert de fallback rendu
 	 *  quand le CLI est offline — la gallery affiche le dernier état connu
 	 *  au lieu d'un « CLI hors ligne » vide. */
 	readonly lastPreviewSnapshot: PreviewSnapshot | null;
@@ -64,8 +64,8 @@ interface ListResponse {
 export async function fetchDbConnections(
 	teamSlug: string | null
 ): Promise<readonly DbConnection[]> {
-	// C.21.5 : URL team-scoped si teamSlug est fourni (context router),
-	// sinon fallback route legacy user-scoped (supprimée en C.21.7).
+	// URL team-scoped si teamSlug est fourni (context router), sinon
+	// fallback route legacy user-scoped (transitionnel).
 	const url = teamSlug
 		? `${API_BASE}/api/teams/${encodeURIComponent(teamSlug)}/db-connections`
 		: `${API_BASE}/api/db-connections`;
@@ -89,11 +89,10 @@ export async function fetchDbConnections(
  *
  * Latence des transitions on↔off visibles côté UI : 0-2s. Coût backend
  * = SELECT indexé + O(N) sur registry in-memory par tick. À terme,
- * migrer vers SSE + Redis pub/sub pour zéro latence sans polling
- * (voir ADR-016 dans le vault).
+ * migrer vers SSE + Redis pub/sub pour zéro latence sans polling.
  *
- * `teamSlug` (C.21.5) : si fourni, appelle la route team-scoped ; sinon
- * la route legacy (transitionnel, supprimée en C.21.7).
+ * `teamSlug` : si fourni, appelle la route team-scoped ; sinon la route
+ * legacy (transitionnel).
  */
 export function useDbConnections(teamSlug: string | null = null) {
 	return useQuery({

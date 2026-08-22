@@ -1,11 +1,11 @@
 /**
- * ADR-024 PM/2 + PA/1 (ADR-024-A) — Sibling parité Mongo pour sub-queries
- * uncorrelated (Q2c requalifié PM/2) et correlated liftées (PA/1). Mirror de
- * subquery-t211-e2e.test.ts (oracle PG) : mêmes SNQL, planner Mongo ACCEPTE.
+ * + Sibling parité Mongo pour sub-queries
+ * uncorrelated (requalifié) et correlated liftées. Mirror de
+ * subquery-e2e.test.ts (oracle PG) : mêmes SNQL, planner Mongo ACCEPTE.
  *
  * Le shape du pipeline Mongo post-matérialisation dépend des rows exécutées
  * en runtime — non testable ici sans Connection (couvert par les tests
- * d'intégration adapter.int.test.ts et parity-matrix.e2e.test.ts en PM/9).
+ * d'intégration adapter.int.test.ts et parity-matrix.e2e.test.ts en).
  * Ici on verrouille uniquement l'acceptance côté planner + verrous refus
  * MVP hors-scope (nested v3+).
  */
@@ -13,7 +13,7 @@
 import { describe, expect, it } from "vitest";
 import { assertMongoRefused, MONGODB_CAPABILITIES, planFor } from "./index";
 
-describe("PM/2 — subquery uncorrelated Mongo acceptée (Q2c requalifié)", () => {
+describe("subquery uncorrelated Mongo acceptée (requalifié)", () => {
 	it("in (subquery) uncorrelated accepté au planner", () => {
 		expect(() =>
 			planFor("find u where id in (find t pick uid)", "mongodb")
@@ -58,7 +58,7 @@ describe("PM/2 — subquery uncorrelated Mongo acceptée (Q2c requalifié)", () 
 	});
 });
 
-describe("PA/1 (ADR-024-A) — subquery correlated Mongo acceptée via lift-lookup", () => {
+describe("subquery correlated Mongo acceptée via lift-lookup", () => {
 	it("exists corrélée acceptée au planner (lift-lookup $lookup{let,pipeline})", () => {
 		expect(() =>
 			planFor(

@@ -42,7 +42,7 @@ function stubConnection(rowsToReturn: readonly Row[]): Connection {
 	};
 }
 
-describe("materializeSubplan (ADR-024 D1)", () => {
+describe("materializeSubplan", () => {
 	const mongoMapper = getMapper("mongodb");
 
 	it("exécute nativement et retourne les rows du connection", async () => {
@@ -125,7 +125,7 @@ describe("materializeSubplan (ADR-024 D1)", () => {
 		expect(rows.map((r) => r.id)).toEqual([11, 12]);
 	});
 
-	it("D4 — refuse au-dessus du cap avec code runtime_mongo_materialize_overflow", async () => {
+	it("refuse au-dessus du cap avec code runtime_mongo_materialize_overflow", async () => {
 		const source = "find users pick id";
 		const subplan = lower(parse(tokenize(source)));
 		const bigStub: Row[] = Array.from({ length: 20 }, (_, i) => ({ id: i }));
@@ -149,11 +149,11 @@ describe("materializeSubplan (ADR-024 D1)", () => {
 		}
 	});
 
-	it("D4 — cap défaut = 1_000_000 (constante exportée)", () => {
+	it("cap défaut = 1_000_000 (constante exportée)", () => {
 		expect(DEFAULT_MATERIALIZE_MAX_ROWS).toBe(1_000_000);
 	});
 
-	it("D4 — sous le cap : passe silencieusement", async () => {
+	it("sous le cap : passe silencieusement", async () => {
 		const source = "find users pick id";
 		const subplan = lower(parse(tokenize(source)));
 		const smallStub: Row[] = [{ id: 1 }, { id: 2 }];
@@ -168,7 +168,7 @@ describe("materializeSubplan (ADR-024 D1)", () => {
 		expect(rows).toHaveLength(2);
 	});
 
-	it("D4 — le cap s'applique aussi au chemin CTE court-circuit", async () => {
+	it("le cap s'applique aussi au chemin CTE court-circuit", async () => {
 		const source = "find big_cte pick id";
 		const subplan = lower(parse(tokenize(source)));
 		const cteRows: Row[] = Array.from({ length: 5 }, (_, i) => ({ id: i }));

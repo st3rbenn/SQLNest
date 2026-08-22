@@ -85,7 +85,7 @@ export function snqlCompletionSource(
 }
 
 /**
- * Sprint T2/13.6 : choisit le apply pour un candidat.
+ * Choisit le apply pour un candidat.
  *  - `o.apply` string custom (ex. `on <local> = <foreign>` d'un with) → priorité.
  *  - `o.insertKind` (fields de doc/set) → apply function smart : insère
  *    `<name>: "|"` ou `<name>: |` avec indent auto si l'user vient de taper

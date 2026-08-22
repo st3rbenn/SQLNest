@@ -1,20 +1,20 @@
 /**
- * ADR-024 PM/4 — Sibling parité Mongo pour write-join. Mirror de
- * mutation-join-t214-e2e.test.ts (oracle PG utilise `UPDATE ... FROM`).
- * Mongo compile via aggregate + $merge natif (Q4a).
+ * Sibling parité Mongo pour write-join. Mirror de
+ * mutation-join-e2e.test.ts (oracle PG utilise `UPDATE ... FROM`).
+ * Mongo compile via aggregate + $merge natif.
  *
  * Pipeline attendu :
  *   [$match?, $lookup, $unwind, $set, $unset(alias), $merge into:self]
  *
  * L'exécution runtime (bulkWrite atomique par-doc) est couverte par
- * mutation-join adapter.int.test.ts et parity-matrix.e2e.test.ts (PM/9).
+ * mutation-join adapter.int.test.ts et parity-matrix.e2e.test.ts.
  * Ce fichier vérifie uniquement le SHAPE du pipeline codegen.
  */
 
 import { describe, expect, it } from "vitest";
 import { mongoWrite } from "./index";
 
-describe("PM/4 — write-join Mongo pipeline shape", () => {
+describe("write-join Mongo pipeline shape", () => {
 	it("update simple avec one join → pipeline aggregate+$merge", () => {
 		const write = mongoWrite(
 			"update orders with one users as u on user_id = u.id set discount = 0.1"

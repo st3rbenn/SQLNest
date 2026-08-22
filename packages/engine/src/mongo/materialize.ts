@@ -16,18 +16,18 @@ import type { Connection } from "../adapter";
 import { EngineExecutionError } from "../errors";
 
 /**
- * ADR-024 D4 — plafond dur du nombre de rows matérialisables in-memory par un
- * `materializeSubplan()`. Au-delà, refus typé `runtime_mongo_materialize_overflow`
- * plutôt qu'OOM silencieux du process. Override par workspace via `options.maxRows`
- * (config workspace runtime — hors scope PM/1, plumbing dans PM/9 gate CI).
+ * Plafond dur du nombre de rows matérialisables in-memory par un
+ * `materializeSubplan()`. Au-delà, refus typé
+ * `runtime_mongo_materialize_overflow` plutôt qu'OOM silencieux du process.
+ * Override par workspace via `options.maxRows`.
  *
  * Défaut 10^6 = validé sur charge dev typique. À revalider en E2E large-scale
- * (>10^5 rows) sur subquery/cte/write-join en PM/9 (voir ADR-024 §Risques ouverts #3).
+ * (>10^5 rows) sur subquery/cte/write-join.
  */
 export const DEFAULT_MATERIALIZE_MAX_ROWS = 1_000_000;
 
 export interface MaterializeOptions {
-	/** Cap dur de rows (D4). Défaut : {@link DEFAULT_MATERIALIZE_MAX_ROWS}. */
+	/** Cap dur de rows. Défaut : {@link DEFAULT_MATERIALIZE_MAX_ROWS}. */
 	readonly maxRows?: number;
 	/**
 	 * CTE déjà matérialisés — si le scan racine du subplan pointe une des
@@ -38,19 +38,16 @@ export interface MaterializeOptions {
 }
 
 /**
- * ADR-024 D1 — util public de matérialisation runtime. Exécute un LogicalPlan
- * sub-select nativement (ou via CTE court-circuit) et retourne les Rows.
- * Extract de `resolveSubqueries.executeInnerSelect` (ancien `run.ts:666-694`) —
- * pivot du sprint parité Mongo : consommé par subquery uncorrelated (PM/2),
- * cte matérialisation (PM/3) et write-join fallback (PM/4 si $lookup non
- * indexable).
+ * Util public de matérialisation runtime. Exécute un LogicalPlan sub-select
+ * nativement (ou via CTE court-circuit) et retourne les Rows. Consommé par
+ * subquery uncorrelated, cte matérialisation et write-join fallback.
  *
  * Sémantique — le subplan matérialisé peut lui-même contenir des subqueries.
  * Le caller (typiquement `resolveSubqueries`) est responsable de rappeler
  * `resolveSubqueries` avant `materializeSubplan` pour aplatir en cascade.
  * On ne se rappelle PAS soi-même pour éviter les cycles avec le walker parent.
  *
- * Overflow — D4 cap dur `maxRows` : après matérialisation, si `rows.length >
+ * Overflow — cap dur `maxRows` : après matérialisation, si `rows.length >
  * maxRows` on lève `runtime_mongo_materialize_overflow` (EngineExecutionError
  * avec code typé). Le user voit un message actionable pointant `limit` /
  * pagination.
@@ -74,8 +71,8 @@ export async function materializeSubplan(
 
 	// Court-circuit : scan direct sur un CTE déjà en RAM → compensate pur, pas
 	// de round-trip driver. Central pour le chaînage CTE → subquery / body.
-	// PA/2 (ADR-024-A) : les autres CTE matérialisés sont passés en JoinSources
-	// pour que compensate applique les join op sur des RAM sets.
+	// Les autres CTE matérialisés sont passés en JoinSources pour que
+	// compensate applique les join op sur des RAM sets.
 	if (
 		materialized !== undefined &&
 		scanOp?.op === "scan" &&
@@ -122,9 +119,9 @@ function assertUnderCap(rows: readonly Row[], maxRows: number): readonly Row[] {
 }
 
 /**
- * Code d'erreur d'overflow — exposé pour permettre aux tests (PM/9 large-scale)
- * de matcher précisément sur le code sans dépendre du message. Consommé aussi
- * par le pattern d'erreurs enrichies côté frontend en PM/10.
+ * Code d'erreur d'overflow — exposé pour permettre aux tests de matcher
+ * précisément sur le code sans dépendre du message. Consommé aussi par le
+ * pattern d'erreurs enrichies côté frontend.
  */
 export const RUNTIME_MONGO_MATERIALIZE_OVERFLOW =
 	"runtime_mongo_materialize_overflow" as const;

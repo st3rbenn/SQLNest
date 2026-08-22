@@ -1,5 +1,5 @@
 /**
- * Tests E2E parité cross-engine pour les 13 fonctions du sprint 3. Vérifie
+ * Tests E2E parité cross-engine pour les 13 fonctions string/date/number. Vérifie
  * que le SQL PG et le pipeline Mongo générés portent la même sémantique —
  * NULL propagation, indexing 1-based, whitelists unit, divergences documentées.
  *
@@ -25,7 +25,7 @@ function mongo(source: string): readonly Record<string, unknown>[] {
 	return native.pipeline;
 }
 
-describe("sprint 3 parité — string : trim family, substring, replace, strpos", () => {
+describe("parité — string : trim family, substring, replace, strpos", () => {
 	it("trim cross-engine — même expression sémantique", () => {
 		const sqlText = pg('find t pick trim(name) as x');
 		const bson = JSON.stringify(mongo('find t pick trim(name) as x'));
@@ -74,7 +74,7 @@ describe("sprint 3 parité — string : trim family, substring, replace, strpos"
 	});
 });
 
-describe("sprint 3 parité — number : floor, ceil", () => {
+describe("parité — number : floor, ceil", () => {
 	it("floor cross-engine", () => {
 		expect(pg("find t pick floor(price) as x")).toContain(`FLOOR("price")`);
 		expect(JSON.stringify(mongo("find t pick floor(price) as x"))).toContain(
@@ -90,7 +90,7 @@ describe("sprint 3 parité — number : floor, ceil", () => {
 	});
 });
 
-describe("sprint 3 parité — date : today UTC forcé", () => {
+describe("parité — date : today UTC forcé", () => {
 	it("today() UTC des 2 côtés (parité stricte)", () => {
 		// PG : NOW() AT TIME ZONE 'UTC' → force UTC (pas CURRENT_DATE session-TZ).
 		// Mongo : $$NOW est toujours UTC, $dateTrunc unit:day → même date.
@@ -103,7 +103,7 @@ describe("sprint 3 parité — date : today UTC forcé", () => {
 	});
 });
 
-describe("sprint 3 parité — date_part : units mappés à même sémantique", () => {
+describe("parité — date_part : units mappés à même sémantique", () => {
 	const units: { snql: string; pg: string; mongo: string }[] = [
 		{ snql: "year", pg: "EXTRACT(year", mongo: "$year" },
 		{ snql: "quarter", pg: "EXTRACT(quarter", mongo: "$quarter" },
@@ -142,7 +142,7 @@ describe("sprint 3 parité — date_part : units mappés à même sémantique", 
 	});
 });
 
-describe("sprint 3 parité — date_trunc : week=monday cross-engine", () => {
+describe("parité — date_trunc : week=monday cross-engine", () => {
 	it('date_trunc("week", d) — Mongo force startOfWeek:monday (parité PG ISO)', () => {
 		// PG DATE_TRUNC('week', d) = lundi (ISO).
 		// Mongo default = dimanche → renderer force monday explicitement.
@@ -160,7 +160,7 @@ describe("sprint 3 parité — date_trunc : week=monday cross-engine", () => {
 	});
 });
 
-describe("sprint 3 parité — date_add : unit-first + fix quarter", () => {
+describe("parité — date_add : unit-first + fix quarter", () => {
 	it('date_add("quarter", d, 2) — PG MAKE_INTERVAL(months=>(2*3)) / Mongo unit:"quarter"', () => {
 		// PG : MAKE_INTERVAL n'a pas `quarters` → mapping vers months*3.
 		// Mongo : $dateAdd supporte unit:"quarter" nativement.
@@ -180,7 +180,7 @@ describe("sprint 3 parité — date_add : unit-first + fix quarter", () => {
 	});
 });
 
-describe("sprint 3 parité — date_diff : whitelist réduite + FLOOR truncate", () => {
+describe("parité — date_diff : whitelist réduite + FLOOR truncate", () => {
 	it('date_diff("day", later, earlier) — PG date subtraction / Mongo $dateDiff', () => {
 		expect(pg('find t pick date_diff("day", end_dt, start_dt) as n')).toBe(
 			`SELECT ("end_dt"::date - "start_dt"::date) AS "n" FROM "t"`
@@ -197,7 +197,7 @@ describe("sprint 3 parité — date_diff : whitelist réduite + FLOOR truncate",
 		expect(sql).toContain("3600");
 	});
 
-	it('date_diff("month", ...) — refusé sprint 3 (whitelist réduite)', () => {
+	it('date_diff("month", ...) — refusé (whitelist réduite)', () => {
 		try {
 			pg('find t pick date_diff("month", end_dt, start_dt) as n');
 			throw new Error("SnqlError attendu");
@@ -217,7 +217,7 @@ describe("sprint 3 parité — date_diff : whitelist réduite + FLOOR truncate",
 	});
 });
 
-describe("sprint 3 parité — round fix (double-cast pattern)", () => {
+describe("parité — round fix (double-cast pattern)", () => {
 	it("round(x) mono-arg inchangé cross-engine", () => {
 		expect(pg("find t pick round(x) as r")).toContain("ROUND(");
 		expect(JSON.stringify(mongo("find t pick round(x) as r"))).toContain(
@@ -232,7 +232,7 @@ describe("sprint 3 parité — round fix (double-cast pattern)", () => {
 	});
 });
 
-describe("sprint 3 parité — errors cross-engine (parser/lower avant codegen)", () => {
+describe("parité — errors cross-engine (parser/lower avant codegen)", () => {
 	it("date_part unit inconnue → même erreur PG/Mongo (lower est engine-indépendant)", () => {
 		for (const engine of ["postgres", "mongodb"] as const) {
 			try {

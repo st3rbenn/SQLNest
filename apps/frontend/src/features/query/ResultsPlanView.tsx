@@ -1,20 +1,20 @@
 /**
- * PM/10 D10 — Vue "Plan" du result panel : compile la source SNQL localement
- * (compile snql, aucun round-trip) et affiche le native query produit avec
- * badges par stage. Complète les 3 vues existantes (tableau/graphique/JSON).
+ * Vue "Plan" du result panel : compile la source SNQL localement (compile
+ * snql, aucun round-trip) et affiche le native query produit avec badges
+ * par stage. Complète les 3 vues existantes (tableau/graphique/JSON).
  *
  * Pour Mongo : liste chaque stage du pipeline (`$match`, `$lookup`, `$project`,
  * `$dateTrunc`, `$setIsSubset`, etc.) avec :
  *  - Badge `native` — stage poussé au driver MongoDB
- *  - Badge `lift` — stage synthétisé par PA/1 lift-lookup (correlated subquery)
- *  - Badge `materialize` — stage lié à matérialisation runtime (PA/2 join CTE)
+ *  - Badge `lift` — stage synthétisé par lift-lookup (correlated subquery)
+ *  - Badge `materialize` — stage lié à matérialisation runtime (join CTE)
  *  - Badge `write` — stage terminal ($merge, $out) ou operation update-pipeline
  *
  * Pour PG : affiche le SQL text + params, distingue query vs mutation.
  *
  * L'inférence des badges est heuristique (basée sur les operator patterns) —
- * elle ne remplace pas l'instrumentation planner (v2). Le user voit
- * néanmoins la structure exacte du native produit.
+ * elle ne remplace pas l'instrumentation planner. Le user voit néanmoins
+ * la structure exacte du native produit.
  */
 
 import type { NativeQuery } from "@sqlnest/snql";
@@ -350,7 +350,7 @@ function analyzeNative(native: NativeQuery): PlanStage[] {
 
 /**
  * Heuristique de badge pour un stage Mongo. Détecte les patterns typiques de
- * lift-lookup (PA/1 correlated) et de matérialisation, sinon "native".
+ * lift-lookup (correlated) et de matérialisation, sinon "native".
  */
 function badgeForMongoStage(
 	operator: string,
@@ -358,7 +358,7 @@ function badgeForMongoStage(
 	pipeline: readonly Record<string, unknown>[],
 	index: number
 ): StageBadge {
-	// PA/1 lift-lookup : $lookup avec `let` (correlated → sub-pipeline)
+	// lift-lookup : $lookup avec `let` (correlated → sub-pipeline)
 	if (operator === "$lookup") {
 		const lookup = stage.$lookup as Record<string, unknown> | undefined;
 		if (
@@ -370,7 +370,7 @@ function badgeForMongoStage(
 		}
 		return "native";
 	}
-	// $unset — souvent la 3ème partie du triple lift-lookup (PA/1)
+	// $unset — souvent la 3ème partie du triple lift-lookup
 	if (operator === "$unset") {
 		// Si un $lookup avec `let` a précédé récemment → suffixe lift
 		for (let i = index - 1; i >= Math.max(0, index - 3); i -= 1) {
@@ -384,7 +384,7 @@ function badgeForMongoStage(
 	}
 	// $merge / $out — write terminal
 	if (operator === "$merge" || operator === "$out") return "write";
-	// PA/7 : $dateTrunc = cast(_ as date) émule date-only
+	// $dateTrunc = cast(_ as date) émule date-only
 	if (operator === "$dateTrunc") return "native";
 	return "native";
 }

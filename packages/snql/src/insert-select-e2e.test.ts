@@ -1,5 +1,5 @@
 /**
- * Sprint T2/14 — Feature 2 : INSERT SELECT (`add (find … pick a, b as c) into t`).
+ * Feature 2 : INSERT SELECT (`add (find … pick a, b as c) into t`).
  *
  * Couvre :
  *  - parser  : `add ( verb …) into t` détection lparen + verb select
@@ -159,7 +159,7 @@ describe("lower — insert-select validations", () => {
 // Codegen PG
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe("codegen PG — INSERT INTO ... SELECT", () => {
+describe("codegen PG — INSERT INTO... SELECT", () => {
 	it("simple : add (find … pick a, b) into t", () => {
 		const { text } = pgSql("add (find users pick id, email) into archive");
 		expect(text).toBe(
@@ -201,8 +201,8 @@ describe("codegen PG — INSERT INTO ... SELECT", () => {
 // Planner : capability insert-select
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe("planner — capability 'insert-select' PG + Mongo (PM/5), KV refusé", () => {
-	it("Mongo supporte add (find …) into (PM/5 aggregate+$merge)", () => {
+describe("planner — capability 'insert-select' PG + Mongo, KV refusé", () => {
+	it("Mongo supporte add (find …) into (aggregate+$merge)", () => {
 		const stmt = parse(tokenize("add (find users pick id) into archive"));
 		if (stmt.operation !== "insert") throw new Error();
 		const mutation = lowerMutation(stmt);

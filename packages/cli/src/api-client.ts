@@ -91,7 +91,7 @@ export interface ApiClient {
 		dbFingerprint?: string | null
 	): Promise<AuthenticateResult>;
 	/**
-	 * T4/1.5 : ping périodique + backfill des métadonnées DB (fingerprint,
+	 * Ping périodique + backfill des métadonnées DB (fingerprint,
 	 * schema checksum) sur une db_connection existante. Contourne le
 	 * findResumableTunnel qui skip authenticate. Auth : Bearer tn_...
 	 */
@@ -154,7 +154,7 @@ export function createApiClient(
 			if (cliConnectionName != null && cliConnectionName !== "") {
 				body.cliConnectionName = cliConnectionName;
 			}
-			// T4/5 : envoie les identifiants DB dès le pair pour que le
+			// Envoie les identifiants DB dès le pair pour que le
 			// backend détecte au /approve qu'une db_connection existe déjà
 			// pour cette DB (multi-CLI reuse) → auto-fill device_name.
 			if (dbFingerprint != null && dbFingerprint !== "") {
@@ -185,7 +185,7 @@ export function createApiClient(
 			dbFingerprint: string | null = null
 		) {
 			const body: Record<string, string> = { code, signature: signatureHex };
-			// T4/1 Step 6 : optionnel — omis si le CLI n'a pas pu ouvrir la DSN
+			// Optionnel — omis si le CLI n'a pas pu ouvrir la DSN
 			// à ce moment. Backend backfill au prochain succès.
 			if (dbFingerprint != null && dbFingerprint !== "") {
 				body.dbFingerprint = dbFingerprint;
@@ -230,7 +230,7 @@ export function createApiClient(
 			if (dbSchemaChecksum != null && dbSchemaChecksum !== "") {
 				body.dbSchemaChecksum = dbSchemaChecksum;
 			}
-			// PM/10 D8 fix — envoie l'engine détecté (scheme DSN) pour backfill
+			// Envoie l'engine détecté (scheme DSN) pour backfill
 			// db_connection.engine côté backend (pairing historique défaultait
 			// à "postgres" pour toutes les connections y compris Mongo).
 			if (engine != null) {

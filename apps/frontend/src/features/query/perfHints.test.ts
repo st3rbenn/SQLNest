@@ -1,5 +1,5 @@
 /**
- * PM/10 D9 — Tests unit du walker perfHints.
+ * Tests unit du walker perfHints.
  *
  * Vérifie que collectPerfHints émet un hint pour chaque pattern SNQL non-
  * indexable côté Mongo. Le hook `useLiveDiagnostics` filtre par engine

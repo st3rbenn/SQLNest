@@ -48,7 +48,7 @@ describe("planner cast — capability check castTargets", () => {
 		});
 	}
 
-	it("cast(_ as json) sur mongodb → accepté (ADR-024 PM/6 #7 no-op)", () => {
+	it("cast(_ as json) sur mongodb → accepté (#7 no-op)", () => {
 		expect(() =>
 			planFor("get t pick cast(x as json) as y", "mongodb")
 		).not.toThrow();
@@ -67,8 +67,8 @@ describe("planner cast — capability check castTargets", () => {
 		).not.toThrow();
 	});
 
-	it("cast profondément imbriqué : json accepté sur mongodb (PM/6 #7)", () => {
-		// Depuis PM/6 : cast(_ as json) est accepté sur mongodb (no-op).
+	it("cast profondément imbriqué : json accepté sur mongodb (#7)", () => {
+		// Depuis cast(_ as json) est accepté sur mongodb (no-op).
 		// L'imbrication passe donc — inner cast(x as text) OK + outer json = no-op.
 		expect(() =>
 			planFor(
@@ -87,7 +87,7 @@ describe("planner cast — capability check castTargets", () => {
 });
 
 describe("planner cast — mutations", () => {
-	it("update SET value = cast(_ as json) sur mongodb → accepté (PM/6 #7 no-op)", () => {
+	it("update SET value = cast(_ as json) sur mongodb → accepté (#7 no-op)", () => {
 		const stmt = parse(
 			tokenize("update t where id = 1 set y = cast(x as json)")
 		);

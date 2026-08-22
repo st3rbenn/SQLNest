@@ -1,5 +1,5 @@
 /**
- * Sync serveur du snapshot de preview (C.15).
+ * Sync serveur du snapshot de preview.
  *
  * Rôle : chaque fois que le user modifie son canvas (drag table, resize,
  * create/rename/delete frame, hide), on compute un snapshot léger du

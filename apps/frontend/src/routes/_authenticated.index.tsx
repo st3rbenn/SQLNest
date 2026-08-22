@@ -1,8 +1,8 @@
 /**
  * Landing des pages authentifiées — redirect vers la team perso par
- * défaut (C.21.5). Toute l'app tourne désormais sous `/team/:slug/*` ;
- * cette route est un pur router (fetch team perso via
- * `/api/teams/me/default`, redirect immédiat).
+ * défaut. Toute l'app tourne désormais sous `/team/:slug/*` ; cette route
+ * est un pur router (fetch team perso via `/api/teams/me/default`,
+ * redirect immédiat).
  *
  * La route legacy `/` continue d'exister pour :
  *   - permettre aux bookmarks historiques de rediriger proprement,
@@ -25,8 +25,8 @@ export const Route = createFileRoute("/_authenticated/")({
 		const team = await context.queryClient.ensureQueryData(
 			defaultTeamQueryOptions
 		);
-		// Home = Recents (défaut UX 2026-08-09). L'URL canonique après
-		// signup / login pointe direct sur /recents plutôt que /drafts.
+		// Home = Recents. L'URL canonique après signup / login pointe
+		// direct sur /recents plutôt que /drafts.
 		throw redirect({
 			to: "/team/$teamSlug/recents",
 			params: { teamSlug: team.slug }

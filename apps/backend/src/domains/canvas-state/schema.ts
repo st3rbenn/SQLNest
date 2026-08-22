@@ -3,10 +3,9 @@ import z from "zod/v4";
 /**
  * Identifiant d'une `db_connection` — UUID v4 validé strict.
  *
- * Depuis C.5, le canvas_state est rattaché à UNE `db_connection` (au lieu
- * de la signature `${engine}:${sortedTables}`). Un canvas par (user ×
- * connection). Cf. `packages/db/src/schema.ts` (table `canvas_state`) pour
- * la clé unique DB.
+ * Le canvas_state est rattaché à UNE `db_connection`. Un canvas par (user
+ * × connection). Cf. `packages/db/src/schema.ts` (table `canvas_state`)
+ * pour la clé unique DB.
  */
 export const CanvasConnectionId = z.uuid();
 
@@ -54,8 +53,8 @@ export type GetCanvasResponseT = z.infer<typeof GetCanvasResponse>;
 export type PutCanvasResponseT = z.infer<typeof PutCanvasResponse>;
 
 /**
- * T4/4 : endpoint GET /canvas-state/checksum-history?connectionId=... —
- * expose l'audit trail des checksums vus par le canvas résolu pour cette
+ * Endpoint GET /canvas-state/checksum-history?connectionId=... — expose
+ * l'audit trail des checksums vus par le canvas résolu pour cette
  * db_connection. Read-only, user-scoped (auth cookie), 100 dernières
  * entrées ordonnées desc par seen_at.
  */

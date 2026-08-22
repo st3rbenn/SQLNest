@@ -11,7 +11,6 @@ export interface DelCanvasResult {
 /**
  * Supprime le canvas d'un utilisateur pour une db_connection donnée.
  *
- * ─── T4/4 : résolution cross-device ────────────────────────────────────
  * Utilise `resolveCanvasByConnection` pour trouver le canvas (via
  * fp/checksum/legacy). ATTENTION : le canvas moderne est partagé entre
  * plusieurs db_connections d'un user (Mac + Windows sur la même DB). Le

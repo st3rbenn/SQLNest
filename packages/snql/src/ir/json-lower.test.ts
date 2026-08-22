@@ -1,5 +1,5 @@
 /**
- * Guards lower JSON (sprint 4) : 11 codes d'erreur × edge cases + reserved
+ * Guards lower JSON : 11 codes d'erreur × edge cases + reserved
  * lexemes + bool_bare_predicate cross-engine.
  */
 
@@ -135,9 +135,9 @@ describe("bool_bare_predicate cross-engine", () => {
 	});
 });
 
-describe("reserved lexemes JSON sprint 4", () => {
+describe("reserved lexemes JSON", () => {
 	const reserved = [
-		// json_contains DÉBLOQUÉ sprint object-literals (PG only) — retiré des reserved.
+		// json_contains DÉBLOQUÉ (PG only) — retiré des reserved.
 		"json_set",
 		"json_delete",
 		"json_merge",
@@ -147,7 +147,7 @@ describe("reserved lexemes JSON sprint 4", () => {
 		"json_object_keys"
 	];
 	for (const name of reserved) {
-		it(`${name}(...) → lower_call_reserved avec hint sprint 5+`, () => {
+		it(`${name}(...) → lower_call_reserved avec hint`, () => {
 			try {
 				compile(`find t pick ${name}(meta, "x") as v`, { engine: "postgres" });
 				throw new Error("SnqlError attendu");
@@ -155,7 +155,7 @@ describe("reserved lexemes JSON sprint 4", () => {
 				if (!(e instanceof SnqlError)) throw e;
 				expect(e.code).toBe("lower_call_reserved");
 				expect(e.message).toContain(name);
-				expect(e.message.toLowerCase()).toContain("sprint");
+				expect(e.message.toLowerCase()).toContain("réservée");
 			}
 		});
 	}

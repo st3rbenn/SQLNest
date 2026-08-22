@@ -1,11 +1,11 @@
 /**
- * ADR-024 PM/9 D12 (MVP offline) — verrou de la parity au niveau codegen.
+ * (MVP offline) — verrou de la parity au niveau codegen.
  *
  * Chaque case de PARITY_CASES est compilé pour tous les engines listés dans
  * `.engines`. Un `expectedRefusal` verrouille en plus qu'un engine spécifique
- * refuse au planner avec le code exact (D18 codes typés du registre D13).
+ * refuse au planner avec le code exact.
  *
- * Ce test ne vérifie PAS le rowset runtime (D12 full est reporté quand
+ * Ce test ne vérifie PAS le rowset runtime (full est reporté quand
  * infrastructure Docker CI stabilisée). Il verrouille uniquement la surface
  * codegen — condition nécessaire mais pas suffisante à la parité totale.
  *
@@ -23,7 +23,7 @@ import {
 } from "./index";
 
 // Adapter mongoSql/pgSql qui accepte tous les types de statement retournés
-// par dispatchNative — pour PM/9 on veut juste "compile OK" ou refus attendu,
+// par dispatchNative — pour on veut juste "compile OK" ou refus attendu,
 // pas de check sur le shape (kind sql/mongo/transaction/mongo-write toléré).
 function compileFor(engine: "postgres" | "mongodb", source: string): void {
 	try {
@@ -45,7 +45,7 @@ function compileFor(engine: "postgres" | "mongodb", source: string): void {
 	}
 }
 
-describe("PM/9 D12 — parity-cases codegen check (MVP offline)", () => {
+describe("parity-cases codegen check (MVP offline)", () => {
 	for (const c of PARITY_CASES) {
 		for (const engine of c.engines) {
 			// Skip codegen check pour les engines runtime-materialized (subquery
@@ -75,13 +75,13 @@ describe("PM/9 D12 — parity-cases codegen check (MVP offline)", () => {
 	}
 });
 
-describe("PM/9 D12 — méta invariants", () => {
+describe("méta invariants", () => {
 	it("chaque case a un id unique", () => {
 		const ids = PARITY_CASES.map((c) => c.id);
 		expect(new Set(ids).size).toBe(ids.length);
 	});
 
-	it("expectedRefusal.engine n'est PAS dans .engines (mutuellement exclusif)", () => {
+	it("expectedRefusal.engine n'est PAS dans.engines (mutuellement exclusif)", () => {
 		for (const c of PARITY_CASES) {
 			if (c.expectedRefusal !== undefined) {
 				expect(c.engines).not.toContain(c.expectedRefusal.engine);

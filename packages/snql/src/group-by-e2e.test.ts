@@ -1,5 +1,5 @@
 /**
- * Sprint T2/7 group by / having E2E — parser + lower + planner + codegen
+ * group by / having E2E — parser + lower + planner + codegen
  * PG/Mongo + runtime KV bucket fold.
  */
 

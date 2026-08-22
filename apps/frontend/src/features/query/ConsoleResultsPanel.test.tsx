@@ -7,10 +7,10 @@ import type { QueryResult } from "./useRunQuery";
 import { SnqlRuntimeError } from "./useRunQuery";
 
 /**
- * Tests des changements [[ADR-023]] E/6 sur ConsoleResultsPanel :
- *  - D15 : distinction rowCount (0 vs > 0) dans le status label
- *  - D12 : badge rollback (user-initiated vs error-triggered) via classify
- *  - D5  : header partial-writes quand tx wrap sur engine no-tx
+ * Tests ConsoleResultsPanel :
+ *  - distinction rowCount (0 vs > 0) dans le status label
+ *  - badge rollback (user-initiated vs error-triggered) via classify
+ *  - header partial-writes quand tx wrap sur engine no-tx
  *
  * On focus le status bar text via `screen.getByText` — pas de simulation
  * ResultsTable/JsonView (composants découplés).

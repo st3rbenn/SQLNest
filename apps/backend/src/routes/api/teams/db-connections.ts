@@ -1,5 +1,5 @@
 /**
- * Routes team-scoped `/api/teams/:slug/db-connections/*` (C.21.3).
+ * Routes team-scoped `/api/teams/:slug/db-connections/*` :
  *
  *   GET  /api/teams/:slug/db-connections
  *   PUT  /api/teams/:slug/db-connections/:id/preview-snapshot

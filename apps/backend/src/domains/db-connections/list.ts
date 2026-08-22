@@ -33,9 +33,9 @@ export interface DbConnectionSummary {
 	readonly activeSince: Date;
 	readonly lastSeenAt: Date | null;
 	readonly createdAt: Date;
-	/** Snapshot précalculé du dernier rendu de preview (C.15). `null` si
-	 *  jamais save. Le frontend s'en sert comme fallback rendu quand le
-	 *  CLI est offline. Format `PreviewSnapshot` (voir schema Zod). */
+	/** Snapshot précalculé du dernier rendu de preview. `null` si jamais
+	 *  save. Le frontend s'en sert comme fallback rendu quand le CLI est
+	 *  offline. Format `PreviewSnapshot` (voir schema Zod). */
 	readonly lastPreviewSnapshot: unknown;
 }
 

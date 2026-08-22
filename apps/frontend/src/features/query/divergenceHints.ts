@@ -1,22 +1,20 @@
 /**
- * PM/10 D8 — walker AST qui remonte les patterns SNQL sujets à divergences
- * sémantiques PG↔Mongo (registre `divergences-mongo-vs-pg.ts` PM/8). Chaque
- * pattern rencontré produit un `DivergenceHint` avec span source + entrée du
- * registre. Le hook `useLiveDiagnostics` sélectionne le premier hint pour
- * l'émettre en `severity: "info"` (squiggly bleu discret + tooltip).
+ * Walker AST qui remonte les patterns SNQL sujets à divergences sémantiques
+ * PG↔Mongo (registre `divergences-mongo-vs-pg.ts`). Chaque pattern rencontré
+ * produit un `DivergenceHint` avec span source + entrée du registre. Le
+ * hook `useLiveDiagnostics` sélectionne le premier hint pour l'émettre en
+ * `severity: "info"` (squiggly bleu discret + tooltip).
  *
  * Cross-engine : le hint ne s'affiche que quand l'engine cible est Mongo — sur
  * PG les divergences ne s'appliquent pas (PG est la référence). Le filtrage
  * engine est fait en amont côté hook.
  *
- * Patterns détectés v1 (walker directement sur le AST, pas besoin de plan) :
+ * Patterns détectés (walker directement sur le AST, pas besoin de plan) :
  *  - `concat(…)` — call name === "concat"
  *  - `json_contains(…)` — call name === "json_contains"
  *  - `cast(_ as bool)` — cast target === "bool"
  *  - `cast(_ as date)` — cast target === "date"
  *  - `!=` — compare operator === "!="
- *
- * Patterns v2 (report follow-up) : `not in (find …)`, `let…; update`, `pick first|last`.
  */
 
 import type {

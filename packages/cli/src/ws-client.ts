@@ -22,10 +22,9 @@
  *
  * ─── Ce qui n'est PAS géré ici ────────────────────────────────────────
  *   - ECDH X25519 + AEAD ChaCha20-Poly1305 côté CLI. Le CLI voit les
- *     payloads applicatifs EN CLAIR pour l'instant (le E2E vient
- *     Bloc 7e côté browser + wire-up ici en Bloc 7f). Le protocole
- *     `@sqlnest/tunnel-protocol` supporte le chiffrement — on l'active
- *     quand le browser est prêt.
+ *     payloads applicatifs EN CLAIR pour l'instant (le E2E côté browser
+ *     activera le chiffrement quand il sera prêt). Le protocole
+ *     `@sqlnest/tunnel-protocol` supporte déjà le chiffrement.
  */
 
 import {
@@ -59,10 +58,10 @@ export type RemoteOp =
 /**
  * Résultat retourné par `runOp` — sérialisé dans le payload de `res`.
  *
- * `pgError` (optionnel, Phase 3a) porte le détail structuré d'une erreur
- * Postgres : SQLSTATE, position, hint, colonne + les params bindés et leurs
- * spans SNQL source pour permettre au frontend de résoudre `$N` → token
- * source à souligner. Absent si la cause n'est pas une erreur `pg`.
+ * `pgError` (optionnel) porte le détail structuré d'une erreur Postgres :
+ * SQLSTATE, position, hint, colonne + les params bindés et leurs spans SNQL
+ * source pour permettre au frontend de résoudre `$N` → token source à
+ * souligner. Absent si la cause n'est pas une erreur `pg`.
  */
 export type RemoteResult =
 	| { readonly ok: true; readonly data: unknown }

@@ -8,7 +8,7 @@
  *
  * Le token Bearer doit être un `sn_<64 hex>` généré via le dashboard
  * `/api/api-tokens`. La pubkey Ed25519 du CLI est envoyée en body pour
- * signer les futures frames WS (Bloc 7).
+ * signer les futures frames WS.
  */
 
 import { hostname } from "node:os";
@@ -23,7 +23,7 @@ export interface ConnectTokenOptions {
 	readonly bearerToken: string;
 	/** Nom explicite requis en CI (pas d'UI de sélection). */
 	readonly deviceName: string;
-	/** Nom de la DSN LOCALE à servir cette session (C.13). Envoyé au backend
+	/** Nom de la DSN LOCALE à servir cette session. Envoyé au backend
 	 *  pour scoper le fingerprint et pilote `resolveLocalConnectionUrl` dans
 	 *  le serve loop. Peut être null en compat legacy single-DSN. */
 	readonly cliConnectionName?: string | null;

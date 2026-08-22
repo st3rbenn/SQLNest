@@ -1,7 +1,7 @@
 /**
  * E2E cross-engine cast — vérifie que le pipeline complet (parse → lower →
  * planner → codegen) produit des sorties correctes sur PG et Mongo pour chaque
- * cas de la test matrix du sprint. Complète les tests unitaires par engine
+ * cas de la test matrix. Complète les tests unitaires par engine
  * en garantissant qu'un même SNQL source compile bien vers 2 targets.
  */
 
@@ -78,13 +78,13 @@ describe("E2E cast cross-engine — SNQL identique, sortie engine-spécifique", 
 		expect(proj.$project.y.$convert.to).toBe("bool");
 	});
 
-	it("cast(x as date) — PG date / Mongo $dateTrunc unit day (PA/7 émule date-only)", () => {
+	it("cast(x as date) — PG date / Mongo $dateTrunc unit day (émule date-only)", () => {
 		const src = "get t pick cast(x as date) as y";
 		expect(pgSql(src)).toContain(`CAST("x" AS date)`);
 		const proj = mongoPipeline(src)[0] as {
 			$project: { y: { $dateTrunc: { unit: string; timezone: string } } };
 		};
-		// PA/7 : comble divergence #15 partiel — $dateTrunc unit:"day" émule
+		// comble divergence #15 partiel — $dateTrunc unit:"day" émule
 		// PG date-only en tronquant à minuit UTC (au lieu de $convert to date
 		// qui laisserait un timestamp full).
 		expect(proj.$project.y.$dateTrunc.unit).toBe("day");
@@ -101,7 +101,7 @@ describe("E2E cast cross-engine — SNQL identique, sortie engine-spécifique", 
 	});
 });
 
-describe("E2E cast cross-engine — cast(_ as json) : PG jsonb, Mongo no-op (ADR-024 PM/6 #7)", () => {
+describe("E2E cast cross-engine — cast(_ as json) : PG jsonb, Mongo no-op (#7)", () => {
 	it("PG accepte cast(_ as json)", () => {
 		expect(pgSql("get t pick cast(x as json) as y")).toContain(
 			`CAST("x" AS jsonb)`
@@ -109,8 +109,8 @@ describe("E2E cast cross-engine — cast(_ as json) : PG jsonb, Mongo no-op (ADR
 	});
 
 	it("Mongo accepte cast(_ as json) : no-op (BSON = JSON natif)", () => {
-		// ADR-024 PM/6 item #7 — Mongo a désormais 'json' dans castTargets.
-		// Le codegen retourne l'operand tel quel (pas de $convert). D8 squiggly
+		// item #7 — Mongo a désormais 'json' dans castTargets.
+		// Le codegen retourne l'operand tel quel (pas de $convert). squiggly
 		// INFO éditeur alerte sur `cast(str as json)` (trap : pas de parse).
 		expect(() =>
 			planFor("get t pick cast(x as json) as y", "mongodb")
@@ -118,7 +118,7 @@ describe("E2E cast cross-engine — cast(_ as json) : PG jsonb, Mongo no-op (ADR
 	});
 });
 
-describe("PA/7 (ADR-024-A) — cast(<string literal> as json) parsé au lower cross-engine", () => {
+describe("cast(<string literal> as json) parsé au lower cross-engine", () => {
 	it("cast('{\"k\":1}' as json) → object literal parsé (Mongo BSON natif)", () => {
 		const pipeline = mongoPipeline(
 			'get t pick cast(\'{"k":1}\' as json) as d'
@@ -169,7 +169,7 @@ describe("E2E cast — compositions", () => {
 		});
 	});
 
-	it("cast d'un call cross-engine — PA/7 $dateTrunc pour date", () => {
+	it("cast d'un call cross-engine — $dateTrunc pour date", () => {
 		const src = "get t pick cast(now() as date) as today";
 		expect(pgSql(src)).toContain(`CAST(NOW() AS date)`);
 		const proj = mongoPipeline(src)[0] as {
@@ -220,7 +220,7 @@ describe("E2E cast — writes (PG autorisé, Mongo autorisé sauf en filtre)", (
 		);
 	});
 
-	it("update WHERE cast(_ as text) sur Mongo → pipeline $expr+$convert (PA/4)", () => {
+	it("update WHERE cast(_ as text) sur Mongo → pipeline $expr+$convert", () => {
 		const stmt = parse(
 			tokenize('update t where cast(id as text) = "42" set y = 1')
 		);

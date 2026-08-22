@@ -1,7 +1,6 @@
 /**
  * `resolveCanvasByConnection` — helper central pour tout accès canvas_state.
  *
- * ─── T4/4 : refactor cross-device ────────────────────────────────────────
  * Le canvas n'est plus 1:1 avec une db_connection. Un même canvas est partagé
  * par toutes les db_connections d'un user dans une team qui pointent vers la
  * MÊME instance DB (même db_fingerprint) OU vers un dump identique
@@ -136,9 +135,8 @@ export async function resolveCanvasByConnection(
 	}
 
 	// 4. Priorité 3 — canvas legacy `(user, connection_id)` avec fp NULL.
-	//    Rétro-compat pour les canvas créés AVANT le refactor T4/4 (avant que
-	//    les db_connection aient un db_fingerprint backfillé). Backfill au
-	//    premier put moderne.
+	//    Rétro-compat pour les canvas créés AVANT que les db_connection
+	//    aient un db_fingerprint backfillé. Backfill au premier put moderne.
 	const legacy = await selectCanvas(
 		and(
 			eq(dbSchema.canvasState.userId, userId),

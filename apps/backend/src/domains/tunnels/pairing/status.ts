@@ -16,12 +16,11 @@
  * Row absente → `expired` (indistingible d'un code invalide → même UX).
  * Empêche l'énumération de codes existants.
  *
- * ─── `existingConnection` (C.7) ────────────────────────────────────────
- * Si `userId` est fourni (call vient d'un endpoint authentifié via cookie),
- * on lookup le fingerprint du CLI (hash de sa pubkey stockée dans le
- * pairing) contre les db_connections du user. Si match → l'UI /connect
- * saura afficher "Reconnexion à X" au lieu de demander un nom.
- * Sans userId (poll CLI public), toujours `null`.
+ * `existingConnection` : si `userId` est fourni (call vient d'un endpoint
+ * authentifié via cookie), on lookup le fingerprint du CLI (hash de sa
+ * pubkey stockée dans le pairing) contre les db_connections du user. Si
+ * match → l'UI /connect saura afficher "Reconnexion à X" au lieu de
+ * demander un nom. Sans userId (poll CLI public), toujours `null`.
  */
 
 import { schema as dbSchema } from "@sqlnest/db";
@@ -61,13 +60,13 @@ export async function getPairingStatus(
 	}
 
 	// Lookup existingConnection quand un user est identifié. Trois stratégies :
-	//  1) T4/5 — le CLI a envoyé un db_fingerprint dès le POST /pairings :
-	//     match (team, db_fingerprint). Instance stricte (system_id PG).
-	//  2) T4/5 fallback — match (team, db_schema_checksum). Cross-docker
-	//     (2 dumps identiques ont même checksum mais fingerprints différents).
-	//  3) Legacy C.7 — fingerprint scopé CLI (SHA256(pubkey|connectionName)) :
+	//  1) Le CLI a envoyé un db_fingerprint dès le POST /pairings : match
+	//     (team, db_fingerprint). Instance stricte (system_id PG).
+	//  2) Fallback : match (team, db_schema_checksum). Cross-docker (2 dumps
+	//     identiques ont même checksum mais fingerprints différents).
+	//  3) Legacy — fingerprint scopé CLI (SHA256(pubkey|connectionName)) :
 	//     un même CLI qui re-pair sur le MÊME nom local → autofill du name.
-	// C.21.4 : scope par team_id si fourni, sinon user_id (legacy).
+	// Scope par team_id si fourni, sinon user_id (legacy).
 	let existingConnection: { id: string; name: string } | null = null;
 	if (options.userId !== undefined) {
 		const scopeFilter = options.teamId

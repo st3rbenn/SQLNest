@@ -38,7 +38,7 @@ import {
 } from "./crypto";
 
 /** Engine par défaut à la première authentification. Le CLI pourra
- * changer via le dashboard (Bloc 11) ou une future commande CLI. */
+ * changer via le dashboard ou une future commande CLI. */
 const DEFAULT_ENGINE = "postgres";
 
 /** Durée de vie d'une session tunnel — 30 jours (usage "installation
@@ -112,14 +112,13 @@ export async function authenticatePairing(
 			return { ok: false, reason: "signature_invalid" as const };
 		}
 
-		// Pairing idempotent (C.6/C.13/C.21.2/C.21.4) : le fingerprint est
-		// SCOPÉ par la DSN locale du CLI (C.13) + par la team (C.21.2) → un
-		// même install CLI peut avoir N db_connection distinctes, chacune
-		// identifiée par (team, DSN locale).
+		// Pairing idempotent : le fingerprint est SCOPÉ par la DSN locale du
+		// CLI + par la team → un même install CLI peut avoir N db_connection
+		// distinctes, chacune identifiée par (team, DSN locale).
 		//
 		// Priorité pour la team :
-		//   1) `pairing.teamId` set au /approve (C.21.4) — l'user a
-		//      explicitement choisi la team via l'UI team-scoped.
+		//   1) `pairing.teamId` set au /approve — l'user a explicitement
+		//      choisi la team via l'UI team-scoped.
 		//   2) team perso de l'user (fallback pour flow legacy où le
 		//      pairing n'a pas de team_id).
 		//   3) createPersonalTeam lazy (filet si l'user n'a même pas de
@@ -137,8 +136,8 @@ export async function authenticatePairing(
 			}
 		}
 
-		// T4/5 : priorité au fingerprint stocké sur le tunnel_pairing (envoyé
-		// dès le POST /pairings côté CLI récent). Fallback : le fingerprint
+		// Priorité au fingerprint stocké sur le tunnel_pairing (envoyé dès
+		// le POST /pairings côté CLI récent). Fallback : le fingerprint
 		// éventuellement passé en param `dbFingerprint` (compat CLI ancien
 		// qui l'envoie au /authenticate seulement).
 		const effectiveDbFingerprint =
@@ -152,19 +151,19 @@ export async function authenticatePairing(
 			cliConnectionName: row.cliConnectionName,
 			name: row.deviceName,
 			engine: DEFAULT_ENGINE,
-			// T4/1 Step 6 — le CLI envoie le fingerprint DB (SHA256(sys_id PG)
-			// / replSet Mongo) au moment de l'authenticate. Absent quand le
-			// CLI est legacy ou que la DSN n'a pas répondu — le backend
-			// backfill au prochain succès (voir upsertDbConnectionByFingerprint).
+			// Le CLI envoie le fingerprint DB (SHA256(sys_id PG) / replSet
+			// Mongo) au moment de l'authenticate. Absent quand le CLI est
+			// legacy ou que la DSN n'a pas répondu — le backend backfill au
+			// prochain succès (voir upsertDbConnectionByFingerprint).
 			dbFingerprint: effectiveDbFingerprint,
-			// T4/5 : le checksum aussi disponible dès le pair, propagé au backfill.
+			// Le checksum aussi disponible dès le pair, propagé au backfill.
 			dbSchemaChecksum: effectiveDbSchemaChecksum
 		});
 		if (!upsert.ok) {
 			// Cas rarissime : l'user a approuvé un name qui vient d'être
 			// utilisé par un autre CLI entre l'approve et l'authenticate.
 			// On log comme signature_invalid par manque de raison dédiée ;
-			// à V2 on ajoutera un `name_conflict` explicite dans l'union.
+			// à terme on ajoutera un `name_conflict` explicite dans l'union.
 			return { ok: false, reason: "signature_invalid" as const };
 		}
 		const conn = { id: upsert.connectionId };
@@ -173,8 +172,8 @@ export async function authenticatePairing(
 		const tokenHash = hashSha256Hex(token);
 		const expiresAt = new Date(nowMs + TUNNEL_SESSION_TTL_MS);
 
-		// T4/5 : chaque tunnel_session porte le cli_fingerprint DU CLI qui
-		// l'a ouverte. Différent de dbConnection.cliFingerprint quand cette
+		// Chaque tunnel_session porte le cli_fingerprint DU CLI qui l'a
+		// ouverte. Différent de dbConnection.cliFingerprint quand cette
 		// session appartient à un CLI secondaire (reuse via db_fingerprint
 		// match). Le WS handshake vérifie contre session.cliFingerprint.
 		const cliFingerprintForSession = computeCliFingerprint(

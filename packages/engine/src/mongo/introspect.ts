@@ -149,7 +149,7 @@ function resolveTargetCollection(
 /**
  * Relations inférées par **heuristique de nommage** : un champ `<x>_id` pointe
  * vers la collection `<x>` (ou `<x>s`) si elle existe. `origin: naming-heuristic`,
- * confiance moyenne — l'utilisateur pourra confirmer. → ADR-010.
+ * confiance moyenne — l'utilisateur pourra confirmer.
  */
 export function inferRelations(collections: readonly Collection[]): Relation[] {
 	const names = new Set(collections.map((c) => c.name));

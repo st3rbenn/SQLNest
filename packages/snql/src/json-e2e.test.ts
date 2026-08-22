@@ -1,5 +1,5 @@
 /**
- * Parity E2E cross-engine sprint 4 : chaque cas SNQL doit produire un SQL PG
+ * Parity E2E cross-engine chaque cas SNQL doit produire un SQL PG
  * ET un pipeline Mongo cohérents pour le même intent utilisateur.
  * Complète les tests unitaires par engine.
  */
@@ -20,7 +20,7 @@ function mongo(source: string): readonly Record<string, unknown>[] {
 	return native.pipeline;
 }
 
-describe("sprint 4 parity — projection identique cross-engine", () => {
+describe("parity — projection identique cross-engine", () => {
 	it("json_get single key : PG chain -> / Mongo $getField", () => {
 		const src = 'find t pick json_get(meta, "role") as r';
 		expect(pg(src)).toContain(`"meta" -> $1::text`);
@@ -46,8 +46,8 @@ describe("sprint 4 parity — projection identique cross-engine", () => {
 	});
 });
 
-describe("sprint 4 parity — WHERE : PG accepte, Mongo hoist indexable", () => {
-	it("where json_get_text = literal : PG WHERE ... / Mongo $expr fallback (v1)", () => {
+describe("parity — WHERE : PG accepte, Mongo hoist indexable", () => {
+	it("where json_get_text = literal : PG WHERE... / Mongo $expr fallback (v1)", () => {
 		// Volontairement PAS de hoist Mongo pour json_get_text (coercion type).
 		const src = 'find t where json_get_text(meta, "role") = "admin"';
 		expect(pg(src)).toContain(`"meta" ->> $1::text`);
@@ -77,7 +77,7 @@ describe("sprint 4 parity — WHERE : PG accepte, Mongo hoist indexable", () => 
 	});
 });
 
-describe("sprint 4 parity — composition cast(json_get_text as T)", () => {
+describe("parity — composition cast(json_get_text as T)", () => {
 	it("cast(json_get_text(x, 'age') as int) : PG CAST bigint / Mongo $convert long", () => {
 		const src = 'find t pick cast(json_get_text(meta, "age") as int) as age';
 		expect(pg(src)).toBe(
@@ -100,7 +100,7 @@ describe("sprint 4 parity — composition cast(json_get_text as T)", () => {
 	});
 });
 
-describe("sprint 4 parity — cast(json_get) refusé PG, mais Mongo OK via $convert", () => {
+describe("parity — cast(json_get) refusé PG, mais Mongo OK via $convert", () => {
 	it("cast(json_get(x, 'k') as int) : PG throw planner_cast_from_jsonb_unsupported", () => {
 		try {
 			planFor('find t pick cast(json_get(meta, "k") as int) as v', "postgres");
@@ -113,7 +113,7 @@ describe("sprint 4 parity — cast(json_get) refusé PG, mais Mongo OK via $conv
 	});
 });
 
-describe("sprint 4 parity — negation collapse via hoist mirror", () => {
+describe("parity — negation collapse via hoist mirror", () => {
 	it("not (json_has_key = true) équivaut à = false cross-engine", () => {
 		const positive = 'find t where json_has_key(meta, "k") = true';
 		const negated = 'find t where not (json_has_key(meta, "k") = true)';
@@ -126,7 +126,7 @@ describe("sprint 4 parity — negation collapse via hoist mirror", () => {
 	});
 });
 
-describe("sprint 4 parity — reserved cross-engine (même erreur)", () => {
+describe("parity — reserved cross-engine (même erreur)", () => {
 	const reserved = ["json_set", "json_path", "json_array_length"];
 	for (const name of reserved) {
 		it(`${name} → lower_call_reserved cross-engine`, () => {

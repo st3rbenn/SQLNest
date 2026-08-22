@@ -165,7 +165,7 @@ describe("createApiClient — authenticatePairing (device flow)", () => {
 		}
 	});
 
-	test("T4/1 : dbFingerprint inclus dans le body si fourni", async () => {
+	test("dbFingerprint inclus dans le body si fourni", async () => {
 		const payload = {
 			token: `tn_${"a".repeat(64)}`,
 			tunnelId: "11111111-1111-1111-1111-111111111111",
@@ -184,7 +184,7 @@ describe("createApiClient — authenticatePairing (device flow)", () => {
 		expect(body.dbFingerprint).toBe("postgres:9876543210/chinook");
 	});
 
-	test("T4/1 : dbFingerprint omis si null/vide (rétro-compat CLI legacy)", async () => {
+	test("dbFingerprint omis si null/vide (rétro-compat CLI legacy)", async () => {
 		const payload = {
 			token: `tn_${"a".repeat(64)}`,
 			tunnelId: "1",
@@ -247,7 +247,7 @@ describe("createApiClient — authenticateWithToken (CI Bearer)", () => {
 		}
 	});
 
-	test("T4/1 : dbFingerprint inclus dans le body si fourni", async () => {
+	test("dbFingerprint inclus dans le body si fourni", async () => {
 		const payload = {
 			token: `tn_${"c".repeat(64)}`,
 			tunnelId: "3",
@@ -269,7 +269,7 @@ describe("createApiClient — authenticateWithToken (CI Bearer)", () => {
 	});
 });
 
-describe("createApiClient — heartbeat (T4/1.5)", () => {
+describe("createApiClient — heartbeat", () => {
 	test("POST /heartbeat avec Bearer + dbFingerprint + dbSchemaChecksum", async () => {
 		const { fetch, calls } = mockFetchOk({
 			ok: true,

@@ -1,6 +1,6 @@
 /**
- * Tests intégration C.21.1 — auto-création de la team « Personal » à la
- * signup + idempotence de `createPersonalTeam`.
+ * Tests intégration — auto-création de la team « Personal » à la signup +
+ * idempotence de `createPersonalTeam`.
  */
 
 import { dirname, resolve } from "node:path";
@@ -63,7 +63,7 @@ async function signup(
 	return { userId: body.user!.id! };
 }
 
-describe.skipIf(!DATABASE_URL)("C.21.1 — team auto-signup", () => {
+describe.skipIf(!DATABASE_URL)("team auto-signup", () => {
 	let app: FastifyInstance;
 
 	beforeAll(async () => {
@@ -147,7 +147,7 @@ describe.skipIf(!DATABASE_URL)("C.21.1 — team auto-signup", () => {
 		expect(after.length).toBe(0);
 	});
 
-	test("C.21.2 — db_connection est scopée team (isolation cross-team pour un même user)", async () => {
+	test("db_connection est scopée team (isolation cross-team pour un même user)", async () => {
 		const { userId } = await signup(
 			app,
 			"multi-team@example.com",
@@ -211,7 +211,7 @@ describe.skipIf(!DATABASE_URL)("C.21.1 — team auto-signup", () => {
 		expect(alphaConns[0]?.id).not.toBe(betaConns[0]?.id);
 	});
 
-	test("C.21.2 — DELETE team cascade → db_connection supprimées", async () => {
+	test("DELETE team cascade → db_connection supprimées", async () => {
 		const { userId } = await signup(
 			app,
 			"cascade-team@example.com",

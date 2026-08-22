@@ -16,7 +16,7 @@ export interface Capabilities {
 	readonly functions: ReadonlySet<string>;
 	readonly castTargets: ReadonlySet<CastTarget>;
 	/**
-	 * ADR-024 PM/2 — stratégie d'exécution des sub-queries si `supports.has(
+	 * stratégie d'exécution des sub-queries si `supports.has(
 	 * "subquery")`. 'native' : pushdown SQL/pipeline natif (PG, SELECT imbriqué).
 	 * 'materialize' : runtime via `materializeSubplan` (Mongo, résolution
 	 * uncorrelated côté runtime + refus correlated au planner). Absent = pas
@@ -31,8 +31,8 @@ function caps(
 	castTargets: readonly CastTarget[],
 	extras: { readonly subqueryStrategy?: "native" | "materialize" } = {}
 ): Capabilities {
-	// Baseline Mongo 5.0+ assumée pour les fonctions sprint 3
-	// ($dateTrunc / $dateAdd / $dateDiff / $replaceAll). Ticket futur :
+	// Baseline Mongo 5.0+ assumée pour les fonctions
+	// ($dateTrunc / $dateAdd / $dateDiff / $replaceAll). À terme :
 	// introduire Capabilities.mongoServerVersion pour version gating côté
 	// planner et rejeter à la compilation plutôt qu'au runtime cryptique.
 	const base: Capabilities = {
@@ -47,13 +47,13 @@ function caps(
 }
 
 /** Relationnel complet (lecture). Tous les casts canoniques supportés.
- * Sprint T2/11 : 'subquery' ajouté — sub-queries inline (`in (find ...)` /
+ * 'subquery' ajouté — sub-queries inline (`in (find...)` /
  * `exists (find ...)`) natives PG (nested SELECT).
- * Sprint T2/13 : 'upsert' ajouté — `add {…} into t on conflict (col) [ignore |
+ * 'upsert' ajouté — `add {…} into t on conflict (col) [ignore |
  * edit set …]` via `INSERT ... ON CONFLICT` natif PG.
- * Sprint T2/14 : 'write-join' + 'insert-select' ajoutés — `update … with one`
+ * 'write-join' + 'insert-select' ajoutés — `update … with one`
  * via `UPDATE ... FROM` et `add (find …) into t` via `INSERT ... SELECT`.
- * Sprint T2/15 : 'transaction' ajouté — `transaction { s; s }` bloc atomique
+ * 'transaction' ajouté — `transaction { s; s }` bloc atomique
  * via `BEGIN [ISOLATION LEVEL X] / COMMIT / ROLLBACK` + SAVEPOINT natifs. */
 export const POSTGRES_CAPABILITIES: Capabilities = caps(
 	"postgres",
@@ -84,10 +84,10 @@ export const POSTGRES_CAPABILITIES: Capabilities = caps(
  * Sprint TxMongo : 'transaction' ajouté — bloc atomique via RS session
  * (startTransaction/commit/abort). Requiert Mongo en replica set (standalone
  * n'accepte pas les transactions).
- * ADR-024 PM/2 : 'subquery' ajouté avec strategy='materialize' — le planner
+ * 'subquery' ajouté avec strategy='materialize' — le planner
  * accepte les sub-queries uncorrelated (résolues via `materializeSubplan` au
- * runtime, ADR-024 D1) ; correlated reste refusée au planner via
- * `planner_subquery_unsupported` (ADR-024 D16 dédié pour CTE bindings).
+ * runtime) ; correlated reste refusée au planner via
+ * `planner_subquery_unsupported` (dédié pour CTE bindings).
  */
 export const MONGODB_CAPABILITIES: Capabilities = caps(
 	"mongodb",
@@ -108,8 +108,8 @@ export const MONGODB_CAPABILITIES: Capabilities = caps(
 		"write-join",
 		"insert-select"
 	],
-	// ADR-024 PM/6 item #7 : 'json' ajouté aux castTargets Mongo — cast(x as json)
-	// est un no-op côté Mongo (BSON = JSON natif). D8 squiggly INFO éditeur
+	// item #7 : 'json' ajouté aux castTargets Mongo — cast(x as json)
+	// est un no-op côté Mongo (BSON = JSON natif). squiggly INFO éditeur
 	// avertira sur `cast(str as json)` (trap type : la string ne sera pas parsée).
 	["int", "float", "text", "bool", "date", "timestamp", "json"],
 	{ subqueryStrategy: "materialize" }
@@ -118,7 +118,7 @@ export const MONGODB_CAPABILITIES: Capabilities = caps(
 /**
  * Clé-valeur (façon Redis) : sait scanner et filtrer, mais NI trier, NI projeter,
  * NI paginer, NI joindre côté serveur → ces opérateurs déclenchent la compensation.
- * Fonctions : sprint T2/5 introduit le dispatch registre côté runtime — la liste
+ * Fonctions : introduit le dispatch registre côté runtime — la liste
  * `SNQL_FUNCTIONS.forEngine("kv")` correspond aux entrées avec `engines.kv`
  * déclaré (aujourd'hui : if/nullif/greatest/least). Toute autre fonction
  * déclenche `planner_unsupported_function`. Cast : uniquement scalaires
@@ -127,8 +127,8 @@ export const MONGODB_CAPABILITIES: Capabilities = caps(
  */
 export const KV_CAPABILITIES: Capabilities = caps(
 	"kv",
-	// Sprint T2/6 : 'aggregate' ajouté — foldAggregate implémenté dans
-	// compensate.ts (1 row output sprint 6, N rows sprint 7 avec groupKeys).
+	// 'aggregate' ajouté — foldAggregate implémenté dans
+	// compensate.ts (1 row output N rows avec groupKeys).
 	["scan", "filter", "mutate", "aggregate"],
 	["int", "float", "text", "bool"]
 );

@@ -1,5 +1,5 @@
 /**
- * Sprint T2/14 — Feature 1 : mutation join (`update t [as a] with one X on l=f set …`).
+ * Feature 1 : mutation join (`update t [as a] with one X on l=f set …`).
  *
  * Couvre :
  *  - parser  : `as <alias>` + `with one X on l=f [and Y on ...]` avant where/set
@@ -149,7 +149,7 @@ describe("lower — mutation join validations", () => {
 // Codegen PG : UPDATE ... FROM
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe("codegen PG — UPDATE ... FROM", () => {
+describe("codegen PG — UPDATE... FROM", () => {
 	it("update simple sans join reste `UPDATE t SET`", () => {
 		const { text } = pgSql('update resource set status = "closed"');
 		expect(text).toBe('UPDATE "resource" SET "status" = $1 RETURNING *');
@@ -171,7 +171,7 @@ describe("codegen PG — UPDATE ... FROM", () => {
 		);
 	});
 
-	it("update as r with one X as a on ... where + set", () => {
+	it("update as r with one X as a on... where + set", () => {
 		const { text } = pgSql(
 			'update resource as r with one agency as a on agency_id = id where a.region_id = "reg-1" set status = "closed"'
 		);
@@ -201,8 +201,8 @@ describe("codegen PG — UPDATE ... FROM", () => {
 // Planner : capability write-join
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe("planner — capability 'write-join' PG + Mongo (PM/4), KV refusé", () => {
-	it("Mongo supporte update … with one … (PM/4 aggregate+$merge)", () => {
+describe("planner — capability 'write-join' PG + Mongo, KV refusé", () => {
+	it("Mongo supporte update … with one … (aggregate+$merge)", () => {
 		const stmt = parse(
 			tokenize('update resource with one agency on agency_id = id set status = "x"')
 		);

@@ -1,5 +1,5 @@
 /**
- * `getCanvasChecksumHistory` — audit trail T4/4.
+ * `getCanvasChecksumHistory` — audit trail des checksums de schéma.
  *
  * Résout le canvas d'un `(userId, connectionId)` via le lookup standard
  * (fp/checksum/legacy), puis retourne les 100 derniers events checksum
@@ -7,14 +7,13 @@
  * authenticate (voir heartbeat.ts). Chaque event trace : quand, quel
  * checksum, depuis quelle db_connection source.
  *
- * ─── Rôle audit ──────────────────────────────────────────────────────
  * Permet à l'user d'inspecter l'historique des évolutions de schéma de sa
  * DB vues par SQLNest — utile pour :
  *  - vérifier les migrations passées (drift detection)
  *  - identifier depuis quel device un changement est arrivé
  *  - export pour compliance/audit externe
  *
- * Read-only : aucune API de write ou delete v1 (append-only pur).
+ * Read-only : aucune API de write ou delete (append-only pur).
  */
 
 import { schema as dbSchema } from "@sqlnest/db";

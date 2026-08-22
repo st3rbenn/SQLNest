@@ -1,5 +1,5 @@
 /**
- * Sprint T3/6 — CTE `let x = find ...; body`.
+ * CTE `let x = find...; body`.
  *
  * Couvre :
  *  - parser  : bindings avec ; obligatoire, body find/add/update/remove,
@@ -95,7 +95,7 @@ describe("parser — let CTE", () => {
 		expect(stmt.body.operation).toBe("insert");
 	});
 
-	it("refus binding non-select (let x = add ...)", () => {
+	it("refus binding non-select (let x = add...)", () => {
 		expectCode(
 			() => parse(tokenize("let x = add {n: 1} into t; find users")),
 			"parse_let_binding_not_select"
@@ -193,10 +193,10 @@ describe("lower — let CTE", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Lower T3/7 — shadowing (ADR-020) + graft self-ref sans rec (ADR-021)
+// Lower shadowing + graft self-ref sans rec
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe("lower T3/7 — shadowing CTE vs table (ADR-020)", () => {
+describe("lower shadowing CTE vs table", () => {
 	it("refus shadow simple (CTE porte le nom d'une collection)", () => {
 		const stmt = parse(
 			tokenize(
@@ -254,7 +254,7 @@ describe("lower T3/7 — shadowing CTE vs table (ADR-020)", () => {
 	});
 });
 
-describe("lower T3/7 — self-ref sans rec (graft ADR-021)", () => {
+describe("lower self-ref sans rec (graft)", () => {
 	it("refus self-ref en source (`let a = find a`)", () => {
 		const stmt = parse(tokenize("let a = find a where id = 1; find a pick id"));
 		if (stmt.operation !== "let") throw new Error();
@@ -281,9 +281,9 @@ describe("lower T3/7 — self-ref sans rec (graft ADR-021)", () => {
 		expect(() => lowerLet(stmt)).not.toThrow();
 	});
 
-	// ADR-024 PM/2 D2 — walker complet bindingReferencesSelf (couvre
+	// walker complet bindingReferencesSelf (couvre
 	// subquery/exists dans where/pick/having, pas seulement source + with).
-	it("D2 — self-ref via subquery in-where (`let a = find b where c in (find a pick d)`)", () => {
+	it("self-ref via subquery in-where (`let a = find b where c in (find a pick d)`)", () => {
 		const stmt = parse(
 			tokenize(
 				"let a = find users where id in (find a pick parent_id); find a pick id"
@@ -293,7 +293,7 @@ describe("lower T3/7 — self-ref sans rec (graft ADR-021)", () => {
 		expectCode(() => lowerLet(stmt), "lower_let_self_reference_without_rec");
 	});
 
-	it("D2 — self-ref via exists in-where", () => {
+	it("self-ref via exists in-where", () => {
 		const stmt = parse(
 			tokenize(
 				"let a = find users where exists (find a pick id); find a pick id"
@@ -303,7 +303,7 @@ describe("lower T3/7 — self-ref sans rec (graft ADR-021)", () => {
 		expectCode(() => lowerLet(stmt), "lower_let_self_reference_without_rec");
 	});
 
-	it("D2 — self-ref via not-exists in-where", () => {
+	it("self-ref via not-exists in-where", () => {
 		const stmt = parse(
 			tokenize(
 				"let a = find users where not exists (find a pick id); find a pick id"
@@ -313,7 +313,7 @@ describe("lower T3/7 — self-ref sans rec (graft ADR-021)", () => {
 		expectCode(() => lowerLet(stmt), "lower_let_self_reference_without_rec");
 	});
 
-	it("D2 — self-ref via having (aggregate)", () => {
+	it("self-ref via having (aggregate)", () => {
 		const stmt = parse(
 			tokenize(
 				"let a = find users group by dept having count(*) > 0 pick dept, count(*) as n; find a pick dept"
@@ -330,7 +330,7 @@ describe("lower T3/7 — self-ref sans rec (graft ADR-021)", () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe("codegen PG — let CTE", () => {
-	it("`let a = find users; find a pick id` produit WITH ... SELECT", () => {
+	it("`let a = find users; find a pick id` produit WITH... SELECT", () => {
 		const stmt = parse(tokenize("let a = find users; find a pick id"));
 		if (stmt.operation !== "let") throw new Error();
 		const plan = lowerLet(stmt);
@@ -342,8 +342,8 @@ describe("codegen PG — let CTE", () => {
 		expect(native.text).toContain(`FROM "a"`);
 	});
 
-	it("body update (CTE prep, use simple) — WITH ... UPDATE", () => {
-		// v1 limitation : subquery-in-write refusé (T2/11), donc le CTE
+	it("body update (CTE prep, use simple) — WITH... UPDATE", () => {
+		// v1 limitation : subquery-in-write refusé, donc le CTE
 		// ne peut pas être ref via `where id in (find cte …)` dans un
 		// update/delete. Le CTE reste utile ici pour préparer un dataset
 		// avant du join/insert-select. Test que le codegen émet bien
@@ -361,7 +361,7 @@ describe("codegen PG — let CTE", () => {
 		expect(native.text).toContain("UPDATE");
 	});
 
-	it("body insert-select — WITH ... INSERT", () => {
+	it("body insert-select — WITH... INSERT", () => {
 		const stmt = parse(
 			tokenize(
 				'let old = find users where email like "%@old.com"; add (find old pick id, email) into archive'
@@ -404,10 +404,10 @@ describe("planner — capability 'cte'", () => {
 		expect(() => assertLetSupported(plan, POSTGRES_CAPABILITIES)).not.toThrow();
 	});
 
-	it("Mongo supporte cte (PM/3 — matérialisation runtime)", () => {
-		// ADR-024 PM/3 — Mongo a désormais 'cte' capability, résolution via
+	it("Mongo supporte cte (matérialisation runtime)", () => {
+		// Mongo a désormais 'cte' capability, résolution via
 		// materializeLet (packages/engine/src/run.ts) qui délègue à
-		// materializeSubplan (ADR-024 D1). Le mapper Mongo n'a PAS mapLet —
+		// materializeSubplan. Le mapper Mongo n'a PAS mapLet
 		// l'exécution est runtime, pas codegen.
 		const stmt = parse(tokenize("let a = find users; find a pick id"));
 		if (stmt.operation !== "let") throw new Error();

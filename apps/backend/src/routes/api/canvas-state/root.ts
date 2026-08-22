@@ -261,7 +261,7 @@ export default function canvasStateRoute(fastify: FastifyInstance) {
 		}
 	);
 
-	// ─── GET /canvas-state/checksum-history — T4/4 audit trail ────────
+	// ─── GET /canvas-state/checksum-history — audit trail ────────────
 	instance.get(
 		"/checksum-history",
 		{

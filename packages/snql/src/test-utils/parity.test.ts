@@ -9,7 +9,7 @@ import {
 	pgSql
 } from "./parity";
 
-describe("pgSql (ADR-024 D11)", () => {
+describe("pgSql ()", () => {
 	it("SELECT simple → SQL text + params", () => {
 		const { text, params } = pgSql("find users pick id, email");
 		expect(text).toContain("FROM");
@@ -34,7 +34,7 @@ describe("pgSql (ADR-024 D11)", () => {
 	});
 });
 
-describe("mongoSql / mongoPipeline (ADR-024 D11)", () => {
+describe("mongoSql / mongoPipeline ()", () => {
 	it("SELECT → NativeQuery kind='mongo' avec pipeline", () => {
 		const native = mongoSql("find users pick id");
 		expect(native.kind).toBe("mongo");
@@ -64,9 +64,9 @@ describe("mongoSql / mongoPipeline (ADR-024 D11)", () => {
 	});
 });
 
-describe("assertMongoRefused (ADR-024 D11)", () => {
+describe("assertMongoRefused ()", () => {
 	it("correlated subquery nested 2+ niveaux Mongo → refus MVP", () => {
-		// PA/1 : correlated 1 niveau désormais liftée en $lookup{let,pipeline}
+		// correlated 1 niveau désormais liftée en $lookup{let,pipeline}
 		// sur Mongo. Nested 2+ niveaux reste hors scope MVP → refus dédié.
 		const err = assertMongoRefused(
 			"find users as u where exists (find orders as o where exists (find items as i where i.tag = u.name))",
@@ -76,8 +76,8 @@ describe("assertMongoRefused (ADR-024 D11)", () => {
 		expect(err.code).toBe("planner_correlated_subquery_nested_v3");
 	});
 
-	it("write-join Mongo (PM/4) → codegen aggregate+$merge, plus de refus", () => {
-		// Depuis PM/4 : Mongo supporte write-join via aggregate + $merge natif.
+	it("write-join Mongo → codegen aggregate+$merge, plus de refus", () => {
+		// Depuis Mongo supporte write-join via aggregate + $merge natif.
 		// L'ancien planner_write_join_unsupported n'est plus levé.
 		const write = mongoWrite(
 			"update orders with one users as u on user_id = u.id set discount = 0.1"
@@ -85,13 +85,13 @@ describe("assertMongoRefused (ADR-024 D11)", () => {
 		expect(write.op).toBe("update-agg-merge");
 	});
 
-	it("insert-select Mongo (PM/5) → codegen aggregate+$merge, plus de refus", () => {
+	it("insert-select Mongo → codegen aggregate+$merge, plus de refus", () => {
 		const write = mongoWrite("add (find users pick id, email) into archive");
 		expect(write.op).toBe("insert-select-agg-merge");
 	});
 
-	it("let Mongo (PM/3) → matérialisation runtime, pas de codegen", () => {
-		// Depuis PM/3 : Mongo a cte capability, exécution via materializeLet
+	it("let Mongo → matérialisation runtime, pas de codegen", () => {
+		// Depuis Mongo a cte capability, exécution via materializeLet
 		// runtime (pas codegen). Le parity helper le signale explicitement pour
 		// que le caller sache qu'il faut passer par runQuery + Connection.
 		const err = assertMongoRefused(

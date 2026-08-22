@@ -1,7 +1,7 @@
 /**
  * Object/Array literals E2E — parser + lower + codegen PG + codegen Mongo +
  * insert widening + json_contains PG débloqué + planner guards.
- * Un seul fichier consolidé pour couvrir les 15 steps du sprint.
+ * Un seul fichier consolidé pour couvrir l'ensemble des cas.
  */
 
 import { describe, expect, it } from "vitest";
@@ -237,11 +237,11 @@ describe("codegen Mongo object/array literal — BSON natif", () => {
 	});
 });
 
-describe("codegen Mongo — object literal in where (ADR-024 PM/6 #12)", () => {
+describe("codegen Mongo — object literal in where (#12)", () => {
 	it("where col = {n:1} → accepté sur Mongo (comparaison BSON native)", () => {
-		// ADR-024 PM/6 item #12 — retire l'ancien refus `plan_mongo_compare_object
+		// item #12 — retire l'ancien refus `plan_mongo_compare_object
 		// _literal_unsupported`. Mongo compare nativement les objects BSON (ordre
-		// des clés préservé). Divergence order-sensitivity documentée D8 squiggly INFO.
+		// des clés préservé). Divergence order-sensitivity documentée squiggly INFO.
 		expect(() =>
 			planFor('find t where meta = {n: 1}', "mongodb")
 		).not.toThrow();
@@ -254,7 +254,7 @@ describe("codegen Mongo — object literal in where (ADR-024 PM/6 #12)", () => {
 
 describe("composition — object literal + json fns", () => {
 	it("json_get_text({n:\"hi\"}, \"n\") = \"hi\" — SANS raw JSON déguisé", () => {
-		// Le cas qui a motivé le sprint : plus besoin d'écrire
+		// Cas motivant : plus besoin d'écrire
 		// cast("{\\"n\\":\\"hi\\"}" as json) pour extraire une valeur.
 		const { text } = pg('find t pick json_get_text({n: "hi"}, "n") as v');
 		expect(text).toContain("jsonb_build_object");
@@ -271,7 +271,7 @@ describe("composition — object literal + json fns", () => {
 	});
 });
 
-describe("json_contains PG débloqué (sprint object-literals)", () => {
+describe("json_contains PG débloqué ()", () => {
 	it("json_contains(meta, {archived: true}) → PG @> avec cast jsonb", () => {
 		const { text } = pg(
 			'find t pick json_contains(meta, {archived: true}) as has'
@@ -286,7 +286,7 @@ describe("json_contains PG débloqué (sprint object-literals)", () => {
 		).not.toThrow();
 	});
 
-	it("json_contains Mongo object literal → PA/8 $and $eq $getField", () => {
+	it("json_contains Mongo object literal → $and $eq $getField", () => {
 		const nat = mongo(
 			'find t pick json_contains(meta, {archived: true}) as h'
 		);
@@ -295,7 +295,7 @@ describe("json_contains PG débloqué (sprint object-literals)", () => {
 		expect(serialized).toContain("archived");
 	});
 
-	it("json_contains Mongo array literal → PA/8 $setIsSubset", () => {
+	it("json_contains Mongo array literal → $setIsSubset", () => {
 		const nat = mongo('find t pick json_contains(tags, [1, 2, 3]) as h');
 		expect(JSON.stringify(nat)).toContain("$setIsSubset");
 	});
@@ -323,7 +323,7 @@ describe("planner guards cast literal", () => {
 		);
 	});
 
-	it("cast({n:1} as text) → plan_cast_literal_to_text (json_stringify sprint 6+)", () => {
+	it("cast({n:1} as text) → plan_cast_literal_to_text (json_stringify)", () => {
 		expectCode(
 			() => planFor('find t pick cast({n: 1} as text) as s', "postgres"),
 			"plan_cast_literal_to_text"

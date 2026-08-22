@@ -4,8 +4,8 @@ type Engine = "postgres" | "mongodb";
 
 const CONSOLE_LS_KEY = "sqlnest:canvas-console:source";
 const CONSOLE_HEIGHT_LS_KEY = "sqlnest:canvas-console:height";
-/** [ADR-023 D9] History clé scopée par connectionId — pas de leak dev→prod
- * cross-connection. Global fallback pour rétrocompatibilité v1 (canvas
+/** History clé scopée par connectionId — pas de leak dev→prod
+ * cross-connection. Global fallback pour rétrocompatibilité (canvas
  * console éphémère sans connId). */
 const CONSOLE_HISTORY_LS_KEY = "sqlnest:canvas-console:history";
 function historyKeyFor(connectionId: string | undefined): string {
@@ -15,13 +15,13 @@ function historyKeyFor(connectionId: string | undefined): string {
 const HISTORY_MAX = 20;
 
 /**
- * [ADR-023 E/7] Une entrée de l'historique — la source SNQL du run + les
- * metadata rendu-side pour permettre le badge distinct dans l'UI history :
+ * Une entrée de l'historique — la source SNQL du run + les metadata
+ * rendu-side pour permettre le badge distinct dans l'UI history :
  *  - `written` : le run était une écriture (INSERT/UPDATE/DELETE/upsert)
  *  - `rolledBack` : la tx a été annulée (rollback_user OU rollback_error
  *    via classifyRuntimeError)
  *  - `at` : timestamp ms — pour un tri chronologique explicite si besoin
- *    (v1 : liste implicitement most-recent-first via unshift dans addHistory)
+ *    (liste implicitement most-recent-first via unshift dans addHistory)
  *
  * Migration soft : les anciennes entrées string du localStorage sont
  * upgradées silencieusement en `{source: entry}` au load.
@@ -50,9 +50,9 @@ const EXAMPLES: Record<Engine, string> = {
 };
 
 /**
- * [ADR-023 E/7.1] Charge l'history depuis localStorage avec migration soft
- * des anciennes entrées string[] → HistoryEntry[]. Tolérant aux JSON
- * corrompus, quota, private mode — retombe sur [] sans throw.
+ * Charge l'history depuis localStorage avec migration soft des anciennes
+ * entrées string[] → HistoryEntry[]. Tolérant aux JSON corrompus, quota,
+ * private mode — retombe sur [] sans throw.
  */
 function loadHistory(storageKey: string): readonly HistoryEntry[] {
 	if (typeof window === "undefined") return [];
@@ -114,9 +114,9 @@ export interface ConsolePersistence {
 
 /**
  * Persistance locale de la CanvasConsole (source + hauteur + historique).
- * [ADR-023 D9] History scopé par connectionId : pas de leak dev→prod
- * cross-connection. `connectionId` absent → clé globale (rétrocompat +
- * canvas console éphémère sans connexion active).
+ * History scopé par connectionId : pas de leak dev→prod cross-connection.
+ * `connectionId` absent → clé globale (rétrocompat + canvas console
+ * éphémère sans connexion active).
  */
 export function useConsolePersistence(
 	engine: Engine,
@@ -167,17 +167,17 @@ export function useConsolePersistence(
 		}
 	}, [height]);
 
-	// [ADR-023 E/7.1] Load history — migration soft depuis old string[]
-	// vers HistoryEntry[]. Chaque string devient `{source: entry}` sans
-	// perte. Ré-init sur changement de connectionId (nouvelle key → nouveau
+	// Load history — migration soft depuis old string[] vers
+	// HistoryEntry[]. Chaque string devient `{source: entry}` sans perte.
+	// Ré-init sur changement de connectionId (nouvelle key → nouveau
 	// state, évite le leak cross-connection).
 	const [history, setHistory] = useState<readonly HistoryEntry[]>(() =>
 		loadHistory(historyStorageKey)
 	);
 	useEffect(() => {
 		// Ré-charge quand la clé change (switch de connection). Les storage
-		// events cross-tab ne sont pas écoutés v1 — le BroadcastChannel
-		// (E/5.5 D16) pourrait s'étendre à ça en v2 si besoin.
+		// events cross-tab ne sont pas écoutés — le BroadcastChannel
+		// pourrait s'étendre à ça plus tard si besoin.
 		setHistory(loadHistory(historyStorageKey));
 	}, [historyStorageKey]);
 	useEffect(() => {

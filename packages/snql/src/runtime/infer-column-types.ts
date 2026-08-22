@@ -123,8 +123,8 @@ function applyLogical(
 			return;
 		case "project":
 		case "aggregate":
-			// Sprint T2/6 : aggregate projette les mêmes fields que project (une
-			// seule row output sprint 6). Le type inference dispatch sur call
+			// aggregate projette les mêmes fields que project (une
+			// seule row output). Le type inference dispatch sur call
 			// kind='aggregate' pour retourner bigint/float selon la fonction.
 			state.cols = projectFields(op.fields, state, schema);
 			return;
@@ -207,7 +207,7 @@ function resolveProjectField(
 		};
 	}
 
-	// Sprint T2/6-7 : agrégats scalaires — signal type fort.
+	// -7 : agrégats scalaires — signal type fort.
 	//  - count → bigint (parité PG bigint natif ; KV Number sub-2^53 quand
 	//    même bigint sémantiquement, doc knownDivergences).
 	//  - sum/avg → float (cast ::double precision dans pgSum/pgAvg pour
@@ -253,7 +253,7 @@ function resolveProjectField(
 				collection: ""
 			};
 		}
-		// Sprint T2/8 : aggregateMulti — types de retour forts.
+		// aggregateMulti — types de retour forts.
 		//  - array_agg → array (nullable côté PG empty group, [] côté KV)
 		//  - string_agg → string (nullable côté PG empty group, "" côté KV)
 		//  - json_agg → json
@@ -283,7 +283,7 @@ function resolveProjectField(
 		}
 	}
 
-	// Sprint T2/9 : window functions — types de retour forts.
+	// window functions — types de retour forts.
 	//  - row_number / rank / dense_rank → bigint, jamais NULL (chaque row
 	//    reçoit un index par définition, même partition vide).
 	if (field.expr?.kind === "windowCall") {
@@ -296,7 +296,7 @@ function resolveProjectField(
 				collection: ""
 			};
 		}
-		// Autres window fns (T2/10+) : unknown pour l'instant.
+		// Autres window fns (+) : unknown pour l'instant.
 		return {
 			name: outputName,
 			...UNKNOWN_FIELD,
@@ -401,7 +401,7 @@ function resolveProjectField(
 }
 
 /**
- * Sprint T2/7 : résout le SnqlType d'un field ref path (utilisé par min/max).
+ * résout le SnqlType d'un field ref path (utilisé par min/max).
  * Traverse alias source, alias join. Retourne null si non résolvable (nested
  * paths, préfixe inconnu, schema pas dispo, etc).
  */

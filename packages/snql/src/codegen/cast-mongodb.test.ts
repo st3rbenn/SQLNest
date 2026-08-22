@@ -36,7 +36,7 @@ function expectCode(fn: () => unknown, code: string): void {
 	}
 }
 
-describe("codegen mongodb — cast (T2 sprint 2)", () => {
+describe("codegen mongodb — cast ()", () => {
 	it("cast(x as int) en pick → $project avec $convert to long + $ifNull wrap", () => {
 		const { pipeline } = mongo("get t pick cast(x as int) as x_int");
 		expect(pipeline).toEqual([
@@ -52,7 +52,7 @@ describe("codegen mongodb — cast (T2 sprint 2)", () => {
 	});
 
 	it("les 5 targets $convert mappent vers les types BSON figés", () => {
-		// PA/7 (ADR-024-A) : target=date passe désormais par $dateTrunc unit
+		// target=date passe désormais par $dateTrunc unit
 		// day (émule PG date-only, comble div #15) — testé séparément.
 		const cases: [string, string][] = [
 			["int", "long"],
@@ -68,7 +68,7 @@ describe("codegen mongodb — cast (T2 sprint 2)", () => {
 		}
 	});
 
-	it("PA/7 : cast(x as date) → $dateTrunc unit day (émule PG date-only)", () => {
+	it("cast(x as date) → $dateTrunc unit day (émule PG date-only)", () => {
 		const { pipeline } = mongo("get t pick cast(x as date) as y");
 		expect(pipeline[0]).toEqual({
 			$project: {
@@ -98,7 +98,7 @@ describe("codegen mongodb — cast (T2 sprint 2)", () => {
 		});
 	});
 
-	it("cast d'un call as date (operand call, pas de $ifNull) — wrap $dateTrunc PA/7", () => {
+	it("cast d'un call as date (operand call, pas de $ifNull) — wrap $dateTrunc", () => {
 		const { pipeline } = mongo("get t pick cast(now() as date) as today");
 		expect(pipeline[0]).toEqual({
 			$project: {
@@ -193,7 +193,7 @@ describe("codegen mongodb — cast refusé en position prédicat", () => {
 	});
 });
 
-describe("PA/4 (ADR-024-A) — cast dans filtre write Mongo via pipeline $expr+$convert", () => {
+describe("cast dans filtre write Mongo via pipeline $expr+$convert", () => {
 	it("update where cast(id as text) = '42' → filter {$expr: {$eq:[{$convert}, '42']}}", () => {
 		const nat = mongoMutation(
 			'update t where cast(id as text) = "42" set y = 1'
@@ -258,7 +258,7 @@ describe("PA/4 (ADR-024-A) — cast dans filtre write Mongo via pipeline $expr+$
 	});
 });
 
-describe("PA/4 — refus planner casts coercitifs ambigus (bool/date/timestamp)", () => {
+describe("refus planner casts coercitifs ambigus (bool/date/timestamp)", () => {
 	it("update where cast(x as bool) = true → refus planner_mongo_write_cast_coercive_v3", () => {
 		expectCode(
 			() => mongoWrite("update t where cast(x as bool) = true set y = 1"),
@@ -293,7 +293,7 @@ describe("codegen mongodb — cast dans in refusé (v1)", () => {
 	});
 });
 
-describe("codegen mongodb — cast(_ as json) no-op (ADR-024 PM/6 #7)", () => {
+describe("codegen mongodb — cast(_ as json) no-op (#7)", () => {
 	it("via planFor() → accepté (json ajouté aux Mongo castTargets)", () => {
 		expect(() =>
 			planFor("get t pick cast(payload as json) as p", "mongodb")

@@ -1,6 +1,6 @@
 /**
- * Hook TanStack — liste des teams de l'user (owner). V1 : 1 team,
- * V2 : N. Utilisé par `TeamSelector` (sidebar dropdown, C.21.6).
+ * Hook TanStack — liste des teams de l'user (owner). Utilisé par
+ * `TeamSelector` (sidebar dropdown).
  */
 
 import { useQuery } from "@tanstack/react-query";

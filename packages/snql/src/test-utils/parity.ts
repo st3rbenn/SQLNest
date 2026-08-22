@@ -26,11 +26,11 @@ import {
 import type { SchemaModel } from "../schema/model";
 
 /**
- * ADR-024 D11 — helpers test-utils factorisés depuis les 25 fichiers .test.ts
+ * helpers test-utils factorisés depuis les 25 fichiers.test.ts
  * PG existants qui redéclaraient localement `pgSql`. Consommés par les sibling
- * tests `-mongo-e2e.test.ts` créés en PM/2..PM/8 pour vérifier :
+ * tests `-mongo-e2e.test.ts` créés en.. pour vérifier :
  *  1. shape codegen Mongo (assertMongoPipeline) — analogue à pgSql().text
- *  2. refus typé au planner (assertMongoRefused) — code du registre D13
+ * 2. refus typé au planner (assertMongoRefused) — code du registre
  *
  * Conventions figées :
  *  - `sourceOf(engine, source, schema?)` dispatch auto SELECT vs MUTATION vs
@@ -43,9 +43,9 @@ import type { SchemaModel } from "../schema/model";
 /**
  * Compile une source SNQL vers la requête native Postgres. Dispatch auto sur
  * le type de statement — équivalent des `pgSql()` locaux redéclarés dans
- * subquery-t211-e2e / insert-select-t214-e2e / mutation-join-t214-e2e /
- * upsert-t213-e2e / aggregate-t26-e2e / group-by-t27-e2e / window-fn-t29-e2e /
- * typecheck-t2115-e2e / cast.e2e / conditional-t25-e2e / correlated-subquery-t212-e2e.
+ * subquery-e2e / insert-select-e2e / mutation-join-e2e /
+ * upsert-e2e / aggregate-e2e / group-by-e2e / window-fn-e2e /
+ * typecheck-e2e / cast.e2e / conditional-e2e / correlated-subquery-e2e.
  */
 export function pgSql(
 	source: string,
@@ -109,14 +109,14 @@ export function mongoWrite(
 
 /**
  * Vérifie qu'une source SNQL est refusée par le planner/lower/codegen Mongo
- * avec le code exact `expectedCode` (typé du registre D13). Message d'échec
+ * avec le code exact `expectedCode` (typé du registre). Message d'échec
  * détaillé quand l'erreur remonte avec un autre code — critique pour éviter
  * les tests qui passent sur un refus non-lié (ex. parse error au lieu de
  * planner refus attendu).
  *
  * Le code est typé `PlannerErrorCode` : TS refuse un code hors registre à la
  * compilation — verrou anti-régression sur la contrainte non-négociable #1
- * de l'ADR-024 (pattern refus atomique). Pour un code hors registre planner
+ * de l' (pattern refus atomique). Pour un code hors registre planner
  * (parse_/lower_/codegen_), passe la string directement via le second overload.
  */
 export function assertMongoRefused(
@@ -229,11 +229,11 @@ function dispatchNative(
 			const letPlan = lowerLet(statement, schema);
 			assertLetSupported(letPlan, capabilities);
 			if (mapper.mapLet === undefined) {
-				// ADR-024 PM/3 — Mongo a cte capability mais pas mapLet : exécution
+				// Mongo a cte capability mais pas mapLet : exécution
 				// runtime via materializeLet (packages/engine/src/run.ts), pas
 				// codegen. Le parity helper ne peut pas produire de NativeQuery ici
 				// — les tests parity de ce feature doivent aller via runQuery avec
-				// un Connection (couvert par parity-matrix.e2e.test.ts en PM/9).
+				// un Connection (couvert par parity-matrix.e2e.test.ts en).
 				throw new SnqlError(
 					`${engine}: let/cte matérialisé au runtime (pas codegen) — utilise runQuery pour tester.`,
 					"parity_helper_runtime_materialized"
@@ -256,7 +256,7 @@ function dispatchNative(
 			// Introspect passe par assertIntrospectSupported au planner ; raw
 			// n'a pas d'assert planner (codegen direct dispatchant sur payload
 			// shape). Ces cas ont des helpers dédiés dans les tests concernés
-			// (introspect-t31-e2e / raw-t34-e2e) — pas de dispatch générique ici.
+			// (introspect-e2e / raw-e2e) — pas de dispatch générique ici.
 			void assertIntrospectSupported;
 			throw new Error(
 				`${engine}: operation '${statement.operation}' non couverte par ces helpers — utiliser un test dédié.`

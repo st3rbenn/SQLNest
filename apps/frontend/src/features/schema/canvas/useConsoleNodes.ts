@@ -7,15 +7,12 @@
  * résultat sont gérés par `useConsoleTabs(connId, nodeId)` à l'intérieur
  * de chaque node (scope suffix = nodeId → tabs isolés par node).
  *
- * ─── Persistance ──────────────────────────────────────────────────────
- * localStorage `sqlnest:console-nodes:<connId>` → `ConsoleNodeGeom[]`.
- * Pas encore branché sur canvas_state serveur (pas de sync cross-device
- * en T5 initial — deferred, voir memory `todo-console-snql-canvas-frame`
- * et alignement avec T4/4 canvas partagé).
+ * Persistance : localStorage `sqlnest:console-nodes:<connId>` →
+ * `ConsoleNodeGeom[]`. Pas encore branché sur canvas_state serveur.
  *
- * Pas de `useFrames`-style server sync ici : les geometries console
- * sont locales au device (comme les tabs), l'user peut les recréer
- * n'importe où. Migration future = 30 min quand on branche canvas_state.
+ * Les geometries console sont locales au device (comme les tabs), l'user
+ * peut les recréer n'importe où. Migration future = 30 min quand on
+ * branche canvas_state.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";

@@ -1,9 +1,9 @@
 /**
- * Sélecteur team pour la sidebar gallery (C.21.6).
+ * Sélecteur team pour la sidebar gallery.
  *
- * Rendu compact : logo carré + nom + chevron + badge plan (V1 = "Free").
+ * Rendu compact : logo carré + nom + chevron + badge plan ("Free").
  * Clic → dropdown avec l'unique team surlignée + « Nouvelle team »
- * disabled (V2). Ferme au clic outside / Escape.
+ * disabled. Ferme au clic outside / Escape.
  *
  * ─── Style ────────────────────────────────────────────────────────────
  * Hover / active / disabled états portés par les classes DS

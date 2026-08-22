@@ -1,15 +1,14 @@
 /**
  * AutorunRefusedBanner — banner permanent affiché au-dessus de l'éditeur
- * quand un `?autorun=1` a été refusé par le check unfiltered/raw ([[ADR-023]]
- * D14). Prévient l'user que l'auto-exec a été bloqué ; il doit vérifier la
- * source et lancer manuellement via ⌘⏎.
+ * quand un `?autorun=1` a été refusé par le check unfiltered/raw. Prévient
+ * l'user que l'auto-exec a été bloqué ; il doit vérifier la source et
+ * lancer manuellement via ⌘⏎.
  *
- * ─── Pourquoi permanent (pas de fadeout auto) ────────────────────────
- * Un banner qui disparaît en 5s laisserait l'user penser que l'auto-exec
- * s'est bien fait. Le refus est un état structurel : la source à
- * l'ouverture est dangereuse, l'user doit prendre une décision consciente.
- * Le seul way out est le bouton × explicite (dismiss local, ne re-arme
- * pas l'auto-exec).
+ * Pourquoi permanent (pas de fadeout auto) : un banner qui disparaît en 5s
+ * laisserait l'user penser que l'auto-exec s'est bien fait. Le refus est un
+ * état structurel : la source à l'ouverture est dangereuse, l'user doit
+ * prendre une décision consciente. Le seul way out est le bouton ×
+ * explicite (dismiss local, ne re-arme pas l'auto-exec).
  */
 
 import { ActionIcon } from "@mantine/core";

@@ -1,5 +1,5 @@
 /**
- * Renderers Postgres pour les builtins SNQL (sprint 1 : 8 fonctions, sprint 3
+ * Renderers Postgres pour les builtins SNQL (8 fonctions,
  * : +11 fonctions). Chaque renderer reçoit les args déjà rendus en SQL
  * (strings) via `ctx.renderExpr` — c'est du string assembly typé côté engine.
  */
@@ -83,7 +83,7 @@ export const pgConcat: EngineRenderer = (args, ctx) => {
 	return `CONCAT(${rendered.map((a) => `${a}::text`).join(", ")})`;
 };
 
-// ─── sprint 3 : string ─────────────────────────────────────────────────────
+// ─── string ─────────────────────────────────────────────────────
 
 /** `trim(s [, chars])` → `BTRIM(<s>)` / `BTRIM(<s>, <chars>)` — jamais syntaxe TRIM(BOTH … FROM …). */
 export const pgTrim: EngineRenderer = (args, ctx) => {
@@ -143,7 +143,7 @@ export const pgStrpos: EngineRenderer = (args, ctx) => {
 	return `STRPOS(${h}, ${n})`;
 };
 
-// ─── sprint 3 : number ─────────────────────────────────────────────────────
+// ─── number ─────────────────────────────────────────────────────
 
 /** `floor(n)` → `FLOOR(<n>)`. */
 export const pgFloor: EngineRenderer = (args, ctx) => {
@@ -157,7 +157,7 @@ export const pgCeil: EngineRenderer = (args, ctx) => {
 	return `CEIL(${n})`;
 };
 
-// ─── sprint 3 : date ───────────────────────────────────────────────────────
+// ─── date ───────────────────────────────────────────────────────
 
 /**
  * `today()` → `((NOW() AT TIME ZONE 'UTC')::date)`. UTC forcé pour parité
@@ -208,7 +208,7 @@ export const pgDateAdd: EngineRenderer = (args, ctx) => {
 
 /**
  * `date_diff(unit, later, earlier)` → nombre entier de units entre les deux
- * dates. Whitelist réduite sprint 3 : {day, hour, minute, second}. FLOOR
+ * dates. Whitelist réduite {day, hour, minute, second}. FLOOR
  * obligatoire (`::int` seul ferait banker rounding, casse la parité Mongo
  * truncate). Résultat positif si later > earlier.
  */
@@ -233,7 +233,7 @@ export const pgDateDiff: EngineRenderer = (args, ctx) => {
 	}
 };
 
-// ─── sprint 4 : JSON ───────────────────────────────────────────────────────
+// ─── JSON ───────────────────────────────────────────────────────
 
 /**
  * Duck-type un PlanExpr literal pour un segment path JSON. Renvoie la
@@ -328,9 +328,9 @@ export const pgJsonTypeof: EngineRenderer = (args, ctx) => {
 
 /**
  * `json_contains(doc, subdoc)` → `((doc)::jsonb @> (subdoc)::jsonb)`.
- * Débloqué sprint object-literals : le subdoc peut désormais être un object
+ * Débloqué le subdoc peut désormais être un object
  * literal SNQL natif (`{archived: true}`) au lieu du workaround
- * `cast("{...}" as json)` (raw JSON déguisé). Mongo reste `reserved` sprint 6.
+ * `cast("{...}" as json)` (raw JSON déguisé). Mongo reste `reserved`.
  */
 export const pgJsonContains: EngineRenderer = (args, ctx) => {
 	const doc = ctx.renderExpr(args[0]) as string;
@@ -338,7 +338,7 @@ export const pgJsonContains: EngineRenderer = (args, ctx) => {
 	return `((${doc})::jsonb @> (${subdoc})::jsonb)`;
 };
 
-// ─── sprint T2/5 : conditional ─────────────────────────────────────────────
+// ─── conditional ─────────────────────────────────────────────
 
 /**
  * `if(cond, then, else)` → `CASE WHEN <cond> THEN <then> ELSE <else> END`.
@@ -375,7 +375,7 @@ export const pgLeast: EngineRenderer = (args, ctx) => {
 	return `LEAST(${rendered.join(", ")})`;
 };
 
-// ─── sprint T2/6 : aggregates scalaires ────────────────────────────────────
+// ─── aggregates scalaires ────────────────────────────────────
 
 /**
  * `count(*)` → `COUNT(*)` (ctx.star=true).
@@ -398,7 +398,7 @@ export const pgCount: EngineRenderer = (args, ctx) => {
  * pgRound double-cast). Rationale : pg driver sérialise numeric/bigint > 2^53
  * en string, cassant `typeof number` consumer JS. Cast `::double precision`
  * préserve le contrat. Perte precision > 2^53 documentée (escape via
- * `cast(sum(x) as decimal)` sprint 8+).
+ * `cast(sum(x) as decimal)`).
  *
  * Empty → NULL (natif PG SUM sur set vide). NULL args ignorés naturellement.
  */
@@ -434,7 +434,7 @@ export const pgMax: EngineRenderer = (args, ctx) => {
 	return `MAX(${a})`;
 };
 
-// ─── sprint T2/8 : aggregateMulti ─────────────────────────────────────────
+// ─── aggregateMulti ─────────────────────────────────────────
 
 /**
  * Identifiant PG quoté : whitelist stricte `[A-Za-z_][A-Za-z0-9_]*` (miroir de
@@ -450,7 +450,7 @@ function quoteIdent(name: string): string {
 }
 
 /**
- * Rend une clause `ORDER BY` PG à partir des sortKeys du call (T2/8). Vide
+ * Rend une clause `ORDER BY` PG à partir des sortKeys du call. Vide
  * si `ctx.sortKeys` absent/vide.
  */
 function renderOrderByClause(ctx: {
@@ -501,7 +501,7 @@ export const pgJsonAgg: EngineRenderer = (args, ctx) => {
 	return `JSON_AGG(${distinct}${a}${renderOrderByClause(ctx)})`;
 };
 
-// ─── sprint T2/9 : window functions ─────────────────────────────────────────
+// ─── window functions ─────────────────────────────────────────
 
 /**
  * `row_number()` → `ROW_NUMBER()`. Le OVER clause est émis par le codegen

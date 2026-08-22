@@ -5,8 +5,7 @@ import { requireAdapter } from "./registry";
  * `@sqlnest/engine` — couche connexion (couche 1 du Reader).
  *
  * Le contrat {@link EngineAdapter} branche un moteur sur SNQL sans toucher au
- * langage : connexion (Slice 5), puis introspection → SchemaModel (Slice 6) et
- * exécution → ResultSet (Slice 7). Voir le vault : `07 - Reader/The Cross-DB Reader`.
+ * langage : connexion, puis introspection → SchemaModel et exécution → ResultSet.
  */
 
 /**

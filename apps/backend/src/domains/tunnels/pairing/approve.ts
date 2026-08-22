@@ -4,7 +4,7 @@
  * Contrats :
  *   - Le user DOIT être connecté (l'appelant vérifie via `requireUser`).
  *   - Le code DOIT être valide, pending, non-expiré, et non-consumed.
- *   - `deviceName` est **optionnel** depuis C.7 :
+ *   - `deviceName` est **optionnel** :
  *       * Si le fingerprint du CLI matche une `db_connection` existante
  *         du user (pairing idempotent) → on autofill avec le nom existant.
  *         Le `deviceName` fourni (s'il l'est) est ignoré silencieusement
@@ -74,8 +74,8 @@ export async function approvePairing(
 			return { ok: false, reason: "expired" as const };
 		}
 
-		// C.21.4 — résout la team dans laquelle la db_connection sera créée
-		// à l'authenticate. Priorité :
+		// Résout la team dans laquelle la db_connection sera créée à
+		// l'authenticate. Priorité :
 		//   1) `teamIdOverride` (route team-scoped `/api/teams/:slug/...`)
 		//   2) `pairing.teamId` (déjà set par un précédent approve idempotent)
 		//   3) team perso de l'user (fallback pour route legacy
@@ -99,11 +99,11 @@ export async function approvePairing(
 
 		// Lookup db_connection existante — 3 stratégies pour autofill le
 		// deviceName :
-		//   1) T4/5 : match (team, db_fingerprint) — MÊME instance DB déjà
-		//      pair-ée par un autre CLI (backup/restore ou re-attach).
-		//   2) T4/5 fallback : match (team, db_schema_checksum) — cross-docker,
-		//      2 dumps identiques dans 2 containers PG distincts.
-		//   3) C.7 : match (team, cli_fingerprint) — même CLI re-pair idempotent.
+		//   1) Match (team, db_fingerprint) — MÊME instance DB déjà pair-ée
+		//      par un autre CLI (backup/restore ou re-attach).
+		//   2) Fallback match (team, db_schema_checksum) — cross-docker, 2
+		//      dumps identiques dans 2 containers PG distincts.
+		//   3) Match (team, cli_fingerprint) — même CLI re-pair idempotent.
 		const fingerprint = computeCliFingerprint(
 			row.cliPubkey,
 			row.cliConnectionName

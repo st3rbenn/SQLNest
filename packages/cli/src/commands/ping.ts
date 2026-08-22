@@ -7,9 +7,9 @@
  *   - accepte la connexion (auth OK, réseau OK),
  *   - retourne un ping avec latence + version PG.
  *
- * Utile AVANT que le WS backend soit établi (Bloc 7) — l'user peut
- * vérifier que sa configuration locale marche sans avoir à naviguer le
- * flow complet du device pairing.
+ * Utile AVANT que le WS backend soit établi — l'user peut vérifier que sa
+ * configuration locale marche sans avoir à naviguer le flow complet du
+ * device pairing.
  *
  * ─── Sécurité ─────────────────────────────────────────────────────────
  * L'output ne contient JAMAIS la DSN — uniquement `source`

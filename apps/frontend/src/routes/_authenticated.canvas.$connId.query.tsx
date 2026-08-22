@@ -1,5 +1,5 @@
 /**
- * Route legacy `/canvas/:connId/query` (C.21.7) — redirect vers
+ * Route legacy `/canvas/:connId/query` — redirect vers
  * `/team/:defaultSlug/canvas/:connId/query`. Conservée pour les
  * bookmarks historiques.
  */

@@ -20,7 +20,7 @@
  * c'est un self-signed handshake. La vraie protection vient d'un
  * pinning externe :
  *   - Backend ↔ CLI : la pubkey Ed25519 du CLI a été enregistrée au
- *     `/tunnels/pairings/:code/approve` (Bloc 2). Le backend refuse
+ *     `/tunnels/pairings/:code/approve`. Le backend refuse
  *     tout handshake dont la pubkey ne matche pas.
  *   - Browser ↔ CLI : la pubkey X25519 du CLI est aussi signée avec
  *     la privkey Ed25519 pinnée — le browser vérifie contre la même

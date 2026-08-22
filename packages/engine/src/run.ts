@@ -80,7 +80,7 @@ export async function runQuery(
 	// dans le pgError → résolution `column "X" does not exist` → span source.
 	const identSpans = collectIdentSpans(statement);
 
-	// Sprint T3/1 : introspection (`list tables`, `describe <t>`, ...). Le
+	// Introspection (`list tables`, `describe <t>`, ...). Le
 	// mapper.mapIntrospect est absent sur les engines sans support —
 	// assertIntrospectSupported remonte l'erreur claire avant TypeError.
 	if (statement.operation === "introspect") {
@@ -99,9 +99,9 @@ export async function runQuery(
 				: undefined;
 		const native = mapper.mapIntrospect(introPlan, ctx);
 		const executed = await connection.execute(native);
-		// Sprint T3/2.3 : PG inline les postOps dans son SELECT wrapper, donc
-		// le résultat est déjà filtré/projeté. Pour les engines qui renvoient
-		// des rows brutes (Mongo), on applique compensate() côté runtime.
+		// PG inline les postOps dans son SELECT wrapper, donc le résultat est
+		// déjà filtré/projeté. Pour les engines qui renvoient des rows brutes
+		// (Mongo), on applique compensate() côté runtime.
 		if (
 			native.kind === "mongo-introspect" &&
 			introPlan.postOps !== undefined &&
@@ -118,12 +118,12 @@ export async function runQuery(
 		return { ...executed, written: false };
 	}
 
-	// Sprint T3/6 : CTE `let x = ...; body`.
+	// CTE `let x = ...; body`.
 	//   - Engine natif (PG capability `cte`) : compile en `WITH ... BODY_SQL`.
-	//   - Engine sans cte native (Mongo/KV) : T3/6.1 matérialisation —
-	//     exécute les bindings séquentiellement, puis compensate() le body
-	//     sur les rows RAM. Vision SNQL : porter les features aux engines
-	//     qui ne les ont pas nativement.
+	//   - Engine sans cte native (Mongo/KV) : matérialisation — exécute les
+	//     bindings séquentiellement, puis compensate() le body sur les rows
+	//     RAM. Vision SNQL : porter les features aux engines qui ne les ont
+	//     pas nativement.
 	if (statement.operation === "let") {
 		if (capabilities.supports.has("cte") && mapper.mapLet !== undefined) {
 			const letPlan = lowerLet(statement, schema);
@@ -143,11 +143,11 @@ export async function runQuery(
 		);
 	}
 
-	// Sprint T3/4 : escape hatch `raw`. Bypass complet du pipeline SNQL —
-	// PG passe le text SQL brut, Mongo passe le command à db.runCommand().
-	// L'user assume la sémantique + les droits DB. Une lecture peut se
-	// transformer en écriture (`raw "DELETE ..."`) → written=true safe-side
-	// pour que l'UI n'affiche pas des rows fantômes.
+	// Escape hatch `raw`. Bypass complet du pipeline SNQL — PG passe le text
+	// SQL brut, Mongo passe le command à db.runCommand(). L'user assume la
+	// sémantique + les droits DB. Une lecture peut se transformer en écriture
+	// (`raw "DELETE ..."`) → written=true safe-side pour que l'UI n'affiche
+	// pas des rows fantômes.
 	if (statement.operation === "raw") {
 		const rawPlan = lowerRaw(statement);
 		if (mapper.mapRaw === undefined) {
@@ -160,9 +160,9 @@ export async function runQuery(
 		return { ...executed, written: true };
 	}
 
-	// Sprint T2/15 : transaction bloc atomique. Le mapper.mapTransaction est
-	// absent sur les engines sans support (Mongo/KV) — assertTransactionSupported
-	// remonte l'erreur claire avant que TypeError explose.
+	// Transaction bloc atomique. Le mapper.mapTransaction est absent sur les
+	// engines sans support (Mongo/KV) — assertTransactionSupported remonte
+	// l'erreur claire avant que TypeError explose.
 	if (statement.operation === "transaction") {
 		const txPlan = lowerTransaction(statement, schema);
 		assertTransactionSupported(txPlan, capabilities);
@@ -193,18 +193,17 @@ export async function runQuery(
 
 	// Le schéma pilote l'inférence de multiplicité des joins `with` (many-to-one
 	// → LEFT JOIN, one-to-many → embed array). Sans schéma, fallback embed.
-	// T3/6.2 v2 B : subquery `in (find ...)` / `exists (find ...)` — si l'engine
-	// n'a pas la capability native (Mongo/KV), on matérialise chaque subquery
-	// puis on la remplace par un array literal / bool literal dans le plan
-	// avant de mapper. Idem "porter les features SQL manquantes".
+	// Subquery `in (find ...)` / `exists (find ...)` — si l'engine n'a pas la
+	// capability native (Mongo/KV), on matérialise chaque subquery puis on la
+	// remplace par un array literal / bool literal dans le plan avant de
+	// mapper. Idem "porter les features SQL manquantes".
 	let logicalForPlan = lower(statement, schema);
-	// ADR-024 PM/2 — condition changée : Mongo a désormais `subquery` capability,
-	// mais avec strategy='materialize'. Le planner accepte les sub-queries
-	// uncorrelated (correlated rejetées par assertUncorrelatedSubqueryForMaterialize),
-	// le runtime les résout via materializeSubplan avant plan(). Le refus
-	// correlated est fait AVANT resolveSubqueries — sinon la matérialisation
-	// remplace les subqueries par des littéraux et le planner assert (dans plan())
-	// ne les voit plus (bug PM/2 corrigé après validation E2E chinook-mongo).
+	// Mongo a `subquery` capability avec strategy='materialize'. Le planner
+	// accepte les sub-queries uncorrelated (correlated rejetées par
+	// assertUncorrelatedSubqueryForMaterialize), le runtime les résout via
+	// materializeSubplan avant plan(). Le refus correlated est fait AVANT
+	// resolveSubqueries — sinon la matérialisation remplace les subqueries
+	// par des littéraux et le planner assert (dans plan()) ne les voit plus.
 	if (capabilities.subqueryStrategy === "materialize") {
 		assertUncorrelatedSubqueryForMaterialize(logicalForPlan, capabilities);
 		logicalForPlan = await resolveSubqueries(
@@ -254,9 +253,9 @@ export async function runQuery(
 }
 
 /**
- * Sprint T3/6.1 : matérialise un CTE sur un engine qui n'a pas la capability
- * `cte` (Mongo, KV). Vision SNQL : les features SQL manquantes sont portées
- * via runtime compensation. Pattern v1 supporté :
+ * Matérialise un CTE sur un engine qui n'a pas la capability `cte` (Mongo,
+ * KV). Vision SNQL : les features SQL manquantes sont portées via runtime
+ * compensation. Pattern v1 supporté :
  *
  *   let x = find <collection> [stages];
  *   find x [stages]
@@ -302,10 +301,10 @@ async function materializeLet(
 	}
 	// Étape 2 : exécute le body selon son type.
 	if (statement.body.operation === "select") {
-		// PA/2 (ADR-024-A) — le body peut scan une vraie collection ET joindre
-		// un CTE matérialisé. Le refus D17 PM/3 est retiré : runQueryOnCte
-		// détecte ce cas et matérialise la real coll AUSSI (cap D4), puis
-		// compensate le join sur les 2 RAM sets. Symétrique CTE↔real.
+		// Le body peut scan une vraie collection ET joindre un CTE
+		// matérialisé. runQueryOnCte détecte ce cas et matérialise la real
+		// coll AUSSI (cap runtime), puis compensate le join sur les 2 RAM
+		// sets. Symétrique CTE↔real.
 		const rows = await runQueryOnCte(
 			statement.body,
 			schema,
@@ -365,9 +364,8 @@ async function runQueryOnCte(
 ): Promise<readonly Row[]> {
 	const sourceName = query.source.collection;
 	// Court-circuit CTE : source = CTE déjà matérialisé → materializeSubplan
-	// (D1) fait le compensate pur, sans resolveSubqueries — les subqueries
-	// éventuelles dans les stages sont résolues par compensate directement,
-	// comportement historique T3/6.1 préservé.
+	// fait le compensate pur, sans resolveSubqueries — les subqueries
+	// éventuelles dans les stages sont résolues par compensate directement.
 	if (materialized.has(sourceName)) {
 		return materializeSubplan(
 			lower(query, schema),
@@ -382,12 +380,11 @@ async function runQueryOnCte(
 	// pour Mongo/KV : résoudre les subqueries `in (find cte_ou_coll …)` avant
 	// materializeSubplan, sinon le planner refuse (capability subquery absente).
 	let logicalPlan = lower(query, schema);
-	// ADR-024 PM/2 — condition changée : Mongo a désormais `subquery` capability,
-	// mais avec strategy='materialize'. Le planner accepte les sub-queries
-	// uncorrelated (correlated rejetées par assertUncorrelatedSubqueryForMaterialize).
-	// Le refus correlated est fait AVANT resolveSubqueries — sinon la
-	// matérialisation remplace les subqueries par des littéraux et le planner
-	// assert ne les voit plus (bug PM/2 corrigé après validation E2E chinook-mongo).
+	// Mongo a `subquery` capability avec strategy='materialize'. Le planner
+	// accepte les sub-queries uncorrelated (correlated rejetées par
+	// assertUncorrelatedSubqueryForMaterialize). Le refus correlated est fait
+	// AVANT resolveSubqueries — sinon la matérialisation remplace les
+	// subqueries par des littéraux et le planner assert ne les voit plus.
 	if (capabilities.subqueryStrategy === "materialize") {
 		assertUncorrelatedSubqueryForMaterialize(logicalPlan, capabilities);
 		logicalPlan = await resolveSubqueries(
@@ -399,11 +396,11 @@ async function runQueryOnCte(
 			materialized
 		);
 	}
-	// PA/2 (ADR-024-A) — join CTE↔real coll : le body scan une real coll et
-	// join un CTE matérialisé. Un $lookup natif pointerait vers une coll
-	// inexistante côté engine. Matérialise la real coll (scan seul), l'ajoute
-	// comme CTE virtuel, puis re-exécute via court-circuit (compensate pur avec
-	// materialized comme JoinSources). Cap D4 s'applique.
+	// Join CTE↔real coll : le body scan une real coll et join un CTE
+	// matérialisé. Un $lookup natif pointerait vers une coll inexistante
+	// côté engine. Matérialise la real coll (scan seul), l'ajoute comme CTE
+	// virtuel, puis re-exécute via court-circuit (compensate pur avec
+	// materialized comme JoinSources). Le cap runtime s'applique.
 	if (
 		capabilities.subqueryStrategy === "materialize" &&
 		hasJoinToMaterialized(logicalPlan, materialized)
@@ -448,7 +445,7 @@ function hasJoinToMaterialized(
 }
 
 /**
- * PA/2 — extrait le scan racine du plan (sans stages downstream). Utilisé pour
+ * Extrait le scan racine du plan (sans stages downstream). Utilisé pour
  * matérialiser la real coll seule avant que compensate applique les joins CTE
  * + filters + project + sort + limit sur les 2 RAM sets. Optimisation future :
  * pousser aussi les filters racines pushdown-friendly (aucune ref CTE).
@@ -578,17 +575,17 @@ function literalOf(value: unknown): import("@sqlnest/snql").Expr {
 }
 
 /**
- * T3/6.2 v2 B : porter les subqueries `in (find …)` / `exists (find …)`
- * vers les engines qui n'ont pas la capability `subquery` (Mongo/KV) via
- * matérialisation. Walker sur le LogicalPlan : chaque subquery rencontrée
- * dans un predicate est exécutée récursivement (native + compensate),
- * puis remplacée par une valeur littérale équivalente :
+ * Porter les subqueries `in (find …)` / `exists (find …)` vers les engines
+ * qui n'ont pas la capability `subquery` (Mongo/KV) via matérialisation.
+ * Walker sur le LogicalPlan : chaque subquery rencontrée dans un predicate
+ * est exécutée récursivement (native + compensate), puis remplacée par une
+ * valeur littérale équivalente :
  *  - `x in (find ...)` → `x in [v1, v2, v3, ...]` (Expr.in avec array literal)
  *  - `exists (find ...)` → `true`/`false` selon rows.length
  *
- * Correlated subqueries : hors scope v2 (chaque row outer aurait un contexte
+ * Correlated subqueries : hors scope (chaque row outer aurait un contexte
  * différent → N+1 avec potentiellement des milliers de round-trips). Les
- * subqueries corrélées PG sont déjà refusées côté Mongo au lower T2/12.
+ * subqueries corrélées PG sont déjà refusées côté Mongo au lower.
  */
 async function resolveSubqueries(
 	logicalPlan: import("@sqlnest/snql").LogicalPlan,
@@ -637,10 +634,10 @@ async function resolveSubqueries(
 	): Promise<import("@sqlnest/snql").PlanExpr> => {
 		switch (expr.kind) {
 			case "subquery": {
-				// ADR-024 PM/2 → PA/1 (ADR-024-A) — les subqueries CORRELATED sont
-				// laissées dans le plan pour que le codegen Mongo les rewrite en
-				// lift-lookup ($lookup{let,pipeline}). Seules les uncorrelated
-				// passent par la matérialisation runtime en 1 shot.
+				// Les subqueries CORRELATED sont laissées dans le plan pour que
+				// le codegen Mongo les rewrite en lift-lookup
+				// ($lookup{let,pipeline}). Seules les uncorrelated passent par
+				// la matérialisation runtime en 1 shot.
 				if (detectOuterAliasesInSubplan(expr.plan).length > 0) {
 					return expr;
 				}
@@ -656,7 +653,7 @@ async function resolveSubqueries(
 				};
 			}
 			case "exists": {
-				// PA/1 — skip correlated pour lift-lookup côté codegen Mongo.
+				// Skip correlated pour lift-lookup côté codegen Mongo.
 				if (detectOuterAliasesInSubplan(expr.subplan).length > 0) {
 					return expr;
 				}
@@ -761,7 +758,7 @@ async function resolveSubqueries(
 		values: readonly import("@sqlnest/snql").PlanExpr[]
 	): Promise<readonly import("@sqlnest/snql").PlanExpr[]> => {
 		if (values.length === 1 && values[0]?.kind === "subquery") {
-			// PA/1 — skip correlated pour lift-lookup côté codegen Mongo.
+			// Skip correlated pour lift-lookup côté codegen Mongo.
 			if (detectOuterAliasesInSubplan(values[0].plan).length > 0) {
 				return values;
 			}
@@ -781,8 +778,8 @@ async function resolveSubqueries(
 	// les subqueries matérialisées. Peut contenir lui-même des subqueries →
 	// résolue par la récursion (on rappelle resolveSubqueries d'abord).
 	//
-	// PM/1 D1 — délégué à `materializeSubplan()` (packages/engine/src/mongo/
-	// materialize.ts) qui centralise court-circuit CTE + cap runtime D4.
+	// Délégué à `materializeSubplan()` (packages/engine/src/mongo/
+	// materialize.ts) qui centralise court-circuit CTE + cap runtime.
 	// Ordre : (1) court-circuit CTE via materializeSubplan si scan racine sur
 	// CTE ; (2) sinon resolveSubqueries pour aplatir les subqueries imbriquées
 	// puis materializeSubplan pour le pushdown natif.

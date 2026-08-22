@@ -19,33 +19,33 @@ export type Capability =
 	| "paginate"
 	| "mutate"
 	| "graph"
-	// Sprint T2/11 : support des sub-queries inline (`in (find ...)` /
+	// support des sub-queries inline (`in (find...)` /
 	// `exists (find ...)`). PG only v1 (natif SQL) ; Mongo/KV refusés.
 	| "subquery"
-	// Sprint T2/13 : `add {…} into t on conflict (col) [ignore | edit set …]`.
+	// `add {…} into t on conflict (col) [ignore | edit set …]`.
 	// PG only v1 (INSERT ... ON CONFLICT natif). Mongo/KV refusés (sémantique
 	// upsert Mongo est différente — updateOne(upsert:true) sur un full doc,
 	// pas de WHERE côté conflict, à réévaluer plus tard).
 	| "upsert"
-	// Sprint T2/14 : `update t with one X on l=f set …` — UPDATE ... FROM natif
+	// `update t with one X on l=f set …` — UPDATE... FROM natif
 	// PG. Mongo/KV refusés v1 (Mongo n'a pas de write-join natif ; passe par
 	// aggregation + $merge dans les versions récentes, à réévaluer plus tard).
 	| "write-join"
-	// Sprint T2/14 : `add (find … pick a, b) into t` — INSERT INTO ... SELECT
+	// `add (find … pick a, b) into t` — INSERT INTO... SELECT
 	// natif PG. Mongo passe par aggregate + $merge $out, KV pas de select-
 	// then-insert atomique — refusés v1.
 	| "insert-select"
-	// Sprint T2/15 : `transaction [isolation …] { stmt; stmt }` bloc atomique
+	// `transaction [isolation …] { stmt; stmt }` bloc atomique
 	// multi-statements. PG only v1 (BEGIN/COMMIT/ROLLBACK natif). Mongo/KV
 	// hors scope pour l'instant.
 	| "transaction"
-	// Sprint T3/1 : introspection (`list tables`, `describe <t>`, `list
+	// introspection (`list tables`, `describe <t>`, `list
 	// schemas`, `list indexes`). PG + Mongo v1 — chaque engine mappe vers
 	// son propre mécanisme (information_schema PG, listCollections Mongo).
 	// Chaque IntrospectKind renvoie un shape de colonnes stable cross-engine
 	// (ex: list-tables → {name: string}).
 	| "introspect"
-	// Sprint T3/6 : `let x = ...; body` — CTE (Common Table Expressions).
+	// `let x = ...; body` — CTE (Common Table Expressions).
 	// PG only v1 (WITH ... natif). Mongo pourrait matérialiser via $lookup
 	// sub-pipeline mais complexité pas justifiée v1 — refus explicit.
 	| "cte";
@@ -127,11 +127,11 @@ export type PlanExpr = (
 	// Appel de fonction validé — nom canonique (lowercased), args lowered.
 	// Le codegen délègue au renderer du registre pour l'engine cible.
 	//
-	// Sprint T2/6 : flags optionnels pour les aggregates.
+	// flags optionnels pour les aggregates.
 	//  - `star` : `count(*)` — args=[]. Invariants documentés au parser/lower.
 	//  - `unique` : `count(unique x)` — args.length=1. Réservé aggregates.
 	//
-	// Sprint T2/8 : `sortKeys?` — sort intra-call pour aggregateMulti
+	// `sortKeys?` — sort intra-call pour aggregateMulti
 	// (`array_agg / string_agg / json_agg`). Codegen PG émet ORDER BY dans
 	// la fonction ; Mongo utilise $sortArray en $project ; runtime KV trie
 	// avant reduce.
@@ -167,7 +167,7 @@ export type PlanExpr = (
 			readonly kind: "array";
 			readonly items: readonly PlanExpr[];
 	  }
-	// Sprint T2/5 : `case { c1 -> v1, c2 -> v2, else -> v3 }`. First-match wins.
+	// `case { c1 -> v1, c2 -> v2, else -> v3 }`. First-match wins.
 	// elseValue toujours défini (else obligatoire à la surface). Codegen PG :
 	// CASE WHEN. Codegen Mongo : $switch. Runtime KV : evalValue short-circuit
 	// avec strict `=== true` sur cond (parité PG 3VL, null/false/0 → else).
@@ -176,7 +176,7 @@ export type PlanExpr = (
 			readonly branches: readonly PlanCaseBranch[];
 			readonly elseValue: PlanExpr;
 	  }
-	// Sprint T2/9 : window function — `fn(args) over (partition <col> sort <key>)`.
+	// window function — `fn(args) over (partition <col> sort <key>)`.
 	// Distinct de `call` : sémantique per-row-in-partition-context (row_number,
 	// rank, dense_rank + agg-over-window plus tard). Codegen PG émet `FN() OVER
 	// (PARTITION BY ... ORDER BY ...)` dans le SELECT. Codegen Mongo insère un
@@ -190,7 +190,7 @@ export type PlanExpr = (
 			readonly partitionKeys: readonly (readonly string[])[];
 			readonly sortKeys: readonly PlanSortKey[];
 	  }
-	// Sprint T2/11 : sub-query uncorrelated — `(find t pick y)` en position
+	// sub-query uncorrelated — `(find t pick y)` en position
 	// d'expression. Le `plan` est un LogicalPlan récursif (query nested
 	// abaissée). Codegen PG : `(SELECT ...)` inline. Autres engines : refusé
 	// v1 (capability `subquery` PG-only).
@@ -198,14 +198,14 @@ export type PlanExpr = (
 			readonly kind: "subquery";
 			readonly plan: LogicalPlan;
 	  }
-	// Sprint T2/11 : `exists (find ...)` — retourne bool ssi subquery renvoie
+	// `exists (find...)` — retourne bool ssi subquery renvoie
 	// au moins une row. Le `subplan` est TOUJOURS un LogicalPlan (unwrap du
 	// PlanExpr.subquery au lower).
 	| {
 			readonly kind: "exists";
 			readonly subplan: LogicalPlan;
 	  }
-	// Sprint T2/13 : `new.<col>` — référence la row proposée d'un upsert.
+	// `new.<col>` — référence la row proposée d'un upsert.
 	// Valide UNIQUEMENT dans le scope `on conflict (…) edit set / where` d'un
 	// insert. Le lower transforme `Expr.field {path:["new", col]}` en cette
 	// variant seulement à l'intérieur du scope upsert ; ailleurs, `new` reste
@@ -256,7 +256,7 @@ export type LogicalPlan =
 			readonly input: LogicalPlan;
 			readonly predicate: PlanExpr;
 	  }
-	// Sprint T2/10 : DISTINCT via `unique` flag et/ou `distinctOnKeys` explicites.
+	// DISTINCT via `unique` flag et/ou `distinctOnKeys` explicites.
 	// `unique` seul = SELECT DISTINCT sur tous les fields projetés.
 	// `distinctOnKeys` non-vide = SELECT DISTINCT ON (keys) — la 1re row de
 	// chaque groupe (par keys) conservée, ordre défini par le sort suivant
@@ -281,7 +281,7 @@ export type LogicalPlan =
 	  }
 	// Join. `kind` détermine la sémantique côté codegen :
 	//  - `embed` : chaque ligne gauche reçoit un TABLEAU des lignes droites matchées
-	//    sous le champ `as` (comportement historique, cf. ADR-008). Adapté aux
+	// sous le champ `as` (comportement historique, cf. ). Adapté aux
 	//    relations one-to-many / many-to-many. Les refs `alias.field` en pick/where
 	//    ne sont pas résolvables — utiliser `pick alias` pour l'array complet.
 	//  - `join` : LEFT JOIN classique, `alias` = **une** row unique projetée à côté
@@ -298,9 +298,9 @@ export type LogicalPlan =
 			readonly foreignField: readonly string[];
 			readonly kind: "embed" | "join";
 	  }
-	// Sprint T2/6 : agrégation scalaire fold — `pick count(*)`, `pick sum(x)`.
-	// `groupKeys` toujours undefined en sprint 6 (fold sur toute la collection,
-	// 1 row output). Sprint 7 (`group by`) le peuplera sans refactor. `fields`
+	// agrégation scalaire fold — `pick count(*)`, `pick sum(x)`.
+	// `groupKeys` toujours undefined en (fold sur toute la collection,
+	// 1 row output). (`group by`) le peuplera sans refactor. `fields`
 	// contient au moins un PlanProjectField dont `expr` est un call kind='aggregate'
 	// (validation au lower). Codegen PG : SELECT-list nue (implicit grouping natif).
 	// Codegen Mongo : PAIRE [$group{_id:null,...}, $project{_id:0,...}] via SSA
@@ -339,7 +339,7 @@ export type PlanRowValue =
  * son prédicat, ses valeurs. Exige la capacité `mutate`.
  */
 /**
- * Sprint T2/13 : action sur conflit d'un upsert lowered.
+ * action sur conflit d'un upsert lowered.
  *  - `ignore` : `ON CONFLICT (...) DO NOTHING`.
  *  - `update` : `ON CONFLICT (...) DO UPDATE SET c = expr [WHERE p]`. Les
  *    `assignments.value` peuvent contenir des `PlanExpr.upsertNew` (réfs
@@ -359,7 +359,7 @@ export interface PlanOnConflict {
 }
 
 /**
- * Sprint T2/14 : join lowered pour un `update t with one X on l=f`. `kind`
+ * join lowered pour un `update t with one X on l=f`. `kind`
  * verrouillé à `"join"` (many = refusé au lower). `as` = alias effectif de
  * la table jointe (soit user-specified, soit égal à `collection` sinon).
  */
@@ -385,12 +385,12 @@ export type MutationPlan =
 			 */
 			readonly rowSpans?: readonly (Span | undefined)[];
 			readonly cellSpans?: readonly (readonly (Span | undefined)[])[];
-			// Sprint T2/13 : clause upsert. Exige capability `upsert` (PG only v1).
+			// clause upsert. Exige capability `upsert` (PG only v1).
 			readonly onConflict?: PlanOnConflict;
-			// Sprint T2/13 : `pick count` → drop `RETURNING *` côté codegen.
+			// `pick count` → drop `RETURNING *` côté codegen.
 			readonly returnRowCount?: true;
 			/**
-			 * Sprint T2/14 : INSERT SELECT — quand présent, `rows` est vide et
+			 * INSERT SELECT — quand présent, `rows` est vide et
 			 * `columns` porte les noms cibles inférés du `pick` de la sub-query
 			 * (`pick x as tgt_col` → tgt_col). Le codegen émet `INSERT INTO t
 			 * (cols) SELECT … FROM …` en réutilisant renderPlan sur sourcePlan.
@@ -401,11 +401,11 @@ export type MutationPlan =
 	| {
 			readonly op: "update";
 			readonly collection: string;
-			// Sprint T2/14 : alias source `update t as a set …`. Utilisé par le
+			// alias source `update t as a set …`. Utilisé par le
 			// codegen pour émettre `UPDATE t AS a SET …` et résoudre `a.col`
 			// dans set/where sans FROM-clause fantôme.
 			readonly alias?: string;
-			// Sprint T2/14 : joins de mutation `update t with one X on l=f set …`.
+			// joins de mutation `update t with one X on l=f set …`.
 			// PG only (capability `write-join`). `with many` refusé au lower.
 			readonly joins?: readonly PlanUpdateJoin[];
 			readonly assignments: readonly PlanColumnValue[];
@@ -421,7 +421,7 @@ export type MutationPlan =
 	  };
 
 /**
- * Sprint T2/15 : item de body d'un TransactionPlan — soit une lecture
+ * item de body d'un TransactionPlan — soit une lecture
  * (LogicalPlan wrapped), soit une mutation (MutationPlan wrapped), soit
  * un sous-bloc savepoint récursif.
  */
@@ -435,7 +435,7 @@ export type TransactionPlanItem =
 	  };
 
 /**
- * Sprint T2/15 : plan d'une transaction. Exige capability `transaction`
+ * plan d'une transaction. Exige capability `transaction`
  * (PG only v1). Le codegen produit un `SqlTransaction` avec statements
  * pré-rendus, l'engine wrap avec BEGIN [ISOLATION LEVEL X] / COMMIT /
  * ROLLBACK et gère les SAVEPOINT / RELEASE.
@@ -447,7 +447,7 @@ export interface TransactionPlan {
 }
 
 /**
- * Sprint T3/1 : plan d'introspection. Exige capability `introspect`. Le
+ * plan d'introspection. Exige capability `introspect`. Le
  * codegen produit un native adapté à l'engine cible (SqlQuery PG via
  * information_schema, MongoIntrospect via listCollections). `target` porte
  * l'ident cible quand pertinent (ex: `describe <target>`).
@@ -457,7 +457,7 @@ export interface IntrospectPlan {
 	readonly kind: import("../parser/ast").IntrospectKind;
 	readonly target?: string;
 	/**
-	 * Sprint T3/2.3 : stages post-introspection (where/pick/sort/limit) déjà
+	 * stages post-introspection (where/pick/sort/limit) déjà
 	 * lowered en ops de compensation. PG les inline dans un SELECT wrapper
 	 * `FROM (baseSql) AS t`. Mongo les applique via compensate() côté engine
 	 * sur les rows renvoyées par listCollections/sample.
@@ -466,7 +466,7 @@ export interface IntrospectPlan {
 }
 
 /**
- * Sprint T3/4 : plan `raw` — pass-through du payload AST. Le mapper vérifie
+ * plan `raw` — pass-through du payload AST. Le mapper vérifie
  * la compatibilité shape/engine (raw sql sur PG, raw object sur Mongo) et
  * refuse le cross avec un message dédié.
  */
@@ -476,7 +476,7 @@ export interface RawPlan {
 }
 
 /**
- * Sprint T3/6 : un binding CTE lowered. Chaque nom devient une "collection
+ * un binding CTE lowered. Chaque nom devient une "collection
  * virtuelle" visible dans le body plan — le codegen PG l'émet en préfixe
  * `WITH <name> AS (<subplan-sql>)`.
  */
@@ -486,7 +486,7 @@ export interface PlanCteBinding {
 }
 
 /**
- * Sprint T3/6 : wrapper `let x1 = …; x2 = …; body`. Le body est un plan
+ * wrapper `let x1 = …; x2 = …; body`. Le body est un plan
  * classique (Logical pour find, Mutation pour add/update/remove) qui a été
  * lowered en considérant les cte names comme des collections légitimes.
  * PG only v1 (capability `cte`) — Mongo refuse au planner.
@@ -497,7 +497,7 @@ export interface LetPlan {
 	readonly body: LogicalPlan | MutationPlan;
 }
 
-/** Un plan complet : lecture, mutation, transaction (T2/15), introspect (T3/1), raw (T3/4) ou let/CTE (T3/6). */
+/** Un plan complet : lecture, mutation, transaction, introspect, raw ou let/CTE. */
 export type Plan =
 	| LogicalPlan
 	| MutationPlan
@@ -508,7 +508,7 @@ export type Plan =
 
 export type PlanOp = LogicalPlan["op"];
 
-/** Capacité exigée par chaque opérateur — consommé par le planner (Slice 3). */
+/** Capacité exigée par chaque opérateur — consommé par le planner. */
 export const REQUIRED_CAPABILITY: Readonly<Record<PlanOp, Capability>> = {
 	scan: "scan",
 	filter: "filter",

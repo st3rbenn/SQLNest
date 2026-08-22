@@ -1,29 +1,28 @@
 /**
  * WriteConfirmBar — surface de confirmation inline pour les writes non filtrés
- * détectés par le walker [[unfilteredWrites.ts]] (voir [[ADR-023]] Q2 = typing
- * du verbe INLINE, PAS modal bloquant).
+ * détectés par le walker [[unfilteredWrites.ts]] : typing du verbe INLINE,
+ * PAS modal bloquant.
  *
- * ─── Comportement ─────────────────────────────────────────────────────
  * L'user tape la chaîne exacte attendue (`REMOVE FROM users` etc.) — le
  * bouton "Exécuter" reste disabled tant que la saisie ne matche pas
  * (comparaison normalisée : trim + espaces collapsés + upper case). Escape
- * ou clic "Annuler" ferme la bar sans exécuter. `⌘⇧⏎` (E/5) court-circuite
- * ce flow via un run direct en transaction.
+ * ou clic "Annuler" ferme la bar sans exécuter. `⌘⇧⏎` court-circuite ce
+ * flow via un run direct en transaction.
  *
- * ─── Pourquoi le typing du verbe (Q2d) ────────────────────────────────
+ * Pourquoi le typing du verbe :
  * - Anti-reflexe : impossible de cliquer 2× par erreur (`⌘⏎ → chip → ⌘⏎`
- *   trap Q2b), impossible de Enter-Enter sur un modal (Q2a), force à LIRE
- *   la cible avant confirmation.
+ *   trap), impossible de Enter-Enter sur un modal, force à LIRE la cible
+ *   avant confirmation.
  * - Pattern éprouvé GitHub/Stripe/AWS pour les actions destructives.
  * - Inline dans un TextInput sous l'éditeur (pas un Modal bloquant) préserve
  *   le flow CodeMirror — Escape rend le focus à l'éditeur.
  *
- * ─── Ce qui n'est PAS géré ici ────────────────────────────────────────
- * - Timeout 5s auto-cancel : géré côté parent (`ConsoleShellInner`) qui
+ * Ce qui n'est PAS géré ici :
+ * - Timeout auto-cancel : géré côté parent (`ConsoleShellInner`) qui
  *   contrôle le state pending — la bar est stateless sur ce point.
  * - Reset onChange source : idem, parent recompute walker et set pending
  *   à null si findings vide ou déclenche un nouveau flow.
- * - Wrap transaction sur `⌘⇧⏎` : E/5, hors scope E/3.
+ * - Wrap transaction sur `⌘⇧⏎` : géré par le keymap de l'éditeur.
  */
 
 import { TextInput } from "@mantine/core";
@@ -47,9 +46,9 @@ export interface WriteConfirmBarProps {
 	 * affiché au-dessus des boutons pour que l'user sache combien de temps
 	 * il lui reste. */
 	readonly timeoutMs?: number;
-	/** [ADR-023 E/4] Résultat du preview count fetché en parallèle. `null` =
-	 * loading (juste après le trigger, le fetch n'est pas revenu). `ok` =
-	 * count disponible + disclaimer optionnel D17. `unavailable` = affichage
+	/** Résultat du preview count fetché en parallèle. `null` = loading
+	 * (juste après le trigger, le fetch n'est pas revenu). `ok` = count
+	 * disponible + disclaimer optionnel. `unavailable` = affichage
 	 * "aperçu indisponible" avec la raison (unsupported / timeout / erreur). */
 	readonly preview?: PreviewResult | null;
 }
@@ -265,9 +264,9 @@ export function WriteConfirmBar({
 		inputRef.current?.focus();
 	}, [firstOffset]);
 
-	// [ADR-023 E/3.5] Countdown local — 250ms tick pour rendu smooth, appelle
-	// onCancel automatiquement quand la deadline est atteinte. Re-init si le
-	// finding change (nouveau pending). Cleanup obligatoire sinon leak.
+	// Countdown local — 250ms tick pour rendu smooth, appelle onCancel
+	// automatiquement quand la deadline est atteinte. Re-init si le finding
+	// change (nouveau pending). Cleanup obligatoire sinon leak.
 	useEffect(() => {
 		setRemainingMs(timeoutMs);
 		const deadline = performance.now() + timeoutMs;

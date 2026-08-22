@@ -1,5 +1,5 @@
 /**
- * Sprint T2/13.5 — Schema-aware autocomplete dans `add {…}` / `update … set …`.
+ * Schema-aware autocomplete dans `add {…}` / `update … set …`.
  *
  * Vérifie :
  *  - fields de la target proposés dans un doc (avec skip des déjà tapés)
@@ -113,7 +113,7 @@ describe("add doc — position clé", () => {
 		expect(opts.find((o) => o.label === "id")?.insertKind).toBe("string");
 	});
 
-	// NB: pas de champ number dans la schema T2/13.5 — on couvre via
+	// NB: pas de champ number dans la schema on couvre via
 	// insertKindOf, testé indirectement par le comportement enum/string ci-dessus.
 });
 
@@ -147,7 +147,7 @@ describe("add doc — position valeur (enum)", () => {
 		expect(options).not.toContain("field_expert");
 	});
 
-	// Sprint T2/13.6 : le smart-apply insère `role: "|"` et le curseur atterrit
+	// le smart-apply insère `role: "|"` et le curseur atterrit
 	// entre les guillemets — le complete doit reconnaître ce cas (string
 	// ouverte) et proposer les labels enum en insertion nue (pas de re-wrap).
 	it("cursor entre `\"|\"` (string ouverte) : propose labels nus", () => {

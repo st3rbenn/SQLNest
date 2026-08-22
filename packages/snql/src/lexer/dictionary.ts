@@ -20,8 +20,8 @@ export const VERB_SYNONYMS: Readonly<Record<string, OperationKind>> = {
 
 /**
  * Mots-clés de structure reconnus par le lexer (hors littéraux true/false/null,
- * traités à part). Certains ne sont pas encore consommés par le parser (Slice 1)
- * mais sont réservés pour éviter qu'ils soient pris pour des identifiants.
+ * traités à part). Certains ne sont pas encore consommés par le parser mais
+ * sont réservés pour éviter qu'ils soient pris pour des identifiants.
  */
 export const KEYWORDS: ReadonlySet<string> = new Set([
 	"where",
@@ -67,7 +67,7 @@ export const KEYWORD_ALIASES: Readonly<Record<string, string>> = {
 };
 
 /**
- * Verbes d'introspection T3 — soft-keywords contextuels (détectés au parser
+ * Verbes d'introspection — soft-keywords contextuels (détectés au parser
  * en tête de statement uniquement, pour ne pas rentrer en conflit avec un
  * usage `pick x as list`/`as describe`). Absent de [[KEYWORDS]] à dessein —
  * mais highlightés comme des keywords côté éditeur.
@@ -75,12 +75,12 @@ export const KEYWORD_ALIASES: Readonly<Record<string, string>> = {
 export const INTROSPECT_VERBS: ReadonlySet<string> = new Set([
 	"list",
 	"describe",
-	// T3/2.4 : `for` — filter shortcut. Highlight comme keyword, mais reste
+	// `for` — filter shortcut. Highlight comme keyword, mais reste
 	// soft-keyword (utilisable en ident hors introspect).
 	"for",
-	// T3/4 : `raw` escape hatch — highlight bleu. Soft-keyword aussi.
+	// `raw` escape hatch — highlight bleu. Soft-keyword aussi.
 	"raw",
-	// T3/6 : `let` — CTE binding. Highlight bleu, soft-keyword.
+	// `let` — CTE binding. Highlight bleu, soft-keyword.
 	"let"
 ]);
 

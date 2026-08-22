@@ -55,31 +55,31 @@ export function parse(tokens: readonly Token[]): Statement {
 }
 
 function parseStatement(cursor: TokenCursor): Statement {
-	// Sprint T3/6 : `let x = <query>; ... <body>` — CTE. Un ou plusieurs
+	// `let x = <query>; ... <body>` — CTE. Un ou plusieurs
 	// bindings en tête suivis du statement principal. `let` est soft-keyword
 	// (utilisable comme ident ailleurs — ex. col nommée `let`).
 	const first = cursor.peek();
 	if (first.kind === "ident" && first.value.toLowerCase() === "let") {
 		return parseLet(cursor);
 	}
-	// Sprint T2/15 : `transaction [isolation …] { … }` — bloc atomique
+	// `transaction [isolation …] { … }` — bloc atomique
 	// multi-statements. Détection avant le check verb (transaction est un
 	// keyword, pas un verb).
 	if (first.kind === "keyword" && first.value === "transaction") {
 		return parseTransaction(cursor);
 	}
-	// Sprint T3/1 : `list tables` — statement d'introspection. `list` reste
+	// `list tables` — statement d'introspection. `list` reste
 	// ident soft-keyword (pour ne pas casser `pick x as list` où list est
 	// alias) — détecté ici uniquement en tête de statement.
 	if (first.kind === "ident" && first.value.toLowerCase() === "list") {
 		return parseIntrospectList(cursor);
 	}
-	// Sprint T3/2 : `describe <table>` — même stratégie soft-keyword. Une
+	// `describe <table>` — même stratégie soft-keyword. Une
 	// col nommée `describe` reste utilisable ailleurs (pick/where/set).
 	if (first.kind === "ident" && first.value.toLowerCase() === "describe") {
 		return parseIntrospectDescribe(cursor);
 	}
-	// Sprint T3/4 : `raw "sql"` (PG) ou `raw {...}` (Mongo) — escape hatch.
+	// `raw "sql"` (PG) ou `raw {...}` (Mongo) — escape hatch.
 	// Soft-keyword pour ne pas casser une col nommée `raw` ailleurs.
 	if (first.kind === "ident" && first.value.toLowerCase() === "raw") {
 		return parseRaw(cursor);
@@ -115,8 +115,8 @@ function parseStatement(cursor: TokenCursor): Statement {
 }
 
 /**
- * Sprint T3/1 : `list <sub-command>` — statement d'introspection.
- * Sous-commandes v1 : `list tables`. Extensible pour T3/2 (`list schemas`,
+ * `list <sub-command>` — statement d'introspection.
+ * Sous-commandes v1 : `list tables`. Extensible pour (`list schemas`,
  * `list indexes [on t]`) sans refactor.
  */
 function parseIntrospectList(cursor: TokenCursor): IntrospectStatement {
@@ -195,7 +195,7 @@ function parseIntrospectList(cursor: TokenCursor): IntrospectStatement {
 }
 
 /**
- * Sprint T3/6 : `let x1 = find …; let x2 = find x1 …; <body>` — CTE.
+ * `let x1 = find …; let x2 = find x1 …; <body>` — CTE.
  * Consomme les bindings tant qu'un `let` suit (chacun terminé par `;`), puis
  * parse le body (find/add/update/remove). Body = transaction/raw/introspect
  * refusé (pas de sémantique claire v1 — refus explicit avec code).
@@ -284,7 +284,7 @@ function parseLetBinding(cursor: TokenCursor): LetBinding {
 }
 
 /**
- * Sprint T3/4 : `raw "SQL"` (PG) ou `raw {...}` (Mongo command). Le payload
+ * `raw "SQL"` (PG) ou `raw {...}` (Mongo command). Le payload
  * lève l'ambiguïté PG-vs-Mongo par shape : string → SQL, object literal →
  * Mongo command. Aucun stage n'est autorisé après (raw = statement complet).
  * L'accord engine-payload est vérifié par le mapper (refus cross-shape).
@@ -334,7 +334,7 @@ function parseRaw(cursor: TokenCursor): RawStatement {
 }
 
 /**
- * Sprint T3/2 : `describe <table>` — introspection colonnes.
+ * `describe <table>` — introspection colonnes.
  * Retourne un shape stable {name, type, nullable, default, is_primary_key,
  * foreign_key} — cohérent PG/Mongo pour que l'UI n'ait pas à brancher
  * sur l'engine.
@@ -364,7 +364,7 @@ function parseIntrospectDescribe(cursor: TokenCursor): IntrospectStatement {
 }
 
 /**
- * Sprint T3/2.4 : `for <col1>, <col2>, ...` — sucre parseur qui désucre en
+ * `for <col1>, <col2>, ...` — sucre parseur qui désucre en
  * `where name in ["col1", "col2", ...]`. Utile pour cibler des rows précises
  * d'un `describe` ou `list` sans écrire le prédicat verbeux. `for` est un
  * soft-keyword contextuel (non ajouté à KEYWORDS pour rester utilisable en
@@ -403,7 +403,7 @@ function parseIntrospectForShortcut(cursor: TokenCursor): Stage {
 }
 
 /**
- * Sprint T3/2.3 : parse la suite `where`/`pick`/`sort`/`limit` d'une commande
+ * parse la suite `where`/`pick`/`sort`/`limit` d'une commande
  * d'introspection. Ordre canonique aligné avec un `find` (parser + lower
  * réutilisent la même infra pour typecheck alias / stage order).
  *
@@ -425,7 +425,7 @@ function parseIntrospectTail(cursor: TokenCursor): { stages: Stage[] } {
 			peekedFirst.span
 		);
 	}
-	// T3/2.4 : `for a, b, ...` — filter shortcut sur le nom de col/table.
+	// `for a, b, ...` — filter shortcut sur le nom de col/table.
 	// Soft-keyword contextuel : `for` n'est jamais dans KEYWORDS (pas de
 	// conflit avec les usages ident ailleurs). Ordre canonique impose
 	// `for` avant `where` — s'il vient après on refuse (message dédié).
@@ -455,7 +455,7 @@ function parseIntrospectTail(cursor: TokenCursor): { stages: Stage[] } {
 }
 
 /**
- * Sprint T2/15 : `transaction [isolation <level>] { stmt; stmt; ... }`.
+ * `transaction [isolation <level>] { stmt; stmt; ... }`.
  * `;` obligatoire entre statements (robuste au copier-coller). `{}` vide
  * refusé (transaction sans op = no-op silencieuse, pas de valeur ajoutée).
  */
@@ -503,7 +503,7 @@ function parseTransaction(cursor: TokenCursor): TransactionStatement {
 }
 
 /**
- * Sprint T2/15 : lit `isolation <level>` post-keyword. Levels : `read
+ * lit `isolation <level>` post-keyword. Levels : `read
  * committed`, `repeatable read`, `serializable` (case-insensitive côté
  * lexer). `read` est ident soft-keyword ici (pas de reserved word global
  * pour ne pas casser les cols nommées `read`).
@@ -548,7 +548,7 @@ function parseIsolationLevel(cursor: TokenCursor): IsolationLevel {
 }
 
 /**
- * Sprint T2/15 : un item de body de transaction. Soit un statement classique
+ * un item de body de transaction. Soit un statement classique
  * (select/insert/update/delete), soit un savepoint bloc. Refus transaction
  * nested (parseStatement pourrait recurser sinon).
  */
@@ -575,7 +575,7 @@ function parseTransactionItem(cursor: TokenCursor): TransactionBodyItem {
 			first.span
 		);
 	}
-	// Sprint T3/1 : introspection interdite dans une transaction (pas de
+	// introspection interdite dans une transaction (pas de
 	// sémantique claire — `list tables` retourne un shape stable, mais son
 	// placement dans un bloc atomique n'apporte rien vs l'exécuter à part).
 	if (stmt.operation === "introspect") {
@@ -585,7 +585,7 @@ function parseTransactionItem(cursor: TokenCursor): TransactionBodyItem {
 			first.span
 		);
 	}
-	// Sprint T3/4 : `raw` interdit dans une transaction — SNQL ne parse pas
+	// `raw` interdit dans une transaction — SNQL ne parse pas
 	// le contenu du raw, donc ne peut pas garantir l'atomicité de son effet
 	// vs les autres stmts. L'user peut wrapper son SQL brut avec BEGIN/COMMIT
 	// dans la chaîne s'il en a besoin.
@@ -596,7 +596,7 @@ function parseTransactionItem(cursor: TokenCursor): TransactionBodyItem {
 			first.span
 		);
 	}
-	// Sprint T3/6 : `let` interdit dans une transaction v1 — scope des CTE
+	// `let` interdit dans une transaction v1 — scope des CTE
 	// vs multi-stmt atomique ambigu. Chaque stmt de la transaction peut
 	// avoir ses propres let en préfixe si besoin.
 	if (stmt.operation === "let") {
@@ -610,7 +610,7 @@ function parseTransactionItem(cursor: TokenCursor): TransactionBodyItem {
 }
 
 /**
- * Sprint T2/15 : `savepoint <name> { stmt; stmt; ... }`. Réutilise la logique
+ * `savepoint <name> { stmt; stmt; ... }`. Réutilise la logique
  * de séparateur `;` obligatoire. Savepoints imbriqués autorisés (utile pour
  * rollback multi-niveaux).
  */
@@ -664,7 +664,7 @@ function parseInsert(cursor: TokenCursor, verbTok: Token): InsertStatement {
 	} else if (opener.kind === "lbrace") {
 		rows.push(parseDocument(cursor));
 	} else if (opener.kind === "lparen") {
-		// Sprint T2/14 : INSERT SELECT — `add (find … pick a, b) into t`. Le
+		// INSERT SELECT — `add (find … pick a, b) into t`. Le
 		// mapping cols est inféré du pick au lower (`pick x as tgt` → tgt).
 		sourceQuery = parseInsertSourceQuery(cursor);
 	} else {
@@ -687,16 +687,16 @@ function parseInsert(cursor: TokenCursor, verbTok: Token): InsertStatement {
 	const nameTok = cursor.expect("ident", "un nom de collection après 'into'");
 
 	let end = nameTok.span.end;
-	// Sprint T2/13 : `on conflict (k1, k2) [ignore | edit set ... [where ...]]`.
+	// `on conflict (k1, k2) [ignore | edit set... [where...]]`.
 	let onConflict: OnConflictClause | undefined;
 	if (peekKeyword(cursor, "on") && peekKeyword(cursor, "conflict", 1)) {
-		// Sprint T2/14 : refus `on conflict` combiné avec INSERT SELECT v1 —
+		// refus `on conflict` combiné avec INSERT SELECT v1
 		// sémantique plus complexe (DO UPDATE référence EXCLUDED depuis un
 		// SELECT, PG supporte mais mapping non-trivial). Bloqué au lower.
 		onConflict = parseOnConflict(cursor);
 		end = onConflict.span.end;
 	}
-	// Sprint T2/13 : `pick count` — retourne seulement rowCount, pas les rows.
+	// `pick count` — retourne seulement rowCount, pas les rows.
 	const returnRowCount = tryConsumePickCount(cursor);
 	if (returnRowCount !== undefined) end = returnRowCount.end;
 
@@ -714,8 +714,8 @@ function parseInsert(cursor: TokenCursor, verbTok: Token): InsertStatement {
 }
 
 /**
- * Sprint T2/14 : parse `(find … pick a, b)` en position source d'un `add`.
- * Réutilise le hook subquery de T2/11 (setSubqueryParser). La validation
+ * parse `(find … pick a, b)` en position source d'un `add`.
+ * Réutilise le hook subquery de (setSubqueryParser). La validation
  * `pick` présent + exactement 1..N fields est faite au lower.
  */
 function parseInsertSourceQuery(cursor: TokenCursor): Query {
@@ -743,7 +743,7 @@ function parseInsertSourceQuery(cursor: TokenCursor): Query {
 }
 
 /**
- * Sprint T2/13 : lit `on conflict (k1, k2) [ignore | edit set c = expr, ... [where pred]]`.
+ * lit `on conflict (k1, k2) [ignore | edit set c = expr, ... [where pred]]`.
  * `edit` est le verbe alias pour `update` — ici c'est un mot contextuel après
  * `on conflict (…)` (soft-keyword post-parens, pas de conflit avec le verb en
  * début de statement puisqu'on est déjà dans un `add`).
@@ -810,7 +810,7 @@ function parseOnConflict(cursor: TokenCursor): OnConflictClause {
 }
 
 /**
- * Sprint T2/13 : consomme `pick count` si présent. `count` reste un ident
+ * consomme `pick count` si présent. `count` reste un ident
  * (soft-keyword contextuel après `pick` en position mutation, pas de conflit
  * avec la fonction `count()` qui exige `(` derrière). Renvoie le span consommé
  * ou undefined.
@@ -939,7 +939,7 @@ function parseUpdate(cursor: TokenCursor, verbTok: Token): UpdateStatement {
 	const nameTok = cursor.expect("ident", "un nom de collection après 'update'");
 	let end = nameTok.span.end;
 
-	// Sprint T2/14 : `update t as a` — alias source optionnel pour référencer
+	// `update t as a` — alias source optionnel pour référencer
 	// les cols via `a.col` en cohabitation avec les alias joins.
 	let alias: string | undefined;
 	if (peekKeyword(cursor, "as")) {
@@ -949,7 +949,7 @@ function parseUpdate(cursor: TokenCursor, verbTok: Token): UpdateStatement {
 		end = aliasTok.span.end;
 	}
 
-	// Sprint T2/14 : `with one X on l=f [and ...]` — joins optionnels avant
+	// `with one X on l=f [and...]` — joins optionnels avant
 	// where/set. Réutilise parseWiths qui gère la chaîne `and`.
 	let joins: Stage[] | undefined;
 	if (peekKeyword(cursor, "with")) {
@@ -979,7 +979,7 @@ function parseUpdate(cursor: TokenCursor, verbTok: Token): UpdateStatement {
 		end = lastAssign.span.end;
 	}
 
-	// Sprint T2/13 : `pick count` — dropRETURNING côté PG, ne renvoie que
+	// `pick count` — dropRETURNING côté PG, ne renvoie que
 	// rowCount. Consommé avant le trailing-stage guard (`pick` n'est pas dans
 	// UPDATE_STAGE_KEYWORDS, il aurait fini `parse_unexpected`).
 	const rrc = tryConsumePickCount(cursor);
@@ -1035,7 +1035,7 @@ function parseDelete(cursor: TokenCursor, verbTok: Token): DeleteStatement {
 		end = predicate.span.end;
 	}
 
-	// Sprint T2/13 : `pick count` — dropRETURNING côté PG.
+	// `pick count` — dropRETURNING côté PG.
 	const rrc = tryConsumePickCount(cursor);
 	if (rrc !== undefined) end = rrc.end;
 
@@ -1215,7 +1215,7 @@ function parseHaving(cursor: TokenCursor): Stage {
 
 function parsePick(cursor: TokenCursor): Stage {
 	const kw = cursor.next();
-	// Sprint T2/10 : détecte `unique` (ident soft-keyword) + optional `on (keys)`.
+	// détecte `unique` (ident soft-keyword) + optional `on (keys)`.
 	// Piège UX : un champ nommé `unique` reste valide (`pick unique` seul, sans
 	// autre field derrière — mais ambigu !). On applique la règle : `unique`
 	// SEULEMENT si suivi de `on` OU d'un ident qui n'est pas une continuation
@@ -1359,7 +1359,7 @@ function parseLimit(cursor: TokenCursor): Stage {
 }
 
 /**
- * Sprint T2/11 : hook parser sub-query. Consomme le verb + délègue à
+ * hook parser sub-query. Consomme le verb + délègue à
  * parseSelect. Refuse mutation (add/update/remove) — sub-queries en
  * position d'expression sont read-only par nature.
  */

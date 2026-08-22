@@ -1,6 +1,6 @@
 /**
  * Renderers KV (in-memory runtime `compensate.ts`) pour les builtins SNQL —
- * sprint T2/5 : introduction du dispatch registre côté KV pour
+ * introduction du dispatch registre côté KV pour
  * if/nullif/greatest/least. Les fns antérieures restent inline dans
  * `compensate.ts` (migration progressive).
  *
@@ -80,7 +80,7 @@ function compareLoose(a: unknown, b: unknown): number {
 	return sa < sb ? -1 : sa > sb ? 1 : 0;
 }
 
-// ─── sprint T2/6 : aggregates scalaires — fold sur ctx.rows ────────────────
+// ─── aggregates scalaires — fold sur ctx.rows ────────────────
 // Ces renderers sont dispatchés depuis le case 'aggregate' du switch compensate.
 // Ils lisent ctx.rows (toute la collection) et ctx.evalPerRow (évaluation
 // scalar per-row) pour émettre une valeur scalaire aggregée.
@@ -210,11 +210,11 @@ export const kvMax: EngineRenderer = (args, ctx) => {
 	return hasAny ? acc : null;
 };
 
-// ─── sprint T2/6 : kvCoalesce (débloque scalar-around-agg côté KV) ─────────
+// ─── kvCoalesce (débloque scalar-around-agg côté KV) ─────────
 
 /**
  * `coalesce(a, b, …)` — retourne le premier arg non-null. Sémantique 'custom'
- * (parité PG COALESCE : null ssi TOUS args null). Ajouté sprint T2/6 pour
+ * (parité PG COALESCE : null ssi TOUS args null). Ajouté pour
  * débloquer `coalesce(sum(x), 0)` côté runtime KV — sinon
  * planner.assertFunctionsSupported rejette coalesce sur KV. Migration inline
  * → registre.
@@ -227,7 +227,7 @@ export const kvCoalesce: EngineRenderer = (args, ctx) => {
 	return null;
 };
 
-// ─── sprint T2/8 : aggregateMulti ─────────────────────────────────────────
+// ─── aggregateMulti ─────────────────────────────────────────
 
 /**
  * Helper : collecte les values évaluées per-row, applique le sort intra-call
@@ -355,7 +355,7 @@ export const kvJsonAgg: EngineRenderer = (args, ctx) => {
 	return collectAggMulti(args, ctx, { skipNulls: false });
 };
 
-// ─── sprint T2/9 : window functions ─────────────────────────────────────────
+// ─── window functions ─────────────────────────────────────────
 
 /**
  * Runtime KV : les window fns ne s'évaluent PAS ici (pas per-row-in-isolation).

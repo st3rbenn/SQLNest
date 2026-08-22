@@ -14,7 +14,7 @@ function mongo(source: string): {
 
 describe("codegen mongodb — pipeline de base", () => {
 	it("compile la requête canonique (with→where→pick→sort→limit)", () => {
-		// Sprint T2/7 : sort par colonne DROPPÉE par pick → auto-reorder $sort
+		// sort par colonne DROPPÉE par pick → auto-reorder $sort
 		// avant $project pour préserver l'accès à la col source (aligné PG lax).
 		const { collection, pipeline } = mongo(
 			`get users where age > 30 and status = "active" pick name, email sort created_at desc limit 10 offset 20`

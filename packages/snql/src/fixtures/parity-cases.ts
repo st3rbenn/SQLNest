@@ -1,17 +1,17 @@
 /**
- * ADR-024 PM/9 D12 — Fixtures de cas SNQL pour la parity-matrix.
+ * Fixtures de cas SNQL pour la parity-matrix.
  *
  * Chaque case = un SNQL source + un ensemble d'engines qui doivent le
  * COMPILER (planner accepte + codegen produit un native query sans throw).
  * Les cases divergents (documentés dans divergences-mongo-vs-pg.ts) portent
- * un `divergenceCode` référençant le registre D7 — le runner CI (à venir,
+ * un `divergenceCode` référençant le registre ; le runner CI (à venir,
  * requiert Docker) skippe la comparaison bit-à-bit pour ces cas.
  *
  * Consommé par :
- *  - parity-cases.test.ts (livré PM/9) — vérifie compile OK pour tous
- *    les engines listés dans `.engines`, offline, à chaque test run.
- *  - parity-matrix.e2e.test.ts (reporté, requiert Docker) — exécute chaque
- *    case sur les 2 drivers avec seed identique + diff bit-à-bit.
+ *  - parity-cases.test.ts — vérifie compile OK pour tous les engines listés
+ *    dans `.engines`, offline, à chaque test run.
+ *  - parity-matrix.e2e.test.ts (requiert Docker) — exécute chaque case sur
+ *    les 2 drivers avec seed identique + diff bit-à-bit.
  *
  * Contrat : ajouter un cas ici verrouille la parity — toute PR qui casse
  * la compilation pour un engine listé fail CI.
@@ -47,9 +47,9 @@ export interface ParityCase {
 }
 
 /**
- * PM/9 fixtures MVP — couvre les grandes familles SNQL. Chaque famille (find,
+ * fixtures MVP — couvre les grandes familles SNQL. Chaque famille (find,
  * subquery, cte, write-join, insert-select, transaction, upsert, agg) a au
- * moins 1 cas. Sera étendue par sprint suivant selon besoin CI.
+ * moins 1 cas. Sera étendue par selon besoin CI.
  */
 export const PARITY_CASES: readonly ParityCase[] = [
 	// ─── Lecture de base ────────────────────────────────────────────────
@@ -90,7 +90,7 @@ export const PARITY_CASES: readonly ParityCase[] = [
 		source: "find orders with one users as u on user_id = u.id pick id, u.email",
 		engines: ["postgres", "mongodb"]
 	},
-	// ─── Subquery (PM/2 uncorrelated OK) ────────────────────────────────
+	// ─── Subquery (uncorrelated OK) ────────────────────────────────
 	{
 		id: "subquery-in-uncorrelated",
 		source: "find users where id in (find orders pick user_id)",
@@ -103,7 +103,7 @@ export const PARITY_CASES: readonly ParityCase[] = [
 		engines: ["postgres", "mongodb"],
 		runtimeMaterialized: ["mongodb"]
 	},
-	// PA/1 (ADR-024-A) — correlated liftée en $lookup{let,pipeline} : compile OK
+	// correlated liftée en $lookup{let,pipeline} : compile OK
 	// sur les 2 engines. Nested 2+ niveaux reste hors scope MVP.
 	{
 		id: "subquery-correlated-lift-lookup",
@@ -120,7 +120,7 @@ export const PARITY_CASES: readonly ParityCase[] = [
 			code: "planner_correlated_subquery_nested_v3"
 		}
 	},
-	// ─── CTE / let (PM/3) ───────────────────────────────────────────────
+	// ─── CTE / let ───────────────────────────────────────────────
 	{
 		id: "let-basic",
 		source: "let active = find users where inactive = false pick id; find active pick id",
@@ -142,19 +142,19 @@ export const PARITY_CASES: readonly ParityCase[] = [
 		source: "remove from users where id = 1",
 		engines: ["postgres", "mongodb"]
 	},
-	// ─── Write-join (PM/4) ──────────────────────────────────────────────
+	// ─── Write-join ──────────────────────────────────────────────
 	{
 		id: "write-join-simple",
 		source: "update orders with one users as u on user_id = u.id set discount = 0.1",
 		engines: ["postgres", "mongodb"]
 	},
-	// ─── Insert-select (PM/5) ───────────────────────────────────────────
+	// ─── Insert-select ───────────────────────────────────────────
 	{
 		id: "insert-select-simple",
 		source: "add (find users pick id, email) into archive",
 		engines: ["postgres", "mongodb"]
 	},
-	// ─── Transaction (PA/5 savepoint via compensation logique in-session) ─
+	// ─── Transaction (savepoint via compensation logique in-session) ─
 	{
 		id: "transaction-simple",
 		source: "transaction { update users where id = 1 set is_active = false; remove from orders where user_id = 1 }",

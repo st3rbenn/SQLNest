@@ -35,8 +35,8 @@ export interface UseCanvasSyncBridgeReturn {
 /**
  * Encapsule TOUT ce qui touche à la synchro serveur du state canvas :
  *   - Reçoit le `connectionId` (UUID db_connection) — clé du GET/PUT.
- *     Depuis C.5 la clé n'est plus la signature `${engine}:${tables}` (source
- *     de collisions entre 2 dbs partageant le même set de tables).
+ *     La clé n'est plus la signature `${engine}:${tables}` (qui provoquait
+ *     des collisions entre 2 dbs partageant le même set de tables).
  *   - Compose `replaceAll` — 5 setters atomiques combinés en un objet stable.
  *   - Wire `useCanvasSync` — GET au mount, observe les 5 slices, PUT debounce
  *     2 s. Skip si user anonyme (le hook interne détecte via `session`).

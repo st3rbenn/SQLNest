@@ -1,6 +1,6 @@
 /**
- * transactionWrap — helpers pour l'exec `⌘⇧⏎` en transaction ([[ADR-023]]
- * E/5). Deux préoccupations distinctes :
+ * transactionWrap — helpers pour l'exec `⌘⇧⏎` en transaction. Deux
+ * préoccupations distinctes :
  *
  * 1. **Capability check** — le shortcut ne s'exécute QUE si l'engine
  *    supporte les transactions. Sur les engines non-relationnels (KV) ou
@@ -8,24 +8,23 @@
  *    une erreur cryptique + protège le pattern feedback-no-silent-ignore-auth
  *    (jamais no-op silencieux, toast danger explicite si false).
  *
- * 2. **Double-wrap detection (D7)** — si l'user a DÉJÀ tapé `transaction
+ * 2. **Double-wrap detection** — si l'user a DÉJÀ tapé `transaction
  *    { … }` racine et hit `⌘⇧⏎`, on ne re-wrappe PAS (produirait
  *    `transaction { transaction { … } }` REFUSÉ au parse). On respecte
  *    l'intention utilisateur : exec direct sans modification.
  *
- * ─── Limites v1 ─────────────────────────────────────────────────────
- * `supportsTransactionsForEngine` s'appuie sur la capabilité statique
- * déclarée par SNQL (`POSTGRES_CAPABILITIES` / `MONGODB_CAPABILITIES` etc.).
- * Mongo standalone (non-replica-set) est déclaré `transaction`-capable
- * mais échoue runtime — le fix propre exige `ConnectionCapabilities`
- * runtime enrichi via `engineMetadata` au handshake tunnel ([[ADR-023]]
- * Risque 2). Reporté E/8 ou ticket futur.
+ * Limites : `supportsTransactionsForEngine` s'appuie sur la capabilité
+ * statique déclarée par SNQL (`POSTGRES_CAPABILITIES` /
+ * `MONGODB_CAPABILITIES` etc.). Mongo standalone (non-replica-set) est
+ * déclaré `transaction`-capable mais échoue runtime — le fix propre exige
+ * `ConnectionCapabilities` runtime enrichi via `engineMetadata` au
+ * handshake tunnel.
  */
 
 import { capabilitiesFor, type Statement } from "@sqlnest/snql";
 
 /** True si l'engine SNQL déclare supporter le verbe `transaction`. Faux
- * pour KV, engines inconnus. Voir limites v1 ci-dessus pour Mongo. */
+ * pour KV, engines inconnus. Voir limites ci-dessus pour Mongo. */
 export function supportsTransactionsForEngine(engine: string): boolean {
 	const caps = capabilitiesFor(engine);
 	if (caps === undefined) return false;
@@ -35,14 +34,14 @@ export function supportsTransactionsForEngine(engine: string): boolean {
 /** Résultat du wrap. `kind` route l'UX :
  *  - `wrap` : source modifiée = `transaction { <src trim> }` — envoyée au CLI.
  *  - `already_tx` : source inchangée — l'user avait tapé une tx explicite,
- *    on respecte (D7 no-op).
+ *    on respecte (no-op).
  */
 export type TxWrapResult =
 	| { readonly kind: "wrap"; readonly source: string }
 	| { readonly kind: "already_tx"; readonly source: string };
 
 /** Enveloppe la source dans un bloc transaction sauf si elle EN EST DÉJÀ
- * une racine (D7). Le trim évite d'insérer un tx `transaction {  <src>  }`
+ * une racine. Le trim évite d'insérer un tx `transaction {  <src>  }`
  * avec espaces parasites en début/fin (parser tolérant mais on préfère
  * une source lisible dans les logs backend + history). */
 export function wrapInTransaction(

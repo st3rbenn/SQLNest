@@ -1,19 +1,19 @@
 /**
- * ADR-024 PM/5 — Sibling parité Mongo pour insert-select. Mirror de
- * insert-select-t214-e2e.test.ts (oracle PG utilise `INSERT ... SELECT`).
- * Mongo compile via aggregate + $merge dans une collection cible (Q5a).
+ * Sibling parité Mongo pour insert-select. Mirror de
+ * insert-select-e2e.test.ts (oracle PG utilise `INSERT ... SELECT`).
+ * Mongo compile via aggregate + $merge dans une collection cible.
  *
  * Pipeline attendu : [...source pipeline stages..., $merge{into: target,
  * whenMatched: 'fail', whenNotMatched: 'insert'}].
  *
- * D19 (session tx obligatoire, Mongo 5.0+ RS) enforced côté adapter runtime
+ * (session tx obligatoire, Mongo 5.0+ RS) enforced côté adapter runtime
  * (adapter.ts #executeWrite refuse hors session).
  */
 
 import { describe, expect, it } from "vitest";
 import { mongoWrite } from "./index";
 
-describe("PM/5 — insert-select Mongo pipeline shape", () => {
+describe("insert-select Mongo pipeline shape", () => {
 	it("add (find …) into T → pipeline source + $merge", () => {
 		const write = mongoWrite("add (find users pick id, email) into archive");
 		expect(write.kind).toBe("mongo-write");

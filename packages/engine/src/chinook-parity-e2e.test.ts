@@ -237,7 +237,7 @@ describe.skipIf(!hasBoth)("Chinook parité PG ↔ Mongo", () => {
 	}, 20_000);
 
 	// ═══════════════════════════════════════════════════════════════════════════
-	// Correlated subquery (PA/1 — ADR-024-A) : lift-lookup $lookup{let,pipeline}
+	// Correlated subquery : lift-lookup $lookup{let,pipeline}
 	// ═══════════════════════════════════════════════════════════════════════════
 
 	it("exists corrélée (customer avec au moins 1 invoice)", async () => {
@@ -249,7 +249,7 @@ describe.skipIf(!hasBoth)("Chinook parité PG ↔ Mongo", () => {
 		expect(normalize(mongo)).toEqual(normalize(pg));
 	}, 20_000);
 
-	it("exists corrélée (album avec au moins 1 track — canon PA/1 roadmap)", async () => {
+	it("exists corrélée (album avec au moins 1 track)", async () => {
 		const q = `find album as a where exists (find track as t where t.album_id = a.album_id) pick album_id sort album_id asc limit 5`;
 		const [pg, mongo] = await Promise.all([
 			runOn(pgConn, q),
@@ -277,12 +277,12 @@ describe.skipIf(!hasBoth)("Chinook parité PG ↔ Mongo", () => {
 	}, 20_000);
 
 	// ═══════════════════════════════════════════════════════════════════════════
-	// Cast dans predicate write (PA/4 — ADR-024-A) : pipeline update $expr+$convert
+	// Cast dans predicate write : pipeline update $expr+$convert
 	// ═══════════════════════════════════════════════════════════════════════════
 
 	it("update where cast(int as text) = '<id inexistant>' (non-destructif) : compile+exec sur les 2 engines", async () => {
-		// Cast dans predicate write : avant PA/4 → codegen_mongo_write_cast_predicate.
-		// Après PA/4 → filter {$expr:{$eq:[{$convert:{input:$track_id,to:'string'}},'-99999']}}.
+		// Cast dans predicate write : filter
+		// {$expr:{$eq:[{$convert:{input:$track_id,to:'string'}},'-99999']}}.
 		// track_id -99999 n'existe pas → 0 rows affectées sur les 2 engines, 0 corruption.
 		const q = `update track where cast(track_id as text) = "-99999" set milliseconds = 0`;
 		const [pgRes, mongoRes] = await Promise.all([
@@ -308,14 +308,13 @@ describe.skipIf(!hasBoth)("Chinook parité PG ↔ Mongo", () => {
 	}, 20_000);
 
 	// ═══════════════════════════════════════════════════════════════════════════
-	// PA/2 (ADR-024-A) — Join CTE ↔ collection via matérialisation symétrique
+	// Join CTE ↔ collection via matérialisation symétrique
 	// ═══════════════════════════════════════════════════════════════════════════
 
-	it("let CTE + body scan real coll + join CTE (PA/2 roadmap-canon)", async () => {
+	it("let CTE + body scan real coll + join CTE", async () => {
 		// `big` matérialisé, `album` real coll joined via `big` sur album_id.
-		// Avant PA/2 → planner_cte_body_join_mongo_unsupported.
-		// Après PA/2 → real coll matérialisée (cap D4) + compensate join sur les
-		// 2 RAM sets. Résultats identiques à PG.
+		// Real coll matérialisée (cap runtime) + compensate join sur les 2 RAM
+		// sets. Résultats identiques à PG.
 		const q = `let big = find track where milliseconds > 500000 pick track_id, name, album_id; find album with one big on album_id = big.album_id pick title sort title asc limit 5`;
 		const [pg, mongo] = await Promise.all([
 			runOn(pgConn, q),
@@ -325,7 +324,7 @@ describe.skipIf(!hasBoth)("Chinook parité PG ↔ Mongo", () => {
 	}, 30_000);
 
 	it("let CTE + body scan real coll + join CTE (pattern users↔orders adapté)", async () => {
-		// Pattern du roadmap adapté à chinook : customer avec au moins une invoice de +20$.
+		// Adapté à chinook : customer avec au moins une invoice de +20$.
 		const q = `let big_invoice = find invoice where total > 20 pick customer_id; find customer with one big_invoice on customer_id = big_invoice.customer_id pick first_name sort first_name asc limit 3`;
 		const [pg, mongo] = await Promise.all([
 			runOn(pgConn, q),
@@ -335,7 +334,7 @@ describe.skipIf(!hasBoth)("Chinook parité PG ↔ Mongo", () => {
 	}, 30_000);
 
 	// ═══════════════════════════════════════════════════════════════════════════
-	// PA/8 (ADR-024-A) — json_contains Mongo (object flat scalar / array scalar)
+	// json_contains Mongo (object flat scalar / array scalar)
 	// ═══════════════════════════════════════════════════════════════════════════
 
 	it("json_contains object flat scalar : filtre par title (parity PG↔Mongo)", async () => {
@@ -360,8 +359,7 @@ describe.skipIf(!hasBoth)("Chinook parité PG ↔ Mongo", () => {
 	}, 20_000);
 
 	// ═══════════════════════════════════════════════════════════════════════════
-	// PA/7 (ADR-024-A) — cast(str_literal as json) parse au lower + cast date
-	// $dateTrunc
+	// cast(str_literal as json) parse au lower + cast date $dateTrunc
 	// ═══════════════════════════════════════════════════════════════════════════
 
 	it("cast('{...}' as json) parsé au lower : json_contains sur pattern parsé", async () => {
@@ -376,10 +374,10 @@ describe.skipIf(!hasBoth)("Chinook parité PG ↔ Mongo", () => {
 	}, 20_000);
 
 	// ═══════════════════════════════════════════════════════════════════════════
-	// PA/5 (ADR-024-A) FLAGSHIP — savepoint via compensation logique in-session
+	// Savepoint via compensation logique in-session
 	// ═══════════════════════════════════════════════════════════════════════════
 
-	it("PA/5 savepoint success path (no error) : whole-tx commit, state persisté", async () => {
+	it("savepoint success path (no error) : whole-tx commit, state persisté", async () => {
 		// Cleanup potential test artist_id 999998/999999 leftover
 		await runQuery(
 			mongoConn,
@@ -422,7 +420,7 @@ describe.skipIf(!hasBoth)("Chinook parité PG ↔ Mongo", () => {
 		}
 	}, 30_000);
 
-	it("PA/5 savepoint rollback partiel : compensation restore state pre-savepoint", async () => {
+	it("savepoint rollback partiel : compensation restore state pre-savepoint", async () => {
 		// Setup : capture original name artist_id 1 (avant tx)
 		const beforeRows = await runOn(
 			mongoConn,
@@ -474,7 +472,7 @@ describe.skipIf(!hasBoth)("Chinook parité PG ↔ Mongo", () => {
 	}, 30_000);
 
 	it("cast(date_field as date) : $dateTrunc unit day (smoke — Mongo minuit UTC)", async () => {
-		// PA/7 : $dateTrunc unit:"day" tronque le timestamp à minuit UTC sur Mongo.
+		// $dateTrunc unit:"day" tronque le timestamp à minuit UTC sur Mongo.
 		// Comparaison PG↔Mongo directe non-triviale : PG DATE type projeté en JS
 		// applique le fuseau local (2021-01-03 → 2021-01-02T23:00Z en Europe/Paris),
 		// alors que Mongo garde le tronqué UTC. Smoke test Mongo-only : vérifie

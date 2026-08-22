@@ -62,7 +62,7 @@ export interface MongoQuery {
  * de surface d'injection.
  *
  * `filter` vide (`{}`) = toutes les lignes : un write non filtré est assumé
- * (→ ADR-012, le cœur n'est pas un garde-fou).
+ * (→ , le cœur n'est pas un garde-fou).
  */
 export type MongoWriteQuery = {
 	readonly engine: string;
@@ -104,7 +104,7 @@ export type MongoWriteQuery = {
 	  }
 	| {
 			/**
-			 * ADR-024 PM/4 Q4a — write-join Mongo via aggregate + `$merge`. Le
+			 * write-join Mongo via aggregate + `$merge`. Le
 			 * codegen produit un pipeline `[$match?, $lookup, $unwind, $set,
 			 * $unset(__j0), $merge{into: <same>, whenMatched: 'merge',
 			 * whenNotMatched: 'discard'}]`. L'adapter exécute via
@@ -112,18 +112,18 @@ export type MongoWriteQuery = {
 			 * stage terminal qui écrit comme side-effect. Atomicité par-doc via
 			 * `whenMatched: 'merge'` (Mongo 4.2+). rowCount non-reporté (limitation
 			 * `$merge` : la cursor result est vide) — le caller reçoit rowCount=null.
-			 * D9 perf-warning (join key non-indexée) délivré en PM/10.
+			 * perf-warning (join key non-indexée) délivré en.
 			 */
 			readonly op: "update-agg-merge";
 			readonly pipeline: readonly MongoStage[];
 	  }
 	| {
 			/**
-			 * ADR-024 PM/5 Q5a — insert-select Mongo via aggregate + `$merge` dans
+			 * insert-select Mongo via aggregate + `$merge` dans
 			 * une collection différente. Le codegen émet `[...source pipeline...,
 			 * $merge{into: target, whenMatched: 'fail', whenNotMatched: 'insert'}]`.
 			 * L'adapter exécute via `db.<sourceCollection>.aggregate(pipeline)`.
-			 * D19 : session tx obligatoire (Mongo 5.0+ RS) — l'adapter refuse hors
+			 * session tx obligatoire (Mongo 5.0+ RS) — l'adapter refuse hors
 			 * session avec `planner_mongo_insert_select_requires_txn`. `collection`
 			 * porte le TARGET, `sourceCollection` le root scan à agréger.
 			 */
@@ -134,7 +134,7 @@ export type MongoWriteQuery = {
 );
 
 /**
- * Sprint T2/15 : bloc transaction PG. `statements` = liste plate (pas de
+ * bloc transaction PG. `statements` = liste plate (pas de
  * nesting) de statements pré-rendus + directives structurelles pour les
  * savepoints. L'engine émet un `BEGIN` + boucle sur les directives puis
  * `COMMIT` (ou `ROLLBACK` sur erreur). Params sont par statement (chaque
@@ -153,7 +153,7 @@ export interface SqlTransaction {
 }
 
 /**
- * Sprint T3/1 : native shape pour une commande d'introspection Mongo. PG
+ * native shape pour une commande d'introspection Mongo. PG
  * produit une SqlQuery normale (via information_schema, avec le namespace
  * bindé). Mongo utilise une commande dédiée (`listCollections`) qui n'est
  * pas exprimable en pipeline aggregation.
@@ -174,7 +174,7 @@ export interface MongoIntrospectQuery {
 export type MongoTransactionStep =
 	| { readonly kind: "query"; readonly query: MongoQuery }
 	| { readonly kind: "write"; readonly write: MongoWriteQuery }
-	// PA/5 (ADR-024-A) — savepoint préservé comme step dédié, non aplati.
+	// savepoint préservé comme step dédié, non aplati.
 	// L'adapter exécute chaque body step avec snapshot pre-write + compensation
 	// runtime si erreur (inverse ops dans même session tx).
 	| {
@@ -191,7 +191,7 @@ export interface MongoTransaction {
 }
 
 /**
- * Sprint T3/4 : native shape pour un `raw {...}` Mongo — command native
+ * native shape pour un `raw {...}` Mongo — command native
  * exécutée via db.runCommand(). Le document est déjà évalué en clé/valeur
  * scalaires par le codegen (Expr.object → Record<string, unknown>).
  */
@@ -202,7 +202,7 @@ export interface MongoRawQuery {
 }
 
 /**
- * Sprint T3/1 : options passées aux méthodes du Mapper qui ont besoin du
+ * options passées aux méthodes du Mapper qui ont besoin du
  * contexte runtime. Aujourd'hui : namespace (PG schema / Mongo DB name)
  * pour l'introspection. Extensible pour d'autres options futures sans
  * casser la signature.
@@ -229,14 +229,14 @@ export interface Mapper {
 	/** Écriture : Mutation Plan → requête native. */
 	mapMutation(plan: MutationPlan): NativeQuery;
 	/**
-	 * Sprint T2/15 : transaction PG natif ; sprint TxMongo : Mongo via RS.
+	 * transaction PG natif; Mongo via RS.
 	 * Absent = engine sans support.
 	 */
 	mapTransaction?(plan: TransactionPlan): SqlTransaction | MongoTransaction;
-	/** Sprint T3/1 : introspection (list/describe/etc.). PG et Mongo v1. */
+	/** introspection (list/describe/etc.). PG et Mongo v1. */
 	mapIntrospect?(plan: IntrospectPlan, ctx?: MapperContext): NativeQuery;
-	/** Sprint T3/4 : escape hatch raw (SQL brut / Mongo command). */
+	/** escape hatch raw (SQL brut / Mongo command). */
 	mapRaw?(plan: import("../ir/plan").RawPlan): NativeQuery;
-	/** Sprint T3/6 : CTE `let x = ...; body`. PG only v1. */
+	/** CTE `let x = ...; body`. PG only v1. */
 	mapLet?(plan: import("../ir/plan").LetPlan): NativeQuery;
 }

@@ -1,5 +1,5 @@
 /**
- * PM/10 D8 — Tests unit du walker divergenceHints.
+ * Tests unit du walker divergenceHints.
  *
  * Vérifie que collectDivergenceHints émet un hint pour chaque pattern
  * divergent PG↔Mongo listé dans le registre `divergences-mongo-vs-pg`.

@@ -1,5 +1,5 @@
 /**
- * Sprint T2/11.5 typecheck cross-type predicates E2E — compare / in / arith / like.
+ * typecheck cross-type predicates E2E — compare / in / arith / like.
  * Vérifie que le lower rejette les patterns type-incompatibles avec messages
  * actionables quand le SchemaModel est chargé. Permissif quand schema absent
  * (aucun faux positif — les tests existants continuent de passer).
@@ -138,7 +138,7 @@ describe("in [values] typecheck", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// in (subquery) type mismatch — le cas motivant sprint
+// in (subquery) type mismatch — le cas motivant
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe("in (subquery) typecheck", () => {

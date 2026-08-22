@@ -1,5 +1,5 @@
 /**
- * Verrouille la politique NullBehavior en contexte write (sprint 3). Chaque
+ * Verrouille la politique NullBehavior en contexte write. Chaque
  * fonction déclarée avec writeNullBehavior est autorisée en update SET /
  * update WHERE / remove WHERE ; celles non déclarées restent refusées.
  */
@@ -28,23 +28,23 @@ function expectCode(fn: () => unknown, code: string): void {
 
 describe("writeNullBehavior — fonctions `propagate` autorisées en write", () => {
 	const propagateCases: [string, string][] = [
-		["upper (sprint 1)", "update t where id = 1 set y = upper(x)"],
-		["lower (sprint 1)", "update t where id = 1 set y = lower(x)"],
-		["length (sprint 1)", "update t where id = 1 set y = length(x)"],
-		["abs (sprint 1)", "update t where id = 1 set y = abs(x)"],
-		["round (sprint 1)", "update t where id = 1 set y = round(x)"],
-		["trim (sprint 3)", "update t where id = 1 set y = trim(x)"],
-		["ltrim (sprint 3)", "update t where id = 1 set y = ltrim(x)"],
-		["rtrim (sprint 3)", "update t where id = 1 set y = rtrim(x)"],
-		["substring (sprint 3)", "update t where id = 1 set y = substring(x, 1, 5)"],
-		["replace (sprint 3)", 'update t where id = 1 set y = replace(x, "a", "b")'],
-		["strpos (sprint 3)", 'update t where id = 1 set y = strpos(x, "a")'],
-		["floor (sprint 3)", "update t where id = 1 set y = floor(x)"],
-		["ceil (sprint 3)", "update t where id = 1 set y = ceil(x)"],
-		["date_part (sprint 3)", 'update t where id = 1 set y = date_part("year", created)'],
-		["date_trunc (sprint 3)", 'update t where id = 1 set y = date_trunc("day", created)'],
-		["date_add (sprint 3)", 'update t where id = 1 set y = date_add("day", created, 1)'],
-		["date_diff (sprint 3)", 'update t where id = 1 set y = date_diff("day", end_dt, start_dt)']
+		["upper", "update t where id = 1 set y = upper(x)"],
+		["lower", "update t where id = 1 set y = lower(x)"],
+		["length", "update t where id = 1 set y = length(x)"],
+		["abs", "update t where id = 1 set y = abs(x)"],
+		["round", "update t where id = 1 set y = round(x)"],
+		["trim", "update t where id = 1 set y = trim(x)"],
+		["ltrim", "update t where id = 1 set y = ltrim(x)"],
+		["rtrim", "update t where id = 1 set y = rtrim(x)"],
+		["substring", "update t where id = 1 set y = substring(x, 1, 5)"],
+		["replace", 'update t where id = 1 set y = replace(x, "a", "b")'],
+		["strpos", 'update t where id = 1 set y = strpos(x, "a")'],
+		["floor", "update t where id = 1 set y = floor(x)"],
+		["ceil", "update t where id = 1 set y = ceil(x)"],
+		["date_part", 'update t where id = 1 set y = date_part("year", created)'],
+		["date_trunc", 'update t where id = 1 set y = date_trunc("day", created)'],
+		["date_add", 'update t where id = 1 set y = date_add("day", created, 1)'],
+		["date_diff", 'update t where id = 1 set y = date_diff("day", end_dt, start_dt)']
 	];
 	for (const [label, source] of propagateCases) {
 		it(`${label} passe en write`, () => {

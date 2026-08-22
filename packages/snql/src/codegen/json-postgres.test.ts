@@ -1,5 +1,5 @@
 /**
- * Snapshots SQL PG pour les 4 fonctions JSON sprint 4 + planner guards
+ * Snapshots SQL PG pour les 4 fonctions JSON + planner guards
  * (cast_from_jsonb + json_get_compare_ambiguous) + composition cast + write.
  */
 

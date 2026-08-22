@@ -3,8 +3,8 @@ import { classifyRuntimeError } from "./rollbackClassify";
 import { SnqlRuntimeError } from "./useRunQuery";
 
 /**
- * Tests du classifier rollback [[ADR-023]] E/6.1. Couvre SQLSTATE PG (40*
- * et 25P0*) + codes/labels Mongo + fallback ordinary.
+ * Tests du classifier rollback. Couvre SQLSTATE PG (40* et 25P0*) +
+ * codes/labels Mongo + fallback ordinary.
  */
 
 function pgErr(code: string, message = "…"): SnqlRuntimeError {

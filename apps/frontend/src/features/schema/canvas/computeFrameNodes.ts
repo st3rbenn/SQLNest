@@ -60,7 +60,7 @@ export function computeFrameNodes(
 				// FrameNode les rappellera avec `frame.key` en premier arg — ça
 				// évite de recréer des closures inline `(r) => handler(key, r)`
 				// à chaque render, qui faisaient RF re-mesurer tous les frames
-				// en boucle (bug C.14 : re-mesures pendant un drag NodeResizer
+				// en boucle (re-mesures pendant un drag NodeResizer
 				// réinitialisaient son état interne → axes qui sautaient).
 				data: {
 					frame,

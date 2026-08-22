@@ -1,5 +1,5 @@
 /**
- * Assemblage des 8 builtins T2 sprint 1. Chaque entrée porte : nom canonique,
+ * Assemblage des 8 builtins. Chaque entrée porte : nom canonique,
  * arité, types d'args opt-in, et les renderers par engine.
  *
  * Ce corpus minimal exerce 100% des modes d'arité :
@@ -174,7 +174,7 @@ const BUILTINS: readonly FunctionEntry[] = [
 		// Args non typés — `coalesce(x, "default")` mixe types intentionnellement.
 		// Sémantique NULL "custom" : renvoie null ssi TOUS args null (pas absorb pur).
 		writeNullBehavior: "custom",
-		// Sprint T2/6 : kvCoalesce ajouté pour débloquer scalar-around-agg côté KV
+		// kvCoalesce ajouté pour débloquer scalar-around-agg côté KV
 		// (`coalesce(sum(x), 0)`). Migration inline → registre.
 		engines: { postgres: pgCoalesce, mongodb: mongoCoalesce, kv: kvCoalesce }
 	},
@@ -192,11 +192,11 @@ const BUILTINS: readonly FunctionEntry[] = [
 		// Args non typés — PG `CONCAT` accepte tout et castre en string.
 		// writeNullBehavior VOLONTAIREMENT NON DÉCLARÉ : PG concat absorb NULL comme '',
 		// Mongo $concat propagate. Divergence NULL irréductible sans concat_strict /
-		// concat_ws distincts — reporté sprint 4. Reste refusé en write context.
+		// concat_ws distincts — reporté. Reste refusé en write context.
 		engines: { postgres: pgConcat, mongodb: mongoConcat }
 	},
 
-	// ─── sprint 3 : string ────────────────────────────────────────────────
+	// ─── string ────────────────────────────────────────────────
 	{
 		name: "trim",
 		kind: "scalar",
@@ -246,7 +246,7 @@ const BUILTINS: readonly FunctionEntry[] = [
 		engines: { postgres: pgStrpos, mongodb: mongoStrpos }
 	},
 
-	// ─── sprint 3 : number ────────────────────────────────────────────────
+	// ─── number ────────────────────────────────────────────────
 	{
 		name: "floor",
 		kind: "scalar",
@@ -264,7 +264,7 @@ const BUILTINS: readonly FunctionEntry[] = [
 		engines: { postgres: pgCeil, mongodb: mongoCeil }
 	},
 
-	// ─── sprint 3 : date ──────────────────────────────────────────────────
+	// ─── date ──────────────────────────────────────────────────
 	{
 		name: "today",
 		kind: "scalar",
@@ -309,7 +309,7 @@ const BUILTINS: readonly FunctionEntry[] = [
 		engines: { postgres: pgDateDiff, mongodb: mongoDateDiff }
 	},
 
-	// ─── sprint 3 : reserved (sprint 4) ───────────────────────────────────
+	// ─── reserved ───────────────────────────────────
 	{
 		name: "regex_replace",
 		kind: "reserved",
@@ -317,7 +317,7 @@ const BUILTINS: readonly FunctionEntry[] = [
 		engines: {}
 	},
 
-	// ─── sprint 4 : JSON (read-only) ──────────────────────────────────────
+	// ─── JSON (read-only) ──────────────────────────────────────
 	{
 		name: "json_get",
 		kind: "scalar",
@@ -334,7 +334,7 @@ const BUILTINS: readonly FunctionEntry[] = [
 		writeNullBehavior: "propagate",
 		// PAS de mongoMatchHoist v1 : coercion type sans schema introspection
 		// risquerait `field int32 42 != string "42"` silencieux cross-engine.
-		// Fallback $expr avec $toString explicite. Type-aware hoist reporté sprint 5+.
+		// Fallback $expr avec $toString explicite. Type-aware hoist reporté.
 		engines: { postgres: pgJsonGetText, mongodb: mongoJsonGetText }
 	},
 	{
@@ -353,20 +353,20 @@ const BUILTINS: readonly FunctionEntry[] = [
 		engines: { postgres: pgJsonTypeof, mongodb: mongoJsonTypeof }
 	},
 
-	// ─── sprint object-literals : json_contains PG + Mongo (PA/8) ────────
+	// ─── json_contains PG + Mongo ────────
 	{
 		name: "json_contains",
 		kind: "scalar",
 		arity: { min: 2, max: 2 },
 		// args non typés : subdoc peut être object/array literal, doc column jsonb.
 		writeNullBehavior: "propagate",
-		// PA/8 (ADR-024-A) : Mongo renderer dispatch $setIsSubset (flat scalar
+		// Mongo renderer dispatch $setIsSubset (flat scalar
 		// array) vs $and+$eq+$getField (flat scalar object). Subdoc dynamique ou
 		// nested → refus planner_mongo_json_contains_nested_unsupported.
 		engines: { postgres: pgJsonContains, mongodb: mongoJsonContains }
 	},
 
-	// ─── sprint T2/5 : conditional ────────────────────────────────────────
+	// ─── conditional ────────────────────────────────────────
 	// writeNullBehavior 'custom' pour les 4 : NULL cond ≠ NULL result (if/case
 	// choisissent la else branch, greatest/least NULL-absorb parité PG, nullif
 	// retourne null ssi égalité). Validé par l'utilisateur — pas 'propagate'
@@ -406,7 +406,7 @@ const BUILTINS: readonly FunctionEntry[] = [
 		engines: { postgres: pgLeast, mongodb: mongoLeast, kv: kvLeast }
 	},
 
-	// ─── sprint T2/6 : aggregates scalaires ───────────────────────────────
+	// ─── aggregates scalaires ───────────────────────────────
 	// `writeNullBehavior` VOLONTAIREMENT undefined : les aggregates n'ont
 	// aucun sens en contexte write (`update t set y = count(*)`). Refus
 	// spécifique lower_agg_in_set (ordre CRITIQUE avant assertNoCallInWrite
@@ -453,7 +453,7 @@ const BUILTINS: readonly FunctionEntry[] = [
 		engines: { postgres: pgMax, mongodb: mongoMax, kv: kvMax }
 	},
 
-	// ─── sprint T2/8 : aggregateMulti (array/string/json_agg) ─────────────
+	// ─── aggregateMulti (array/string/json_agg) ─────────────
 	// Retour = collection (array/string/json). Accepte `sort <keys>` intra-call
 	// (parser contextuel via registry.kind === 'aggregateMulti'). Modifier
 	// `unique` OK (dedup). NULL parity : array/json inclut, string skip.
@@ -490,7 +490,7 @@ const BUILTINS: readonly FunctionEntry[] = [
 		}
 	},
 
-	// ─── sprint T2/9 : window functions ───────────────────────────────────
+	// ─── window functions ───────────────────────────────────
 	// Kind `window` : produit une valeur per-row basée sur le contexte
 	// partition (partitionBy + sortBy dans OVER). Le codegen émet OVER clause
 	// (PG), $setWindowFields (Mongo), ou pre-project pass (KV runtime).
@@ -526,7 +526,7 @@ const BUILTINS: readonly FunctionEntry[] = [
 		}
 	},
 
-	// ─── sprint 4 : reserved (sprint 5+) ──────────────────────────────────
+	// ─── reserved ──────────────────────────────────
 	{
 		name: "json_set",
 		kind: "reserved",

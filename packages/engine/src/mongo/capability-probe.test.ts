@@ -6,7 +6,7 @@ import {
 	resolveMongoFeatures
 } from "./capability-probe";
 
-describe("resolveMongoFeatures (ADR-024 D3)", () => {
+describe("resolveMongoFeatures", () => {
 	it("Mongo 3.6 standalone : rien n'est supporté sauf topologie", () => {
 		const f = resolveMongoFeatures({
 			buildInfo: { version: "3.6.23" },
@@ -113,7 +113,7 @@ describe("resolveMongoFeatures (ADR-024 D3)", () => {
 	});
 });
 
-describe("assertMongoFeature (ADR-024 D3)", () => {
+describe("assertMongoFeature", () => {
 	const features: MongoFeatures = {
 		serverVersion: "4.0.28",
 		topology: "standalone",

@@ -4,7 +4,7 @@ const API_BASE = window.CONTEXT.apiBaseUrl;
 
 /**
  * PUT snapshot précalculé du dernier rendu de preview pour une
- * `db_connection` (C.15).
+ * `db_connection`.
  *
  * Appelé par le canvas au save (piggyback avec `useCanvasSync`) pour
  * alimenter le fallback rendu de la gallery quand le CLI est offline.

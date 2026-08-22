@@ -1,26 +1,20 @@
 /**
- * PM/10 D9 — walker AST qui remonte les patterns SNQL non-indexables côté
- * Mongo (perf warnings). Complémentaire à `divergenceHints.ts` (D8) qui
- * remonte les divergences sémantiques : ici on cible la perf, pas la
- * correction. Signalé au user via squiggly INFO + tooltip préfixé "⚡ perf:".
+ * Walker AST qui remonte les patterns SNQL non-indexables côté Mongo (perf
+ * warnings). Complémentaire à `divergenceHints.ts` qui remonte les
+ * divergences sémantiques : ici on cible la perf, pas la correction.
+ * Signalé au user via squiggly INFO + tooltip préfixé "⚡ perf:".
  *
  * Le hook `useLiveDiagnostics` chaîne divergenceHints (prio 1) puis perfHints
  * (prio 2) — l'info correction prévaut sur l'info perf, mais les deux sont
  * émises en severity: "info" (canal unique squiggly bleu discret).
  *
- * Patterns détectés v1 (Mongo only) :
- *  - **PA/4** : `cast(_)` dans le predicate d'un `update`/`remove` → codegen
- *    Mongo route via pipeline update `$expr + $convert` qui est non-indexable
+ * Patterns détectés (Mongo only) :
+ *  - `cast(_)` dans le predicate d'un `update`/`remove` → codegen Mongo
+ *    route via pipeline update `$expr + $convert` qui est non-indexable
  *    (sauf aggregation index Mongo 6.0+ rarement configuré).
- *  - **PA/1** : correlated subquery (`exists/in (find X where X.col = Y.col)`)
- *    → codegen Mongo lift en `$lookup{let, pipeline}` qui exécute un scan
+ *  - correlated subquery (`exists/in (find X where X.col = Y.col)`) →
+ *    codegen Mongo lift en `$lookup{let, pipeline}` qui exécute un scan
  *    par row outer (indexé sur foreign side seulement si la key l'est).
- *
- * Patterns v2 (report follow-up) :
- *  - PA/2 join CTE↔collection → matérialisation symétrique = compensate
- *    côté runtime, non-indexable structurellement.
- *  - PA/8 json_contains nested → `$expr $and $getField` non-indexable.
- *  - Correlated dans un update-join Mongo (PA/4 étendu).
  */
 
 import type {
@@ -93,7 +87,7 @@ function walkStage(stage: Stage, out: PerfHint[], query: Query): void {
 	switch (stage.type) {
 		case "where":
 		case "having":
-			// PA/1 detection — correlated subquery dans un where
+			// Correlated subquery dans un where
 			walkExpr(stage.predicate, out, query, false);
 			return;
 		case "pick":
@@ -118,7 +112,7 @@ function walkInsert(stmt: InsertStatement, out: PerfHint[]): void {
 
 function walkUpdate(stmt: UpdateStatement, out: PerfHint[]): void {
 	for (const a of stmt.assignments) walkExpr(a.value, out, undefined, false);
-	// PA/4 : cast dans predicate write → hint perf
+	// Cast dans predicate write → hint perf
 	if (stmt.predicate !== undefined) {
 		walkExpr(stmt.predicate, out, undefined, /*insideWritePredicate*/ true);
 	}
@@ -160,7 +154,7 @@ function walkExpr(
 	switch (expr.type) {
 		case "cast":
 			if (insideWritePredicate) {
-				// PA/4 — cast dans predicate write → $expr+$convert non-indexable
+				// Cast dans predicate write → $expr+$convert non-indexable
 				emitCastInWritePredicate(expr, out);
 			}
 			walkExpr(expr.operand, out, outerQuery, insideWritePredicate);

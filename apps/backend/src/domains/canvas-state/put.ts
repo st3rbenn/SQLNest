@@ -11,21 +11,18 @@ export interface PutCanvasResult {
 /**
  * Upsert du canvas d'un utilisateur pour une db_connection donnée.
  *
- * ─── T4/4 : refactor cross-device ────────────────────────────────────
  * Le canvas peut déjà exister ailleurs (autre db_connection du user
  * pointant vers la même instance DB). `resolveCanvasByConnection` fait le
  * lookup fingerprint > checksum > legacy → si trouvé, UPDATE ce canvas
  * (peu importe la connection_id d'origine). Sinon INSERT nouveau avec
  * team_id + fp + checksum courant.
  *
- * ─── Concurrence ─────────────────────────────────────────────────────
- * Contrairement à l'ancien `onConflictDoUpdate` sur `(user, connection_id)`,
- * on fait un lookup+write en 2 requêtes. Une race window minime existe
- * entre les 2 : 2 puts concurrents pour la MÊME (user, team, fp) peuvent
- * tomber sur le path INSERT en parallèle et l'un lève `unique_violation`.
- * Le handler HTTP retry naturellement (le client réémet le PUT). En
- * pratique la race est rare (2 devices écrivent le canvas au même
- * moment).
+ * Concurrence : on fait un lookup+write en 2 requêtes. Une race window
+ * minime existe entre les 2 : 2 puts concurrents pour la MÊME (user,
+ * team, fp) peuvent tomber sur le path INSERT en parallèle et l'un lève
+ * `unique_violation`. Le handler HTTP retry naturellement (le client
+ * réémet le PUT). En pratique la race est rare (2 devices écrivent le
+ * canvas au même moment).
  */
 export async function putCanvasState(
 	db: DbOrTx,

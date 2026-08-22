@@ -1,7 +1,7 @@
 /**
  * `listDbConnectionsByTeam` — miroir team-scoped de `listDbConnections`.
  * WHERE team_id = X au lieu de WHERE user_id = X. Utilisé par les
- * routes `/api/teams/:slug/db-connections` (C.21.3). */
+ * routes `/api/teams/:slug/db-connections`. */
 
 import { schema as dbSchema } from "@sqlnest/db";
 import { desc, eq } from "drizzle-orm";

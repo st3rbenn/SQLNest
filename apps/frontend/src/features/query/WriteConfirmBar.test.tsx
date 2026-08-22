@@ -10,7 +10,7 @@ import type { UnfilteredFinding } from "./unfilteredWrites";
 import { expectedFor, WriteConfirmBar } from "./WriteConfirmBar";
 
 /**
- * Tests du composant [[ADR-023]] E/3 — surface de confirmation typing du
+ * Tests du composant WriteConfirmBar — surface de confirmation typing du
  * verbe. Couvre : expected string par kind, activation Exécuter, Escape /
  * Annuler, Enter, compteur multi-findings. Le timeout 5s est géré côté
  * ConsoleShellInner (state React parent) — pas testé ici.
@@ -247,7 +247,7 @@ describe("WriteConfirmBar — multi-findings", () => {
 	});
 });
 
-describe("WriteConfirmBar — preview count [ADR-023 E/4]", () => {
+describe("WriteConfirmBar — preview count", () => {
 	it("preview=null (loading) → badge 'Estimation…'", () => {
 		render(
 			<WriteConfirmBar

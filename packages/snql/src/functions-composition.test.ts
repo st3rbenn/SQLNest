@@ -1,5 +1,5 @@
 /**
- * Composition sprint 3 : cast + call + arith. Le codegen délègue déjà via
+ * Composition cast + call + arith. Le codegen délègue déjà via
  * renderExpr, mais on verrouille les combinaisons courantes E2E cross-engine
  * pour catch les régressions futures (naming, mapping, null-parity).
  */
@@ -33,9 +33,9 @@ function pgMutation(source: string): string {
 	return nat.text;
 }
 
-describe("sprint 3 — composition cast + call", () => {
+describe("composition cast + call", () => {
 	it("round(cast(x as float), 3) — fix E2E RNAcentral (double-cast pattern)", () => {
-		// Le cas qui a explosé en sprint 2 : cast → double precision → round
+		// Le cas qui a explosé en cast → double precision → round
 		// throw 42883. Le renderer B++ absorbe le quirk sans casser le type.
 		expect(pg("find t pick round(cast(rate as float), 3) as r")).toBe(
 			`SELECT ROUND((CAST("rate" AS double precision))::numeric, $1)::double precision AS "r" FROM "t"`
@@ -68,8 +68,8 @@ describe("sprint 3 — composition cast + call", () => {
 	});
 });
 
-describe("sprint 3 — composition cast + arith + call (RNAcentral-like)", () => {
-	it("round(cast(len as float) / 1000, 2) — expression réelle sprint 3 RNAcentral", () => {
+describe("composition cast + arith + call (RNAcentral-like)", () => {
+	it("round(cast(len as float) / 1000, 2) — expression réelle RNAcentral", () => {
 		// Chaîne : cast → arith → round. Chaque étape passe par renderExpr.
 		expect(pg("find t pick round(cast(len as float) / 1000, 2) as len_kb")).toBe(
 			`SELECT ROUND(((CAST("len" AS double precision) / $1))::numeric, $2)::double precision AS "len_kb" FROM "t"`
@@ -88,7 +88,7 @@ describe("sprint 3 — composition cast + arith + call (RNAcentral-like)", () =>
 	});
 });
 
-describe("sprint 3 — composition write : cast + call safe", () => {
+describe("composition write : cast + call safe", () => {
 	it('update set y = trim(cast(raw as text)) passe (trim propagate + cast pur)', () => {
 		// Composition safe cross-engine — pas de call refusé sous.
 		expect(pgMutation('update t where id = 1 set y = trim(cast(raw as text))')).toBe(

@@ -1,5 +1,5 @@
 /**
- * Schémas Zod des routes `/api/teams/*` (C.21.3).
+ * Schémas Zod des routes `/api/teams/*`.
  */
 
 import z from "zod/v4";
@@ -17,7 +17,7 @@ export const TeamSummaryResponse = z.object({
 	id: z.string(),
 	slug: z.string(),
 	/** Name stocké — chaîne vide si `isPersonal=true` (frontend affiche
-	 *  `${user.name}'s team`). Non-vide pour les teams custom (V2). */
+	 *  `${user.name}'s team`). Non-vide pour les teams custom. */
 	name: z.string(),
 	isPersonal: z.boolean(),
 	createdAt: z.string()

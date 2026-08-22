@@ -1,6 +1,6 @@
 /**
  * rollbackClassify — classifie une SnqlRuntimeError en distinguant
- * rollback transactionnel vs erreur classique ([[ADR-023]] E/6, D12).
+ * rollback transactionnel vs erreur classique.
  *
  * Objectif : distinguer visuellement dans le status bar :
  *  - `rollback_error` — un stmt a échoué et la tx a été annulée en cascade
@@ -11,20 +11,20 @@
  *  - `ordinary` — erreur classique hors tx (syntaxe, permissions, table
  *    absente). Rendu existant (rouge, ErrorBlock riche).
  *
- * ─── Sources de vérité ────────────────────────────────────────────────
+ * Sources de vérité :
  *  - Postgres : SQLSTATE class 40 (Transaction Rollback) + 25xxx sous-set
  *    (in_failed_sql_transaction, no_active_sql_transaction).
  *  - Mongo : pas de SQLSTATE, on match sur codes numériques du driver
  *    (WriteConflict=112, TransactionAborted=251, NoSuchTransaction=251) +
  *    fallback sur le label textuel dans le message ("transient-transaction-
  *    error", "WriteConflict"). Cette liste est incomplète — audit driver
- *    obligatoire E/8 ([[ADR-023]] Risque 3).
+ *    obligatoire.
  *
- * ─── Backend minimalism ──────────────────────────────────────────────
- * ZÉRO extension du shape SnqlRuntimeError / PgErrorInfo côté tunnel. On
- * lit UNIQUEMENT ce qui est déjà exposé : `pgError.code`, `err.message`.
- * Si le driver renvoie un code non-reconnu, on retombe sur `ordinary` —
- * l'utilisateur voit l'erreur brute (safe fallback, pas de miscat).
+ * Backend minimalism : ZÉRO extension du shape SnqlRuntimeError /
+ * PgErrorInfo côté tunnel. On lit UNIQUEMENT ce qui est déjà exposé :
+ * `pgError.code`, `err.message`. Si le driver renvoie un code non-reconnu,
+ * on retombe sur `ordinary` — l'utilisateur voit l'erreur brute (safe
+ * fallback, pas de miscat).
  */
 
 import type { SnqlRuntimeError } from "./useRunQuery";
@@ -52,7 +52,7 @@ const PG_ROLLBACK_USER_CODES = new Set<string>([
 ]);
 
 /** Codes numériques Mongo qui remontent un rollback tx multi-doc. Liste
- * v1 non-exhaustive — audit driver mongodb E/8 ([[ADR-023]] Risque 3). */
+ * non-exhaustive — audit driver mongodb requis. */
 const MONGO_ROLLBACK_ERROR_CODES = new Set<number>([
 	112, // WriteConflict — collision entre 2 tx concurrentes
 	251, // TransactionAborted / NoSuchTransaction
@@ -87,7 +87,7 @@ export function classifyRuntimeError(err: SnqlRuntimeError): RollbackKind {
 
 	// Priorité 2 : Mongo — code numérique éventuellement embarqué dans le
 	// message ou dans pgError.detail (pas de champ dédié Mongo côté shape
-	// actuel — voir E/8 pour enrichissement). On sniff via regex fragile.
+	// actuel — à enrichir plus tard). On sniff via regex fragile.
 	const message = err.message ?? "";
 	const detail = err.pgError?.detail ?? "";
 	const combined = `${message}\n${detail}`;

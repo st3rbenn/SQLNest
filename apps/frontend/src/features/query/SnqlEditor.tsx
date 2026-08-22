@@ -43,12 +43,12 @@ interface SnqlEditorProps {
 	readonly value: string;
 	readonly onChange: (value: string) => void;
 	readonly onRun: () => void;
-	/** [ADR-023 E/5] Optional Mod-Shift-Enter callback → exec in transaction.
-	 * Ajouté au CM keymap directement plutôt qu'au useHotkeys Mantine du
-	 * parent, car ce dernier ne capture pas les keydowns quand le focus est
-	 * dans le contenu CM (l'éditeur les absorbe avant remontée document).
-	 * Le principe D10 tient : Mod-Enter reste unique exec safe, Mod-Shift-
-	 * Enter est un sur-croît sécurité (tx = rollback sur erreur). */
+	/** Optional Mod-Shift-Enter callback → exec in transaction. Ajouté au
+	 * CM keymap directement plutôt qu'au useHotkeys Mantine du parent, car
+	 * ce dernier ne capture pas les keydowns quand le focus est dans le
+	 * contenu CM (l'éditeur les absorbe avant remontée document).
+	 * Mod-Enter reste unique exec safe, Mod-Shift-Enter est un sur-croît
+	 * sécurité (tx = rollback sur erreur). */
 	readonly onRunInTransaction?: () => void;
 	/** SchemaModel courant → candidats de complétion (absent = base non introspectée). */
 	readonly schema: SchemaModel | undefined;
@@ -60,15 +60,15 @@ interface SnqlEditorProps {
 	 */
 	readonly errorSpans?: readonly SerializedSpan[];
 	/**
-	 * Diagnostic live (sprint T2/live-diag) : erreur compile SNQL découverte
-	 * pendant la frappe. Squiggly + badge gutter + tooltip au hover. `null`
-	 * clear (query valide ou pas d'erreur détectée).
+	 * Diagnostic live : erreur compile SNQL découverte pendant la frappe.
+	 * Squiggly + badge gutter + tooltip au hover. `null` clear (query valide
+	 * ou pas d'erreur détectée).
 	 */
 	readonly liveDiagnostic?: LiveDiagnostic | null;
-	/** [ADR-023 E/7.4 / D1] Span du RawStatement racine — quand présent, un
-	 * marker gutter "unsafe" permanent + tooltip s'affiche pour rappeler que
-	 * ce bloc contourne la détection unfiltered. Séparé de liveDiagnostic
-	 * car cette décoration reste visible tant que la source est raw, alors
+	/** Span du RawStatement racine — quand présent, un marker gutter
+	 * "unsafe" permanent + tooltip s'affiche pour rappeler que ce bloc
+	 * contourne la détection unfiltered. Séparé de liveDiagnostic car
+	 * cette décoration reste visible tant que la source est raw, alors
 	 * que la squiggly peut être écrasée par une autre warning. */
 	readonly rawStatementSpan?: SerializedSpan | null;
 }
@@ -77,7 +77,7 @@ interface SnqlEditorProps {
  * Contrôleur impératif exposé via `ref` — permet à l'ErrorBlock de commander
  * un focus + scroll sur un span source SNQL précis (clic sur un chip `$N`),
  * et au ConsoleShellInner de rendre le focus après une cancelPending
- * WriteConfirmBar (ADR-023 E/3).
+ * WriteConfirmBar.
  */
 export interface SnqlEditorHandle {
 	/**
@@ -177,7 +177,7 @@ const theme = EditorView.theme(
 		// Squigglies rouges sous les tokens source des erreurs Postgres (Phase 3a).
 		// text-decoration wavy + underline-color : rendu natif partout, pas d'SVG.
 		// Par défaut = danger ; surchargé par sqlnest-diag-severity-{warning,info}
-		// pour les live diags (ADR-023 E/2 D8).
+		// pour les live diags.
 		".sqlnest-error-mark": {
 			textDecoration: "underline wavy var(--sqlnest-danger)",
 			textDecorationThickness: "1px",
@@ -189,9 +189,9 @@ const theme = EditorView.theme(
 		".sqlnest-error-mark.sqlnest-diag-severity-info": {
 			textDecoration: "underline wavy var(--sqlnest-text-tertiary)"
 		},
-		// Live diagnostic (sprint T2/live-diag) : barre verticale colorée dans
-		// la gutter, pleine hauteur de la ligne. Style compact type IDE. Couleur
-		// routée via data-severity (ADR-023 E/2 D8).
+		// Live diagnostic : barre verticale colorée dans la gutter, pleine
+		// hauteur de la ligne. Style compact type IDE. Couleur routée via
+		// data-severity.
 		".sqlnest-diag-gutter-slot": {
 			width: "3px",
 			padding: 0
@@ -217,9 +217,9 @@ const theme = EditorView.theme(
 			width: "3px",
 			height: "100%"
 		},
-		// [ADR-023 E/7.4 / D1] Décoration permanente RawStatement — icône
-		// warning centré dans une gutter dédiée, tooltip natif au hover via
-		// title=. Distinct de la gutter live-diag (warning/error éphémère).
+		// Décoration permanente RawStatement — icône warning centré dans
+		// une gutter dédiée, tooltip natif au hover via title=. Distinct
+		// de la gutter live-diag (warning/error éphémère).
 		".sqlnest-raw-gutter-slot": {
 			minWidth: "14px",
 			padding: 0,
@@ -324,10 +324,10 @@ export const SnqlEditor = forwardRef<SnqlEditorHandle, SnqlEditorProps>(
 							}
 						},
 						{
-							// [ADR-023 E/5] Mod-Shift-Enter = exec in tx. Bind ici
-							// (CM keymap) plutôt que useHotkeys parent, car CM capte
-							// les keydowns avant remontée document quand le focus
-							// est dans le contenu — le useHotkeys Mantine ne
+							// Mod-Shift-Enter = exec in tx. Bind ici (CM keymap)
+							// plutôt que useHotkeys parent, car CM capte les
+							// keydowns avant remontée document quand le focus est
+							// dans le contenu — le useHotkeys Mantine ne
 							// déclencherait jamais. Fallback no-op silencieux si
 							// la callback n'est pas fournie (compat rétro).
 							key: "Mod-Shift-Enter",
@@ -338,8 +338,8 @@ export const SnqlEditor = forwardRef<SnqlEditorHandle, SnqlEditorProps>(
 								return true;
 							}
 						},
-						// Sprint T2/13.6 : Tab accepte le candidat courant quand le
-						// popup d'autocomplete est ouvert ; sinon fallthrough vers
+						// Tab accepte le candidat courant quand le popup
+						// d'autocomplete est ouvert ; sinon fallthrough vers
 						// `indentWithTab` (comportement historique).
 						{
 							key: "Tab",
@@ -356,10 +356,10 @@ export const SnqlEditor = forwardRef<SnqlEditorHandle, SnqlEditorProps>(
 						...defaultKeymap,
 						...historyKeymap
 					]),
-					// Sprint T2/13.7 : auto-pair des `"`/`'`/`{`/`[`/`(` — quand
-					// l'user tape `"`, la fermeture est insérée et le curseur
-					// atterrit entre les deux (Backspace supprime la paire, `"`
-					// juste avant la fermeture skip au lieu de re-insérer).
+					// Auto-pair des `"`/`'`/`{`/`[`/`(` — quand l'user tape `"`,
+					// la fermeture est insérée et le curseur atterrit entre les
+					// deux (Backspace supprime la paire, `"` juste avant la
+					// fermeture skip au lieu de re-insérer).
 					closeBrackets(),
 					snqlHighlighting(),
 					snqlCompletion(() => schemaRef.current),
@@ -368,18 +368,17 @@ export const SnqlEditor = forwardRef<SnqlEditorHandle, SnqlEditorProps>(
 					EditorView.updateListener.of((update) => {
 						if (update.docChanged) {
 							onChangeRef.current(update.state.doc.toString());
-							// Sprint T2/13.7 : après un auto-pair `""` (closeBrackets
-							// vient d'insérer `""` + placé le curseur au milieu),
-							// trigger le popup pour proposer les enum labels /
-							// autocomplete de valeur. Détection : cette transaction
-							// contient une insertion de `""` (2 chars) ET le curseur
-							// est pile au milieu.
+							// Après un auto-pair `""` (closeBrackets vient d'insérer
+							// `""` + placé le curseur au milieu), trigger le popup
+							// pour proposer les enum labels / autocomplete de
+							// valeur. Détection : cette transaction contient une
+							// insertion de `""` (2 chars) ET le curseur est pile
+							// au milieu.
 							//
-							// Guard IME (bug user 2026-08 : après delete, les
-							// caractères se répétaient) : startCompletion pendant
-							// une composition IME peut verrouiller le state
-							// composition du browser. On skip si compositionend
-							// n'a pas encore été fire.
+							// Guard IME : startCompletion pendant une composition
+							// IME peut verrouiller le state composition du browser
+							// (les caractères se répètent après delete). On skip
+							// si compositionend n'a pas encore été fire.
 							if (
 								didAutoPairQuote(update) &&
 								!update.view.composing
@@ -450,9 +449,9 @@ export const SnqlEditor = forwardRef<SnqlEditorHandle, SnqlEditorProps>(
 			editor.dispatch({ effects: setLiveDiagnostic.of(liveDiagnostic ?? null) });
 		}, [diagKey, liveDiagnostic]);
 
-		// [ADR-023 E/7.4 / D1] Sync rawStatementSpan → décoration permanente
-		// (gutter icon "unsafe" + tooltip). Séparé du liveDiag pour rester
-		// visible même quand la squiggly change.
+		// Sync rawStatementSpan → décoration permanente (gutter icon
+		// "unsafe" + tooltip). Séparé du liveDiag pour rester visible même
+		// quand la squiggly change.
 		const rawKey = useMemo(() => {
 			if (!rawStatementSpan) return "";
 			return `${rawStatementSpan[0]}:${rawStatementSpan[1]}`;
@@ -497,11 +496,11 @@ export const SnqlEditor = forwardRef<SnqlEditorHandle, SnqlEditorProps>(
 );
 
 /**
- * Sprint T2/13.7 : détecte qu'une transaction vient d'insérer une paire de
- * guillemets (`""` ou `''`) via `closeBrackets` et que le curseur est au
- * milieu. On regarde tous les changements insérés : si l'un est exactement
- * `""` (ou `''`) et que le curseur main est pile après la 1re quote, c'est
- * un auto-pair déclenché par l'user qui a tapé `"`.
+ * Détecte qu'une transaction vient d'insérer une paire de guillemets (`""`
+ * ou `''`) via `closeBrackets` et que le curseur est au milieu. On regarde
+ * tous les changements insérés : si l'un est exactement `""` (ou `''`) et
+ * que le curseur main est pile après la 1re quote, c'est un auto-pair
+ * déclenché par l'user qui a tapé `"`.
  */
 function didAutoPairQuote(update: import("@codemirror/view").ViewUpdate): boolean {
 	let matched = false;

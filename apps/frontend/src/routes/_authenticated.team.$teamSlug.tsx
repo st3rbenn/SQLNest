@@ -1,5 +1,5 @@
 /**
- * Layout des routes team-scoped `/team/:teamSlug/*` (C.21.5).
+ * Layout des routes team-scoped `/team/:teamSlug/*`.
  *
  * `beforeLoad` :
  *   1. Fetch `/api/teams/:slug` via le queryClient — 404 si l'user

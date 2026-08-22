@@ -17,8 +17,8 @@ export interface FrameNodeData {
 	 * est géré côté SchemaCanvas via l'interception des changes RF (voir
 	 * `handleNodesChange`).
 	 *
-	 * NOTE (C.14) : la clé est passée en 1er arg APPLIQUÉ CÔTÉ FrameNode
-	 * (avec `data.frame.key`) plutôt que via une closure inline
+	 * La clé est passée en 1er arg APPLIQUÉ CÔTÉ FrameNode (avec
+	 * `data.frame.key`) plutôt que via une closure inline
 	 * `(r) => handler(key, r)` dans computeFrameNodes. Cela garde `data`
 	 * stable entre renders → RF n'invalide plus le NodeResizer en cours
 	 * de drag (les axes sautaient sinon). */

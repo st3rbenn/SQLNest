@@ -3,9 +3,8 @@
  * Conservée pour les bookmarks et les URLs affichées par le CLI sans
  * team-slug ; la vraie route vit sous `/team/:teamSlug/pair`.
  *
- * P/2 (ADR-022 D7) : le CLI ouvre `/pair?code=XXXX-XXXX` — on doit
- * forwarder le search dans le redirect sinon le code est perdu et
- * l'user tombe sur l'input vide.
+ * Le CLI ouvre `/pair?code=XXXX-XXXX` — on doit forwarder le search dans
+ * le redirect sinon le code est perdu et l'user tombe sur l'input vide.
  */
 
 import { queryOptions } from "@tanstack/react-query";

@@ -3,10 +3,11 @@ import { describe, expect, it } from "vitest";
 import { buildPreviewCountSource } from "./previewCountRewrite";
 
 /**
- * Tests du rewrite `pick count(*) as _preview_count` [[ADR-023]] E/4.1. Chaque rewrite est
+ * Tests du rewrite `pick count(*) as _preview_count`. Chaque rewrite est
  * validé en le re-parsant — si le résultat n'est PAS un SNQL valide select
- * avec pick count(*) as _preview_count, le test échoue (garantit qu'aucun rewrite ne produit une
- * source cassée qui reviendrait comme parse error du CLI).
+ * avec pick count(*) as _preview_count, le test échoue (garantit qu'aucun
+ * rewrite ne produit une source cassée qui reviendrait comme parse error
+ * du CLI).
  */
 
 function rewrite(src: string) {

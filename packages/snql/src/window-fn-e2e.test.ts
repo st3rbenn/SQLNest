@@ -1,5 +1,5 @@
 /**
- * Sprint T2/9 window functions E2E — row_number / rank / dense_rank avec
+ * window functions E2E — row_number / rank / dense_rank avec
  * over (partition ... sort ...). Parser + lower + codegen PG/Mongo +
  * runtime KV pre-project.
  */

@@ -1,7 +1,7 @@
 /**
- * PM/10 D20 — Test unit ParityPage : rend toutes les divergences du registre
- * groupées par mitigation (shim/warn/refus). Le registre est la source de
- * vérité — le test se contente de vérifier que le composant les affiche
+ * Test unit ParityPage : rend toutes les divergences du registre groupées
+ * par mitigation (shim/warn/refus). Le registre est la source de vérité —
+ * le test se contente de vérifier que le composant les affiche
  * intégralement et sans doublon.
  */
 

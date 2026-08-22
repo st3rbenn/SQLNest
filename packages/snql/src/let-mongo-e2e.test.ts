@@ -1,15 +1,15 @@
 /**
- * ADR-024 PM/3 — Sibling parité Mongo pour let/CTE. Mirror de let-t36-e2e.test.ts
+ * Sibling parité Mongo pour let/CTE. Mirror de let-e2e.test.ts
  * (oracle PG utilise `WITH ... AS`). Mongo compile via matérialisation runtime
  * (`materializeLet` dans packages/engine/src/run.ts) qui délègue à
- * `materializeSubplan` (ADR-024 D1) — pas de codegen mapLet.
+ * `materializeSubplan` — pas de codegen mapLet.
  *
  * Ce fichier verrouille : (a) planner accepte let sur Mongo (cte capability
- * PM/3), (b) D17 refus join CTE↔collection avec code typé, (c) D2 shadow-check
- * fires sur schema Mongo, (d) self-ref via D2 walker complet.
+ * ), (b) refus join CTE↔collection avec code typé, (c) shadow-check
+ * fires sur schema Mongo, (d) self-ref via walker complet.
  *
  * Les tests d'exécution runtime (rows effectivement matérialisées) vivent dans
- * chinook-parity-e2e.test.ts et parity-matrix.e2e.test.ts (PM/9).
+ * chinook-parity-e2e.test.ts et parity-matrix.e2e.test.ts.
  */
 
 import { describe, expect, it } from "vitest";
@@ -34,7 +34,7 @@ function makeMongoSchema(...names: string[]): SchemaModel {
 	} as unknown as SchemaModel;
 }
 
-describe("PM/3 — Mongo let/CTE capability (Q3c matérialisation runtime)", () => {
+describe("Mongo let/CTE capability (matérialisation runtime)", () => {
 	it("MONGODB_CAPABILITIES contient 'cte'", () => {
 		expect(MONGODB_CAPABILITIES.supports.has("cte")).toBe(true);
 	});
@@ -75,7 +75,7 @@ describe("PM/3 — Mongo let/CTE capability (Q3c matérialisation runtime)", () 
 	});
 });
 
-describe("PM/3 D2 — shadow-check Mongo (ADR-020 étendu)", () => {
+describe("shadow-check Mongo (étendu)", () => {
 	it("refus shadow simple avec schema Mongo", () => {
 		const stmt = parse(
 			tokenize(
@@ -93,9 +93,9 @@ describe("PM/3 D2 — shadow-check Mongo (ADR-020 étendu)", () => {
 		}
 	});
 
-	it("mode sans schema : shadow-check skip (divergence documentée D2)", () => {
+	it("mode sans schema : shadow-check skip (divergence documentée)", () => {
 		// Sans schema, le shadow-check ne fires pas — comportement identique
-		// PG/Mongo aujourd'hui. Fix complet ADR-024 D2 nécessite un cache
+		// PG/Mongo aujourd'hui. Fix complet nécessite un cache
 		// listCollections() au bootstrap CLI (reporté).
 		const stmt = parse(
 			tokenize("let users = find products; find users pick id")
@@ -105,8 +105,8 @@ describe("PM/3 D2 — shadow-check Mongo (ADR-020 étendu)", () => {
 	});
 });
 
-describe("PM/3 D2 — self-ref walker complet sur Mongo", () => {
-	it("self-ref via subquery in-where refusé (walker D2)", () => {
+describe("self-ref walker complet sur Mongo", () => {
+	it("self-ref via subquery in-where refusé (walker)", () => {
 		const stmt = parse(
 			tokenize(
 				"let a = find users where id in (find a pick parent_id); find a pick id"

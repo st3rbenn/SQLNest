@@ -1,8 +1,8 @@
 /**
- * ADR-024-A PA/1 — Sibling parité Mongo pour correlated sub-queries. Mirror
- * de correlated-subquery-t212-e2e.test.ts (oracle PG accepte correlated via
+ * Sibling parité Mongo pour correlated sub-queries. Mirror
+ * de correlated-subquery-e2e.test.ts (oracle PG accepte correlated via
  * ScopeStack + pushdown SELECT). Mongo accepte désormais via lift-lookup
- * ($lookup{from, let, pipeline, as} — 5.0+) en remplacement du refus PM/2
+ * ($lookup{from, let, pipeline, as} — 5.0+) en remplacement du refus 
  * (assertUncorrelatedSubqueryForMaterialize).
  *
  * Verrous shape : chaque cas produit exactement la séquence attendue [$lookup,
@@ -13,7 +13,7 @@
 import { describe, expect, it } from "vitest";
 import { assertMongoPipeline, assertMongoRefused } from "./index";
 
-describe("PA/1 — correlated exists lift-lookup", () => {
+describe("correlated exists lift-lookup", () => {
 	it("exists corrélée : $lookup + $match ne empty + $unset", () => {
 		const pipeline = assertMongoPipeline(
 			"find users as u where exists (find orders as o where o.user_id = u.id)"
@@ -46,7 +46,7 @@ describe("PA/1 — correlated exists lift-lookup", () => {
 	});
 });
 
-describe("PA/1 — correlated `in (subq pick col)` lift-lookup", () => {
+describe("correlated `in (subq pick col)` lift-lookup", () => {
 	it("in (correlated pick col) : $lookup + $expr $in + $unset", () => {
 		const pipeline = assertMongoPipeline(
 			"find users as u where u.id in (find orders as o where o.total > u.age pick o.user_id)"
@@ -77,7 +77,7 @@ describe("PA/1 — correlated `in (subq pick col)` lift-lookup", () => {
 	});
 });
 
-describe("PA/1 — correlated combinée avec AND top-level", () => {
+describe("correlated combinée avec AND top-level", () => {
 	it("where compare AND exists corrélée : predicate résiduel + match addition", () => {
 		const pipeline = assertMongoPipeline(
 			'find users as u where u.email = "x" and exists (find orders as o where o.user_id = u.id)'
@@ -89,7 +89,7 @@ describe("PA/1 — correlated combinée avec AND top-level", () => {
 	});
 });
 
-describe("PA/1 — verrous MVP refus explicites", () => {
+describe("verrous MVP refus explicites", () => {
 	it("correlated sous OR : refus disjunction_v3", () => {
 		const err = assertMongoRefused(
 			'find users as u where u.email = "x" or exists (find orders as o where o.user_id = u.id)',
@@ -130,7 +130,7 @@ describe("PA/1 — verrous MVP refus explicites", () => {
 	});
 });
 
-describe("PA/1 — correlated dans aggregate having (MVP hors-scope)", () => {
+describe("correlated dans aggregate having (MVP hors-scope)", () => {
 	it("having correlated : refus complex_v3 (lift-lookup câblé sur where uniquement)", () => {
 		const err = assertMongoRefused(
 			"find users as u group by u.id having count(*) > 0 and exists (find orders as o where o.user_id = u.id) pick u.id",

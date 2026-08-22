@@ -1,5 +1,5 @@
 /**
- * Tests unitaires des 13 nouvelles fonctions du sprint 3 + validation
+ * Tests unitaires des 13 nouvelles fonctions du + validation
  * argEnum + guards dédiés (substring zero-index, replace empty-find, reserved
  * regex_replace, aliases Levenshtein).
  */
@@ -30,7 +30,7 @@ function expectCode(fn: () => unknown, code: string): void {
 	}
 }
 
-describe("sprint 3 — string : trim / ltrim / rtrim", () => {
+describe("string : trim / ltrim / rtrim", () => {
 	it("trim(s) → BTRIM(s)", () => {
 		expect(sqlOf('find t pick trim(name) as x')).toBe(
 			`SELECT BTRIM("name") AS "x" FROM "t"`
@@ -59,7 +59,7 @@ describe("sprint 3 — string : trim / ltrim / rtrim", () => {
 	});
 });
 
-describe("sprint 3 — substring : 1-indexed + guard zero-index", () => {
+describe("substring : 1-indexed + guard zero-index", () => {
 	it("substring(s, 2, 3) → SUBSTRING avec cast ::int (désambigüe overload regex)", () => {
 		expect(sqlOf('find t pick substring(name, 2, 3) as x')).toBe(
 			`SELECT SUBSTRING("name", ($1)::int, ($2)::int) AS "x" FROM "t"`
@@ -86,7 +86,7 @@ describe("sprint 3 — substring : 1-indexed + guard zero-index", () => {
 	});
 });
 
-describe("sprint 3 — replace : guard empty-find + littéral pur", () => {
+describe("replace : guard empty-find + littéral pur", () => {
 	it('replace(s, "from", "to") → REPLACE(s, from, to)', () => {
 		expect(sqlOf('find t pick replace(name, "a", "b") as x')).toBe(
 			`SELECT REPLACE("name", $1, $2) AS "x" FROM "t"`
@@ -112,7 +112,7 @@ describe("sprint 3 — replace : guard empty-find + littéral pur", () => {
 	});
 });
 
-describe("sprint 3 — strpos : 1-indexed cross-engine", () => {
+describe("strpos : 1-indexed cross-engine", () => {
 	it("strpos(h, n) → STRPOS(h, n) — jamais POSITION(n IN h)", () => {
 		expect(sqlOf('find t pick strpos(name, "x") as p')).toBe(
 			`SELECT STRPOS("name", $1) AS "p" FROM "t"`
@@ -129,7 +129,7 @@ describe("sprint 3 — strpos : 1-indexed cross-engine", () => {
 	});
 });
 
-describe("sprint 3 — number : floor / ceil", () => {
+describe("number : floor / ceil", () => {
 	it("floor(n) → FLOOR(n)", () => {
 		expect(sqlOf("find t pick floor(price) as x")).toBe(
 			`SELECT FLOOR("price") AS "x" FROM "t"`
@@ -149,7 +149,7 @@ describe("sprint 3 — number : floor / ceil", () => {
 	});
 });
 
-describe("sprint 3 — date : today() UTC forcé", () => {
+describe("date : today() UTC forcé", () => {
 	it("today() → ((NOW() AT TIME ZONE 'UTC')::date) — pas CURRENT_DATE", () => {
 		expect(sqlOf("find t pick today() as d")).toBe(
 			`SELECT ((NOW() AT TIME ZONE 'UTC')::date) AS "d" FROM "t"`
@@ -172,7 +172,7 @@ describe("sprint 3 — date : today() UTC forcé", () => {
 	});
 });
 
-describe("sprint 3 — date_part : whitelist + UTC + remap dow", () => {
+describe("date_part : whitelist + UTC + remap dow", () => {
 	it('date_part("year", d) → EXTRACT(year FROM (d AT TIME ZONE UTC))::int', () => {
 		expect(sqlOf('find t pick date_part("year", created) as y')).toBe(
 			`SELECT EXTRACT(year FROM ("created" AT TIME ZONE 'UTC'))::int AS "y" FROM "t"`
@@ -219,7 +219,7 @@ describe("sprint 3 — date_part : whitelist + UTC + remap dow", () => {
 	});
 });
 
-describe("sprint 3 — date_trunc : whitelist + week=monday fix", () => {
+describe("date_trunc : whitelist + week=monday fix", () => {
 	it('date_trunc("day", d) PG → DATE_TRUNC(\'day\', ...UTC)', () => {
 		expect(sqlOf('find t pick date_trunc("day", created) as d')).toBe(
 			`SELECT DATE_TRUNC('day', ("created" AT TIME ZONE 'UTC')) AS "d" FROM "t"`
@@ -254,7 +254,7 @@ describe("sprint 3 — date_trunc : whitelist + week=monday fix", () => {
 	});
 });
 
-describe("sprint 3 — date_add : unit-first + fix quarter → months*3", () => {
+describe("date_add : unit-first + fix quarter → months*3", () => {
 	it('date_add("day", d, 30) PG → d + MAKE_INTERVAL(days => 30)', () => {
 		expect(sqlOf('find t pick date_add("day", created, 30) as d')).toBe(
 			`SELECT ("created" + MAKE_INTERVAL(days => $1)) AS "d" FROM "t"`
@@ -277,7 +277,7 @@ describe("sprint 3 — date_add : unit-first + fix quarter → months*3", () => 
 	});
 });
 
-describe("sprint 3 — date_diff : whitelist réduite + FLOOR + swap", () => {
+describe("date_diff : whitelist réduite + FLOOR + swap", () => {
 	it('date_diff("day", later, earlier) PG → (later::date - earlier::date)', () => {
 		expect(sqlOf('find t pick date_diff("day", end_dt, start_dt) as n')).toBe(
 			`SELECT ("end_dt"::date - "start_dt"::date) AS "n" FROM "t"`
@@ -290,7 +290,7 @@ describe("sprint 3 — date_diff : whitelist réduite + FLOOR + swap", () => {
 		expect(sql).toContain("/ 3600");
 	});
 
-	it('date_diff("month", ...) → refusé sprint 3 (whitelist réduite)', () => {
+	it('date_diff("month", ...) → refusé (whitelist réduite)', () => {
 		try {
 			sqlOf('find t pick date_diff("month", end_dt, start_dt) as n');
 			throw new Error("SnqlError attendu");
@@ -316,7 +316,7 @@ describe("sprint 3 — date_diff : whitelist réduite + FLOOR + swap", () => {
 	});
 });
 
-describe("sprint 3 — regex_replace : reserved sprint 4", () => {
+describe("regex_replace : reserved", () => {
 	it("regex_replace(...) → lower_call_reserved (pas lower_unknown_function)", () => {
 		expectCode(
 			() => sqlOf('find t pick regex_replace(name, "x", "y") as r'),
@@ -325,7 +325,7 @@ describe("sprint 3 — regex_replace : reserved sprint 4", () => {
 	});
 });
 
-describe("sprint 3 — aliases Levenshtein pour lower_unknown_function", () => {
+describe("aliases Levenshtein pour lower_unknown_function", () => {
 	it("regexp_replace → suggère regex_replace réservé", () => {
 		try {
 			sqlOf('find t pick regexp_replace(name, "x", "y") as r');

@@ -2,9 +2,9 @@
  * Route `/team/:teamSlug/pair` — device pairing flow team-scoped.
  * Réutilise `PairPage` qui lit le slug via `useCurrentTeamSlug`.
  *
- * P/2 (ADR-022 D7) : `validateSearch` accepte `?code=` posé par le CLI
- * (`connect.ts:190`) ; `PairPage` le lit via `Route.useSearch()` et
- * l'utilise comme valeur initiale du `TextInput`.
+ * `validateSearch` accepte `?code=` posé par le CLI (`connect.ts`) ;
+ * `PairPage` le lit via `Route.useSearch()` et l'utilise comme valeur
+ * initiale du `TextInput`.
  */
 
 import { createFileRoute } from "@tanstack/react-router";

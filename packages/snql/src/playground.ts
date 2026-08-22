@@ -27,7 +27,7 @@ for (const source of reads) {
 	console.log("");
 }
 
-// --- Planner capability-aware : pushdown vs compensation (Slice 3) ---
+// --- Planner capability-aware : pushdown vs compensation ---
 console.log("=== Planner : pushdown vs compensation ===\n");
 const query = "get users where age > 30 sort age desc limit 2";
 console.log("SNQL :", query, "\n");

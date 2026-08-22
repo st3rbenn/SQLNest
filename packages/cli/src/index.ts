@@ -1,17 +1,10 @@
 /**
  * `@sqlnest/cli` — module racine (API programmatique).
  *
- * ─── Bloc 4 (crypto + config) ─────────────────────────────────────────
- * Ed25519 keypair, AES-256-GCM privkey chiffrée, load/save `config.toml`
- * avec perms 0600.
- *
- * ─── Bloc 5 (device flow client) ──────────────────────────────────────
- * `runCli(argv)` — dispatcher argv → subcommand. Commands `connect`,
- * `connect --token`, `logout`. API client fetch. Ouverture browser
- * best-effort.
- *
- * Le wiring `bin` (script npm executable) attend un build step (esbuild
- * ou tsup) — reporté à un bloc infrastructure ultérieur.
+ * Expose : crypto (Ed25519 keypair, AES-256-GCM privkey chiffrée, load/save
+ * `config.toml` avec perms 0600), device flow client (`runCli(argv)` dispatch
+ * subcommand — `connect`, `connect --token`, `logout` — API client fetch,
+ * ouverture browser best-effort), et wrappers engine + WS.
  */
 
 export type {

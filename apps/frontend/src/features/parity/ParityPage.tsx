@@ -1,7 +1,7 @@
 /**
- * PM/10 D20 — Landing page `/parity` listant toutes les divergences
- * sémantiques PG↔Mongo documentées dans le registre snql
- * `divergences-mongo-vs-pg.ts` (source unique de vérité PM/8 D7).
+ * Landing page `/parity` listant toutes les divergences sémantiques
+ * PG↔Mongo documentées dans le registre snql `divergences-mongo-vs-pg.ts`
+ * (source unique de vérité).
  *
  * Table par mitigation type (shim/warn/refus) : SNQL construct · PG behavior
  * · Mongo behavior · recommandation. Consommée par un user qui veut savoir
@@ -10,11 +10,6 @@
  *
  * Le registre est le contract — toute PR qui ajoute une divergence l'inscrit
  * ici, la page s'auto-update (import de DIVERGENCES). Aucune duplication.
- *
- * Follow-ups D20 v2 : auto-génération depuis CI en Markdown pour docs statiques,
- * lien direct vers un test-mirror-id qui prouve la divergence, filtrer par
- * engine version (Mongo 4.2/5.0/6.0), badge "livré" vs "reporté" selon
- * `mitigation`.
  */
 
 import {
@@ -141,8 +136,7 @@ export function ParityPage(): React.ReactNode {
 				<strong> shim</strong> = parité livrée automatiquement,
 				<strong> warn</strong> = comportement différent documenté,
 				<strong> refus</strong> = refusé au planner avec code typé.
-				Source de vérité : registre <code>divergences-mongo-vs-pg.ts</code>{" "}
-				(ADR-024 PM/8 D7).
+				Source de vérité : registre <code>divergences-mongo-vs-pg.ts</code>.
 			</div>
 
 			{SECTION_ORDER.map((mitigation) => {

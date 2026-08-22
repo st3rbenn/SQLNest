@@ -1,5 +1,5 @@
 /**
- * Snapshots BSON Mongo pour les 4 fonctions JSON sprint 4 + hoist
+ * Snapshots BSON Mongo pour les 4 fonctions JSON + hoist
  * indexable-natif dans renderCompare/negateCompare/isNull + fallback $expr
  * pour json_get_text + write predicate refusé si non-hoistable.
  */

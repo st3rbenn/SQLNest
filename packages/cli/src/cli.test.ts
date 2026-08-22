@@ -14,10 +14,10 @@ import { ConnectError } from "./commands/connect";
 import type { TunnelEntry } from "./config";
 import { addLocalConnection } from "./local-connections";
 
-// Isolation obligatoire : `runCli connect` (via `resolveCliConnectionName`
-// C.13) lit `~/.sqlnest/local-connections.toml`. Sans isolation, un dev qui
-// a des DSN locales verrait le CLI prompt (≥2 entrées) → tests bloqués
-// en TTY-wait. On pointe `SQLNEST_CONFIG_DIR` vers un tmpdir vide.
+// Isolation obligatoire : `runCli connect` (via `resolveCliConnectionName`)
+// lit `~/.sqlnest/local-connections.toml`. Sans isolation, un dev qui a des
+// DSN locales verrait le CLI prompt (≥2 entrées) → tests bloqués en TTY-wait.
+// On pointe `SQLNEST_CONFIG_DIR` vers un tmpdir vide.
 let originalConfigDir: string | undefined;
 let tmpConfigDir: string;
 beforeEach(() => {
@@ -238,7 +238,7 @@ describe("runCli — connect (device flow)", () => {
 	});
 });
 
-describe("runCli — connect: sélection DSN locale (C.13)", () => {
+describe("runCli — connect: sélection DSN locale", () => {
 	test("0 DSN locale → cliConnectionName null (compat legacy)", async () => {
 		const io = captureIO();
 		const connectFn = vi.fn().mockResolvedValue({

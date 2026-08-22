@@ -4,15 +4,15 @@
  *
  * ─── Rôle ─────────────────────────────────────────────────────────────
  * Ce module est le seul point du CLI qui manipule la DSN Postgres. Toute
- * autre partie (WS handler Bloc 7, commandes user) reçoit un `Connection`
- * déjà ouvert et n'accède JAMAIS à la string de connexion — protection
+ * autre partie (WS handler, commandes user) reçoit un `Connection` déjà
+ * ouvert et n'accède JAMAIS à la string de connexion — protection
  * contre la fuite accidentelle dans un log/frame WS.
  *
  * ─── Réutilise l'engine du backend ─────────────────────────────────────
  * `@sqlnest/engine` expose `connect()`, `runQuery()` (SNQL → SQL Postgres
  * → exécution), et le driver `postgres.js` sous-jacent. Le CLI est un
- * miroir de la logique côté serveur du Bloc 8 — même code path,
- * simplement exécuté sur la machine du user avec ses creds.
+ * miroir de la logique côté serveur — même code path, simplement exécuté
+ * sur la machine du user avec ses creds.
  */
 
 import { createHash } from "node:crypto";
@@ -53,11 +53,10 @@ export async function openConnectionForTunnel(
 }
 
 /**
- * PM/10 D8 fix — détecte l'engine ("postgres" | "mongodb") depuis la DSN
- * locale du tunnel. Exposé pour que `serve` l'envoie au backend via heartbeat
- * (backfill db_connection.engine — le pairing initial stocke DEFAULT_ENGINE
- * en dur). Retourne null si la DSN ne peut pas être résolue (mode dégradé
- * best-effort).
+ * Détecte l'engine ("postgres" | "mongodb") depuis la DSN locale du tunnel.
+ * Exposé pour que `serve` l'envoie au backend via heartbeat (backfill
+ * db_connection.engine — le pairing initial stocke DEFAULT_ENGINE en dur).
+ * Retourne null si la DSN ne peut pas être résolue (mode dégradé best-effort).
  */
 export function detectEngineFromConnectionName(
 	tunnelName: string,
@@ -115,7 +114,7 @@ export async function pingTunnel(
 }
 
 /** Introspection du schéma via la connexion locale. Utile pour la
- * commande `sqlnest introspect` (à venir) et pour le futur WS Bloc 7. */
+ * commande `sqlnest introspect` (à venir) et pour le WS. */
 export async function introspectTunnel(
 	tunnelName: string,
 	env: NodeJS.ProcessEnv = process.env
@@ -129,8 +128,8 @@ export async function introspectTunnel(
 }
 
 /**
- * T4/1 Step 6 : calcule le fingerprint de l'INSTANCE DB visée par cette DSN
- * locale. Ouvre une connexion éphémère, appelle `Connection.fingerprint()`,
+ * Calcule le fingerprint de l'INSTANCE DB visée par cette DSN locale.
+ * Ouvre une connexion éphémère, appelle `Connection.fingerprint()`,
  * la referme. Best-effort : retourne `null` si la DSN n'est pas configurée
  * ou que le serveur ne répond pas — l'authenticate continue sans fingerprint
  * (le backend backfill au prochain succès).
@@ -161,7 +160,7 @@ export async function computeTunnelFingerprint(
 }
 
 /**
- * T4/2 : calcule le CHECKSUM de la STRUCTURE (schéma) de la DB visée.
+ * Calcule le CHECKSUM de la STRUCTURE (schéma) de la DB visée.
  * Complémentaire du fingerprint (identité INSTANCE) : deux DBs avec le
  * même schéma mais différentes (staging vs prod) auront le même checksum
  * mais des fingerprints différents. Une même DB après migration

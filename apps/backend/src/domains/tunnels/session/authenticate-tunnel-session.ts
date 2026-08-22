@@ -50,10 +50,10 @@ export async function authenticateTunnelSession(
 				sessionId: dbSchema.tunnelSession.id,
 				connectionId: dbSchema.tunnelSession.connectionId,
 				userId: dbSchema.dbConnection.userId,
-				// T4/5 : priorité au cli_fingerprint de la session (le CLI qui
-				// a ouvert CETTE session). Fallback sur celui de la db_connection
-				// pour les sessions antérieures au refactor multi-CLI (cli_
-				// fingerprint = NULL sur session → utilise le primaire connection).
+				// Priorité au cli_fingerprint de la session (le CLI qui a ouvert
+				// CETTE session). Fallback sur celui de la db_connection pour les
+				// sessions antérieures au refactor multi-CLI (cli_fingerprint =
+				// NULL sur session → utilise le primaire connection).
 				sessionCliFingerprint: dbSchema.tunnelSession.cliFingerprint,
 				connectionCliFingerprint: dbSchema.dbConnection.cliFingerprint
 			})
@@ -87,7 +87,7 @@ export async function authenticateTunnelSession(
 			sessionId: row.sessionId,
 			connectionId: row.connectionId,
 			userId: row.userId,
-			// T4/5 : fallback vers le fingerprint de la db_connection pour les
+			// Fallback vers le fingerprint de la db_connection pour les
 			// sessions historiques (cli_fingerprint = NULL post-migration).
 			cliFingerprint:
 				row.sessionCliFingerprint ?? row.connectionCliFingerprint

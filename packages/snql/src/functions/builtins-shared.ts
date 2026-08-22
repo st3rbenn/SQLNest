@@ -35,7 +35,7 @@ export function extractStringLiteralArg(
 	);
 }
 
-// ─── sprint 4 : helpers JSON path ──────────────────────────────────────────
+// ─── helpers JSON path ──────────────────────────────────────────
 
 /**
  * Un segment path JSON canonique : string (clé objet) ou int positif ≤ INT32_MAX

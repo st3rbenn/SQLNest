@@ -9,7 +9,7 @@ export type CompareOperator = "=" | "!=" | "<" | ">" | "<=" | ">=" | "like";
 export type ArithOperator = "+" | "-" | "*" | "/" | "%";
 
 /**
- * Types canoniques SNQL pour `cast(x as T)` (T2 sprint 2). Surface fermée : la
+ * Types canoniques SNQL pour `cast(x as T)`. Surface fermée : la
  * whitelist force une seule orthographe par type (pas d'alias SQL type
  * `integer`/`string`/`varchar` — le parser oriente le dev vers ces 7).
  */
@@ -86,12 +86,12 @@ export type Expr =
 	// case-normalisé (lowercase) dès la construction. Résolu au lower via le
 	// registre de fonctions ; arité + typage vérifiés là.
 	//
-	// Sprint T2/6 : deux flags optionnels pour les aggregates.
+	// deux flags optionnels pour les aggregates.
 	//  - `star` : `count(*)` — args=[] (invariant vérifié au parser + lower).
 	//  - `unique` : `count(unique x)` — args.length=1 (invariant vérifié au
 	//    parser + lower). Réservé aux aggregates ; les scalaires refusent.
 	//
-	// Sprint T2/8 : `sortKeys?` — sort intra-call pour aggregateMulti
+	// `sortKeys?` — sort intra-call pour aggregateMulti
 	// (`string_agg(name, ", " sort name asc)`). Parser contextuel via registre :
 	// accepté uniquement si registre.get(name).kind === 'aggregateMulti'.
 	| {
@@ -131,7 +131,7 @@ export type Expr =
 			readonly items: readonly Expr[];
 			readonly span: Span;
 	  }
-	// Sprint T2/5 : structure conditionnelle `case { c1 -> v1, c2 -> v2, else -> v3 }`.
+	// structure conditionnelle `case { c1 -> v1, c2 -> v2, else -> v3 }`.
 	// Else obligatoire à la surface (pas de NULL implicite). First-match wins.
 	// PG codegen : CASE WHEN. Mongo codegen : $switch. Runtime KV : short-circuit
 	// évaluation lazy (parité PG 3VL, cond === true strict).
@@ -141,7 +141,7 @@ export type Expr =
 			readonly elseValue: Expr;
 			readonly span: Span;
 	  }
-	// Sprint T2/9 : window function — `fn(args) over (partition <col> sort <key>)`.
+	// window function — `fn(args) over (partition <col> sort <key>)`.
 	// Distinct de `call` : sémantique différente (assign per-row basé sur
 	// partition context, pas per-row scalaire ni fold), lifecycle IR distinct
 	// (codegen Mongo insère un $setWindowFields avant $project ; PG émet
@@ -155,17 +155,17 @@ export type Expr =
 			readonly sortKeys: readonly SortKey[];
 			readonly span: Span;
 	  }
-	// Sprint T2/11 : sub-query uncorrelated — `(find t pick y)` en position
+	// sub-query uncorrelated — `(find t pick y)` en position
 	// d'expression, typiquement à droite d'un `in` ou wrappé par `exists`.
 	// La `query` est une full Query nested (parsée récursivement). Uncorrelated
-	// = pas de scope-lookup vers les alias de la query outer (T2/12 correlated
+	// = pas de scope-lookup vers les alias de la query outer (correlated
 	// introduira ScopeStack).
 	| {
 			readonly type: "subquery";
 			readonly query: Query;
 			readonly span: Span;
 	  }
-	// Sprint T2/11 : EXISTS prefix — `exists (find ...)`. Le subquery est
+	// EXISTS prefix — `exists (find...)`. Le subquery est
 	// TOUJOURS un Expr.subquery (invariant vérifié au parser). Retourne bool
 	// (true si la subquery renvoie au moins une row).
 	| {
@@ -232,7 +232,7 @@ export interface GroupKey {
 
 export type Stage =
 	| { readonly type: "where"; readonly predicate: Expr; readonly span: Span }
-	// Sprint T2/10 : DISTINCT via `pick unique <fields>` (dédup sur tous les
+	// DISTINCT via `pick unique <fields>` (dédup sur tous les
 	// fields projetés) ou `pick unique on (<keys>) <fields>` (DISTINCT ON
 	// avec keys explicites, parens obligatoires). Les 2 sont exclusifs avec
 	// `group by` (refus lower_unique_with_group).
@@ -302,7 +302,7 @@ export interface Assignment {
 }
 
 /**
- * Sprint T2/13 : action à effectuer quand l'insert entre en conflit sur les
+ * action à effectuer quand l'insert entre en conflit sur les
  * `keys` de l'upsert.
  *  - `ignore` : `INSERT ... ON CONFLICT (...) DO NOTHING`.
  *  - `update` : `INSERT ... ON CONFLICT (...) DO UPDATE SET c = expr [WHERE ...]`.
@@ -320,8 +320,8 @@ export type OnConflictAction =
 	  };
 
 /**
- * Sprint T2/13 : clause `on conflict (k1, k2) [ignore | edit set ... [where ...]]`
- * portée par un `add {…} into t`. Le sprint reste PG-only (capability `upsert`).
+ * clause `on conflict (k1, k2) [ignore | edit set... [where...]]`
+ * portée par un `add {…} into t`. Reste PG-only (capability `upsert`).
  */
 export interface OnConflictClause {
 	readonly keys: readonly string[];
@@ -334,18 +334,18 @@ export interface UpdateStatement {
 	readonly operation: "update";
 	readonly verb: string;
 	readonly collection: string;
-	// Sprint T2/14 : alias source `update t as a set …` — permet à `set`/`where`
+	// alias source `update t as a set …` — permet à `set`/`where`
 	// de référencer les cols de la source via `a.col` en cohabitant avec les
 	// joins qui ont leurs propres alias.
 	readonly alias?: string;
-	// Sprint T2/14 : joins mutation `update t with one X on l=f set …`. Réutilise
+	// joins mutation `update t with one X on l=f set …`. Réutilise
 	// la variante `Stage.with` (multiplicity/alias/foreignField portés dedans).
 	// `with many` est rejeté au lower (`lower_write_join_many`) pour éviter
 	// UPDATE cartésien silencieux ; seul `with one` est autorisé.
 	readonly joins?: readonly Stage[];
 	readonly predicate?: Expr;
 	readonly assignments: readonly Assignment[];
-	// Sprint T2/13 : `pick count` — drop `RETURNING *` côté codegen, ne renvoie
+	// `pick count` — drop `RETURNING *` côté codegen, ne renvoie
 	// que rowCount (le front lit `rowCount` sans payload de rows).
 	readonly returnRowCount?: true;
 	readonly span: Span;
@@ -378,7 +378,7 @@ export interface InsertRow {
  * `add {doc} into <coll> [on conflict (keys) …] [pick count]` (rows literal)
  * OU `add (find … pick a, b as c) into <coll> [pick count]` (INSERT SELECT).
  * Les 2 formes sont mutuellement exclusives : `rows` est peuplé pour les
- * documents literals, `sourceQuery` pour l'INSERT SELECT. Sprint T2/14 :
+ * documents literals, `sourceQuery` pour l'INSERT SELECT. :
  * `sourceQuery` mapping cols inféré du `pick` (`x as tgt_col` → tgt_col).
  */
 export interface InsertStatement {
@@ -386,7 +386,7 @@ export interface InsertStatement {
 	readonly verb: string;
 	readonly collection: string;
 	readonly rows: readonly InsertRow[];
-	/** Sprint T2/14 : INSERT SELECT — mutuellement exclusif avec `rows` non vide. */
+	/** INSERT SELECT — mutuellement exclusif avec `rows` non vide. */
 	readonly sourceQuery?: Query;
 	readonly onConflict?: OnConflictClause;
 	readonly returnRowCount?: true;
@@ -394,14 +394,14 @@ export interface InsertStatement {
 }
 
 /**
- * Sprint T2/15 : niveau d'isolation Postgres. Cast direct au codegen —
+ * niveau d'isolation Postgres. Cast direct au codegen
  * `BEGIN ISOLATION LEVEL READ COMMITTED` etc. Absent = default du serveur
  * (READ COMMITTED sur PG standard).
  */
 export type IsolationLevel = "read_committed" | "repeatable_read" | "serializable";
 
 /**
- * Sprint T2/15 : élément du body d'une transaction — soit un statement
+ * élément du body d'une transaction — soit un statement
  * classique (select/insert/update/delete), soit un sous-bloc savepoint.
  * Une transaction ne peut PAS contenir une transaction imbriquée (refus
  * parse).
@@ -414,7 +414,7 @@ export type TransactionBodyItem =
 	| SavepointStatement;
 
 /**
- * Sprint T2/15 : `savepoint <name> { stmt; stmt; ... }` — bloc atomique
+ * `savepoint <name> { stmt; stmt; ... }` — bloc atomique
  * dans une transaction. Rollback partiel au savepoint sur erreur, sans
  * casser la transaction englobante.
  */
@@ -426,7 +426,7 @@ export interface SavepointStatement {
 }
 
 /**
- * Sprint T2/15 : `transaction [isolation <level>] { stmt; stmt; ... }` — bloc
+ * `transaction [isolation <level>] { stmt; stmt; ... }` — bloc
  * atomique multi-statements. PG only v1 (capability `transaction`). Le
  * séparateur `;` est OBLIGATOIRE entre statements (robuste au copier-coller).
  */
@@ -438,24 +438,24 @@ export interface TransactionStatement {
 }
 
 /**
- * Sprint T3/1 : statement d'introspection — `list tables`, `describe <table>`,
+ * statement d'introspection — `list tables`, `describe <table>`,
  * `list schemas`, `list indexes`, etc. Le `kind` discrimine la sous-commande ;
  * `target` porte l'ident cible quand applicable (ex: `describe users`). Chaque
  * kind est cadré par un mini-schéma (colonnes fixes en sortie) — pas de
  * projection user (contrat SNQL : introspection retourne un shape stable).
  */
 export type IntrospectKind =
-	| "list-tables" // T3/1 — v1 : liste plate des tables du schéma courant
-	| "describe-table" // T3/2 — colonnes d'une table (name/type/nullable/default/PK/FK)
-	| "list-schemas" // T3/3 — schemas PG (ou databases Mongo) — shape {name}
-	| "list-indexes"; // T3/3 — indexes, target optionnel — shape {name,table,unique,columns}
+	| "list-tables" // v1 : liste plate des tables du schéma courant
+	| "describe-table" // colonnes d'une table (name/type/nullable/default/PK/FK)
+	| "list-schemas" // schemas PG (ou databases Mongo) — shape {name}
+	| "list-indexes"; // indexes, target optionnel — shape {name,table,unique,columns}
 
 export interface IntrospectStatement {
 	readonly operation: "introspect";
 	readonly kind: IntrospectKind;
 	readonly target?: string;
 	/**
-	 * Sprint T3/2.3 : stages classiques (`where`/`pick`/`sort`/`limit`) appliqués
+	 * stages classiques (`where`/`pick`/`sort`/`limit`) appliqués
 	 * en post-traitement sur le dataset produit par l'introspection. Uniforme
 	 * avec `find` — `describe users pick name, type sort name` marche comme
 	 * une requête. `with`/`group`/`having` refusés v1 (utilité limitée, coût
@@ -466,7 +466,7 @@ export interface IntrospectStatement {
 }
 
 /**
- * Sprint T3/4 : escape hatch `raw`. Payload est un texte SQL brut (PG) OU
+ * escape hatch `raw`. Payload est un texte SQL brut (PG) OU
  * un document JSON qui devient une command MongoDB via db.runCommand.
  * L'ambiguïté PG-vs-Mongo se résout à l'engine cible : le mapper refuse
  * le shape qui n'est pas le sien avec un message dédié.
@@ -484,7 +484,7 @@ export type RawPayload =
 	  };
 
 /**
- * Sprint T3/4 : `raw "SELECT ..."` (PG) ou `raw {aggregate: "u", ...}` (Mongo).
+ * `raw "SELECT..."` (PG) ou `raw {aggregate: "u", ...}` (Mongo).
  * Bypass le pipeline SNQL — aucun stage n'est autorisé après. Contract :
  * l'utilisateur assume la sécurité (pas de bind auto v1), les capabilities
  * du rôle DB gouvernent read/write (SNQL ne re-check pas).
@@ -496,7 +496,7 @@ export interface RawStatement {
 }
 
 /**
- * Sprint T3/6 : un binding `let <name> = <query>`. Le body du binding est
+ * un binding `let <name> = <query>`. Le body du binding est
  * TOUJOURS une Query (select) — un CTE n'a de sens qu'en lecture (immutable
  * view). Peut référencer les bindings précédents (ordre topologique validé
  * au lower).
@@ -508,7 +508,7 @@ export interface LetBinding {
 }
 
 /**
- * Sprint T3/6 : wrapper `let x1 = ...; let x2 = ...; <body>`. Le body accepte
+ * wrapper `let x1 = ...; let x2 = ...; <body>`. Le body accepte
  * find/add/update/remove — toute la DML classique peut consommer les CTE
  * définis en tête (subqueries, joins, insert-select, where in ...). Transaction/
  * raw/introspection sont refusés au parser (pas de sémantique claire v1).
@@ -522,7 +522,7 @@ export interface LetStatement {
 	readonly span: Span;
 }
 
-/** Racine de l'AST : lecture (`Query`), mutation, transaction (T2/15), introspection (T3/1), raw (T3/4) ou let/CTE (T3/6). */
+/** Racine de l'AST : lecture (`Query`), mutation, transaction, introspection, raw ou let/CTE. */
 export type Statement =
 	| Query
 	| InsertStatement

@@ -1,5 +1,5 @@
 /**
- * Renderers MongoDB pour les builtins SNQL (sprint 1 : 8 fonctions, sprint 3
+ * Renderers MongoDB pour les builtins SNQL (8 fonctions,
  * : +11 fonctions). Les args passés sont des `PlanExpr` opaques (unknown) —
  * le codegen les convertit en opérandes BSON via `ctx.renderExpr`.
  *
@@ -62,9 +62,9 @@ export const mongoNow: EngineRenderer = () => "$$NOW";
 
 /**
  * `concat(a, b, …)` → `{ $concat: [{$ifNull:[<a>,""]},{$ifNull:[<b>,""]}, …] }`.
- * ADR-024 PM/8 divergence #13 — chaque arg wrappé dans `$ifNull:[_,""]` pour
+ * divergence #13 — chaque arg wrappé dans `$ifNull:[_,""]` pour
  * atteindre la parité PG.CONCAT (traite NULL comme ""). Coût = 1 op par arg
- * (passe le critère Q7c : ≤ 1 op ET sémantique PG exacte). Le refus write
+ * (passe le critère: ≤ 1 op ET sémantique PG exacte). Le refus write
  * context reste en place (writeNullBehavior non déclaré) — le shim ne s'applique
  * qu'en projection/read.
  */
@@ -73,7 +73,7 @@ export const mongoConcat: EngineRenderer = (args, ctx) => {
 	return { $concat: rendered.map((r) => ({ $ifNull: [r, ""] })) };
 };
 
-// ─── sprint 3 : string ─────────────────────────────────────────────────────
+// ─── string ─────────────────────────────────────────────────────
 
 /** `trim(s [, chars])` → `{ $trim: { input: <s> [, chars] } }`. */
 export const mongoTrim: EngineRenderer = (args, ctx) => {
@@ -162,7 +162,7 @@ export const mongoStrpos: EngineRenderer = (args, ctx) => {
 	};
 };
 
-// ─── sprint 3 : number ─────────────────────────────────────────────────────
+// ─── number ─────────────────────────────────────────────────────
 
 /** `floor(n)` → `{ $floor: <n> }`. */
 export const mongoFloor: EngineRenderer = (args, ctx) => {
@@ -176,7 +176,7 @@ export const mongoCeil: EngineRenderer = (args, ctx) => {
 	return { $ceil: n };
 };
 
-// ─── sprint 3 : date ───────────────────────────────────────────────────────
+// ─── date ───────────────────────────────────────────────────────
 
 /**
  * `today()` → `{ $dateTrunc: { date: '$$NOW', unit: 'day' } }`. Mongo 5.0+.
@@ -255,7 +255,7 @@ export const mongoDateAdd: EngineRenderer = (args, ctx) => {
  * `date_diff(unit, later, earlier)` → `{ $dateDiff: { startDate, endDate,
  * unit } }`. Mongo 5.0+. Signature SNQL later-first → renderer swap
  * start/end pour convention Mongo (start=earlier, end=later → résultat positif).
- * Whitelist réduite {day, hour, minute, second} sprint 3.
+ * Whitelist réduite {day, hour, minute, second}.
  */
 export const mongoDateDiff: EngineRenderer = (args, ctx) => {
 	const unit = extractStringLiteralArg(args[0], "date_diff", 0);
@@ -264,7 +264,7 @@ export const mongoDateDiff: EngineRenderer = (args, ctx) => {
 	return { $dateDiff: { startDate: earlier, endDate: later, unit } };
 };
 
-// ─── sprint 4 : JSON ───────────────────────────────────────────────────────
+// ─── JSON ───────────────────────────────────────────────────────
 
 /**
  * Duck-type un PlanExpr literal pour un segment path JSON. Le lower a déjà
@@ -329,7 +329,7 @@ export const mongoJsonGet: EngineRenderer = (args, ctx) => {
  * `json_get_text(doc, ...path)` → chain identique + wrap final `$cond` AVANT
  * `$toString` (PIÈGE : `$ifNull:[{$toString:chain}, null]` NE MARCHE PAS car
  * `$toString` throw AVANT que `$ifNull` intervienne sur null). Pattern éprouvé
- * mongoSubstring sprint 3.
+ * mongoSubstring.
  */
 export const mongoJsonGetText: EngineRenderer = (args, ctx) => {
 	const chain = mongoRenderJsonPathChain(args, ctx);
@@ -405,7 +405,7 @@ export const mongoJsonTypeof: EngineRenderer = (args, ctx) => {
 };
 
 /**
- * PA/8 (ADR-024-A) — `json_contains(doc, subdoc)` Mongo. PG utilise l'opérateur
+ * `json_contains(doc, subdoc)` Mongo. PG utilise l'opérateur
  * natif `@>`. Mongo n'a pas d'équivalent direct : deux stratégies selon la
  * forme du subdoc literal (analysé statiquement pour dispatch propre) :
  *
@@ -420,7 +420,7 @@ export const mongoJsonTypeof: EngineRenderer = (args, ctx) => {
  *
  * Non-négociables :
  *  - Refus si subdoc dynamique (field/cast/call) — pattern non-analysable au
- *    codegen. Ticket v3 : parse runtime via `$function` Mongo 4.4+.
+ *    codegen. À terme : parse runtime via `$function` Mongo 4.4+.
  *  - Refus si valeur dans object literal est un array/object nested — deep
  *    array compare via $eq ambigu ordre, deep object non-géré par $getField
  *    chain simple. Code `planner_mongo_json_contains_nested_unsupported`.
@@ -482,7 +482,7 @@ function assertFlatScalarArrayItems(items: readonly PlanExpr[]): void {
 	}
 }
 
-// ─── sprint T2/5 : conditional ─────────────────────────────────────────────
+// ─── conditional ─────────────────────────────────────────────
 
 /**
  * `if(cond, then, else)` → `{ $cond: [<cond>, <then>, <else>] }`. Sucre 3-arg
@@ -562,7 +562,7 @@ function buildMongoMinMax(
 	};
 }
 
-// ─── sprint T2/6 : aggregates scalaires (accumulators pour $group) ─────────
+// ─── aggregates scalaires (accumulators pour $group) ─────────
 // Les 5 renderers ci-dessous retournent un ACCUMULATOR body valide uniquement
 // dans un stage $group. Le SSA extract (codegen/mongodb.ts) matérialise
 // [$group{_id:null,...accs}, $project{_id:0,...renames}] paire pour un
@@ -590,11 +590,11 @@ export const mongoCount: EngineRenderer = (args, ctx) => {
  * `sum(x)` → `{ $sum: '$x' }`. Empty collection → $sum retourne 0 côté Mongo
  * (BSON quirk) vs NULL côté PG — divergence documentée dans knownDivergences.
  * `sum(unique x)` refusé au planner (planner_agg_unique_mongo_unsupported_sum_avg,
- * sprint 6). Defense-in-depth si ctx.unique atteint ce renderer.
+ *). Defense-in-depth si ctx.unique atteint ce renderer.
  */
 export const mongoSum: EngineRenderer = (args, ctx) => {
 	if (ctx.unique === true) {
-		// ADR-024 PM/6 item #5 — sum(unique) matérialisé par SSA extract
+		// item #5 — sum(unique) matérialisé par SSA extract
 		// $addToSet + $sum ; ce renderer ne devrait jamais être appelé avec
 		// ctx.unique=true. Defense-in-depth : sync SSA cassée.
 		throw new Error(
@@ -607,11 +607,11 @@ export const mongoSum: EngineRenderer = (args, ctx) => {
 
 /**
  * `avg(x)` → `{ $avg: '$x' }` — double natif Mongo. `avg(unique x)` refusé
- * planner (sprint 6, cf mongoSum).
+ * planner (cf mongoSum).
  */
 export const mongoAvg: EngineRenderer = (args, ctx) => {
 	if (ctx.unique === true) {
-		// ADR-024 PM/6 item #5 — avg(unique) matérialisé par SSA extract
+		// item #5 — avg(unique) matérialisé par SSA extract
 		// $addToSet + $avg ; defense-in-depth si sync SSA cassée.
 		throw new Error(
 			"mongoAvg(unique) doit être matérialisé par le SSA extract ($addToSet + $avg), pas via le renderer direct"
@@ -646,7 +646,7 @@ export const mongoMax: EngineRenderer = (args, ctx) => {
 	return { $max: arg };
 };
 
-// ─── sprint T2/8 : aggregateMulti ─────────────────────────────────────────
+// ─── aggregateMulti ─────────────────────────────────────────
 
 /**
  * Rendu du body accumulateur Mongo pour aggregateMulti — retourne toujours
@@ -691,7 +691,7 @@ export const mongoJsonAgg: EngineRenderer = (args, ctx) => {
 	return ctx.unique === true ? { $addToSet: arg } : { $push: arg };
 };
 
-// ─── sprint T2/9 : window functions ─────────────────────────────────────────
+// ─── window functions ─────────────────────────────────────────
 
 /**
  * Mongo `$setWindowFields` — chaque window fn produit un accumulator body

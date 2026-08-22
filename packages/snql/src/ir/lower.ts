@@ -38,7 +38,7 @@ import type {
 import { linearize } from "./plan";
 
 /**
- * Sprint T2/12 : scope d'une query outer visible par une subquery corrélée.
+ * scope d'une query outer visible par une subquery corrélée.
  * Contient les alias déclarés (source + with-joins) + colonnes source pour
  * résoudre `alias.field` lookup depuis l'intérieur d'un `(find ...)`.
  */
@@ -79,7 +79,7 @@ const MAX_SUBQUERY_DEPTH = 32;
  * retombe sur `embed` (comportement historique). L'utilisateur peut forcer via
  * `with one X` / `with many X`.
  *
- * Sprint T2/12 : gère les sub-queries corrélées via un scope stack module-level
+ * gère les sub-queries corrélées via un scope stack module-level
  * (poussé quand lowerExpr descend dans une subquery, popé au retour).
  */
 let moduleSchema: SchemaModel | undefined; // schema courant pour lowerExpr subquery
@@ -87,7 +87,7 @@ let moduleSchema: SchemaModel | undefined; // schema courant pour lowerExpr subq
 export function lower(query: Query, schema?: SchemaModel): LogicalPlan {
 	if (query.operation !== "select") {
 		throw new SnqlError(
-			`Opération '${query.operation}' non supportée en Slice 1`,
+			`Opération '${query.operation}' non supportée en `,
 			"lower_unsupported_operation"
 		);
 	}
@@ -98,7 +98,7 @@ export function lower(query: Query, schema?: SchemaModel): LogicalPlan {
 			query.span
 		);
 	}
-	// Sprint T2/12 : capture le schema courant pour que lowerExpr puisse le
+	// capture le schema courant pour que lowerExpr puisse le
 	// propager aux subqueries. Push l'outer scope (currentScope) sur le
 	// stack si on est en recursion — la subquery pourra lire ses alias
 	// via checkAliasDefined.
@@ -118,7 +118,7 @@ export function lower(query: Query, schema?: SchemaModel): LogicalPlan {
 }
 
 function lowerInternal(query: Query, schema?: SchemaModel): LogicalPlan {
-	// Sprint T2/11.5 : typecheck cross-type predicates si schema dispo.
+	// typecheck cross-type predicates si schema dispo.
 	// Fire-early : messages actionnables avant PG remonte du 42883 cryptique.
 	typecheckQuery(query, schema);
 
@@ -151,7 +151,7 @@ function lowerInternal(query: Query, schema?: SchemaModel): LogicalPlan {
 	// Idem si la source n'est pas dans le schéma OU si ses `fields` sont
 	// vides (Mongo pré-sampling, stale post-DDL) — permissif via `null`.
 	const sourceColumns = resolveSourceColumns(schema, query.source.collection);
-	// Sprint T2/12 : initialise currentScope = scope de la query courante.
+	// initialise currentScope = scope de la query courante.
 	// Réassigné dynamiquement après chaque `with` join qui ajoute un alias.
 	// Consulté par le `lower()` récursif quand une subquery est rencontrée.
 	const refreshCurrentScope = (): void => {
@@ -163,7 +163,7 @@ function lowerInternal(query: Query, schema?: SchemaModel): LogicalPlan {
 		};
 	};
 	refreshCurrentScope();
-	// Sprint T2/7 : group by / having accumulation. Les stages `group` et
+	// group by / having accumulation. Les stages `group` et
 	// `having` ne produisent pas d'op IR directement — ils alimentent le `pick`
 	// qui suit (groupKeys sur l'aggregate op, having comme filtre post-agg).
 	let groupKeys: readonly (readonly string[])[] | undefined;
@@ -179,7 +179,7 @@ function lowerInternal(query: Query, schema?: SchemaModel): LogicalPlan {
 		if (sourceColumns !== null) {
 			checkAliasDefined(stage, knownAliases, sourceColumns, query.source);
 		}
-		// Sprint T2/9 : window function refusée dans where/having (per-row
+		// window function refusée dans where/having (per-row
 		// context inutilisable pour filtrer, sub-query needed) — refus AVANT
 		// lowerStage pour message précis.
 		if (stage.type === "where") {
@@ -196,7 +196,7 @@ function lowerInternal(query: Query, schema?: SchemaModel): LogicalPlan {
 				"having"
 			);
 		}
-		// Sprint T2/10 : check sort keys prefix-match distinctOnKeys (parité PG).
+		// check sort keys prefix-match distinctOnKeys (parité PG).
 		// Le pick précédent peut avoir posé distinctOnKeys ; ici on vérifie que
 		// les sort keys commencent par les mêmes paths (alias-stripped).
 		if (
@@ -269,7 +269,7 @@ function lowerInternal(query: Query, schema?: SchemaModel): LogicalPlan {
 			groupKeys
 		);
 		if (stage.type === "pick") {
-			// Sprint T2/7 : si having accumulé, l'injecter dans l'op aggregate.
+			// si having accumulé, l'injecter dans l'op aggregate.
 			// having exige un group by (validé plus haut) → plan racine est
 			// forcément un aggregate avec groupKeys ici.
 			if (havingExpr !== undefined) {
@@ -306,13 +306,13 @@ function lowerInternal(query: Query, schema?: SchemaModel): LogicalPlan {
 				embedAliases.add(stage.alias ?? stage.collection);
 			}
 			knownAliases.add(stage.alias ?? stage.collection);
-			// Sprint T2/12 : refresh currentScope pour que les subqueries dans
+			// refresh currentScope pour que les subqueries dans
 			// les prochains stages (where/having/pick.expr) puissent voir cet
 			// alias join comme partie du scope outer.
 			refreshCurrentScope();
 		}
 	}
-	// Sprint T2/7 : group by requires pick.
+	// group by requires pick.
 	if (hasGroupStage && !query.stages.some((s) => s.type === "pick")) {
 		throw new SnqlError(
 			"'group by' exige un 'pick' — écris 'group by <champ> pick <champ>, <aggregate> as <alias>'",
@@ -450,7 +450,7 @@ function checkAliasDefined(
 		// document de la source (accès JSON `col.subfield`) — les deux sont
 		// des utilisations légitimes de la syntaxe pointée.
 		if (knownAliases.has(head) || sourceColumns.has(head)) continue;
-		// Sprint T2/12 : correlated subquery — l'alias peut appartenir à un
+		// correlated subquery — l'alias peut appartenir à un
 		// scope outer (query englobante). Chercher du plus récent au plus
 		// ancien (LIFO), les scopes plus proches ont priorité.
 		if (
@@ -542,7 +542,7 @@ function collectExprFieldsWithSpans(
 			collectExprFieldsWithSpans(expr.elseValue, out);
 			return;
 		case "windowCall":
-			// Sprint T2/9 : collecte les field refs des args (ex: sum(x) over)
+			// collecte les field refs des args (ex: sum(x) over)
 			// + partitionKeys + sortKeys — comptent tous pour l'alias-check.
 			for (const arg of expr.args) collectExprFieldsWithSpans(arg, out);
 			for (const p of expr.partitionKeys)
@@ -551,7 +551,7 @@ function collectExprFieldsWithSpans(
 			return;
 		case "subquery":
 		case "exists":
-			// Sprint T2/11 : uncorrelated — la sub-query est self-contained, ne
+			// uncorrelated — la sub-query est self-contained, ne
 			// contribue à aucun field ref de l'outer.
 			return;
 	}
@@ -568,7 +568,7 @@ function collectExprFieldsWithSpans(
  * garde côté lecture.
  */
 /**
- * Sprint T2/15 : abaisse un `transaction [isolation …] { … }` en
+ * abaisse un `transaction [isolation …] { … }` en
  * TransactionPlan. Chaque item du body est lowered via `lower()` (read)
  * ou `lowerMutation()` (write). Les savepoints récursent. Le typecheck
  * mutation appliqué par lowerMutation reste valide (chaque write item
@@ -603,14 +603,14 @@ function lowerTransactionItem(
 }
 
 /**
- * Sprint T3/1 : abaisse un statement d'introspection.
- * Sprint T3/2.3 : les stages `where`/`pick`/`sort`/`limit` sont lowered via
+ * abaisse un statement d'introspection.
+ * les stages `where`/`pick`/`sort`/`limit` sont lowered via
  * une fausse Query (source virtuelle `__introspect__`), puis extraits en
  * ops post-scan et convertis en CompensationOp. PG les inline dans un SELECT
  * wrapper, Mongo les applique via compensate() côté engine.
  */
 /**
- * Sprint T3/4 : `raw "SQL"` / `raw {...}` — pass-through direct. Aucun
+ * `raw "SQL"` / `raw {...}` — pass-through direct. Aucun
  * typecheck ni capability check ; c'est un escape hatch, l'utilisateur
  * assume la sémantique.
  */
@@ -621,11 +621,11 @@ export function lowerRaw(
 }
 
 /**
- * ADR-024 D2 (PM/2) — walker complet self-ref d'un binding CTE. Détecte le nom
+ * walker complet self-ref d'un binding CTE. Détecte le nom
  * `name` en tant que collection scannée n'importe où dans la Query : source,
  * with-join, where/having predicate, pick expr, subquery inline dans where/pick.
  * Sans ça, `let a = find b where c in (find a pick d)` passe silencieusement en
- * Mongo matérialisé et Postgres émet du SQL invalide. Cohérent [[ADR-021]] graft.
+ * Mongo matérialisé et Postgres émet du SQL invalide. Cohérent graft.
  */
 function bindingReferencesSelf(query: Query, name: string): boolean {
 	return queryReferencesName(query, name);
@@ -704,7 +704,7 @@ function exprReferencesName(
 }
 
 /**
- * Sprint T3/6 : `let x1 = ...; ... ; body` → LetPlan. Bindings lowered dans
+ * `let x1 = ...; ... ; body` → LetPlan. Bindings lowered dans
  * l'ordre (chacun peut ref les précédents). Le body est lowered avec le set
  * de cte names — les mutations qui ciblent un cte name en écriture sont
  * refusées (`add into <cte>`, `update <cte>`, `remove from <cte>`).
@@ -723,9 +723,9 @@ export function lowerLet(
 					b.span
 				);
 			}
-			// ADR-020 (T3/7) : refus shadowing CTE vs table du SchemaModel.
+			// refus shadowing CTE vs table du SchemaModel.
 			// Gated sur schema — sans schema (mode lib / tests unitaires isolés) skip.
-			// ADR-024 PM/3 D2 (partial) : le check est engine-agnostique (fires sur
+			// (partial) : le check est engine-agnostique (fires sur
 			// tout SchemaModel avec la collection en question). Pour Mongo sans
 			// schema disponible au lower (introspection non cachée), le shadow-check
 			// silently skip — divergence potentielle PG throw / Mongo empty rowset.
@@ -737,9 +737,9 @@ export function lowerLet(
 					b.span
 				);
 			}
-			// ADR-021 graft (T3/7) : `let a = find a` émet du SQL invalide en T3/6 —
+			// graft : `let a = find a` émet du SQL invalide en
 			// détecter au lower avec hint vers `let rec`. Couvre source + with-join ;
-			// walker complet (subqueries) arrive avec T3/8 (G12).
+			// walker complet (subqueries) arrive avec (G12).
 			if (bindingReferencesSelf(b.query, b.name)) {
 				throw new SnqlError(
 					`CTE '${b.name}' se référence lui-même — utilise 'let rec ${b.name} = base union all step;' pour un CTE récursif.`,
@@ -816,12 +816,12 @@ export function lowerMutation(
 	if (statement.operation === "insert") {
 		return lowerInsert(statement, schema);
 	}
-	// Sprint T2/11.5 : typecheck predicate + set values si schema dispo.
+	// typecheck predicate + set values si schema dispo.
 	typecheckMutation(statement, schema);
 	const sourceColumns = resolveSourceColumns(schema, statement.collection);
 	if (statement.operation === "update") {
 		assertUniqueAssignments(statement.assignments);
-		// Sprint T2/14 : joins mutation — refus `with many`, résolution alias +
+		// joins mutation — refus `with many`, résolution alias +
 		// keys, validation contre schema.
 		const loweredJoins = lowerUpdateJoins(statement, schema);
 		const allowedAliases = collectMutationAliases(statement, loweredJoins);
@@ -858,9 +858,9 @@ export function lowerMutation(
 			column: assignment.column,
 			value: lowerExpr(assignment.value)
 		}));
-		// Sprint T2/6 : aggregate dans set — refus AVANT assertNoCallInWrite
+		// aggregate dans set — refus AVANT assertNoCallInWrite
 		// (ordre CRITIQUE : message précis, pas générique lower_call_null_write).
-		// Sprint T2/9 : window aussi refusé en set (per-row-context inutile
+		// window aussi refusé en set (per-row-context inutile
 		// pour un update).
 		for (const [i, a] of assignments.entries()) {
 			refuseWindowCallInPosition(
@@ -890,7 +890,7 @@ export function lowerMutation(
 			refuseAggregateInPosition(
 				predicate,
 				"lower_agg_in_where",
-				"Aggregate dans 'where' d'update interdit — un aggregate produit une valeur globale, pas un prédicat par row ; utilise une sous-requête (T2/11) ou matérialise le count côté application"
+				"Aggregate dans 'where' d'update interdit — un aggregate produit une valeur globale, pas un prédicat par row; utilise une sous-requête ou matérialise le count côté application"
 			);
 			assertNoCallInWrite(predicate);
 		}
@@ -941,11 +941,11 @@ export function lowerMutation(
 			? lowerExpr(statement.predicate)
 			: undefined;
 	if (predicate !== undefined) {
-		// Sprint T2/6 : aggregate dans predicate de delete — refus AVANT write.
+		// aggregate dans predicate de delete — refus AVANT write.
 		refuseAggregateInPosition(
 			predicate,
 			"lower_agg_in_delete_predicate",
-			"Aggregate dans 'where' de delete interdit — un aggregate produit une valeur globale, pas un prédicat par row ; utilise une sous-requête (T2/11) ou matérialise le count côté application"
+			"Aggregate dans 'where' de delete interdit — un aggregate produit une valeur globale, pas un prédicat par row; utilise une sous-requête ou matérialise le count côté application"
 		);
 		assertNoCallInWrite(predicate);
 	}
@@ -982,7 +982,7 @@ function resolveSourceColumns(
  * une colonne document est un alias fantôme. Descend récursivement dans
  * les sous-expressions (arith, call, compare, and/or/not/in).
  *
- * Sprint T2/14 : `allowedAliases` autorise en plus (a) l'alias source d'un
+ * `allowedAliases` autorise en plus (a) l'alias source d'un
  * `update t as a` et (b) chaque alias de `with one X` joint. Un head qui
  * n'est ni une col source, ni le nom de la table, ni un alias autorisé =
  * fantôme.
@@ -1071,7 +1071,7 @@ function levenshtein(a: string, b: string): number {
 }
 
 /**
- * Sprint T2/14 : abaisse la liste des `with one X on l=f` d'un update. Refuse
+ * abaisse la liste des `with one X on l=f` d'un update. Refuse
  * `with many` (`lower_write_join_many` — évite un UPDATE cartésien silencieux),
  * valide que chaque local field est une col de la source, retourne la liste
  * PlanUpdateJoin prête pour le codegen. Les cross-refs entre joins (join B
@@ -1123,7 +1123,7 @@ function lowerUpdateJoins(
 	return out;
 }
 
-/** Sprint T2/14 : ensemble des alias autorisés dans set/where d'un update. */
+/** ensemble des alias autorisés dans set/where d'un update. */
 function collectMutationAliases(
 	statement: UpdateStatement,
 	joins: readonly import("./plan").PlanUpdateJoin[]
@@ -1136,7 +1136,7 @@ function collectMutationAliases(
 }
 
 /**
- * Sprint T2/6 : walker AST — true ssi l'expression contient au moins un call
+ * walker AST — true ssi l'expression contient au moins un call
  * dont le kind du registre est `aggregate`. Utilisé pour détecter en amont
  * qu'un pick doit basculer en op='aggregate' (avant lowerField).
  */
@@ -1178,19 +1178,19 @@ function containsAggregateAst(expr: Expr): boolean {
 				) || containsAggregateAst(expr.elseValue)
 			);
 		case "windowCall":
-			// Sprint T2/9 : windowCall n'est PAS un aggregate — pick avec
+			// windowCall n'est PAS un aggregate — pick avec
 			// windowCall reste op='project' (pas 'aggregate').
 			return false;
 		case "subquery":
 		case "exists":
-			// Sprint T2/11 : uncorrelated — aggregates dans la subquery ne
+			// uncorrelated — aggregates dans la subquery ne
 			// contribuent pas au pick outer.
 			return false;
 	}
 }
 
 /**
- * Sprint T2/6 : span du premier aggregate AST rencontré (helper d'erreur).
+ * span du premier aggregate AST rencontré (helper d'erreur).
  */
 function firstAggregateSpanAst(
 	expr: Expr
@@ -1249,22 +1249,22 @@ function firstAggregateSpanAst(
 			return firstAggregateSpanAst(expr.elseValue);
 		}
 		case "windowCall":
-			// Sprint T2/9 : windowCall n'est PAS un aggregate.
+			// windowCall n'est PAS un aggregate.
 			return undefined;
 		case "subquery":
 		case "exists":
-			// Sprint T2/11 : uncorrelated — pas de span aggregate pour outer.
+			// uncorrelated — pas de span aggregate pour outer.
 			return undefined;
 	}
 }
 
 /**
- * Sprint T2/6 : valide un field expr d'un pick op='aggregate'. Applique
+ * valide un field expr d'un pick op='aggregate'. Applique
  * les 8 refus positions internes + bare-field-hors-agg. Descente contextuelle :
  *  - Dans les args d'un aggregate direct : agg nested REFUS, fields bare OK.
  *  - Dans un scalar wrapper (coalesce/greatest/least/cast/arith/compare) :
  *    agg comme arg direct OK, fields bare REFUS (sauf s'ils matchent un
- *    groupKey — accepté sprint T2/7).
+ * groupKey — accepté).
  *  - Dans if/case cond OU branch : agg REFUS (patterns SQL canoniques
  *    sum(if(cond,x,0))). Fields bare toujours REFUS hors agg direct.
  *  - Object/array literal : agg REFUS (scalar wrappers only).
@@ -1297,7 +1297,7 @@ function validateInAggWrapperAst(
 			// Aggregate détecté. Refus si déjà dans un agg (nested).
 			if (insideAgg) {
 				throw new SnqlError(
-					`Aggregate imbriqué '${expr.name}(...)' — window functions arrivent sprint T2/9`,
+					`Aggregate imbriqué '${expr.name}(...)' — window functions arrivent `,
 					"lower_agg_nested",
 					expr.span
 				);
@@ -1455,7 +1455,7 @@ function validateInAggWrapperAst(
 }
 
 /**
- * Sprint T2/6 : retourne le span du premier `call` d'un aggregate rencontré,
+ * retourne le span du premier `call` d'un aggregate rencontré,
  * ou undefined si le PlanExpr n'en contient aucun. Utilisé par les guards
  * `lower_agg_in_*` pour émettre un message actionnable pointant sur l'agg
  * fautif (pas sur le stage entier).
@@ -1616,7 +1616,7 @@ function assertNoCallInWrite(expr: PlanExpr): void {
 			);
 		case "subquery":
 		case "exists":
-			// Sprint T2/11 : sub-queries refusées en write v1 — sémantique
+			// sub-queries refusées en write v1 — sémantique
 			// complexe (correlated updates). Read-only pour l'instant.
 			throw new SnqlError(
 				"Sub-query dans un contexte d'écriture (update/remove) non supportée v1 — matérialise le résultat côté application",
@@ -1641,7 +1641,7 @@ function lowerInsert(
 	statement: InsertStatement,
 	schema?: SchemaModel
 ): MutationPlan {
-	// Sprint T2/14 : INSERT SELECT — `add (find … pick a, b) into t`.
+	// INSERT SELECT — `add (find … pick a, b) into t`.
 	// Le mapping cols cibles est inféré du `pick` (`x as tgt_col` → tgt_col,
 	// sinon dernier segment du path). Refus si pas de pick, si onConflict
 	// combiné (v1), si engine != PG (au planner).
@@ -1700,7 +1700,7 @@ function lowerInsert(
 		return values;
 	});
 
-	// Sprint T2/13 : on-conflict clause.
+	// on-conflict clause.
 	const sourceColumns = resolveSourceColumns(schema, statement.collection);
 	// v3.1 : check les keys du doc contre le schema — un typo `bad_col` remontait
 	// silencieux jusqu'à PG (`column "bad_col" does not exist`) et pas du tout côté
@@ -1740,7 +1740,7 @@ function lowerInsert(
 }
 
 /**
- * Sprint T2/13 : abaisse un `on conflict (keys) [ignore | edit set …]`.
+ * abaisse un `on conflict (keys) [ignore | edit set …]`.
  *  - Valide que chaque `key` est un ident insérable (dans `columnSet`) et,
  *    si schema présent, une colonne réelle de la source. Sans key réelle sur
  *    la table (contrainte UNIQUE / PK), PG lèvera un `42P10 there is no
@@ -1849,7 +1849,7 @@ function lowerOnConflict(
 }
 
 /**
- * Sprint T2/13 : abaisse une expression du scope on-conflict edit-set/where.
+ * abaisse une expression du scope on-conflict edit-set/where.
  * D'abord lower normal, puis rewrite `field {path:["new", col]}` en
  * `upsertNew {column: col}`. Valide le shape (2 segments exactement, col dans
  * insertColumns). Les path bare (`updated_at`) et `<table>.col` réfèrent la
@@ -1969,7 +1969,7 @@ function rewriteUpsertNew(
  * n'est pas un select.
  */
 /**
- * Sprint T2/14 : abaisse `add (find … pick a, b as tgt) into t` — le pick
+ * abaisse `add (find … pick a, b as tgt) into t` — le pick
  * est OBLIGATOIRE (mapping cols cibles inféré : `pick x as tgt_col` →
  * tgt_col ; sinon dernier segment du path).
  *  - Refus si pas de pick → lower_insert_select_no_pick
@@ -2111,7 +2111,7 @@ function checkColumnsAvailable(
 	if (available === null) {
 		return;
 	}
-	// Sprint T2/7 : sort après pick peut référencer une colonne source droppée
+	// sort après pick peut référencer une colonne source droppée
 	// par le pick — aligné avec SQL (ORDER BY accepte les colonnes de FROM même
 	// non-sélectionnées). En Mongo, cette pattern reste indéfinie côté runtime
 	// (divergence documentée) ; PG l'accepte nativement.
@@ -2224,7 +2224,7 @@ function collectExprFields(expr: Expr, out: (readonly string[])[]): void {
 			return;
 		case "subquery":
 		case "exists":
-			// Sprint T2/11 : uncorrelated — pas de field ref outer.
+			// uncorrelated — pas de field ref outer.
 			return;
 	}
 }
@@ -2264,7 +2264,7 @@ function lowerStage(
 			const hasAggregate = stage.fields.some(
 				(f) => f.expr !== undefined && containsAggregateAst(f.expr)
 			);
-			// Sprint T2/9 : window fns et aggregates dans le même pick sont
+			// window fns et aggregates dans le même pick sont
 			// exclusifs (2 stages logiques différents — un ORDER BY dans window
 			// puis un fold aggregate n'a pas de sémantique naturelle).
 			const hasWindowCall = stage.fields.some(
@@ -2272,7 +2272,7 @@ function lowerStage(
 			);
 			if (hasAggregate && hasWindowCall) {
 				throw new SnqlError(
-					"Mix window function + aggregate dans le même pick non supporté — sépare en deux queries ou utilise une sub-query (T2/11)",
+					"Mix window function + aggregate dans le même pick non supporté — sépare en deux queries ou utilise une sub-query",
 					"lower_window_agg_mix",
 					stage.span
 				);
@@ -2284,7 +2284,7 @@ function lowerStage(
 					stage.span
 				);
 			}
-			// Sprint T2/10 : DISTINCT / DISTINCT ON validations.
+			// DISTINCT / DISTINCT ON validations.
 			if (
 				(stage.unique === true || stage.distinctOnKeys !== undefined) &&
 				groupKeys !== undefined
@@ -2344,7 +2344,7 @@ function lowerStage(
 					? { op: "aggregate", input, fields, groupKeys }
 					: { op: "aggregate", input, fields };
 			}
-			// Sprint T2/10 : distinctOnKeys — strip source alias sur les paths
+			// distinctOnKeys — strip source alias sur les paths
 			// (alignés fields projetés + sort keys). Puis check chaque key
 			// APPARAIT dans les fields projetés (parité PG DISTINCT ON — sinon
 			// la key n'a pas de valeur à comparer post-projection).
@@ -2413,7 +2413,7 @@ function lowerStage(
 		}
 		case "group":
 		case "having":
-			// Sprint T2/7 : ces stages sont consommés dans la boucle lower() —
+			// ces stages sont consommés dans la boucle lower()
 			// n'arrivent jamais ici (defense-in-depth pour l'exhaustivité TS).
 			throw new SnqlError(
 				`Stage '${stage.type}' consommé en amont — bug lower/parser sync`,
@@ -2598,7 +2598,7 @@ function lowerExpr(expr: Expr): PlanExpr {
 		case "not":
 			return { kind: "not", operand: lowerExpr(expr.operand), span: expr.span };
 		case "in": {
-			// Sprint T2/11 : `x in (subquery)` — validate subquery a exactement
+			// `x in (subquery)` — validate subquery a exactement
 			// 1 output field (parité PG `x IN (SELECT y FROM t)`).
 			const isSubqueryVariant =
 				expr.values.length === 1 && expr.values[0]?.type === "subquery";
@@ -2640,7 +2640,7 @@ function lowerExpr(expr: Expr): PlanExpr {
 		case "windowCall":
 			return lowerWindowCall(expr);
 		case "subquery": {
-			// Sprint T2/12 : lower récursif. Le `lower()` détecte le contexte
+			// lower récursif. Le `lower()` détecte le contexte
 			// non-null (currentScope !== null) et pousse automatiquement le
 			// scope outer sur outerScopeStack, permettant à la subquery de
 			// résoudre les alias corrélés via checkAliasDefined.
@@ -2673,7 +2673,7 @@ function lowerExpr(expr: Expr): PlanExpr {
 				);
 			}
 			const operand = lowerExpr(expr.operand);
-			// PA/7 (ADR-024-A) — cast(<string literal> as json) : parse au lower
+			// cast(<string literal> as json) : parse au lower
 			// et remplacement statique par object/array/scalar literal. Cross-
 			// engine (aucun engine-specific code). Fires SnqlError si JSON.parse
 			// échoue — signale l'erreur au parse-time, pas au runtime silent.
@@ -2741,7 +2741,7 @@ function lowerExpr(expr: Expr): PlanExpr {
 }
 
 /**
- * Sprint T2/5 : bool-shape check pour `case` / `if` cond. On refuse les
+ * bool-shape check pour `case` / `if` cond. On refuse les
  * littéraux non-bool prouvés (number / string / null / object / array). Un
  * `cond` field/call/arith/etc. passe — trop coûteux à typer statiquement, PG
  * throwera 22P02 si non-bool réel.
@@ -2760,7 +2760,7 @@ function assertCondIsBoolShaped(cond: Expr, ctx: "case" | "if"): void {
 }
 
 /**
- * Sprint T2/5 : garde d'homogénéité des branches. Si TOUTES les valeurs
+ * garde d'homogénéité des branches. Si TOUTES les valeurs
  * fournies sont des littéraux et que leurs kinds diffèrent, on refuse au lower
  * plutôt que de laisser PG throw un `CASE types cannot be matched` opaque
  * (Mongo tolère plus, mais la promesse SNQL cross-engine impose PG comme
@@ -2803,24 +2803,24 @@ function literalKindOrNull(expr: Expr): string | null {
 }
 
 /**
- * Hints par nom de fonction reserved — pointe le sprint prévu et l'alternative.
+ * Hints par nom de fonction reserved — pointe l'alternative.
  * Utilisé par `lower_call_reserved` pour un message actionnable.
  */
 const RESERVED_FUNCTION_HINTS: Readonly<Record<string, string>> = {
-	regex_replace: "sprint 4 (registre string étendu)",
+	regex_replace: "(registre string étendu)",
 	json_contains:
-		"sprint 5+ (attend object-literal SNQL natif — utilise json_get + composition d'ici là)",
-	json_set: "sprint 5+ (coordination avec `set doc.a.b = value` natif SNQL)",
-	json_delete: "sprint 5+ (idem json_set)",
-	json_merge: "sprint 5+ (design deep-merge vs shallow)",
+		"(attend object-literal SNQL natif — utilise json_get + composition d'ici là)",
+	json_set: "(coordination avec `set doc.a.b = value` natif SNQL)",
+	json_delete: "(idem json_set)",
+	json_merge: "(design deep-merge vs shallow)",
 	json_path:
-		"sprint 5+ (JSONPath complet — utilise json_get variadic pour l'accès simple)",
+		"(JSONPath complet — utilise json_get variadic pour l'accès simple)",
 	json_array_length:
-		"sprint 5+ (cluster introspection étendue — utilise length ou compose)",
+		"(cluster introspection étendue — utilise length ou compose)",
 	json_length:
-		"sprint 5+ (cardinalité unifiée array/object — utilise length pour arrays)",
+		"(cardinalité unifiée array/object — utilise length pour arrays)",
 	json_object_keys:
-		"sprint 5+ (set-returning, nécessite décision array-typed returns)"
+		"(set-returning, nécessite décision array-typed returns)"
 };
 
 /**
@@ -2828,7 +2828,7 @@ const RESERVED_FUNCTION_HINTS: Readonly<Record<string, string>> = {
  * `lower_unknown_function`. Chaque `?` d'un dev perdu = un alias à ajouter.
  */
 const FUNCTION_ALIASES: Readonly<Record<string, string>> = {
-	regexp_replace: "regex_replace (réservé sprint 4)",
+	regexp_replace: "regex_replace (réservé)",
 	position: "strpos",
 	instr: "strpos",
 	substr: "substring",
@@ -2887,7 +2887,7 @@ function bestSuggestion(
  * Résout un appel de fonction contre le registre : fonction connue, arité
  * conforme, kind non-`reserved`. Types opt-in : si `entry.args` est déclaré et
  * que l'arg correspondant est statiquement typable (littéral), on vérifie.
- * `argEnum` (sprint 3) : whitelist pour un arg littéral string (unit de date_*)
+ * `argEnum` : whitelist pour un arg littéral string (unit de date_*)
  * avec suggestion Levenshtein sur valeur hors whitelist.
  */
 function lowerCall(expr: Expr & { type: "call" }): PlanExpr {
@@ -2905,10 +2905,10 @@ function lowerCall(expr: Expr & { type: "call" }): PlanExpr {
 		const message =
 			hint !== undefined
 				? `Fonction '${expr.name}' réservée — ${hint}`
-				: `Fonction '${expr.name}' réservée pour un sprint futur — pas encore implémentée`;
+				: `Fonction '${expr.name}' réservée — pas encore implémentée`;
 		throw new SnqlError(message, "lower_call_reserved", expr.span);
 	}
-	// Sprint T2/6 : guards call-level pour star / unique / aggregates.
+	// guards call-level pour star / unique / aggregates.
 	// Defense-in-depth : le parser fast-path garantit déjà les invariants
 	// structurels ; ces checks capturent un PlanExpr construit programmatiquement
 	// (tests, futur workflow) qui bypasserait le parser.
@@ -2945,7 +2945,7 @@ function lowerCall(expr: Expr & { type: "call" }): PlanExpr {
 			);
 		}
 	}
-	// Sprint T2/8 : sortKeys — parser filtre déjà (contextual via registry),
+	// sortKeys — parser filtre déjà (contextual via registry),
 	// defense-in-depth : refuse si présent sur non-aggregateMulti (bug parser).
 	if (expr.sortKeys !== undefined && expr.sortKeys.length > 0) {
 		if (entry.kind !== "aggregateMulti") {
@@ -3053,15 +3053,15 @@ function lowerCall(expr: Expr & { type: "call" }): PlanExpr {
 	if (entry.name === "json_has_key") {
 		validateJsonHasKey(expr);
 	}
-	// Sprint T2/5 : guards spécifiques `if(cond, then, else)` — miroir des
+	// guards spécifiques `if(cond, then, else)` — miroir des
 	// gardes `case`. cond bool-shaped + branches homogènes (then/else).
 	if (entry.name === "if" && expr.args.length === 3) {
 		assertCondIsBoolShaped(expr.args[0]!, "if");
 		assertBranchLiteralsHomogeneous([expr.args[1]!, expr.args[2]!], "if");
 	}
-	// Sprint T2/6 : forward star/unique flags sur PlanCall — le codegen les
+	// forward star/unique flags sur PlanCall — le codegen les
 	// consomme via ctx.star / ctx.unique.
-	// Sprint T2/8 : forward sortKeys (aggregateMulti) — le codegen les
+	// forward sortKeys (aggregateMulti) — le codegen les
 	// consomme via ctx.sortKeys + accès direct au PlanCall.sortKeys.
 	const loweredSortKeys =
 		expr.sortKeys !== undefined && expr.sortKeys.length > 0
@@ -3079,7 +3079,7 @@ function lowerCall(expr: Expr & { type: "call" }): PlanExpr {
 }
 
 /**
- * Sprint T2/9 : lower d'un windowCall. Vérifie l'existence dans le registre
+ * lower d'un windowCall. Vérifie l'existence dans le registre
  * + kind=window + arité + refus contextes non-pick (validé en amont par le
  * walker). Retourne un PlanExpr.windowCall.
  */
@@ -3118,7 +3118,7 @@ function lowerWindowCall(expr: Expr & { type: "windowCall" }): PlanExpr {
 }
 
 /**
- * Sprint T2/9 : walker AST — refuse windowCall dans une position autre que
+ * walker AST — refuse windowCall dans une position autre que
  * pick.expr. Utilisé par where/having/group by/sort/set predicates.
  */
 function refuseWindowCallInPosition(
@@ -3129,14 +3129,14 @@ function refuseWindowCallInPosition(
 	const span = firstWindowCallSpanAst(expr);
 	if (span === undefined) return;
 	throw new SnqlError(
-		`Window function dans '${positionLabel}' non autorisée — les window fns produisent une valeur per-row ordonnée qui n'a de sens qu'en projection ; utilise un pick + sub-query pour filtrer (T2/11)`,
+		`Window function dans '${positionLabel}' non autorisée — les window fns produisent une valeur per-row ordonnée qui n'a de sens qu'en projection; utilise un pick + sub-query pour filtrer`,
 		code,
 		span
 	);
 }
 
 /**
- * Sprint T2/9 : walker AST — true ssi l'expression contient un windowCall
+ * walker AST — true ssi l'expression contient un windowCall
  * (au top ou nested dans un scalar wrapper). Utilisé pour détecter le mix
  * window+agg dans un pick.
  */
@@ -3200,7 +3200,7 @@ function firstWindowCallSpanAst(
 		}
 		case "subquery":
 		case "exists":
-			// Sprint T2/11 : uncorrelated — pas de window ref outer.
+			// uncorrelated — pas de window ref outer.
 			return undefined;
 	}
 }
@@ -3310,7 +3310,7 @@ function validateJsonHasKey(expr: Expr & { type: "call" }): void {
  * cross-engine : PG accepterait bool nu mais Mongo throw à la traduction —
  * l'asymétrie surprend le dev. Rejet au lower avec message actionnable.
  *
- * Bool-returning aujourd'hui = `json_has_key` (sprint 4). Extensible via un
+ * Bool-returning aujourd'hui = `json_has_key`. Extensible via un
  * champ registry futur ; hardcoded ici pour éviter la modif du shape.
  */
 const BOOL_RETURNING_CALLS: ReadonlySet<string> = new Set(["json_has_key"]);
@@ -3382,7 +3382,7 @@ function isNullLiteral(expr: PlanExpr): boolean {
 }
 
 /**
- * PA/7 (ADR-024-A) — parse un JSON string literal en PlanExpr statique. Utilisé
+ * parse un JSON string literal en PlanExpr statique. Utilisé
  * pour rewriter `cast('{"k":1}' as json)` en `{k: 1}` object literal au lower,
  * cross-engine. Convertit récursivement chaque valeur JSON en son PlanExpr
  * équivalent (object/array/literal). Fires SnqlError si JSON.parse échoue.
@@ -3472,7 +3472,7 @@ function numberRawToValue(raw: string): SqlValue {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Sprint T2/11.5 : typecheck cross-type au lower (schema-aware)
+// typecheck cross-type au lower (schema-aware)
 //
 // Positions typecheckées : compare (=, !=, <, <=, >, >=), in [values]/subquery,
 // arith (+/-/*//%), like. Permissif si schema absent ou type inconnu (aucun
@@ -3505,7 +3505,7 @@ function snqlTypeGroup(t: SnqlType): TypeGroup {
 	if (t === "int" || t === "bigint" || t === "float" || t === "decimal") {
 		return "numeric";
 	}
-	// Sprint T2/13.5 : `enum` groupé avec `string` — l'enum PG accepte les
+	// `enum` groupé avec `string` — l'enum PG accepte les
 	// littéraux string compatibles (`role = "field_expert"`). Un typecheck plus
 	// strict (whitelist des labels) sera fait par un walker dédié plus tard.
 	if (t === "string" || t === "uuid" || t === "enum") return "string";
@@ -3570,7 +3570,7 @@ function castTargetToSnqlType(target: CastTarget): SnqlType {
 /**
  * Résout le type d'une expression AST — best-effort. Retourne `unknown` en
  * fallback (permissif). Ne gère PAS les calls (return type non exposé dans
- * le registre v1 — sprint futur si utile).
+ * le registre v1).
  */
 function resolveExprType(
 	expr: Expr,
@@ -3635,7 +3635,7 @@ function resolveFieldTypeInAst(
 	source: { readonly collection: string; readonly alias?: string },
 	schema: SchemaModel
 ): SnqlType {
-	// Sprint T2/12 : path `outerAlias.field` — chercher dans les scopes outer.
+	// path `outerAlias.field` — chercher dans les scopes outer.
 	// Ex : `find users as u where exists (find orders as o where o.total > u.age)`
 	// → `u.age` doit résoudre vers `users.age` via outer scope.
 	if (path.length === 2) {
@@ -3726,7 +3726,7 @@ function typecheckExprTypes(
 			return;
 		case "in": {
 			typecheckExprTypes(expr.target, source, schema);
-			// Sprint T2/11 : in (subquery) — target vs 1re field du pick sub.
+			// in (subquery) — target vs 1re field du pick sub.
 			if (expr.values.length === 1 && expr.values[0]?.type === "subquery") {
 				const subExpr = expr.values[0]!;
 				// Descend dans la subquery pour typecheck son propre contenu
@@ -3803,7 +3803,7 @@ function typecheckExprTypes(
 			for (const arg of expr.args) typecheckExprTypes(arg, source, schema);
 			return;
 		case "subquery": {
-			// Sprint T2/12 : push l'outer scope pendant le typecheck récursif
+			// push l'outer scope pendant le typecheck récursif
 			// pour que resolveFieldTypeInAst puisse résoudre les refs
 			// corrélées (`outerAlias.field`).
 			const outerScope: OuterScope = {
@@ -3850,7 +3850,7 @@ function typecheckQuery(query: Query, schema: SchemaModel | undefined): void {
 
 /**
  * Walker mutation — typecheck du predicate + valeurs de set.
- * Sprint T2/14 : propage l'alias source d'un `update t as a` pour que
+ * propage l'alias source d'un `update t as a` pour que
  * `resolveFieldTypeInAst` puisse résoudre `a.col` proprement. Les cross-alias
  * joins retournent `unknown` (safe fallback — pas de fausse erreur).
  */

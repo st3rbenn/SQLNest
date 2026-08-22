@@ -152,8 +152,8 @@ class PostgresConnection implements Connection {
 	readonly engine = "postgres";
 	#pool: PgPool | undefined;
 	readonly #schema: string;
-	/** Sprint T3/1 : expose le search_path PG comme namespace runtime pour
-	 *  que le codegen d'introspection puisse binder le WHERE table_schema. */
+	/** Expose le search_path PG comme namespace runtime pour que le codegen
+	 *  d'introspection puisse binder le WHERE table_schema. */
 	get namespace(): string {
 		return this.#schema;
 	}
@@ -202,10 +202,10 @@ class PostgresConnection implements Connection {
 	}
 
 	/**
-	 * Sprint T4/1 : fingerprint via `system_identifier` de pg_control_system.
-	 * Bigint unique par cluster PG, posé au `initdb`, stable pour la vie de
-	 * l'instance (même après restart/restore/upgrade in-place). Inclut aussi
-	 * le nom de la database pour distinguer 2 bases sur le même cluster.
+	 * Fingerprint via `system_identifier` de pg_control_system. Bigint unique
+	 * par cluster PG, posé au `initdb`, stable pour la vie de l'instance
+	 * (même après restart/restore/upgrade in-place). Inclut aussi le nom de
+	 * la database pour distinguer 2 bases sur le même cluster.
 	 * Format : `pg:<system_identifier>/<database_name>`.
 	 */
 	async fingerprint(): Promise<string> {
@@ -260,8 +260,8 @@ class PostgresConnection implements Connection {
 
 	async execute(query: NativeQuery): Promise<ResultSet> {
 		if (query.kind === "transaction") {
-			// Sprint T2/15 : bloc atomique — BEGIN [ISOLATION LEVEL X], loop
-			// steps (SAVEPOINT/RELEASE inclus), COMMIT (ROLLBACK sur error).
+			// Bloc atomique — BEGIN [ISOLATION LEVEL X], loop steps
+			// (SAVEPOINT/RELEASE inclus), COMMIT (ROLLBACK sur error).
 			return this.#executeTransaction(query);
 		}
 		if (query.kind !== "sql") {
@@ -308,11 +308,11 @@ class PostgresConnection implements Connection {
 	}
 
 	/**
-	 * Sprint T2/15 : exécute un SqlTransaction en isolation client-scope. Un
-	 * seul PoolClient acquis pour toute la transaction (nécessaire pour que
-	 * BEGIN/COMMIT partagent l'état). ROLLBACK best-effort sur toute erreur.
-	 * Renvoie le résultat du dernier statement du body pour cohérence UI (le
-	 * user voit ce qu'il a écrit en dernier). Si aucun statement (txn vide de
+	 * Exécute un SqlTransaction en isolation client-scope. Un seul PoolClient
+	 * acquis pour toute la transaction (nécessaire pour que BEGIN/COMMIT
+	 * partagent l'état). ROLLBACK best-effort sur toute erreur. Renvoie le
+	 * résultat du dernier statement du body pour cohérence UI (le user voit
+	 * ce qu'il a écrit en dernier). Si aucun statement (txn vide de
 	 * savepoints), renvoie un ResultSet vide.
 	 */
 	async #executeTransaction(
@@ -398,10 +398,10 @@ class PostgresConnection implements Connection {
 }
 
 /**
- * Sprint T2/15 : mapping IsolationLevel SNQL → mot-clé PG. Le nom exact est
- * imposé par PG (`READ COMMITTED`, `REPEATABLE READ`, `SERIALIZABLE`).
- * Whitelist stricte — jamais d'interpolation user (isolation vient de
- * l'IR = enum fermé côté parser).
+ * Mapping IsolationLevel SNQL → mot-clé PG. Le nom exact est imposé par PG
+ * (`READ COMMITTED`, `REPEATABLE READ`, `SERIALIZABLE`). Whitelist stricte —
+ * jamais d'interpolation user (isolation vient de l'IR = enum fermé côté
+ * parser).
  */
 function isolationSql(level: import("@sqlnest/snql").IsolationLevel): string {
 	switch (level) {

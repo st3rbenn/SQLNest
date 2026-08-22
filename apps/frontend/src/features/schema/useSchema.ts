@@ -47,8 +47,8 @@ export async function fetchSchema(
 /**
  * Introspecte le schéma via le proxy tunnel `/api/db-connections/:id/schema`
  * (ou `/api/teams/:slug/db-connections/:id/schema` si un teamSlug est
- * fourni, C.21.5). `connectionId = null` désactive le hook (utile quand
- * aucune connection n'est encore sélectionnée par l'UI).
+ * fourni). `connectionId = null` désactive le hook (utile quand aucune
+ * connection n'est encore sélectionnée par l'UI).
  */
 export function useSchema(
 	connectionId: string | null,

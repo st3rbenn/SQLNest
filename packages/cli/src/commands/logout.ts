@@ -9,8 +9,8 @@
  *
  * Note : ce logout est PUREMENT local — il n'appelle pas le backend pour
  * révoquer la session tunnel. La révocation côté serveur passe par le
- * dashboard web (Bloc 11) ou une future commande `sqlnest revoke <id>`
- * qui appellera `DELETE /api/tunnel-sessions/:id`.
+ * dashboard web ou une future commande `sqlnest revoke <id>` qui
+ * appellera `DELETE /api/tunnel-sessions/:id`.
  *
  * Si aucune config n'existe (`loadConfig()` → null), retourne
  * `{ removed: 0 }` — idempotent.

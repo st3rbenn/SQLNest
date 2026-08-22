@@ -39,11 +39,11 @@ import type { HistoryEntry } from "../schema/console/useConsolePersistence";
 import type { ConsoleTab } from "./useConsoleTabs";
 
 /**
- * [ADR-023 E/7.3] Petit badge "W" à gauche de chaque entry history — vert
- * si commit OK, gris + strikethrough si rolled back, absent si select. Le
- * label est monochar pour ne pas manger la largeur (le source est déjà
- * tronqué à ~80 chars via ellipsis). Tooltip explicite au hover pour
- * lever tout doute cross-browser.
+ * Petit badge "W" à gauche de chaque entry history — vert si commit OK,
+ * gris + strikethrough si rolled back, absent si select. Le label est
+ * monochar pour ne pas manger la largeur (le source est déjà tronqué à
+ * ~80 chars via ellipsis). Tooltip explicite au hover pour lever tout
+ * doute cross-browser.
  */
 function HistoryBadge({ entry }: { readonly entry: HistoryEntry }): React.ReactNode {
 	if (entry.written !== true) return null;
@@ -278,8 +278,8 @@ export interface ConsoleHeaderProps {
 	readonly onExecute: () => void;
 	readonly onFormat: () => void;
 	readonly onDetach: () => void;
-	/** [ADR-023 E/7.3] History enrichi avec metadata write/rollback pour
-	 * badge distinct dans le dropdown. */
+	/** History enrichi avec metadata write/rollback pour badge distinct
+	 * dans le dropdown. */
 	readonly history: readonly import("../schema/console/useConsolePersistence").HistoryEntry[];
 	readonly onHistorySelect: (source: string) => void;
 	readonly onHistoryClear: () => void;
@@ -326,9 +326,9 @@ export function ConsoleHeader({
 	extraLeftActions
 }: ConsoleHeaderProps): React.ReactNode {
 	const modKey = useModKeyLabel();
-	// [ADR-023 E/7.3] Filter local 'writes only' du history dropdown —
-	// state éphémère (ne persiste pas cross-session, l'user reset à chaque
-	// ouverture). Utile pour l'audit rapide "qu'est-ce que j'ai écrit ?".
+	// Filter local 'writes only' du history dropdown — state éphémère
+	// (ne persiste pas cross-session, l'user reset à chaque ouverture).
+	// Utile pour l'audit rapide "qu'est-ce que j'ai écrit ?".
 	const [writesOnly, setWritesOnly] = useState(false);
 	const filteredHistory = writesOnly
 		? history.filter((e) => e.written === true)
@@ -457,9 +457,8 @@ export function ConsoleHeader({
 						</Tooltip>
 					</Menu.Target>
 					<Menu.Dropdown>
-						{/* [ADR-023 E/7.3] Filter 'writes only' — audit rapide
-						    "qu'est-ce que j'ai écrit ?". State éphémère par
-						    ouverture du menu. */}
+						{/* Filter 'writes only' — audit rapide "qu'est-ce que
+						    j'ai écrit ?". State éphémère par ouverture du menu. */}
 						<Menu.Label
 							style={{
 								display: "flex",

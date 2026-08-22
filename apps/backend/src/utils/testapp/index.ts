@@ -151,10 +151,9 @@ export async function truncateCanvasAndAuth(
 /**
  * Ensure une team perso pour `userId` — idempotent, retourne son id.
  *
- * ─── Contexte (C.21.2) ────────────────────────────────────────────────
- * Depuis C.21.2, `db_connection.team_id` est NOT NULL. Les tests qui
- * INSERT directement dans `db_connection` doivent d'abord garantir une
- * team pour l'user. Deux chemins :
+ * `db_connection.team_id` est NOT NULL. Les tests qui INSERT directement
+ * dans `db_connection` doivent d'abord garantir une team pour l'user.
+ * Deux chemins :
  *   - user créé via signup → le hook Better Auth a déjà créé la team
  *     perso ; ce helper la RETROUVE et retourne son id (idempotent).
  *   - user créé via INSERT direct (bypass Better Auth) → pas de team ;
@@ -176,9 +175,9 @@ export async function ensureTeamForUser(
 }
 
 /** TRUNCATE des tables tunnel/API-token + auth + team. Utilisé par les
- * tests intégration du Bloc CLI + tunnel WSS (`domains/tunnels/*.int.test.ts`)
- * et par les tests teams (C.21). L'ordre explicite documente les tables
- * métier ; le CASCADE via `user.id` vide en réalité déjà `api_token`,
+ * tests intégration CLI + tunnel WSS (`domains/tunnels/*.int.test.ts`) et
+ * par les tests teams. L'ordre explicite documente les tables métier ;
+ * le CASCADE via `user.id` vide en réalité déjà `api_token`,
  * `tunnel_pairing`, `team` et `db_connection` (toutes FK-cascade → user
  * ou → team). */
 export async function truncateTunnelsAndAuth(

@@ -16,8 +16,8 @@ import { useCurrentTeamSlug } from "../teams/useCurrentTeam";
  * parallèle). Après ça, le composant canvas mount et rend instantanément.
  *
  * Utilisé par `useNavigateToCanvas` (click gallery) et par `PairPage`
- * (redirect post-approve ADR-022 Q5a) — sans ce prefetch, l'user arrive
- * sur un fond canvas noir pendant 1-3 s le temps que `useSchema` résolve.
+ * (redirect post-approve) — sans ce prefetch, l'user arrive sur un fond
+ * canvas noir pendant 1-3 s le temps que `useSchema` résolve.
  */
 export async function prefetchCanvasData(
 	queryClient: QueryClient,

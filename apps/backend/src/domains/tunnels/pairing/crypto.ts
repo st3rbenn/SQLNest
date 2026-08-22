@@ -141,22 +141,22 @@ export function hashSha256Hex(input: string): string {
 }
 
 /**
- * Fingerprint effectif d'un pairing CLI (C.13).
+ * Fingerprint effectif d'un pairing CLI.
  *
  * Un install CLI a une seule keypair Ed25519 globale, mais peut manager
  * plusieurs DSN locales via `add-connection`. Sans scoping, le lookup
  * `(user, fingerprint = SHA256(pubkey))` collapse toutes ces DSN sur une
- * seule db_connection côté serveur (bug remonté par Anthonin le 2026-08-07).
+ * seule db_connection côté serveur.
  *
  * Solution : le fingerprint inclut le NOM de la DSN CLI que ce pairing
  * sert. Deux `add-connection` (apollon / delphi) sur le même CLI produiront
  * 2 fingerprints distincts → 2 db_connection distinctes côté serveur.
  *
- * Compat : un CLI legacy (pré-C.13) qui n'envoie pas de `cliConnectionName`
- * → fingerprint = SHA256(pubkey) seul. Ses db_connection existantes
- * restent identifiables tel quel (aucune migration destructive).
+ * Compat : un CLI legacy qui n'envoie pas de `cliConnectionName` →
+ * fingerprint = SHA256(pubkey) seul. Ses db_connection existantes restent
+ * identifiables tel quel (aucune migration destructive).
  *
- * ─── Anti-collision par length-prefix implicite ──────────────────────
+ * Anti-collision par length-prefix implicite :
  * On pré-hash la pubkey (SHA-256 → 64 chars hex, longueur FIXE) avant de
  * concaténer le nom. Cette longueur fixe agit comme un séparateur strict :
  * `(pubA, "b|c")` et `(pubA + "b", "c")` produiraient le même string si on

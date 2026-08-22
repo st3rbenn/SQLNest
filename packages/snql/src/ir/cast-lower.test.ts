@@ -113,9 +113,9 @@ describe("lower cast — autorisé en write (déterministe + NULL propagate)", (
 	});
 });
 
-describe("lower cast — call `propagate` autorisé sous cast (sprint 3)", () => {
+describe("lower cast — call `propagate` autorisé sous cast", () => {
 	it("set y = cast(upper(name) as text) passe (upper propagate)", () => {
-		// sprint 3 : upper est writeNullBehavior:'propagate' → autorisé en write.
+		// upper est writeNullBehavior:'propagate' → autorisé en write.
 		const stmt = parse(
 			tokenize("update t where id = 1 set y = cast(upper(name) as text)")
 		);

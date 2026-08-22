@@ -15,10 +15,10 @@ interface ColumnRow {
 	readonly column_name: string;
 	readonly data_type: string;
 	readonly is_nullable: string;
-	/** Sprint T2/13.5 : NULL si aucun DEFAULT. Utilisé pour `Field.hasDefault`. */
+	/** NULL si aucun DEFAULT. Utilisé pour `Field.hasDefault`. */
 	readonly column_default: string | null;
-	/** Sprint T2/13.5 : nom du type user-defined pour data_type='USER-DEFINED'
-	 *  (typiquement un enum). Lookup dans EnumRow pour peupler `enumValues`. */
+	/** Nom du type user-defined pour data_type='USER-DEFINED' (typiquement un
+	 *  enum). Lookup dans EnumRow pour peupler `enumValues`. */
 	readonly udt_name: string;
 }
 
@@ -58,10 +58,10 @@ const COLUMNS_SQL = `
 	ORDER BY table_name, ordinal_position`;
 
 /**
- * Sprint T2/13.5 : lit les labels de tous les enums du schéma cible via
- * pg_type + pg_enum. `enumsortorder` préserve l'ordre déclaré (important
- * pour affichage cohérent en autocomplete). typname est le nom du type
- * (matched par ColumnRow.udt_name côté colonnes USER-DEFINED).
+ * Lit les labels de tous les enums du schéma cible via pg_type + pg_enum.
+ * `enumsortorder` préserve l'ordre déclaré (important pour affichage cohérent
+ * en autocomplete). typname est le nom du type (matched par ColumnRow.udt_name
+ * côté colonnes USER-DEFINED).
  */
 const ENUMS_SQL = `
 	SELECT t.typname, e.enumlabel

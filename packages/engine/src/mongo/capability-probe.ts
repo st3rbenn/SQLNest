@@ -3,20 +3,20 @@ import type { Db } from "mongodb";
 import { EngineConnectionError } from "../errors";
 
 /**
- * ADR-024 D3 — Features driver Mongo détectées au bootstrap (probe `hello()`
- * + `serverStatus()` + `buildInfo()`) et cachées sur la Connection. Chaque
+ * Features driver Mongo détectées au bootstrap (probe `hello()` +
+ * `serverStatus()` + `buildInfo()`) et cachées sur la Connection. Chaque
  * feature correspond à une capacité driver qui varie par version×topologie ;
- * les asserts sprint (PM/4-5) lisent ce bag avant de codegen.
+ * les asserts codegen lisent ce bag avant de codegen.
  *
- * Matrice version × feature (à jour PM/1) :
+ * Matrice version × feature :
  *
  * | Feature               | Version min | Topologie          | Utilisé par            |
  * |-----------------------|-------------|--------------------|------------------------|
- * | pipelineUpdate        | 4.2+        | any                | PM/4 write-join, PM/6 cast in where write |
- * | mergeStandalone       | 4.2+        | any                | PM/5 insert-select `$merge` (hors tx) |
- * | mergeInTx             | 5.0+        | replica set        | PM/5 insert-select en session tx (D19) |
- * | exprConvert           | 4.0+        | any                | PM/6 cast in predicate |
- * | replicaSet            | any         | replica set        | PM/5 tx obligatoire (D19), PM/7 savepoint refus |
+ * | pipelineUpdate        | 4.2+        | any                | write-join, cast in where write |
+ * | mergeStandalone       | 4.2+        | any                | insert-select `$merge` (hors tx) |
+ * | mergeInTx             | 5.0+        | replica set        | insert-select en session tx |
+ * | exprConvert           | 4.0+        | any                | cast in predicate |
+ * | replicaSet            | any         | replica set        | tx obligatoire, savepoint refus |
  * | serverVersion         | any         | any                | trace, telemetry, refus détaillé |
  * | topology              | any         | any                | 'standalone' | 'replicaSet' | 'sharded' | 'unknown' |
  */
@@ -157,9 +157,9 @@ export async function probeMongoFeatures(db: Db): Promise<MongoFeatures> {
  * run.ts / adapter.ts avant de codegen une op qui exige la feature (pas par
  * le planner pur, qui n'a pas accès au Connection).
  *
- * Format du code : `planner_mongo_version_capability_missing` (registre D13).
- * Le nom de feature apparaît dans le message pour diagnostic ; le code reste
- * générique pour éviter d'exploser le registre.
+ * Format du code : `planner_mongo_version_capability_missing`. Le nom de
+ * feature apparaît dans le message pour diagnostic ; le code reste générique
+ * pour éviter d'exploser le registre.
  */
 export function assertMongoFeature(
 	features: MongoFeatures,

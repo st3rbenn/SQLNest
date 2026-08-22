@@ -28,7 +28,7 @@ const ITEM_INDENT = "    ";
 // Un pick/sort/set devient multi-ligne à partir de N items (compter les virgules
 // TOP-LEVEL — celles imbriquées dans un call ou un [] ne comptent pas).
 const MULTILINE_MIN_ITEMS = 3;
-// Sprint T2/15 : indent d'un niveau de container statement (transaction /
+// indent d'un niveau de container statement (transaction /
 // savepoint). Chaque niveau ajoute STAGE_INDENT (2 spaces) au préfixe.
 const CONTAINER_STEP = "  ";
 
@@ -61,7 +61,7 @@ export function formatSnql(source: string): string {
 		splitCommas,
 		multilineStages
 	);
-	// Sprint T2/15 — marker les blocs `transaction { … }` / `savepoint <name>
+	// marker les blocs `transaction { … }` / `savepoint <name>
 	// { … }`. Ces containers indentent leurs stmts enfants + split sur `;`.
 	// containerDepthAt[i] = profondeur au token i (0 = top-level, 1 = dans un
 	// transaction ou savepoint, 2 = savepoint nested dans transaction).
@@ -90,7 +90,7 @@ export function formatSnql(source: string): string {
 		const containerOpenIndent = containerOpeners.get(i);
 		const containerCloseIndent = containerClosers.get(i);
 		const containerSemicolonIndent = containerSemicolons.get(i);
-		// Sprint T2/15 : offset d'indent additionnel pour stages/ands quand
+		// offset d'indent additionnel pour stages/ands quand
 		// on est dans un container (transaction/savepoint). Depth 0 = pas
 		// d'offset (top-level), depth ≥ 1 = CONTAINER_STEP × depth spaces.
 		const containerDepth = containerDepthAt[i] ?? 0;
@@ -113,14 +113,14 @@ export function formatSnql(source: string): string {
 			continue;
 		}
 		if (containerSemicolonIndent !== undefined) {
-			// Sprint T2/15 : `;` intra-transaction — collé au stmt précédent,
+			// `;` intra-transaction — collé au stmt précédent,
 			// puis newline + indent container (le stmt suivant démarre à cet indent).
 			parts.push(`;\n${containerSemicolonIndent}`);
 			suppressNextSpace = true;
 			continue;
 		}
 		if (tok.kind === "semicolon" && containerDepth === 0) {
-			// Sprint T3/6 : `;` top-level d'un CTE `let x = …; let y = …; body`
+			// `;` top-level d'un CTE `let x = …; let y = …; body`
 			// — colle le `;` au stmt précédent, puis newline sans indent (le
 			// prochain `let`/body démarre en tête de ligne).
 			parts.push(";\n");
@@ -128,7 +128,7 @@ export function formatSnql(source: string): string {
 			continue;
 		}
 		if (containerCloseIndent !== undefined) {
-			// Sprint T2/15 : `}` d'un container — newline + indent parent avant.
+			// `}` d'un container — newline + indent parent avant.
 			parts.push(`\n${containerCloseIndent}${tok.value}`);
 			continue;
 		}
@@ -154,7 +154,7 @@ export function formatSnql(source: string): string {
 		}
 		parts.push(renderToken(tok));
 		if (containerOpenIndent !== undefined) {
-			// Sprint T2/15 : `{` d'un container — newline + indent child après.
+			// `{` d'un container — newline + indent child après.
 			parts.push(`\n${containerOpenIndent}`);
 			suppressNextSpace = true;
 		} else if (blockOpenIndent !== undefined) {
@@ -404,7 +404,7 @@ function markInlineStages(toks: readonly Token[]): ReadonlySet<number> {
 }
 
 /**
- * Sprint T2/15 : détecte les blocs `transaction { … }` et `savepoint <name>
+ * détecte les blocs `transaction { … }` et `savepoint <name>
  * { … }`. Ces containers indentent leurs stmts enfants (childIndent =
  * CONTAINER_STEP × depth) et splittent sur `;` (chaque stmt sur sa ligne).
  * `depth` compte le nesting (savepoint dans transaction = depth 2).

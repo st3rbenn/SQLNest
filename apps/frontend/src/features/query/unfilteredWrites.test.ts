@@ -3,9 +3,9 @@ import { describe, expect, it } from "vitest";
 import { collectUnfilteredWrites, hasAnyUnfilteredWrite } from "./unfilteredWrites";
 
 /**
- * Tests exhaustifs du walker [[ADR-023]] E/2. Chaque cas listé au [[#D2|D2]]
- * a son test. Le walker est pur (Statement in, findings out) — pas de mock,
- * pas de fixture partagée, un parser réel via @sqlnest/snql source-imported.
+ * Tests exhaustifs du walker. Le walker est pur (Statement in, findings
+ * out) — pas de mock, pas de fixture partagée, un parser réel via
+ * @sqlnest/snql source-imported.
  */
 
 function analyze(source: string) {
@@ -203,7 +203,7 @@ describe("collectUnfilteredWrites — D2 récursion transaction/savepoint/let", 
 });
 
 describe("collectUnfilteredWrites — limites documentées", () => {
-	it("where 1 = 1 (predicate tautologique) = 0 finding (ADR-012 tolère user assume)", () => {
+	it("where 1 = 1 (predicate tautologique) = 0 finding (user assume)", () => {
 		expect(analyze("remove from users where 1 = 1")).toHaveLength(0);
 	});
 });

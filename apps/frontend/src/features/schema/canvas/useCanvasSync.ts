@@ -74,9 +74,8 @@ export interface CanvasSyncReplaceAll {
 export interface UseCanvasSyncOptions extends CanvasSources {
 	readonly connectionId: string;
 	readonly replaceAll: CanvasSyncReplaceAll;
-	/** C.21.5 : team courante — si présente, utilise les URLs
-	 *  team-scoped ; sinon fallback URLs legacy (transitionnel, supprimé
-	 *  en C.21.7). */
+	/** Team courante — si présente, utilise les URLs team-scoped ; sinon
+	 *  fallback URLs legacy (transitionnel). */
 	readonly teamSlug?: string | null;
 }
 

@@ -5,7 +5,7 @@ import {
 	hintsForConstruct
 } from "./divergences-mongo-vs-pg";
 
-describe("divergences PG↔Mongo registre (ADR-024 PM/8 D7)", () => {
+describe("divergences PG↔Mongo registre", () => {
 	it("contient les 8 divergences #13-#20", () => {
 		expect(DIVERGENCES.length).toBe(8);
 	});
@@ -36,10 +36,10 @@ describe("divergences PG↔Mongo registre (ADR-024 PM/8 D7)", () => {
 		}
 	});
 
-	it("mitigation 'shim' implique livraison (hintMessage mentionne PM/N)", () => {
+	it("mitigation 'shim' implique livraison (hintMessage mentionne la parité)", () => {
 		const shims = DIVERGENCES.filter((d) => d.mitigation === "shim");
 		for (const s of shims) {
-			expect(s.hintMessage ?? "").toMatch(/PM\/\d/);
+			expect(s.hintMessage ?? "").toMatch(/parité/i);
 		}
 	});
 });

@@ -1,6 +1,6 @@
 /**
- * Sprint T2/5 Conditional E2E — lexer + parser + lower + planner + codegen
- * PG/Mongo + runtime KV. Consolide les 13 steps du sprint. Couvre `case { … }`
+ * Conditional E2E — lexer + parser + lower + planner + codegen
+ * PG/Mongo + runtime KV. Consolide l'ensemble des cas. Couvre `case { … }`
  * + `if/nullif/greatest/least` (fns registre) avec parité cross-engine.
  */
 
@@ -423,7 +423,7 @@ describe("composition case + fns", () => {
 		expect(text).toContain("CASE WHEN");
 	});
 
-	it("case dans un call (upper(case ...))", () => {
+	it("case dans un call (upper(case...))", () => {
 		const { text } = pg(
 			'find t pick upper(case { r.n > 0 -> "yes", else -> "no" }) as v'
 		);

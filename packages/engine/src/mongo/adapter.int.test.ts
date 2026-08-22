@@ -129,7 +129,7 @@ describe.skipIf(!hasMongo)("mongodb — mutations (intégration)", () => {
 		}
 	}, 20_000);
 
-	it("update non filtré : porte sur tous les documents (ADR-012)", async () => {
+	it("update non filtré : porte sur tous les documents", async () => {
 		const conn = await mongoAdapter.connect(loadConfig());
 		try {
 			await wipe(conn);

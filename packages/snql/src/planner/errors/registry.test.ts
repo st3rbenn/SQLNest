@@ -6,7 +6,7 @@ import {
 	plannerError
 } from "./registry";
 
-describe("planner errors registry (ADR-024 D13)", () => {
+describe("planner errors registry ()", () => {
 	it("plannerError construit un SnqlError avec code typé", () => {
 		const err = plannerError(
 			"planner_transaction_unsupported",
@@ -56,7 +56,7 @@ describe("planner errors registry (ADR-024 D13)", () => {
 		}
 	});
 
-	it("PLANNER_ERROR_CODES contient au moins les 18 codes existants + placeholders PM/2-8", () => {
+	it("PLANNER_ERROR_CODES contient au moins les 18 codes existants + placeholders -8", () => {
 		// Verrou anti-régression : ne jamais retirer un code du registre sans
 		// une PR qui retire aussi son usage dans le code base.
 		expect(PLANNER_ERROR_CODES.size).toBeGreaterThanOrEqual(26);

@@ -36,23 +36,23 @@ export interface RenderContext {
 	readonly renderExpr: (expr: unknown) => unknown;
 	readonly addParam?: (value: unknown) => string;
 	readonly alias?: string | undefined;
-	// Sprint T2/6 : flags call-level propagés depuis PlanCall.star / .unique.
+	// flags call-level propagés depuis PlanCall.star / .unique.
 	// Les renderers scalar existants les ignorent (backward compat total). Les
 	// aggregates les lisent pour émettre COUNT(*) / COUNT(DISTINCT x) etc.
 	readonly star?: boolean;
 	readonly unique?: boolean;
-	// Sprint T2/6 : rows disponibles pour les renderers KV aggregate (fold).
-	// Absent pour les scalar per-row (compat sprint 5). Les aggregates KV
+	// rows disponibles pour les renderers KV aggregate (fold).
+	// Absent pour les scalar per-row (compat). Les aggregates KV
 	// lisent ctx.rows pour évaluer un fold sur toute la collection.
 	readonly rows?: readonly Record<string, unknown>[];
-	// Sprint T2/6 : évaluation d'un PlanExpr par row (KV aggregate). Sépare
+	// évaluation d'un PlanExpr par row (KV aggregate). Sépare
 	// la responsabilité du fold (renderer KV agg) de l'évaluation scalar
 	// (evalValue dans compensate). Absent pour les scalar per-row.
 	readonly evalPerRow?: (
 		expr: unknown,
 		row: Record<string, unknown>
 	) => unknown;
-	// Sprint T2/8 : sort intra-call pour aggregateMulti. Propagé depuis
+	// sort intra-call pour aggregateMulti. Propagé depuis
 	// PlanCall.sortKeys. Shape opaque {path, direction} — chaque engine
 	// wrap avec son rendu (PG ORDER BY, Mongo $sortArray, KV comparator).
 	readonly sortKeys?: readonly {
@@ -73,8 +73,8 @@ export type EngineRenderer = (
  *  - `aggregate` : fold sur un groupe → 1 scalaire (count, sum, min…)
  *  - `aggregateMulti` : fold sur un groupe → 1 collection (array/string/json).
  *    Accepte un `sort <keys>` intra-call pour ordonner les éléments accumulés.
- *  - `window` : reservé pour T2/9 (windowCall)
- *  - `reserved` : nom pris mais pas encore implémenté (hint sprint)
+ * `window` : reservé pour (windowCall)
+ * `reserved` : nom pris mais pas encore implémenté (hint fourni)
  */
 export type FunctionKind =
 	| "scalar"
@@ -125,7 +125,7 @@ export interface FunctionEntry {
 	readonly engines: {
 		readonly postgres?: EngineRenderer;
 		readonly mongodb?: EngineRenderer;
-		// Sprint T2/5 : dispatch KV pass-through via le registre (au lieu du switch
+		// dispatch KV pass-through via le registre (au lieu du switch
 		// hardcodé dans compensate.ts). Opt-in : tant qu'une fn n'a pas de renderer
 		// `kv`, elle reste inconnue du runtime (planner filtre déjà). Migration
 		// progressive — les fns héritées gardent leur dispatch inline le temps

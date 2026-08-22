@@ -1,8 +1,8 @@
 /**
  * Route `/team/:teamSlug/canvas/:connId` — canvas d'une db_connection
- * dans la team courante (C.21.5). Miroir de la route legacy
- * `/canvas/:connId` — même component, mais les hooks lisent le team
- * slug depuis le contexte pour appeler les routes team-scoped.
+ * dans la team courante. Miroir de la route legacy `/canvas/:connId` —
+ * même component, mais les hooks lisent le team slug depuis le contexte
+ * pour appeler les routes team-scoped.
  */
 
 import { notifications } from "@mantine/notifications";

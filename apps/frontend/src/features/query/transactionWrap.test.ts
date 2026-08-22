@@ -6,9 +6,9 @@ import {
 } from "./transactionWrap";
 
 /**
- * Tests du helper `transactionWrap` [[ADR-023]] E/5.1. Couvre capability
- * check (Postgres/Mongo capable, KV non) + double-wrap detection D7
- * (source déjà transaction racine = no-op).
+ * Tests du helper `transactionWrap`. Couvre capability check
+ * (Postgres/Mongo capable, KV non) + double-wrap detection (source déjà
+ * transaction racine = no-op).
  */
 
 describe("supportsTransactionsForEngine — capability statique SNQL", () => {
@@ -16,7 +16,7 @@ describe("supportsTransactionsForEngine — capability statique SNQL", () => {
 		expect(supportsTransactionsForEngine("postgres")).toBe(true);
 	});
 
-	it("mongodb → true (Mongo replica set assumé, standalone TODO E/8)", () => {
+	it("mongodb → true (Mongo replica set assumé, standalone à couvrir)", () => {
 		expect(supportsTransactionsForEngine("mongodb")).toBe(true);
 	});
 
@@ -54,7 +54,7 @@ describe("wrapInTransaction — cas de base", () => {
 		expect(r.source).toBe('transaction { add {id: 1, name: "x"} into t }');
 	});
 
-	it("select → wrap quand même (ADR-023 ne restreint pas ⌘⇧⏎ aux writes)", () => {
+	it("select → wrap quand même (⌘⇧⏎ n'est pas restreint aux writes)", () => {
 		// L'user peut vouloir tester une lecture en isolation transactionnelle
 		// (READ COMMITTED etc.). Pas de restriction UI.
 		const r = wrap("find users pick id");
@@ -69,7 +69,7 @@ describe("wrapInTransaction — cas de base", () => {
 	});
 });
 
-describe("wrapInTransaction — double-wrap detection (D7)", () => {
+describe("wrapInTransaction — double-wrap detection", () => {
 	function wrap(source: string) {
 		return wrapInTransaction(source, parse(tokenize(source)));
 	}

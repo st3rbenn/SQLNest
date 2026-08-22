@@ -5,7 +5,7 @@
  * ─── Design ───────────────────────────────────────────────────────────
  * `runCli(argv, io)` est le point d'entrée testable. Toutes les I/O
  * (stdout, stderr, env vars, commands) sont injectables. Le vrai `bin`
- * (à venir Bloc 5 fin ou Bloc 10) fait juste `runCli(process.argv.slice(2))`.
+ * fait juste `runCli(process.argv.slice(2))`.
  *
  * ─── Subcommands ──────────────────────────────────────────────────────
  *   sqlnest connect                     (device flow interactif)
@@ -173,7 +173,7 @@ async function runConnect(args: string[], ctx: RunContext): Promise<number> {
 	const baseUrl = API_URL;
 	const frontendUrl = FRONTEND_URL;
 
-	// ─── Résolution de la DSN locale à servir (C.13) ─────────────────
+	// ─── Résolution de la DSN locale à servir ─────────────────────────
 	// Un même install CLI (une seule keypair) peut manager plusieurs DSN
 	// locales via `add-connection`. On envoie le nom choisi au backend :
 	// le fingerprint effectif est `SHA256(pubkey || "|" || cliConnectionName)`,
@@ -218,10 +218,9 @@ async function runConnect(args: string[], ctx: RunContext): Promise<number> {
 			connectionName = result.connectionName;
 		} else {
 			// ─── Device flow interactif ─────────────────────────────────
-			// P/6 (ADR-022 Q4c + D1) — spinner Braille avec transitions
-			// in-place. Fallback plain-log préfixé `[sqlnest]` si non-TTY
-			// (CI, pipe, redirection) pour que `sqlnest connect | tee log.txt`
-			// et GHA restent lisibles.
+			// Spinner Braille avec transitions in-place. Fallback plain-log
+			// préfixé `[sqlnest]` si non-TTY (CI, pipe, redirection) pour que
+			// `sqlnest connect | tee log.txt` et GHA restent lisibles.
 			const connectFn = ctx.io.connectFn ?? defaultConnect;
 			let spinner: SpinnerHandle | null = null;
 			try {
@@ -316,14 +315,14 @@ async function runConnect(args: string[], ctx: RunContext): Promise<number> {
 }
 
 /**
- * Résout la DSN LOCALE que `sqlnest connect` doit servir cette session (C.13).
+ * Résout la DSN LOCALE que `sqlnest connect` doit servir cette session.
  *
  * Ordre de priorité :
  *   1. Flag `--connection <name>` explicite (validé contre le fichier).
  *   2. Si une seule DSN est configurée localement → celle-ci automatiquement.
  *   3. Si ≥2 DSN → prompt interactif "1) apollon  2) delphi > ".
- *   4. Si 0 DSN → `null` (compat CLI legacy pré-C.13 — le tunnel utilisera
- *      les env vars `SQLNEST_PG_URL` ou throw à la résolution).
+ *   4. Si 0 DSN → `null` (le tunnel utilisera les env vars `SQLNEST_PG_URL`
+ *      ou throw à la résolution).
  *
  * La valeur retournée est envoyée au backend au POST /pairings pour scoper
  * le fingerprint effectif ET utilisée dans le serve loop pour matérialiser

@@ -1,5 +1,5 @@
 /**
- * Tests intégration C.21.3 — routes team-scoped `/api/teams/*`.
+ * Tests intégration — routes team-scoped `/api/teams/*`.
  * Couvre :
  *   - GET /me, GET /me/default (fallback lazy), GET /:slug
  *   - Isolation cross-user (404 sur team d'un autre owner)
@@ -89,7 +89,7 @@ async function signup(
 	return { cookie, userId: body.user!.id! };
 }
 
-describe.skipIf(!DATABASE_URL)("C.21.3 — /api/teams routes", () => {
+describe.skipIf(!DATABASE_URL)("/api/teams routes", () => {
 	let app: FastifyInstance;
 
 	beforeAll(async () => {
@@ -379,8 +379,8 @@ describe.skipIf(!DATABASE_URL)("C.21.3 — /api/teams routes", () => {
 		expect(res.statusCode).toBe(404);
 	});
 
-	// ─── C.21.4 — pairing team-scoped ────────────────────────────────
-	test("C.21.4 — POST /:slug/tunnels/pairings crée un pairing avec team_id", async () => {
+	// ─── pairing team-scoped ─────────────────────────────────────────
+	test("POST /:slug/tunnels/pairings crée un pairing avec team_id", async () => {
 		const { cookie, userId } = await signup(
 			app,
 			"pair-team@example.com",
@@ -417,7 +417,7 @@ describe.skipIf(!DATABASE_URL)("C.21.3 — /api/teams routes", () => {
 		expect(pairing[0]!.teamId).toBe(t!.id);
 	});
 
-	test("C.21.4 — approve set team_id + fingerprint match trouve la db_connection dans la team", async () => {
+	test("approve set team_id + fingerprint match trouve la db_connection dans la team", async () => {
 		const { cookie, userId } = await signup(
 			app,
 			"approve-team@example.com",

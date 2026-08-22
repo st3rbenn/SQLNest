@@ -15,7 +15,7 @@ import type {
 import type { TokenCursor } from "./cursor";
 
 /**
- * Sprint T2/11 : hook pour parser une sub-query. Évite la dép circulaire
+ * hook pour parser une sub-query. Évite la dép circulaire
  * expression.ts ↔ parser.ts (parseSelect vit dans parser.ts). Parser.ts fait
  * `setSubqueryParser(parseStatement)` au module load. La sub-query doit être
  * une Query (verb `find`/`get`), pas une mutation.
@@ -86,7 +86,7 @@ function parseExpr(cursor: TokenCursor, minBindingPower: number): Expr {
 			};
 		} else if (tok.kind === "keyword" && tok.value === "in") {
 			cursor.next();
-			// Sprint T2/11 : `in (find ...)` sub-query vs `in [...]` value list.
+			// `in (find...)` sub-query vs `in [...]` value list.
 			// Discriminant : `(` + verb dedans = subquery ; `[` = value list.
 			const next = cursor.peek();
 			if (next.kind === "lparen" && cursor.peek(1).kind === "verb") {
@@ -144,7 +144,7 @@ function parsePrefix(cursor: TokenCursor): Expr {
 		const operand = parseExpr(cursor, 3);
 		return { type: "not", operand, span: joinSpan(tok.span, operand.span) };
 	}
-	// Sprint T2/11 : `exists (find ...)` — prefix keyword. Exige `(` + verb
+	// `exists (find...)` — prefix keyword. Exige `(` + verb
 	// dedans (subquery obligatoire, pas une expression scalaire).
 	if (tok.kind === "keyword" && tok.value === "exists") {
 		cursor.next();
@@ -194,7 +194,7 @@ function parsePrefix(cursor: TokenCursor): Expr {
 		cursor.expect("rparen", "')'");
 		return inner;
 	}
-	// Object literal en position d'expression (sprint object-literals).
+	// Object literal en position d'expression.
 	if (tok.kind === "lbrace") {
 		return parseObjectLiteral(cursor, 0);
 	}
@@ -232,8 +232,8 @@ function parsePrefix(cursor: TokenCursor): Expr {
 		return { type: "literal", value: { kind: "null" }, span: tok.span };
 	}
 	if (tok.kind === "ident") {
-		// Sprint T2/5 : `case { … }` en position d'expression. `case` reste ident
-		// hors de cette position (pattern `cast` sprint 2) — utilisable comme
+		// `case { … }` en position d'expression. `case` reste ident
+		// hors de cette position (pattern `cast`) — utilisable comme
 		// colonne. La détection exige le `lbrace` immédiatement après le ident
 		// `case` (via lookahead 1). Sans ce guard, `pick case`, `where case = 42`,
 		// `case.foo` restent des fields normaux.
@@ -249,7 +249,7 @@ function parsePrefix(cursor: TokenCursor): Expr {
 		// donc un field. Les parens sont obligatoires ; 0 arg = `now()`.
 		if (path.length === 1 && cursor.peek().kind === "lparen") {
 			const call = parseCall(cursor, path[0] as string, span);
-			// Sprint T2/9 : postfix `over (...)` sur un call déclaré window
+			// postfix `over (...)` sur un call déclaré window
 			// dans le registre. Refuse `over` sur non-window (message clair).
 			if (
 				call.type === "call" &&
@@ -277,11 +277,11 @@ function parsePrefix(cursor: TokenCursor): Expr {
  * spécial `cast(...)` en tête : surface `cast(expr as T)` avec `as` interne
  * (ne remonte jamais au Pratt).
  *
- * Sprint T2/6 : fast-paths agrégats scalaires.
+ * fast-paths agrégats scalaires.
  *  - `count(*)` : star token scopé aux args de call. Refus structurel
  *    sum(*)/avg(*) au parser (`parse_call_star_only_count`) — l'étoile reste
  *    multiplication ailleurs (isArithToken).
- *  - `count(unique x)` : soft-keyword `unique` (aligné `pick unique` sprint 10).
+ * `count(unique x)` : soft-keyword `unique` (aligné `pick unique`).
  *    Discriminator : p0=ident('unique'), p1 démarre une expression → fast-path.
  *    p1=rparen → `parse_call_unique_missing_arg` (piège UX vs field 'unique').
  *    `distinct` en position modifier → `parse_call_distinct_use_unique` (hint
@@ -352,7 +352,7 @@ function parseCall(cursor: TokenCursor, rawName: string, nameSpan: Span): Expr {
 				// modifier === 'unique' → fast-path.
 				cursor.next(); // consomme ident 'unique'
 				const args: Expr[] = [parseExpr(cursor, 0)];
-				// Sprint T2/8 : aggregateMulti (string_agg) a un 2e arg
+				// aggregateMulti (string_agg) a un 2e arg
 				// (separator) après `unique`. Aggregate scalar reste mono-arg
 				// (count/sum/avg/min/max), refuse args supplémentaires.
 				const entry = SNQL_FUNCTIONS.get(name);
@@ -371,7 +371,7 @@ function parseCall(cursor: TokenCursor, rawName: string, nameSpan: Span): Expr {
 						after.span
 					);
 				}
-				// Sprint T2/8 : sort intra-call après args, si aggregateMulti.
+				// sort intra-call après args, si aggregateMulti.
 				let sortKeys: SortKey[] | undefined;
 				const afterArgs = cursor.peek();
 				if (
@@ -422,7 +422,7 @@ function parseCall(cursor: TokenCursor, rawName: string, nameSpan: Span): Expr {
 			args.push(parseExpr(cursor, 0));
 		}
 	}
-	// Sprint T2/8 : sort intra-call — accepté UNIQUEMENT pour aggregateMulti
+	// sort intra-call — accepté UNIQUEMENT pour aggregateMulti
 	// (array_agg / string_agg / json_agg). Parser contextuel via registre : si
 	// le nom n'est pas déclaré aggregateMulti, la keyword `sort` reste un stage
 	// keyword classique et la parenthèse fermante manquera → erreur claire.
@@ -450,7 +450,7 @@ function parseCall(cursor: TokenCursor, rawName: string, nameSpan: Span): Expr {
 }
 
 /**
- * Sprint T2/8 : parse une sort key intra-call — même shape que parseSortKey
+ * parse une sort key intra-call — même shape que parseSortKey
  * du stage `sort`, mais isolé pour ne pas créer de dép cyclique parser↔parser.
  * `<path> [asc|desc]`.
  */
@@ -468,7 +468,7 @@ function parseIntraCallSortKey(cursor: TokenCursor): SortKey {
 }
 
 /**
- * Sprint T2/9 : parse la clause `over (partition <col>[, <col>]* sort <key>[,
+ * parse la clause `over (partition <col>[, <col>]* sort <key>[,
  * <key>]*)`. Appelé quand `over` détecté après un `call` — vérifie que le
  * name est déclaré `window` dans le registre, sinon message clair.
  *
@@ -587,7 +587,7 @@ function parseCastBody(cursor: TokenCursor, nameSpan: Span): Expr {
 }
 
 /**
- * Sprint T2/11 : parse `(find/get ...)` en position d'expression. Consomme
+ * parse `(find/get...)` en position d'expression. Consomme
  * la lparen, délègue au subqueryParser hook (parser.ts:parseStatement) qui
  * parse un full Query, puis expect rparen.
  */

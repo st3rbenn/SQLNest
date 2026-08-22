@@ -2,25 +2,20 @@
  * `heartbeatTunnel` — le CLI signale un tunnel toujours actif et backfill
  * les métadonnées DB (fingerprint identité, checksum structure).
  *
- * ─── Problème résolu ──────────────────────────────────────────────────
- * `findResumableTunnel` côté CLI skip complètement `/authenticate` si le
- * token local est valide. Résultat : `dbFingerprint` (T4/1) et
- * `dbSchemaChecksum` (T4/2) n'atteignent JAMAIS le backend pour les
- * connexions déjà pair-ées. Ce endpoint résout ça — le CLI l'appelle au
- * boot du serve loop ET périodiquement (à définir côté CLI).
+ * Problème résolu : `findResumableTunnel` côté CLI skip complètement
+ * `/authenticate` si le token local est valide. Résultat : `dbFingerprint`
+ * et `dbSchemaChecksum` n'atteignent JAMAIS le backend pour les connexions
+ * déjà pair-ées. Ce endpoint résout ça — le CLI l'appelle au boot du serve
+ * loop ET périodiquement.
  *
- * ─── Contrat ──────────────────────────────────────────────────────────
  * Auth : Bearer `tn_...` (token clair du tunnel session). Vérifié via
  * `authenticateTunnelSession` — même chemin que le WS handshake.
  *
- * Effets (dans une seule transaction) :
+ * Effets :
  *   - Bump `db_connection.last_seen_at`.
- *   - Backfill `db_fingerprint` si fourni ET différent de la valeur
- *     actuelle (change détecté = DB restaurée / basculée → log utile v2).
- *   - Backfill `db_schema_checksum` idem.
+ *   - Backfill `db_fingerprint` / `db_schema_checksum` si fournis.
  *
- * Le token révoqué / expiré → 401 (comme tous les endpoints Bearer).
- * Le token orphelin (db_connection supprimée en cascade) → 401 propre.
+ * Token révoqué / expiré / orphelin (db_connection supprimée) → 401.
  */
 
 import { schema as dbSchema } from "@sqlnest/db";
@@ -64,11 +59,10 @@ export async function heartbeatTunnel(
 	};
 	if (dbFingerprint !== null) patch.dbFingerprint = dbFingerprint;
 	if (dbSchemaChecksum !== null) patch.dbSchemaChecksum = dbSchemaChecksum;
-	// PM/10 D8 fix — backfill engine réel du CLI (le pairing initial stocke
+	// Backfill engine réel du CLI (le pairing initial stocke
 	// DEFAULT_ENGINE="postgres" en dur, ne distingue pas Mongo). Le CLI envoie
-	// désormais son engine détecté (scheme DSN) via ce heartbeat, on met à
-	// jour db_connection.engine en conséquence. Idempotent : chaque heartbeat
-	// écrit la valeur, silencieux si déjà correcte.
+	// son engine détecté (scheme DSN) via ce heartbeat, on met à jour
+	// db_connection.engine en conséquence. Idempotent.
 	if (engine !== null) patch.engine = engine;
 
 	await db
@@ -76,11 +70,11 @@ export async function heartbeatTunnel(
 		.set(patch)
 		.where(eq(dbSchema.dbConnection.id, session.connectionId));
 
-	// T4/4 : si un canvas existe déjà (via lookup fp/checksum/legacy) pour
-	// cette db_connection, on APPEND le checksum courant à son historique
-	// s'il n'est pas encore présent, puis on log un event audit. Rien à
-	// faire si aucun canvas — il sera créé au premier PUT côté frontend
-	// avec le checksum initial via put.ts.
+	// Si un canvas existe déjà (via lookup fp/checksum/legacy) pour cette
+	// db_connection, on APPEND le checksum courant à son historique s'il
+	// n'est pas encore présent, puis on log un event audit. Rien à faire
+	// si aucun canvas — il sera créé au premier PUT côté frontend avec le
+	// checksum initial via put.ts.
 	if (dbSchemaChecksum !== null) {
 		await appendCanvasChecksum(
 			db,
@@ -94,13 +88,13 @@ export async function heartbeatTunnel(
 }
 
 /**
- * T4/4 : append un checksum courant à l'array historique du canvas si
- * absent, puis insert un `canvas_checksum_event` (audit trail). Idempotent
- * sur l'array (pas d'append si le checksum est déjà présent) MAIS log
- * quand même l'event — permet de tracer les heartbeats redondants dans le
- * temps ("le CLI Mac est toujours actif avec checksum X"). Skip si aucun
- * canvas trouvé (le CLI a pair-é mais l'user n'a pas encore ouvert le
- * canvas côté frontend, donc pas de row à append).
+ * Append un checksum courant à l'array historique du canvas si absent,
+ * puis insert un `canvas_checksum_event` (audit trail). Idempotent sur
+ * l'array (pas d'append si le checksum est déjà présent) MAIS log quand
+ * même l'event — permet de tracer les heartbeats redondants dans le temps
+ * ("le CLI Mac est toujours actif avec checksum X"). Skip si aucun canvas
+ * trouvé (le CLI a pair-é mais l'user n'a pas encore ouvert le canvas
+ * côté frontend, donc pas de row à append).
  */
 async function appendCanvasChecksum(
 	db: DbOrTx,
