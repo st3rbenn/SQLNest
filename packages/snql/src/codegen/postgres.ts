@@ -95,6 +95,35 @@ export const postgresMapper: Mapper = {
 		plan: IntrospectPlan,
 		ctx?: import("./mapper").MapperContext
 	): NativeQuery {
+		// `list schema_events` — table système SQLNest. Le codegen émet un
+		// `SqlnestIntrospectQuery` indépendant de l'engine cible : l'exécution
+		// est routée par le backend vers `getCanvasChecksumHistory` (jamais le
+		// tunnel proxy vers la DB user).
+		if (plan.kind === "list-schema-events") {
+			return plan.postOps !== undefined && plan.postOps.length > 0
+				? {
+						engine: "postgres",
+						kind: "sqlnest-introspect",
+						target: "schema-events",
+						postOps: plan.postOps
+					}
+				: {
+						engine: "postgres",
+						kind: "sqlnest-introspect",
+						target: "schema-events"
+					};
+		}
+		// `list databases` = Mongo-first. PG n'a pas de listing des DBs du
+		// cluster utilisable en pratique (pg_database exige souvent superuser).
+		// Le vrai refus vit au planner (matrice INTROSPECT_SUPPORT) ; ce
+		// garde-fou codegen évite un fallback silencieux si le kind descend
+		// jusqu'ici.
+		if (plan.kind === "list-databases") {
+			throw new SnqlError(
+				"'list databases' non supporté sur Postgres — utilise 'list schemas' pour les namespaces intra-DB.",
+				"codegen_introspect_unsupported"
+			);
+		}
 		const namespace = ctx?.namespace ?? "public";
 		const params = new ParamList();
 		let baseText: string;

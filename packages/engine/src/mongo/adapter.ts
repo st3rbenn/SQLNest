@@ -581,6 +581,21 @@ class MongoConnection implements Connection {
 					};
 				}
 			}
+			if (query.plan.kind === "list-databases") {
+				// Mongo-first : cluster-wide listing via admin.listDatabases.
+				// Nécessite le rôle `clusterMonitor` — les connexions read-only
+				// peuvent échouer avec `not authorized`. Pas de fallback silencieux
+				// à `[db.databaseName]` : l'user a demandé le cluster, si l'auth
+				// refuse c'est une info utile — remonter l'erreur brute.
+				const admin = this.#requireClient().db().admin();
+				const result = await admin.listDatabases({ nameOnly: true });
+				const rows: Row[] = result.databases.map((d) => ({ name: d.name }));
+				return {
+					columns: [{ name: "name", type: "string", nullable: false }],
+					rows,
+					rowCount: rows.length
+				};
+			}
 			if (query.plan.kind === "list-indexes") {
 				const collectionNames = query.plan.target !== undefined
 					? [query.plan.target]

@@ -202,6 +202,27 @@ export interface MongoRawQuery {
 }
 
 /**
+ * native shape pour un kind d'introspection SQLNest (table système, pas la DB
+ * user). Aujourd'hui : `list schema_events` → audit trail `canvas_checksum_event`.
+ * Cross-engine : `engine` porte l'engine de la connection user pour trace, mais
+ * l'exécution passe par le backend SQLNest en interne (pas le tunnel proxy).
+ *
+ * Le backend `POST /db-connections/:id/query` détecte
+ * `plan.type === 'sqlnest-introspect'` et court-circuite vers le builder interne
+ * correspondant (ex : `getCanvasChecksumHistory` pour `schema-events`).
+ *
+ * `postOps` porte les stages `where/pick/sort/limit` du pipeline SNQL, appliqués
+ * en matérialisation client-side sur les rows retournées par le builder — le
+ * pushdown vrai (traduire `where seen_at > X` en cursor) reste v-next.
+ */
+export interface SqlnestIntrospectQuery {
+	readonly engine: string;
+	readonly kind: "sqlnest-introspect";
+	readonly target: "schema-events";
+	readonly postOps?: readonly import("../planner/planner").CompensationOp[];
+}
+
+/**
  * options passées aux méthodes du Mapper qui ont besoin du
  * contexte runtime. Aujourd'hui : namespace (PG schema / Mongo DB name)
  * pour l'introspection. Extensible pour d'autres options futures sans
@@ -219,7 +240,8 @@ export type NativeQuery =
 	| SqlTransaction
 	| MongoTransaction
 	| MongoIntrospectQuery
-	| MongoRawQuery;
+	| MongoRawQuery
+	| SqlnestIntrospectQuery;
 
 /** Contrat de codegen par moteur : plan → requête native. Pur, sans I/O. */
 export interface Mapper {

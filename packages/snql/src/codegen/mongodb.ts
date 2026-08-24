@@ -132,8 +132,26 @@ export const mongoMapper: Mapper = {
 	 * L'adapter Mongo dispatch selon `plan.kind` (list-tables → db.listCollections
 	 * sur la DB de la connection). Namespace (DB name) déjà dans la connection —
 	 * l'adapter n'a pas besoin de le lire depuis ctx.
+	 *
+	 * Exception `list schema_events` : le codegen émet un `SqlnestIntrospectQuery`
+	 * (route backend SQLNest, jamais le tunnel Mongo). L'engine cible de la
+	 * connection user n'importe pas — la table système vit dans SQLNest.
 	 */
 	mapIntrospect(plan: IntrospectPlan): NativeQuery {
+		if (plan.kind === "list-schema-events") {
+			return plan.postOps !== undefined && plan.postOps.length > 0
+				? {
+						engine: "mongodb",
+						kind: "sqlnest-introspect",
+						target: "schema-events",
+						postOps: plan.postOps
+					}
+				: {
+						engine: "mongodb",
+						kind: "sqlnest-introspect",
+						target: "schema-events"
+					};
+		}
 		return { engine: "mongodb", kind: "mongo-introspect", plan };
 	},
 	/**

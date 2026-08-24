@@ -117,15 +117,15 @@ function parseStatement(cursor: TokenCursor): Statement {
 
 /**
  * `list <sub-command>` — statement d'introspection.
- * Sous-commandes v1 : `list tables`. Extensible pour (`list schemas`,
- * `list indexes [on t]`) sans refactor.
+ * Sous-commandes : `tables`, `schemas`, `indexes [on t]`, `databases`
+ * (Mongo-first), `schema_events` (SQLNest system).
  */
 function parseIntrospectList(cursor: TokenCursor): IntrospectStatement {
 	const listTok = cursor.next(); // `list`
 	const sub = cursor.peek();
 	if (sub.kind !== "ident") {
 		throw new SnqlError(
-			`'list' attend une sous-commande (tables / schemas / indexes), trouvé '${sub.value}'`,
+			`'list' attend une sous-commande (tables / schemas / indexes / databases / schema_events), trouvé '${sub.value}'`,
 			"parse_introspect_unknown_list",
 			sub.span
 		);
@@ -188,8 +188,34 @@ function parseIntrospectList(cursor: TokenCursor): IntrospectStatement {
 			span: { start: listTok.span.start, end: endSpan.end }
 		};
 	}
+	if (subLower === "databases") {
+		const subTok = cursor.next();
+		const tail = parseIntrospectTail(cursor);
+		const endSpan = tail.stages.length > 0
+			? tail.stages[tail.stages.length - 1]!.span
+			: subTok.span;
+		return {
+			operation: "introspect",
+			kind: "list-databases",
+			...(tail.stages.length > 0 ? { stages: tail.stages } : {}),
+			span: { start: listTok.span.start, end: endSpan.end }
+		};
+	}
+	if (subLower === "schema_events") {
+		const subTok = cursor.next();
+		const tail = parseIntrospectTail(cursor);
+		const endSpan = tail.stages.length > 0
+			? tail.stages[tail.stages.length - 1]!.span
+			: subTok.span;
+		return {
+			operation: "introspect",
+			kind: "list-schema-events",
+			...(tail.stages.length > 0 ? { stages: tail.stages } : {}),
+			span: { start: listTok.span.start, end: endSpan.end }
+		};
+	}
 	throw new SnqlError(
-		`'list' attend une sous-commande connue (tables / schemas / indexes), trouvé '${sub.value}'`,
+		`'list' attend une sous-commande connue (tables / schemas / indexes / databases / schema_events), trouvé '${sub.value}'`,
 		"parse_introspect_unknown_list",
 		sub.span
 	);

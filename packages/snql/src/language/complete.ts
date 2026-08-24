@@ -70,14 +70,21 @@ const PRIMARY_VERBS: readonly {
 	{ label: "let", detail: "CTE (let x = find ...; body)", type: "keyword" }
 ];
 
-/** Sous-commandes reconnues après `list` (+). */
-const LIST_SUBCOMMANDS: readonly string[] = ["tables", "schemas", "indexes"];
+/** Sous-commandes reconnues après `list`. */
+const LIST_SUBCOMMANDS: readonly string[] = [
+	"tables",
+	"schemas",
+	"indexes",
+	"databases",
+	"schema_events"
+];
 
 /**
  * Shape stable de sortie par kind d'introspection. Le complete propose ces
  * cols dans les stages `pick`/`where`/`sort` qui suivent un `describe`/`list`.
  * Aligné positionnellement avec le codegen (postgres.describeTableSql +
- * mongo.adapter DESCRIBE_COLUMNS + listCollections rows).
+ * mongo.adapter DESCRIBE_COLUMNS + listCollections rows + backend
+ * `getCanvasChecksumHistory` pour schema_events).
  */
 const INTROSPECT_SHAPES: Readonly<Record<string, readonly string[]>> = {
 	"list-tables": ["name"],
@@ -90,7 +97,9 @@ const INTROSPECT_SHAPES: Readonly<Record<string, readonly string[]>> = {
 		"foreign_key"
 	],
 	"list-schemas": ["name"],
-	"list-indexes": ["name", "table", "unique", "columns"]
+	"list-indexes": ["name", "table", "unique", "columns"],
+	"list-databases": ["name"],
+	"list-schema-events": ["id", "seen_at", "checksum", "db_connection_id"]
 };
 
 /** Stages autorisés post-introspection (aligné parseIntrospectTail). */
@@ -370,7 +379,13 @@ function contextOptions(
 
 /** Contexte introspect détecté (kind + optionnellement la table cible). */
 interface IntrospectContext {
-	readonly kind: "list-tables" | "describe-table" | "list-schemas" | "list-indexes";
+	readonly kind:
+		| "list-tables"
+		| "describe-table"
+		| "list-schemas"
+		| "list-indexes"
+		| "list-databases"
+		| "list-schema-events";
 	readonly shape: readonly string[];
 	/** Target présent pour `describe <t>` ou `list indexes on <t>`. */
 	readonly target: string | undefined;
@@ -418,6 +433,20 @@ function introspectContextOf(toks: readonly Token[]): IntrospectContext | null {
 				kind: "list-indexes",
 				shape: INTROSPECT_SHAPES["list-indexes"] ?? [],
 				target
+			};
+		}
+		if (subLower === "databases") {
+			return {
+				kind: "list-databases",
+				shape: INTROSPECT_SHAPES["list-databases"] ?? [],
+				target: undefined
+			};
+		}
+		if (subLower === "schema_events") {
+			return {
+				kind: "list-schema-events",
+				shape: INTROSPECT_SHAPES["list-schema-events"] ?? [],
+				target: undefined
 			};
 		}
 		return null;

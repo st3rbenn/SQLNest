@@ -319,8 +319,14 @@ describe("completeSnql — robustesse", () => {
 	});
 
 	// après `list ` / `describe `, orienter vers sous-commande / tables.
-	it("`list ` propose les sous-commandes (tables/schemas/indexes)", () => {
-		expect(labels("list ")).toEqual(["tables", "schemas", "indexes"]);
+	it("`list ` propose les sous-commandes tier-1", () => {
+		expect(labels("list ")).toEqual([
+			"tables",
+			"schemas",
+			"indexes",
+			"databases",
+			"schema_events"
+		]);
 	});
 
 	it("`describe ` propose les collections", () => {

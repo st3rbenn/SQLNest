@@ -445,10 +445,17 @@ export interface TransactionStatement {
  * projection user (contrat SNQL : introspection retourne un shape stable).
  */
 export type IntrospectKind =
-	| "list-tables" // v1 : liste plate des tables du schéma courant
+	| "list-tables" // liste plate des tables du schéma courant
 	| "describe-table" // colonnes d'une table (name/type/nullable/default/PK/FK)
-	| "list-schemas" // schemas PG (ou databases Mongo) — shape {name}
-	| "list-indexes"; // indexes, target optionnel — shape {name,table,unique,columns}
+	| "list-schemas" // schemas PG (namespaces intra-DB) — shape {name}
+	| "list-indexes" // indexes, target optionnel — shape {name,table,unique,columns}
+	// Mongo-first : listing des databases du cluster. PG refuse au planner
+	// (utilise `list schemas` pour les namespaces intra-DB).
+	| "list-databases"
+	// Table système SQLNest — audit trail des checksums de schéma. Codegen
+	// émet un `SqlnestIntrospectQuery` cross-engine, routé backend vers
+	// `getCanvasChecksumHistory` (pas la DB user via tunnel).
+	| "list-schema-events";
 
 export interface IntrospectStatement {
 	readonly operation: "introspect";

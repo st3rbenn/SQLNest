@@ -482,3 +482,108 @@ describe("codegen Mongo — list schemas / list indexes", () => {
 		expect(native.plan.target).toBe("users");
 	});
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// list databases (Mongo-first, refus PG)
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("parser — `list databases`", () => {
+	it("parse `list databases`", () => {
+		const stmt = parse(tokenize("list databases"));
+		if (stmt.operation !== "introspect") throw new Error();
+		expect(stmt.kind).toBe("list-databases");
+		expect(stmt.target).toBeUndefined();
+	});
+
+	it("`list databases where name like \"prod%\"` — stages pipeline", () => {
+		const stmt = parse(tokenize('list databases where name like "prod%"'));
+		if (stmt.operation !== "introspect") throw new Error();
+		expect(stmt.stages).toHaveLength(1);
+	});
+});
+
+describe("codegen PG — list databases refus typé", () => {
+	it("refus au codegen avec hint actionable", () => {
+		const stmt = parse(tokenize("list databases"));
+		if (stmt.operation !== "introspect") throw new Error();
+		const planned = lowerIntrospect(stmt);
+		const mapper = getMapper("postgres");
+		expectCode(
+			() => mapper.mapIntrospect!(planned),
+			"codegen_introspect_unsupported"
+		);
+	});
+});
+
+describe("codegen Mongo — list databases", () => {
+	it("produit mongo-introspect kind list-databases", () => {
+		const stmt = parse(tokenize("list databases"));
+		if (stmt.operation !== "introspect") throw new Error();
+		const planned = lowerIntrospect(stmt);
+		const mapper = getMapper("mongodb");
+		const native = mapper.mapIntrospect!(planned);
+		if (native.kind !== "mongo-introspect") throw new Error();
+		expect(native.plan.kind).toBe("list-databases");
+	});
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// list schema_events (SQLNest system, cross-engine via SqlnestIntrospectQuery)
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("parser — `list schema_events`", () => {
+	it("parse `list schema_events`", () => {
+		const stmt = parse(tokenize("list schema_events"));
+		if (stmt.operation !== "introspect") throw new Error();
+		expect(stmt.kind).toBe("list-schema-events");
+		expect(stmt.target).toBeUndefined();
+	});
+
+	it("`list schema_events limit 20 sort seen_at desc` — pipeline stages", () => {
+		const stmt = parse(tokenize("list schema_events sort seen_at desc limit 20"));
+		if (stmt.operation !== "introspect") throw new Error();
+		expect(stmt.stages).toHaveLength(2);
+		expect(stmt.stages!.map((s) => s.type)).toEqual(["sort", "limit"]);
+	});
+
+	it("`list schema_events pick checksum` — projection pipeline", () => {
+		const stmt = parse(tokenize("list schema_events pick checksum, seen_at"));
+		if (stmt.operation !== "introspect") throw new Error();
+		expect(stmt.stages).toHaveLength(1);
+		expect(stmt.stages![0]!.type).toBe("pick");
+	});
+});
+
+describe("codegen — list schema_events produit sqlnest-introspect", () => {
+	it("PG mapper → sqlnest-introspect target schema-events", () => {
+		const stmt = parse(tokenize("list schema_events"));
+		if (stmt.operation !== "introspect") throw new Error();
+		const planned = lowerIntrospect(stmt);
+		const mapper = getMapper("postgres");
+		const native = mapper.mapIntrospect!(planned);
+		if (native.kind !== "sqlnest-introspect") throw new Error();
+		expect(native.target).toBe("schema-events");
+		expect(native.postOps).toBeUndefined();
+	});
+
+	it("Mongo mapper → sqlnest-introspect target schema-events", () => {
+		const stmt = parse(tokenize("list schema_events"));
+		if (stmt.operation !== "introspect") throw new Error();
+		const planned = lowerIntrospect(stmt);
+		const mapper = getMapper("mongodb");
+		const native = mapper.mapIntrospect!(planned);
+		if (native.kind !== "sqlnest-introspect") throw new Error();
+		expect(native.target).toBe("schema-events");
+	});
+
+	it("stages lowered en postOps sur le shape sqlnest-introspect", () => {
+		const stmt = parse(tokenize("list schema_events sort seen_at desc limit 20"));
+		if (stmt.operation !== "introspect") throw new Error();
+		const planned = lowerIntrospect(stmt);
+		const mapper = getMapper("postgres");
+		const native = mapper.mapIntrospect!(planned);
+		if (native.kind !== "sqlnest-introspect") throw new Error();
+		expect(native.postOps).toBeDefined();
+		expect(native.postOps).toHaveLength(2);
+	});
+});
