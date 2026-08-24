@@ -17,9 +17,12 @@ import {
 	assertIntrospectSupported,
 	getMapper,
 	KV_CAPABILITIES,
+	lower,
 	lowerIntrospect,
+	lowerMutation,
 	MONGODB_CAPABILITIES,
 	parse,
+	POSTGRES_CAPABILITIES,
 	tokenize
 } from "./index";
 
@@ -585,5 +588,119 @@ describe("codegen — list schema_events produit sqlnest-introspect", () => {
 		if (native.kind !== "sqlnest-introspect") throw new Error();
 		expect(native.postOps).toBeDefined();
 		expect(native.postOps).toHaveLength(2);
+	});
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Refus matrice au planner
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("planner — matrice INTROSPECT_SUPPORT", () => {
+	it("list databases refuse au planner sur Postgres avec hint list schemas", () => {
+		const stmt = parse(tokenize("list databases"));
+		if (stmt.operation !== "introspect") throw new Error();
+		const planned = lowerIntrospect(stmt);
+		try {
+			assertIntrospectSupported(planned, POSTGRES_CAPABILITIES);
+			throw new Error("attendu SnqlError");
+		} catch (e) {
+			if (!(e instanceof SnqlError)) throw e;
+			expect(e.code).toBe("planner_introspect_databases_unsupported");
+			expect(e.message).toContain("list schemas");
+		}
+	});
+
+	it("list schema_events refuse au planner sur tous engines (routé client)", () => {
+		const stmt = parse(tokenize("list schema_events"));
+		if (stmt.operation !== "introspect") throw new Error();
+		const planned = lowerIntrospect(stmt);
+		try {
+			assertIntrospectSupported(planned, POSTGRES_CAPABILITIES);
+			throw new Error("attendu SnqlError");
+		} catch (e) {
+			if (!(e instanceof SnqlError)) throw e;
+			expect(e.code).toBe("planner_introspect_schema_events_unsupported");
+			expect(e.message).toContain("SQLNest");
+		}
+		try {
+			assertIntrospectSupported(planned, MONGODB_CAPABILITIES);
+			throw new Error("attendu SnqlError");
+		} catch (e) {
+			if (!(e instanceof SnqlError)) throw e;
+			expect(e.code).toBe("planner_introspect_schema_events_unsupported");
+		}
+	});
+
+	it("list tables accepté PG et Mongo", () => {
+		const stmt = parse(tokenize("list tables"));
+		if (stmt.operation !== "introspect") throw new Error();
+		const planned = lowerIntrospect(stmt);
+		expect(() =>
+			assertIntrospectSupported(planned, POSTGRES_CAPABILITIES)
+		).not.toThrow();
+		expect(() =>
+			assertIntrospectSupported(planned, MONGODB_CAPABILITIES)
+		).not.toThrow();
+	});
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Break net find/add/update/remove sur schema_events (table système)
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("lower — table système schema_events break net", () => {
+	it("find schema_events → refus avec hint vers list schema_events", () => {
+		expectCode(
+			() => lower(parse(tokenize("find schema_events pick id")) as never),
+			"planner_unknown_target_use_introspect"
+		);
+	});
+
+	it("get schema_events → même refus", () => {
+		expectCode(
+			() => lower(parse(tokenize("get schema_events")) as never),
+			"planner_unknown_target_use_introspect"
+		);
+	});
+
+	it("add {checksum: 'x'} into schema_events → refus readonly", () => {
+		expectCode(
+			() =>
+				lowerMutation(
+					parse(tokenize('add {checksum: "x"} into schema_events')) as never
+				),
+			"planner_readonly_system_target"
+		);
+	});
+
+	it("remove from schema_events where id = 'x' → refus readonly", () => {
+		expectCode(
+			() =>
+				lowerMutation(
+					parse(tokenize("remove from schema_events where id = \"x\"")) as never
+				),
+			"planner_readonly_system_target"
+		);
+	});
+
+	it("update schema_events set checksum = 'x' → refus readonly", () => {
+		expectCode(
+			() =>
+				lowerMutation(
+					parse(
+						tokenize("update schema_events set checksum = \"x\"")
+					) as never
+				),
+			"planner_readonly_system_target"
+		);
+	});
+
+	it("find schema_events_v2 (préfixe strict) → passe (pas match strict)", () => {
+		// Un ident qui commence par `schema_events` mais avec suffixe ne
+		// déclenche pas le refus — cohérent avec l'ancienne classification
+		// regex (préfixe strict, pas préfixe lâche).
+		expect(() =>
+			lower(parse(tokenize("find schema_events_v2 pick id")) as never)
+		).not.toThrow();
 	});
 });
