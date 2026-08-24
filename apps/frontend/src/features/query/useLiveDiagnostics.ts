@@ -28,6 +28,13 @@
 
 import {
 	assertIntrospectSupported,
+	assertLetSupported,
+	assertMongoMutationWriteCastCoercive,
+	assertMutationCastTargetsSupported,
+	assertMutationInsertSelectSupported,
+	assertMutationUpsertSupported,
+	assertMutationWriteJoinSupported,
+	assertTransactionSupported,
 	capabilitiesFor,
 	lower,
 	lowerIntrospect,
@@ -36,6 +43,7 @@ import {
 	lowerRaw,
 	lowerTransaction,
 	parse,
+	plan as planLogical,
 	type SchemaModel,
 	SnqlError,
 	type Statement,
@@ -182,47 +190,74 @@ function validateStatement(
 	engine: string,
 	schema: SchemaModel | undefined
 ): void {
+	const caps = capabilitiesFor(engine);
 	switch (statement.operation) {
-		case "select":
-			lower(statement, schema);
+		case "select": {
+			const logical = lower(statement, schema);
+			if (caps === undefined) return;
+			// `plan()` couvre les refus engine-level (fonctions/casts/JSON/
+			// aggregates/subquery/pushdown) — sinon un `find users pick
+			// jsonb_col ->> 'k'` sur KV n'a de squiggly qu'au run.
+			assertWithSpan(() => planLogical(logical, caps), statement);
 			return;
+		}
 		case "insert":
 		case "update":
-		case "delete":
-			lowerMutation(statement, schema);
-			return;
-		case "transaction":
-			lowerTransaction(statement, schema);
-			return;
-		case "introspect": {
-			const plan = lowerIntrospect(statement, schema);
-			// Refus par kind au planner (matrice INTROSPECT_SUPPORT) — sinon
-			// `list databases` sur PG n'a de squiggly qu'au run. Le hint
-			// actionable (« utilise 'list schemas' ») remonte tel quel.
-			// L'assert ne porte pas de span (refus engine-level), on ré-injecte
-			// celui du statement pour que le live diag ancre la squiggly.
-			const caps = capabilitiesFor(engine);
+		case "delete": {
+			const mutationPlan = lowerMutation(statement, schema);
 			if (caps === undefined) return;
-			try {
-				assertIntrospectSupported(plan, caps);
-			} catch (err) {
-				if (err instanceof SnqlError) {
-					throw new SnqlError(
-						err.message,
-						err.code as Parameters<typeof SnqlError>[1],
-						statement.span
-					);
-				}
-				throw err;
-			}
+			// Chaque assert refuse une capability spécifique (upsert /
+			// write-join / insert-select / cast target / cast coercive Mongo).
+			// La première qui throw remonte comme squiggly.
+			assertWithSpan(
+				() => assertMutationCastTargetsSupported(mutationPlan, caps),
+				statement
+			);
+			assertWithSpan(
+				() => assertMongoMutationWriteCastCoercive(mutationPlan, caps),
+				statement
+			);
+			assertWithSpan(
+				() => assertMutationUpsertSupported(mutationPlan, caps),
+				statement
+			);
+			assertWithSpan(
+				() => assertMutationWriteJoinSupported(mutationPlan, caps),
+				statement
+			);
+			assertWithSpan(
+				() => assertMutationInsertSelectSupported(mutationPlan, caps),
+				statement
+			);
+			return;
+		}
+		case "transaction": {
+			const txPlan = lowerTransaction(statement, schema);
+			if (caps === undefined) return;
+			assertWithSpan(
+				() => assertTransactionSupported(txPlan, caps),
+				statement
+			);
+			return;
+		}
+		case "introspect": {
+			const introPlan = lowerIntrospect(statement, schema);
+			if (caps === undefined) return;
+			assertWithSpan(
+				() => assertIntrospectSupported(introPlan, caps),
+				statement
+			);
 			return;
 		}
 		case "raw":
 			lowerRaw(statement);
 			return;
-		case "let":
-			lowerLet(statement, schema);
+		case "let": {
+			const letPlan = lowerLet(statement, schema);
+			if (caps === undefined) return;
+			assertWithSpan(() => assertLetSupported(letPlan, caps), statement);
 			return;
+		}
 		case "savepoint":
 			// Standalone `savepoint` (hors transaction) n'est pas exécutable —
 			// mais le parser l'accepte comme statement. Rien à valider ici.
@@ -231,8 +266,29 @@ function validateStatement(
 	// Défense : capability check symbolique pour un engine inconnu (au cas où
 	// on route sur un mauvais moteur — refuse au niveau live diag avec un
 	// message actionable).
-	if (capabilitiesFor(engine) === undefined) {
+	if (caps === undefined) {
 		throw new SnqlError(`Moteur inconnu '${engine}'`, "unknown_engine");
+	}
+}
+
+/**
+ * Wrap un assert planner : si l'erreur remontée n'a pas de span (refus
+ * engine-level qui ne cible pas un AST node précis), on ré-injecte celui du
+ * statement pour ancrer la squiggly sur toute la query — sinon le live diag
+ * la laisse tomber (guard `err.span !== undefined` dans useLiveDiagnostics).
+ */
+function assertWithSpan(fn: () => void, statement: Statement): void {
+	try {
+		fn();
+	} catch (err) {
+		if (err instanceof SnqlError && err.span === undefined) {
+			throw new SnqlError(
+				err.message,
+				err.code as Parameters<typeof SnqlError>[1],
+				statement.span
+			);
+		}
+		throw err;
 	}
 }
 
