@@ -6,8 +6,6 @@ import {
 } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 import type { CSSProperties } from "react";
-import type { SchemaModel } from "../../schema-model";
-import { CanvasBreadcrumb } from "./CanvasBreadcrumb";
 
 /**
  * Bar « fichier » du canvas — chevron dropdown Files + nom de la DB
@@ -76,13 +74,11 @@ const menuClassNames = {
 
 export function CanvasFilesHUD({
 	dbName,
-	schema,
 	drawerVisible,
 	onToggleDrawer,
 	variant = "floating"
 }: {
 	readonly dbName: string;
-	readonly schema: SchemaModel;
 	readonly drawerVisible: boolean;
 	readonly onToggleDrawer: () => void;
 	readonly variant?: Variant;
@@ -91,11 +87,7 @@ export function CanvasFilesHUD({
 		return (
 			<div style={floatingContainerStyle}>
 				<FilesMenu radius="10px 0 0 10px" padding="11px 14px" />
-				<OpenPanelButton
-					dbName={dbName}
-					schema={schema}
-					onClick={onToggleDrawer}
-				/>
+				<OpenPanelButton dbName={dbName} onClick={onToggleDrawer} />
 			</div>
 		);
 	}
@@ -109,15 +101,13 @@ export function CanvasFilesHUD({
 					...baseBtnStyle,
 					padding: "6px 10px",
 					borderRadius: 6,
-					maxWidth: 320,
-					overflow: "hidden"
+					maxWidth: 220,
+					overflow: "hidden",
+					textOverflow: "ellipsis",
+					whiteSpace: "nowrap"
 				}}
 			>
-				<CanvasBreadcrumb
-					dbName={dbName}
-					engine={schema.engine}
-					tablesCount={schema.collections.length}
-				/>
+				{dbName}
 			</UnstyledButton>
 			<UnstyledButton
 				className="sqlnest-menu-item"
@@ -143,11 +133,9 @@ export function CanvasFilesHUD({
 
 function OpenPanelButton({
 	dbName,
-	schema,
 	onClick
 }: {
 	readonly dbName: string;
-	readonly schema: SchemaModel;
 	readonly onClick: () => void;
 }): React.ReactNode {
 	return (
@@ -160,14 +148,18 @@ function OpenPanelButton({
 				gap: 12,
 				padding: "11px 14px",
 				borderRadius: "0 10px 10px 0",
-				maxWidth: 380
+				maxWidth: 260
 			}}
 		>
-			<CanvasBreadcrumb
-				dbName={dbName}
-				engine={schema.engine}
-				tablesCount={schema.collections.length}
-			/>
+			<span
+				style={{
+					overflow: "hidden",
+					textOverflow: "ellipsis",
+					whiteSpace: "nowrap"
+				}}
+			>
+				{dbName}
+			</span>
 			<IconLayoutSidebarLeftExpand size={16} stroke={2} aria-hidden />
 		</UnstyledButton>
 	);
