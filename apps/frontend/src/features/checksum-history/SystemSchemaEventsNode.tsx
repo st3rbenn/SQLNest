@@ -1,4 +1,3 @@
-import { ActionIcon } from "@mantine/core";
 import {
 	IconChevronDown,
 	IconChevronRight,
@@ -6,25 +5,44 @@ import {
 	IconLock,
 	IconServer
 } from "@tabler/icons-react";
-import { Handle, type Node, type NodeProps, Position } from "@xyflow/react";
+import {
+	Handle,
+	type Node,
+	type NodeProps,
+	NodeResizer,
+	Position
+} from "@xyflow/react";
 import { type CSSProperties, Fragment, useState } from "react";
 import { SCHEMA_EVENTS_COLLECTION } from "./schemaEventsCollection";
 import type { ChecksumHistoryEntry } from "./checksumHistoryClient";
 import { useChecksumHistory } from "./useChecksumHistory";
 
 export const SYSTEM_TABLE_ID = "__sqlnest_schema_events__";
-const NODE_WIDTH = 280;
+export const SYSTEM_TABLE_DEFAULT_WIDTH = 280;
+export const SYSTEM_TABLE_DEFAULT_HEIGHT = 200;
+export const SYSTEM_TABLE_MIN_WIDTH = 240;
+export const SYSTEM_TABLE_MIN_HEIGHT = 140;
+
 const HEADER_H = 46;
 const ROW_H = 22;
 
 /** Palette système — distincte des tables user (bleu declared / ambre inferred).
- * Violet indigo posé sur `--sqlnest-surface` — signale "meta / infrastructure". */
+ * Violet indigo sur `--sqlnest-surface` : signale "meta / infrastructure". */
 const SYSTEM_BORDER = "#7c5cff";
 const SYSTEM_HEADER = "rgba(124,92,255,0.12)";
 
 export interface SystemSchemaEventsNodeData {
 	readonly connectionId: string;
 	readonly teamSlug: string | null;
+	/** Callback au release du resize — persist width/height/position via
+	 * `useSchemaEventsNode` (RF déplace l'origine sur un handle top/left
+	 * pour garder l'opposé fixe → il faut aussi persister x/y). */
+	readonly onResizeEnd?: (params: {
+		width: number;
+		height: number;
+		x: number;
+		y: number;
+	}) => void;
 	readonly [key: string]: unknown;
 }
 
@@ -34,17 +52,17 @@ export type SystemSchemaEventsNodeType = Node<
 >;
 
 const HIDDEN_HANDLE: CSSProperties = { opacity: 0, border: "none" };
+const HANDLE_SIDES = [
+	{ id: "top", position: Position.Top },
+	{ id: "right", position: Position.Right },
+	{ id: "bottom", position: Position.Bottom },
+	{ id: "left", position: Position.Left }
+] as const;
 
 function AllHandles() {
-	const sides = [
-		{ id: "top", position: Position.Top },
-		{ id: "right", position: Position.Right },
-		{ id: "bottom", position: Position.Bottom },
-		{ id: "left", position: Position.Left }
-	] as const;
 	return (
 		<>
-			{sides.map((s) => (
+			{HANDLE_SIDES.map((s) => (
 				<Fragment key={s.id}>
 					<Handle
 						id={s.id}
@@ -67,43 +85,77 @@ function AllHandles() {
 /**
  * Node RF de la table système `schema_events` — audit trail des checksums
  * vus par le canvas courant. Auto-injecté sur tous les canvases,
- * non-supprimable, déplaçable. Palette violet indigo pour signaler
- * "infrastructure SQLNest", distincte des tables user (bleu declared).
+ * non-supprimable, draggable + resizable comme les tables user.
  *
- * Deux modes :
- *  - collapsed : affiche seulement les colonnes fixes (comme une TableNode).
- *  - expanded  : ajoute une preview inline des 50 derniers events (fetch
- *    on-demand via useChecksumHistory).
- *
- * La table est requêtable via SNQL (`find schema_events pick id, checksum
- * sort seen_at desc limit N`). L'exécution est routée par le frontend vers
- * l'API SQLNest, pas vers la DB user (voir `useRunQuery`).
+ * Réutilise le pattern TableNode : `NodeResizer` (4 sides + 4 corners avec
+ * onResizeEnd), `AllHandles` (4 sides × source+target invisibles),
+ * `width/height` push par RF → shell dimensionnable. Le drag et le resize
+ * sont pilotés nativement par RF via `useNodesState` (voir
+ * `useSchemaEventsNode`).
  */
 export function SystemSchemaEventsNode({
-	data
+	data,
+	width,
+	height: heightProp
 }: NodeProps<SystemSchemaEventsNodeType>) {
-	const { connectionId, teamSlug } = data;
+	const { connectionId, teamSlug, onResizeEnd } = data;
 	const [expanded, setExpanded] = useState(false);
 	const history = useChecksumHistory(connectionId, teamSlug, {
 		enabled: expanded
 	});
 	const rows = history.data?.pages.flatMap((p) => p?.entries ?? []) ?? [];
 
-	const contentHeight =
-		HEADER_H + SCHEMA_EVENTS_COLLECTION.fields.length * ROW_H + 8;
+	const effectiveWidth = width ?? SYSTEM_TABLE_DEFAULT_WIDTH;
+	const effectiveHeight = heightProp ?? SYSTEM_TABLE_DEFAULT_HEIGHT;
+	const contentAvailable = effectiveHeight - HEADER_H;
+	const fieldsShown = Math.max(
+		0,
+		Math.min(
+			SCHEMA_EVENTS_COLLECTION.fields.length,
+			Math.floor((contentAvailable - 36) / ROW_H)
+		)
+	);
+	const shownFields = SCHEMA_EVENTS_COLLECTION.fields.slice(0, fieldsShown);
 
 	return (
 		<div
 			style={{
-				width: NODE_WIDTH,
+				width: effectiveWidth,
+				height: effectiveHeight,
 				background: "var(--sqlnest-surface)",
 				border: `2px solid ${SYSTEM_BORDER}`,
 				borderRadius: 10,
 				overflow: "hidden",
 				fontFamily: "ui-sans-serif, system-ui, sans-serif",
-				boxShadow: "0 1px 3px rgba(0,0,0,0.35)"
+				boxShadow: "0 1px 3px rgba(0,0,0,0.35)",
+				display: "flex",
+				flexDirection: "column"
 			}}
 		>
+			<NodeResizer
+				isVisible
+				minWidth={SYSTEM_TABLE_MIN_WIDTH}
+				maxWidth={800}
+				minHeight={SYSTEM_TABLE_MIN_HEIGHT}
+				maxHeight={1200}
+				lineStyle={{ borderColor: SYSTEM_BORDER, borderWidth: 1.5 }}
+				handleStyle={{
+					width: 8,
+					height: 8,
+					borderRadius: 2,
+					background: "var(--sqlnest-surface)",
+					borderColor: SYSTEM_BORDER,
+					borderWidth: 2
+				}}
+				onResizeEnd={(_, params) =>
+					onResizeEnd?.({
+						width: params.width,
+						height: params.height,
+						x: params.x ?? 0,
+						y: params.y ?? 0
+					})
+				}
+			/>
 			<AllHandles />
 			<div
 				style={{
@@ -113,7 +165,8 @@ export function SystemSchemaEventsNode({
 					gap: 8,
 					padding: "10px 12px",
 					borderBottom: "1px solid var(--sqlnest-border)",
-					background: SYSTEM_HEADER
+					background: SYSTEM_HEADER,
+					flexShrink: 0
 				}}
 			>
 				<span
@@ -140,14 +193,13 @@ export function SystemSchemaEventsNode({
 						letterSpacing: 0.5,
 						textTransform: "uppercase"
 					}}
-					title="Table SQLNest — lecture seule, jamais dans votre DB"
 				>
 					<IconLock size={10} stroke={2.5} />
 					Système
 				</span>
 			</div>
-			<div style={{ padding: "4px 0", minHeight: contentHeight - HEADER_H }}>
-				{SCHEMA_EVENTS_COLLECTION.fields.map((f) => (
+			<div style={{ padding: "4px 0", flex: "0 0 auto" }}>
+				{shownFields.map((f) => (
 					<div
 						key={f.name}
 						style={{
@@ -193,7 +245,8 @@ export function SystemSchemaEventsNode({
 					color: "var(--sqlnest-text-tertiary)",
 					fontSize: 11,
 					cursor: "pointer",
-					textAlign: "left"
+					textAlign: "left",
+					flexShrink: 0
 				}}
 			>
 				{expanded ? (
@@ -201,11 +254,7 @@ export function SystemSchemaEventsNode({
 				) : (
 					<IconChevronRight size={12} stroke={2} />
 				)}
-				<span>
-					{expanded
-						? "Masquer les événements"
-						: "Voir les événements récents"}
-				</span>
+				<span>{expanded ? "Masquer les événements" : "Voir les événements"}</span>
 			</button>
 			{expanded && (
 				<EventsPreview
@@ -241,64 +290,65 @@ function EventsPreview({
 			className="nowheel nodrag"
 			style={{
 				borderTop: "1px solid var(--sqlnest-border-subtle)",
-				maxHeight: 260,
+				flex: "1 1 auto",
+				minHeight: 0,
 				overflowY: "auto",
 				padding: "6px 0"
 			}}
 		>
-			{loading && (
-				<p
-					style={{
-						margin: 0,
-						padding: "8px 12px",
-						fontSize: 11,
-						color: "var(--sqlnest-text-tertiary)"
-					}}
-				>
-					Chargement…
-				</p>
-			)}
-			{error && (
-				<p
-					style={{
-						margin: 0,
-						padding: "8px 12px",
-						fontSize: 11,
-						color: "var(--sqlnest-danger)"
-					}}
-				>
-					Échec du chargement.
-				</p>
-			)}
+			{loading && <StatusLine>Chargement…</StatusLine>}
+			{error && <StatusLine tone="danger">Échec du chargement</StatusLine>}
 			{!loading && !error && rows.length === 0 && (
-				<p
-					style={{
-						margin: 0,
-						padding: "8px 12px",
-						fontSize: 11,
-						color: "var(--sqlnest-text-tertiary)"
-					}}
-				>
-					Aucun événement — le CLI heartbeat n'a rien capté encore.
-				</p>
+				<StatusLine>Aucun événement</StatusLine>
 			)}
 			{rows.map((row) => (
 				<EventRow key={row.id} row={row} />
 			))}
 			{hasMore && (
-				<div style={{ padding: "6px 12px", textAlign: "center" }}>
-					<ActionIcon
-						variant="subtle"
-						size="xs"
-						loading={loadingMore}
-						onClick={onLoadMore}
-						aria-label="Charger plus d'événements"
-					>
-						<IconChevronDown size={12} />
-					</ActionIcon>
-				</div>
+				<button
+					type="button"
+					onClick={onLoadMore}
+					disabled={loadingMore}
+					style={{
+						display: "block",
+						margin: "6px auto 2px",
+						padding: "3px 10px",
+						fontSize: 10.5,
+						background: "transparent",
+						border: "1px solid var(--sqlnest-border-subtle)",
+						borderRadius: 4,
+						color: "var(--sqlnest-text-tertiary)",
+						cursor: loadingMore ? "wait" : "pointer"
+					}}
+				>
+					{loadingMore ? "…" : "Plus"}
+				</button>
 			)}
 		</div>
+	);
+}
+
+function StatusLine({
+	children,
+	tone
+}: {
+	readonly children: React.ReactNode;
+	readonly tone?: "danger";
+}) {
+	return (
+		<p
+			style={{
+				margin: 0,
+				padding: "8px 12px",
+				fontSize: 11,
+				color:
+					tone === "danger"
+						? "var(--sqlnest-danger)"
+						: "var(--sqlnest-text-tertiary)"
+			}}
+		>
+			{children}
+		</p>
 	);
 }
 

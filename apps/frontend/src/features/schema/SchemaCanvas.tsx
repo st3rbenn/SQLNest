@@ -929,6 +929,9 @@ function CanvasInner({
 					// changes par id internally.
 					handleNodesChange(changes);
 					onConsoleNodesChange(changes);
+					systemEvents.onNodesChange(
+						changes as Parameters<typeof systemEvents.onNodesChange>[0]
+					);
 				}}
 				nodeTypes={nodeTypes}
 				edgeTypes={edgeTypes}
@@ -1031,7 +1034,7 @@ function CanvasInner({
 						consoleNodes.updatePosition(node.id, node.position);
 					}
 					if (node.id === SYSTEM_TABLE_ID) {
-						systemEvents.onPositionChange(node.position);
+						systemEvents.updatePosition(node.position);
 					}
 				}}
 				onNodesDelete={(deleted) => {
