@@ -90,6 +90,8 @@ export interface CanvasUIContextValue {
 	readonly consoleGap: number;
 	readonly layoutConfirmOpen: boolean;
 	readonly setLayoutConfirmOpen: (o: boolean) => void;
+	readonly historyDrawerOpen: boolean;
+	readonly setHistoryDrawerOpen: (o: boolean) => void;
 	readonly selectedTables: readonly string[];
 	readonly clearSelection: () => void;
 	/** Nom de la table survolée dans le side panel (SchemaTree). Alimente

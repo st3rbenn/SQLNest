@@ -55,9 +55,18 @@ export type PutCanvasResponseT = z.infer<typeof PutCanvasResponse>;
 /**
  * Endpoint GET /canvas-state/checksum-history?connectionId=... — expose
  * l'audit trail des checksums vus par le canvas résolu pour cette
- * db_connection. Read-only, user-scoped (auth cookie), 100 dernières
- * entrées ordonnées desc par seen_at.
+ * db_connection. Read-only, user-scoped (auth cookie).
+ *
+ * Pagination cursor keyset : `cursor` opaque encode `(seen_at, id)` de la
+ * dernière row de la page précédente ; `limit` par défaut 50, max 100.
+ * Réponse : `entries` + `nextCursor` (null si dernière page). Le cursor
+ * réutilise l'index `(canvas_state_id, seen_at)` — perf O(log N) constant.
  */
+export const ChecksumHistoryQuery = z.object({
+	connectionId: CanvasConnectionId,
+	cursor: z.string().optional(),
+	limit: z.coerce.number().int().min(1).max(100).default(50)
+});
 export const ChecksumHistoryEntry = z.object({
 	id: z.string(),
 	dbSchemaChecksum: z.string(),
@@ -66,8 +75,10 @@ export const ChecksumHistoryEntry = z.object({
 });
 export const ChecksumHistoryResponse = z.object({
 	canvasId: z.string(),
-	entries: z.array(ChecksumHistoryEntry)
+	entries: z.array(ChecksumHistoryEntry),
+	nextCursor: z.string().nullable()
 });
+export type ChecksumHistoryQueryT = z.infer<typeof ChecksumHistoryQuery>;
 export type ChecksumHistoryEntryT = z.infer<typeof ChecksumHistoryEntry>;
 export type ChecksumHistoryResponseT = z.infer<typeof ChecksumHistoryResponse>;
 

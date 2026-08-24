@@ -12,6 +12,7 @@ import { getCanvasState } from "../../../domains/canvas-state/get";
 import { getCanvasChecksumHistory } from "../../../domains/canvas-state/history";
 import { putCanvasState } from "../../../domains/canvas-state/put";
 import {
+	ChecksumHistoryQuery,
 	ChecksumHistoryResponse,
 	GetCanvasQuery,
 	GetCanvasResponse,
@@ -267,7 +268,7 @@ export default function canvasStateRoute(fastify: FastifyInstance) {
 		{
 			preHandler: [requireUser],
 			schema: {
-				querystring: GetCanvasQuery,
+				querystring: ChecksumHistoryQuery,
 				response: {
 					200: ChecksumHistoryResponse,
 					404: ErrorResponse
@@ -277,10 +278,15 @@ export default function canvasStateRoute(fastify: FastifyInstance) {
 		async (request, reply) => {
 			assertAuthenticated(request);
 			try {
+				const { connectionId, cursor, limit } = request.query;
 				const history = await getCanvasChecksumHistory(
 					fastify.db,
 					request.user.id,
-					request.query.connectionId
+					connectionId,
+					{
+						...(cursor !== undefined ? { cursor } : {}),
+						...(limit !== undefined ? { limit } : {})
+					}
 				);
 				if (history === null) {
 					return reply.code(404).send({ message: "Canvas introuvable" });
