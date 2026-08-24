@@ -155,6 +155,26 @@
 }
 
 /*
+ * NodeResizer table système `schema_events` — même comportement que les
+ * tables user (hidden par défaut, révélé au hover). Le node système est
+ * `selectable: false` donc pas de cas `.selected` à gérer, juste `:hover`.
+ */
+.react-flow__node-system-schema-events .react-flow__resize-control.handle,
+.react-flow__node-system-schema-events .react-flow__resize-control.line {
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity 120ms ease-out;
+}
+.react-flow__node-system-schema-events:hover .react-flow__resize-control.handle {
+	opacity: 1;
+	pointer-events: auto;
+}
+.react-flow__node-system-schema-events:hover .react-flow__resize-control.line {
+	opacity: 0.6;
+	pointer-events: auto;
+}
+
+/*
  * T5 fullscreen — le shell fullscreen est un React Portal vers
  * document.body (voir ConsoleNode + createPortal), rendu par-dessus le
  * canvas avec un fond opaque `--sqlnest-canvas-bg`. Le canvas derrière
