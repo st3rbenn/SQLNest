@@ -48,7 +48,11 @@ export type Capability =
 	// `let x = ...; body` — CTE (Common Table Expressions).
 	// PG only v1 (WITH ... natif). Mongo pourrait matérialiser via $lookup
 	// sub-pipeline mais complexité pas justifiée v1 — refus explicit.
-	| "cte";
+	| "cte"
+	// `let rec X = base union all step;` — CTE récursif. PG only
+	// (WITH RECURSIVE natif). Mongo/KV refusés au planner (pas de fallback
+	// matérialisation runtime — coûteux pour de la récursion arborescente).
+	| "cte-recursive";
 
 /**
  * Décimal **exact** : on garde le texte brut. Les colonnes NUMERIC/DECIMAL de
@@ -478,12 +482,18 @@ export interface RawPlan {
 /**
  * un binding CTE lowered. Chaque nom devient une "collection
  * virtuelle" visible dans le body plan — le codegen PG l'émet en préfixe
- * `WITH <name> AS (<subplan-sql>)`.
+ * `WITH <name> AS (<subplan-sql>)` (plain) ou
+ * `WITH RECURSIVE <name> AS ((<base>) UNION ALL (<step>))` (recursive).
+ * Discriminated union pour survivre au JSON round-trip du store fullscreen.
  */
-export interface PlanCteBinding {
-	readonly name: string;
-	readonly plan: LogicalPlan;
-}
+export type PlanCteBinding =
+	| { readonly kind: "plain"; readonly name: string; readonly plan: LogicalPlan }
+	| {
+			readonly kind: "recursive";
+			readonly name: string;
+			readonly base: LogicalPlan;
+			readonly step: LogicalPlan;
+	  };
 
 /**
  * wrapper `let x1 = …; x2 = …; body`. Le body est un plan

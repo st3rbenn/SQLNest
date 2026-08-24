@@ -166,16 +166,31 @@ export const postgresMapper: Mapper = {
 	mapLet(plan: LetPlan): NativeQuery {
 		const params = new ParamList();
 		const bindingParts: string[] = [];
+		let hasRecursive = false;
 		for (const b of plan.bindings) {
-			const inner = renderPlan(b.plan, params);
-			bindingParts.push(`${quoteIdent(b.name)} AS (${inner})`);
+			if (b.kind === "recursive") {
+				hasRecursive = true;
+				const baseSql = renderPlan(b.base, params);
+				const stepSql = renderPlan(b.step, params);
+				// Parens explicites autour de chaque membre : sans elles un `sort/limit`
+				// dans la base laisserait le LIMIT s'attacher au tout de l'union.
+				bindingParts.push(
+					`${quoteIdent(b.name)} AS ((${baseSql}) UNION ALL (${stepSql}))`
+				);
+			} else {
+				const inner = renderPlan(b.plan, params);
+				bindingParts.push(`${quoteIdent(b.name)} AS (${inner})`);
+			}
 		}
 		const bodyText = plan.body.op === "insert"
 			|| plan.body.op === "update"
 			|| plan.body.op === "delete"
 			? renderMutation(plan.body, params)
 			: renderPlan(plan.body, params);
-		const text = `WITH ${bindingParts.join(", ")} ${bodyText}`;
+		// `WITH RECURSIVE` s'applique globalement à TOUS les bindings du WITH dès
+		// qu'un seul est récursif ; les bindings plain restent valides sous ce prefix.
+		const prefix = hasRecursive ? "WITH RECURSIVE" : "WITH";
+		const text = `${prefix} ${bindingParts.join(", ")} ${bodyText}`;
 		return {
 			engine: "postgres",
 			kind: "sql",

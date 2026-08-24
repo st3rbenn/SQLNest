@@ -29,6 +29,44 @@ import { introspectPostgres } from "./introspect";
 const { Pool } = pg;
 
 /**
+ * Détection d'un plan `WITH RECURSIVE …` pour lui coller un `statement_timeout`
+ * — `pg` n'a aucun timeout par défaut, un cycle non borné hang le tunnel.
+ * Regex tolérant les espaces / newlines entre les 2 mots. Faux positifs
+ * possibles sur une string literal contenant "WITH RECURSIVE" mais l'impact
+ * est nul (surcoût 3 aller-retours BEGIN/SET/COMMIT).
+ */
+const RECURSIVE_CTE = /\bWITH\s+RECURSIVE\b/i;
+const RECURSIVE_TIMEOUT_MS = 30_000;
+
+/**
+ * Wrapper `BEGIN; SET LOCAL statement_timeout = <ms>; <query>; COMMIT;` pour
+ * les plans `WITH RECURSIVE`. `SET LOCAL` exige une transaction — on la crée
+ * implicitement autour du query. ROLLBACK best-effort sur erreur.
+ */
+async function execWithTimeout(
+	client: PoolClient,
+	text: string,
+	params: readonly unknown[]
+): Promise<import("pg").QueryResult> {
+	await client.query("BEGIN");
+	try {
+		await client.query(
+			`SET LOCAL statement_timeout = ${RECURSIVE_TIMEOUT_MS}`
+		);
+		const result = await client.query(text, Array.from(params));
+		await client.query("COMMIT");
+		return result;
+	} catch (cause) {
+		try {
+			await client.query("ROLLBACK");
+		} catch {
+			/* rollback best-effort — l'erreur d'origine reste prioritaire */
+		}
+		throw cause;
+	}
+}
+
+/**
  * Compose un message utilisable côté UI à partir d'une erreur `pg`. On garde le
  * message natif du driver (ex. `syntax error at or near "and"`, `relation "foo"
  * does not exist`) — c'est ce qui pointe le doigt sur la vraie cause — puis on
@@ -282,7 +320,9 @@ class PostgresConnection implements Connection {
 		}
 
 		try {
-			const result = await client.query(query.text, Array.from(query.params));
+			const result = RECURSIVE_CTE.test(query.text)
+				? await execWithTimeout(client, query.text, Array.from(query.params))
+				: await client.query(query.text, Array.from(query.params));
 			return {
 				// Types + nullable = fallback safe : le driver `pg` ne remonte pas
 				// le type SNQL. L'enrichissement se fait dans `run.ts` via

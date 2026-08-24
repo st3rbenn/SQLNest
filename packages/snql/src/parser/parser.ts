@@ -50,6 +50,7 @@ function peekKeyword(cursor: TokenCursor, value: string, ahead = 0): boolean {
 export function parse(tokens: readonly Token[]): Statement {
 	const cursor = new TokenCursor(tokens);
 	const statement = parseStatement(cursor);
+	checkNoDanglingUnionAll(cursor);
 	cursor.expect("eof", "la fin de la requête");
 	return statement;
 }
@@ -212,6 +213,7 @@ function parseLet(cursor: TokenCursor): LetStatement {
 	// Le body doit être find / add / update / remove — pas transaction/raw/list/describe.
 	const bodyStart = cursor.peek();
 	const body = parseStatement(cursor);
+	checkNoDanglingUnionAll(cursor);
 	if (
 		body.operation === "let" ||
 		body.operation === "transaction" ||
@@ -234,15 +236,29 @@ function parseLet(cursor: TokenCursor): LetStatement {
 }
 
 /**
- * Un binding `let <ident> = <query>;`. Le query est une select ; `;` obligatoire
- * (le suivant peut être un autre `let` ou le body).
+ * Un binding `let <ident> = <query>;` (kind: 'plain') OU
+ * `let rec <ident> = <base> union all <step>;` (kind: 'recursive'). `rec` est
+ * soft-keyword contextuel (ident après `let`), `union` et `all` idem.
  */
 function parseLetBinding(cursor: TokenCursor): LetBinding {
 	const letTok = cursor.next(); // `let`
+	const nextTok = cursor.peek();
+	const isRecursive =
+		nextTok.kind === "ident" && nextTok.value.toLowerCase() === "rec";
+	if (isRecursive) {
+		cursor.next(); // `rec`
+	}
 	const nameTok = cursor.peek();
 	if (nameTok.kind !== "ident") {
+		if (isRecursive && nameTok.kind === "op" && nameTok.value === "=") {
+			throw new SnqlError(
+				`'let rec' attend un nom de CTE avant '=' — 'rec' est réservé après 'let'.`,
+				"parse_let_rec_reserved_name",
+				nameTok.span
+			);
+		}
 		throw new SnqlError(
-			`'let' attend un nom de CTE, trouvé '${nameTok.value}'`,
+			`'let${isRecursive ? " rec" : ""}' attend un nom de CTE, trouvé '${nameTok.value}'`,
 			"parse_let_missing_name",
 			nameTok.span
 		);
@@ -251,12 +267,17 @@ function parseLetBinding(cursor: TokenCursor): LetBinding {
 	const eq = cursor.peek();
 	if (eq.kind !== "op" || eq.value !== "=") {
 		throw new SnqlError(
-			`'let ${nameTok.value}' attend '=', trouvé '${eq.value}'`,
+			`'let${isRecursive ? " rec" : ""} ${nameTok.value}' attend '=', trouvé '${eq.value}'`,
 			"parse_let_missing_eq",
 			eq.span
 		);
 	}
 	cursor.next();
+
+	if (isRecursive) {
+		return parseLetRecBody(cursor, letTok.span.start, nameTok.value);
+	}
+
 	// Le body du binding est TOUJOURS une query select — pas de let{mutation}.
 	const bodyStart = cursor.peek();
 	const bodyStmt = parseStatement(cursor);
@@ -277,10 +298,107 @@ function parseLetBinding(cursor: TokenCursor): LetBinding {
 	}
 	cursor.next();
 	return {
+		kind: "plain",
 		name: nameTok.value,
 		query: bodyStmt,
 		span: { start: letTok.span.start, end: sep.span.end }
 	};
+}
+
+/**
+ * Corps d'un `let rec <name> = <base> union all <step>;`. `union` et `all`
+ * sont soft-keywords contextuels (idents ici). L'ADR-021 v2 exige `union all`
+ * uniquement (pas `union` dedup, pas de branches multiples). Précédence :
+ * `where/sort/limit/pick` après `union all find B` s'attache au step seul
+ * (SQL standard).
+ */
+function parseLetRecBody(
+	cursor: TokenCursor,
+	startPos: import("../lexer/token").Position,
+	name: string
+): LetBinding {
+	const baseStart = cursor.peek();
+	const baseStmt = parseStatement(cursor);
+	if (baseStmt.operation !== "select") {
+		throw new SnqlError(
+			`'let rec ${name} =' attend une requête 'find' comme base — reçu '${baseStmt.operation}'.`,
+			"parse_let_rec_binding_not_select",
+			baseStart.span
+		);
+	}
+	const unionTok = cursor.peek();
+	if (unionTok.kind !== "ident" || unionTok.value.toLowerCase() !== "union") {
+		throw new SnqlError(
+			`'let rec ${name}' attend 'union all' après la base, trouvé '${unionTok.value}'.`,
+			"parse_let_rec_missing_union",
+			unionTok.span
+		);
+	}
+	cursor.next(); // `union`
+	const allTok = cursor.peek();
+	if (allTok.kind !== "ident" || allTok.value.toLowerCase() !== "all") {
+		throw new SnqlError(
+			`'union' seul non supporté v1 (dedup coûteuse) — utilise 'union all'.`,
+			"parse_let_rec_union_needs_all",
+			allTok.span
+		);
+	}
+	cursor.next(); // `all`
+	const stepStart = cursor.peek();
+	const stepStmt = parseStatement(cursor);
+	if (stepStmt.operation !== "select") {
+		throw new SnqlError(
+			`'let rec ${name} = base union all' attend une requête 'find' comme step — reçu '${stepStmt.operation}'.`,
+			"parse_let_rec_binding_not_select",
+			stepStart.span
+		);
+	}
+	const extraUnion = cursor.peek();
+	if (
+		extraUnion.kind === "ident" &&
+		extraUnion.value.toLowerCase() === "union"
+	) {
+		throw new SnqlError(
+			`'let rec ${name}' n'accepte qu'une paire base+step v1 — wrap plusieurs branches ou attends v-next.`,
+			"parse_let_rec_multiple_union_all",
+			extraUnion.span
+		);
+	}
+	const sep = cursor.peek();
+	if (sep.kind !== "semicolon") {
+		throw new SnqlError(
+			`';' attendu après 'let rec ${name} = base union all step' (avant le prochain 'let' ou le body).`,
+			"parse_let_rec_missing_step",
+			sep.span
+		);
+	}
+	cursor.next();
+	return {
+		kind: "recursive",
+		name,
+		base: baseStmt,
+		step: stepStmt,
+		span: { start: startPos, end: sep.span.end }
+	};
+}
+
+/**
+ * Check global : refuser `union all` détecté ailleurs qu'à l'intérieur d'un
+ * `let rec` (le parseur de statement principal ne connaît pas ce séquenceur —
+ * il apparaîtrait comme un ident indésirable). Appelé après un parseStatement
+ * réussi pour lever un erreur ciblée.
+ */
+function checkNoDanglingUnionAll(cursor: TokenCursor): void {
+	const tok = cursor.peek();
+	if (tok.kind !== "ident" || tok.value.toLowerCase() !== "union") return;
+	const next = cursor.peek(1);
+	if (next.kind === "ident" && next.value.toLowerCase() === "all") {
+		throw new SnqlError(
+			`'union all' réservé à 'let rec X = base union all step'.`,
+			"parse_union_all_outside_let_rec",
+			tok.span
+		);
+	}
 }
 
 /**

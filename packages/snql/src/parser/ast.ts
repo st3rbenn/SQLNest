@@ -496,16 +496,24 @@ export interface RawStatement {
 }
 
 /**
- * un binding `let <name> = <query>`. Le body du binding est
- * TOUJOURS une Query (select) — un CTE n'a de sens qu'en lecture (immutable
- * view). Peut référencer les bindings précédents (ordre topologique validé
- * au lower).
+ * un binding `let <name> = <query>` (kind: 'plain') ou
+ * `let rec <name> = <base> union all <step>` (kind: 'recursive'). Toujours
+ * une Query (select) — un CTE n'a de sens qu'en lecture. Peut référencer les
+ * bindings précédents (ordre topologique validé au lower). Discriminated union
+ * pour survivre au JSON round-trip du store fullscreen (un champ optionnel
+ * `recursive?` disparaît au serialize).
  */
-export interface LetBinding {
+export type LetBinding = {
 	readonly name: string;
-	readonly query: Query;
 	readonly span: Span;
-}
+} & (
+	| { readonly kind: "plain"; readonly query: Query }
+	| {
+			readonly kind: "recursive";
+			readonly base: Query;
+			readonly step: Query;
+	  }
+);
 
 /**
  * wrapper `let x1 = ...; let x2 = ...; <body>`. Le body accepte

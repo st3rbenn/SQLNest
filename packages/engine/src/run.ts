@@ -289,6 +289,15 @@ async function materializeLet(
 	// plus haut dans la même liste (dépendance topologique respectée).
 	const materialized = new Map<string, readonly Row[]>();
 	for (const binding of statement.bindings) {
+		if (binding.kind !== "plain") {
+			// Defense-in-depth : le planner a déjà refusé un binding recursive
+			// sur un engine sans capability `cte-recursive`. Le chemin ici est
+			// Mongo — un recursive ne devrait jamais arriver, mais on rend le
+			// message explicite si un bug de dispatch se glissait.
+			throw new EngineExecutionError(
+				`'let rec ${binding.name}' non supporté hors Postgres — matérialise la traversée récursive côté application.`
+			);
+		}
 		const rows = await runQueryOnCte(
 			binding.query,
 			schema,

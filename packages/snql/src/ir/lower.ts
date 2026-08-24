@@ -631,6 +631,14 @@ function bindingReferencesSelf(query: Query, name: string): boolean {
 	return queryReferencesName(query, name);
 }
 
+function queryHasPickStage(query: Query): boolean {
+	return query.stages.some((s) => s.type === "pick");
+}
+
+function queryHasLimitStage(query: Query): boolean {
+	return query.stages.some((s) => s.type === "limit");
+}
+
 function queryReferencesName(query: Query, name: string): boolean {
 	if (query.source.collection === name) return true;
 	return query.stages.some((s) => stageReferencesName(s, name));
@@ -737,7 +745,44 @@ export function lowerLet(
 					b.span
 				);
 			}
-			// graft : `let a = find a` émet du SQL invalide en
+			if (b.kind === "recursive") {
+				if (!queryHasPickStage(b.base)) {
+					throw new SnqlError(
+						`'let rec ${b.name}' base doit expliciter 'pick <cols>' (shape définie).`,
+						"lower_let_rec_pick_required",
+						b.base.span
+					);
+				}
+				if (!queryHasPickStage(b.step)) {
+					throw new SnqlError(
+						`'let rec ${b.name}' step doit expliciter 'pick <cols>' (shape définie).`,
+						"lower_let_rec_pick_required",
+						b.step.span
+					);
+				}
+				if (queryReferencesName(b.base, b.name)) {
+					throw new SnqlError(
+						`'let rec ${b.name}' base ne peut pas se référencer (non terminable). Déplace le self-ref dans le step.`,
+						"lower_let_rec_base_self_reference",
+						b.base.span
+					);
+				}
+				if (!queryReferencesName(b.step, b.name)) {
+					throw new SnqlError(
+						`'let rec ${b.name}' step doit référencer '${b.name}' au moins une fois. Sinon utilise 'let' simple.`,
+						"lower_let_rec_step_no_self_reference",
+						b.step.span
+					);
+				}
+				seen.add(b.name);
+				return {
+					kind: "recursive",
+					name: b.name,
+					base: lower(b.base, schema),
+					step: lower(b.step, schema)
+				};
+			}
+			// graft : `let a = find a` émet du SQL invalide.
 			// détecter au lower avec hint vers `let rec`. Couvre source + with-join ;
 			// walker complet (subqueries) arrive avec (G12).
 			if (bindingReferencesSelf(b.query, b.name)) {
@@ -748,10 +793,13 @@ export function lowerLet(
 				);
 			}
 			seen.add(b.name);
-			return { name: b.name, plan: lower(b.query, schema) };
+			return { kind: "plain", name: b.name, plan: lower(b.query, schema) };
 		}
 	);
 	const cteNames = seen;
+	const recursiveNames = new Set(
+		statement.bindings.filter((b) => b.kind === "recursive").map((b) => b.name)
+	);
 	// Refuse un mutation body qui cible un CTE (write-to-view interdit).
 	if (statement.body.operation !== "select") {
 		const target = statement.body.collection;
@@ -762,6 +810,17 @@ export function lowerLet(
 				statement.body.span
 			);
 		}
+	} else if (
+		recursiveNames.has(statement.body.source.collection) &&
+		!queryHasLimitStage(statement.body)
+	) {
+		// Garde-fou OOM : `find <rec_cte>` direct sans limit N accumule sans borne.
+		// Force l'user à borner explicitement.
+		throw new SnqlError(
+			`'find ${statement.body.source.collection}' sur CTE récursif requiert 'limit N' explicite (garde-fou OOM).`,
+			"lower_let_rec_body_unbounded",
+			statement.body.span
+		);
 	}
 	const body =
 		statement.body.operation === "select"

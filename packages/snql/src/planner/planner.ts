@@ -696,14 +696,22 @@ export function assertIntrospectSupported(
  * pas justifiée v1 — l'user peut re-écrire manuellement en subquery.
  */
 export function assertLetSupported(
-	_plan: import("../ir/plan").LetPlan,
+	plan: import("../ir/plan").LetPlan,
 	capabilities: Capabilities
 ): void {
-	if (capabilities.supports.has("cte")) return;
-	throw new SnqlError(
-		`'let' (CTE) non supporté sur '${capabilities.engine}' — réécris la requête sans CTE (ex: subquery in-line).`,
-		"planner_let_unsupported"
-	);
+	if (!capabilities.supports.has("cte")) {
+		throw new SnqlError(
+			`'let' (CTE) non supporté sur '${capabilities.engine}' — réécris la requête sans CTE (ex: subquery in-line).`,
+			"planner_let_unsupported"
+		);
+	}
+	const hasRecursive = plan.bindings.some((b) => b.kind === "recursive");
+	if (hasRecursive && !capabilities.supports.has("cte-recursive")) {
+		throw new SnqlError(
+			`'let rec' (CTE récursif) non supporté sur '${capabilities.engine}' — matérialise la traversée récursive côté application (loop).`,
+			"planner_let_rec_unsupported"
+		);
+	}
 }
 
 export function toCompensationOp(op: LogicalPlan): CompensationOp {

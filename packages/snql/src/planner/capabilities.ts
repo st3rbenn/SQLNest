@@ -72,7 +72,8 @@ export const POSTGRES_CAPABILITIES: Capabilities = caps(
 		"insert-select",
 		"transaction",
 		"introspect",
-		"cte"
+		"cte",
+		"cte-recursive"
 	],
 	["int", "float", "text", "bool", "date", "timestamp", "json"],
 	{ subqueryStrategy: "native" }
