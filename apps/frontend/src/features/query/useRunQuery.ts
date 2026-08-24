@@ -179,12 +179,9 @@ export async function runQueryRequest(input: RunQueryInput): Promise<QueryResult
 			// un stage supplémentaire côté DS, à défaut d'un vrai lower.
 			{ limit: 50 }
 		);
-		if (page === null) {
-			throw new SnqlRuntimeError(
-				"Canvas introuvable pour cette connexion — impossible de lire schema_events."
-			);
-		}
-		return schemaEventsToQueryResult(page.entries);
+		// Canvas pas encore synchronisé (heartbeat CLI n'a pas capté cette
+		// connexion) → table vide, cohérent avec "aucun événement". Pas d'erreur.
+		return schemaEventsToQueryResult(page?.entries ?? []);
 	}
 
 	const url = input.teamSlug
