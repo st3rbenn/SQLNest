@@ -19,8 +19,11 @@ import z from "zod/v4";
 import { countCanvasStates } from "../../../domains/canvas-state/count";
 import { delCanvasState } from "../../../domains/canvas-state/del";
 import { getCanvasState } from "../../../domains/canvas-state/get";
+import { getCanvasChecksumHistory } from "../../../domains/canvas-state/history";
 import { putCanvasState } from "../../../domains/canvas-state/put";
 import {
+	ChecksumHistoryQuery,
+	ChecksumHistoryResponse,
 	GetCanvasQuery,
 	GetCanvasResponse,
 	PutCanvasBody,
@@ -180,6 +183,59 @@ export default function teamsCanvasStateRoute(fastify: FastifyInstance) {
 				return reply
 					.code(500)
 					.send({ message: "Erreur interne lors de la sauvegarde" });
+			}
+		}
+	);
+
+	// ─── GET /:slug/canvas-state/checksum-history — audit trail team-scopé
+	// L'endpoint user-scopé `/api/canvas-state/checksum-history` (root.ts)
+	// existe pour la surface legacy, mais le frontend team-aware doit passer
+	// par cette route pour matérialiser la vérification `connectionId ∈ team`.
+	// Sans ça, un frontend qui passe un `teamSlug` sans route côté backend
+	// tombait sur un 404 silencieux (audit trail invisible).
+	instance.get(
+		"/:slug/canvas-state/checksum-history",
+		{
+			preHandler: [requireTeamAccess],
+			schema: {
+				params: TeamSlugParams,
+				querystring: ChecksumHistoryQuery,
+				response: {
+					200: ChecksumHistoryResponse,
+					404: ErrorResponse
+				}
+			}
+		},
+		async (request, reply) => {
+			assertTeamAccess(request);
+			const { connectionId, cursor, limit } = request.query;
+			const inTeam = await assertConnectionInTeam(
+				fastify.db,
+				request.team.id,
+				connectionId
+			);
+			if (!inTeam) {
+				return reply
+					.code(404)
+					.send({ message: "Connection introuvable dans cette team" });
+			}
+			try {
+				const history = await getCanvasChecksumHistory(
+					fastify.db,
+					request.user.id,
+					connectionId,
+					{
+						...(cursor !== undefined ? { cursor } : {}),
+						...(limit !== undefined ? { limit } : {})
+					}
+				);
+				if (history === null) {
+					return reply.code(404).send({ message: "Canvas introuvable" });
+				}
+				return history;
+			} catch (err) {
+				request.log.error({ err }, "teams canvas-state checksum-history failed");
+				throw err;
 			}
 		}
 	);
