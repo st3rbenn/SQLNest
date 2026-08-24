@@ -12,10 +12,12 @@ import {
 	NodeResizer,
 	Position
 } from "@xyflow/react";
-import { type CSSProperties, Fragment, useState } from "react";
-import { SCHEMA_EVENTS_COLLECTION } from "./schemaEventsCollection";
+import { type CSSProperties, Fragment, useEffect, useState } from "react";
 import type { ChecksumHistoryEntry } from "./checksumHistoryClient";
+import { SCHEMA_EVENTS_COLLECTION } from "./schemaEventsCollection";
+import { UnseenEventsBadge } from "./UnseenEventsBadge";
 import { useChecksumHistory } from "./useChecksumHistory";
+import { useUnseenSchemaEvents } from "./useUnseenSchemaEvents";
 
 export const SYSTEM_TABLE_ID = "__sqlnest_schema_events__";
 export const SYSTEM_TABLE_DEFAULT_WIDTH = 280;
@@ -104,6 +106,15 @@ export function SystemSchemaEventsNode({
 		enabled: expanded
 	});
 	const rows = history.data?.pages.flatMap((p) => p?.entries ?? []) ?? [];
+	const unseen = useUnseenSchemaEvents(connectionId, teamSlug);
+
+	// Ouvrir la preview stamp le timestamp de lecture — le badge disparaît
+	// dès que l'user regarde. Effet plutôt que dans onClick pour couvrir
+	// aussi les cas où l'expanded est piloté par un default true (rare mais
+	// possible en v-next).
+	useEffect(() => {
+		if (expanded) unseen.markSeen();
+	}, [expanded, unseen.markSeen]);
 
 	const effectiveWidth = width ?? SYSTEM_TABLE_DEFAULT_WIDTH;
 	const effectiveHeight = heightProp ?? SYSTEM_TABLE_DEFAULT_HEIGHT;
@@ -118,154 +129,159 @@ export function SystemSchemaEventsNode({
 	const shownFields = SCHEMA_EVENTS_COLLECTION.fields.slice(0, fieldsShown);
 
 	return (
-		<div
-			style={{
-				width: effectiveWidth,
-				height: effectiveHeight,
-				background: "var(--sqlnest-surface)",
-				border: `2px solid ${SYSTEM_BORDER}`,
-				borderRadius: 10,
-				overflow: "hidden",
-				fontFamily: "ui-sans-serif, system-ui, sans-serif",
-				boxShadow: "0 1px 3px rgba(0,0,0,0.35)",
-				display: "flex",
-				flexDirection: "column"
-			}}
-		>
-			<NodeResizer
-				isVisible
-				minWidth={SYSTEM_TABLE_MIN_WIDTH}
-				maxWidth={800}
-				minHeight={SYSTEM_TABLE_MIN_HEIGHT}
-				maxHeight={1200}
-				lineStyle={{ borderColor: SYSTEM_BORDER, borderWidth: 1.5 }}
-				handleStyle={{
-					width: 8,
-					height: 8,
-					borderRadius: 2,
-					background: "var(--sqlnest-surface)",
-					borderColor: SYSTEM_BORDER,
-					borderWidth: 2
-				}}
-				onResizeEnd={(_, params) =>
-					onResizeEnd?.({
-						width: params.width,
-						height: params.height,
-						x: params.x ?? 0,
-						y: params.y ?? 0
-					})
-				}
-			/>
-			<AllHandles />
+		<div style={{ position: "relative" }}>
+			<UnseenEventsBadge count={unseen.count} capped={unseen.capped} />
 			<div
 				style={{
+					width: effectiveWidth,
+					height: effectiveHeight,
+					background: "var(--sqlnest-surface)",
+					border: `2px solid ${SYSTEM_BORDER}`,
+					borderRadius: 10,
+					overflow: "hidden",
+					fontFamily: "ui-sans-serif, system-ui, sans-serif",
+					boxShadow: "0 1px 3px rgba(0,0,0,0.35)",
 					display: "flex",
-					alignItems: "center",
-					justifyContent: "space-between",
-					gap: 8,
-					padding: "10px 12px",
-					borderBottom: "1px solid var(--sqlnest-border)",
-					background: SYSTEM_HEADER,
-					flexShrink: 0
+					flexDirection: "column"
 				}}
 			>
-				<span
+				<NodeResizer
+					isVisible
+					minWidth={SYSTEM_TABLE_MIN_WIDTH}
+					maxWidth={800}
+					minHeight={SYSTEM_TABLE_MIN_HEIGHT}
+					maxHeight={1200}
+					lineStyle={{ borderColor: SYSTEM_BORDER, borderWidth: 1.5 }}
+					handleStyle={{
+						width: 8,
+						height: 8,
+						borderRadius: 2,
+						background: "var(--sqlnest-surface)",
+						borderColor: SYSTEM_BORDER,
+						borderWidth: 2
+					}}
+					onResizeEnd={(_, params) =>
+						onResizeEnd?.({
+							width: params.width,
+							height: params.height,
+							x: params.x ?? 0,
+							y: params.y ?? 0
+						})
+					}
+				/>
+				<AllHandles />
+				<div
+					style={{
+						display: "flex",
+						alignItems: "center",
+						justifyContent: "space-between",
+						gap: 8,
+						padding: "10px 12px",
+						borderBottom: "1px solid var(--sqlnest-border)",
+						background: SYSTEM_HEADER,
+						flexShrink: 0
+					}}
+				>
+					<span
+						style={{
+							display: "flex",
+							alignItems: "center",
+							gap: 6,
+							fontWeight: 700,
+							fontSize: 13,
+							color: "var(--sqlnest-text-primary)"
+						}}
+					>
+						<IconServer size={14} stroke={2} color={SYSTEM_BORDER} />
+						{SCHEMA_EVENTS_COLLECTION.name}
+					</span>
+					<span
+						style={{
+							display: "flex",
+							alignItems: "center",
+							gap: 3,
+							fontSize: 10,
+							fontWeight: 600,
+							color: SYSTEM_BORDER,
+							letterSpacing: 0.5,
+							textTransform: "uppercase"
+						}}
+					>
+						<IconLock size={10} stroke={2.5} />
+						Système
+					</span>
+				</div>
+				<div style={{ padding: "4px 0", flex: "0 0 auto" }}>
+					{shownFields.map((f) => (
+						<div
+							key={f.name}
+							style={{
+								display: "flex",
+								alignItems: "center",
+								justifyContent: "space-between",
+								gap: 8,
+								height: ROW_H,
+								padding: "0 12px",
+								fontSize: 11.5,
+								color: "var(--sqlnest-text-secondary)"
+							}}
+						>
+							<span>{f.name}</span>
+							<span
+								style={{
+									fontSize: 10.5,
+									color: "var(--sqlnest-text-tertiary)"
+								}}
+							>
+								{f.type}
+								{f.nullable ? "?" : ""}
+							</span>
+						</div>
+					))}
+				</div>
+				<button
+					type="button"
+					onClick={(e) => {
+						e.stopPropagation();
+						setExpanded((v) => !v);
+					}}
+					className="nodrag"
 					style={{
 						display: "flex",
 						alignItems: "center",
 						gap: 6,
-						fontWeight: 700,
-						fontSize: 13,
-						color: "var(--sqlnest-text-primary)"
+						width: "100%",
+						padding: "6px 12px",
+						background: "transparent",
+						border: "none",
+						borderTop: "1px solid var(--sqlnest-border-subtle)",
+						color: "var(--sqlnest-text-tertiary)",
+						fontSize: 11,
+						cursor: "pointer",
+						textAlign: "left",
+						flexShrink: 0
 					}}
 				>
-					<IconServer size={14} stroke={2} color={SYSTEM_BORDER} />
-					{SCHEMA_EVENTS_COLLECTION.name}
-				</span>
-				<span
-					style={{
-						display: "flex",
-						alignItems: "center",
-						gap: 3,
-						fontSize: 10,
-						fontWeight: 600,
-						color: SYSTEM_BORDER,
-						letterSpacing: 0.5,
-						textTransform: "uppercase"
-					}}
-				>
-					<IconLock size={10} stroke={2.5} />
-					Système
-				</span>
-			</div>
-			<div style={{ padding: "4px 0", flex: "0 0 auto" }}>
-				{shownFields.map((f) => (
-					<div
-						key={f.name}
-						style={{
-							display: "flex",
-							alignItems: "center",
-							justifyContent: "space-between",
-							gap: 8,
-							height: ROW_H,
-							padding: "0 12px",
-							fontSize: 11.5,
-							color: "var(--sqlnest-text-secondary)"
-						}}
-					>
-						<span>{f.name}</span>
-						<span
-							style={{
-								fontSize: 10.5,
-								color: "var(--sqlnest-text-tertiary)"
-							}}
-						>
-							{f.type}
-							{f.nullable ? "?" : ""}
-						</span>
-					</div>
-				))}
-			</div>
-			<button
-				type="button"
-				onClick={(e) => {
-					e.stopPropagation();
-					setExpanded((v) => !v);
-				}}
-				className="nodrag"
-				style={{
-					display: "flex",
-					alignItems: "center",
-					gap: 6,
-					width: "100%",
-					padding: "6px 12px",
-					background: "transparent",
-					border: "none",
-					borderTop: "1px solid var(--sqlnest-border-subtle)",
-					color: "var(--sqlnest-text-tertiary)",
-					fontSize: 11,
-					cursor: "pointer",
-					textAlign: "left",
-					flexShrink: 0
-				}}
-			>
-				{expanded ? (
-					<IconChevronDown size={12} stroke={2} />
-				) : (
-					<IconChevronRight size={12} stroke={2} />
+					{expanded ? (
+						<IconChevronDown size={12} stroke={2} />
+					) : (
+						<IconChevronRight size={12} stroke={2} />
+					)}
+					<span>
+						{expanded ? "Masquer les événements" : "Voir les événements"}
+					</span>
+				</button>
+				{expanded && (
+					<EventsPreview
+						rows={rows}
+						loading={history.isLoading}
+						error={history.isError}
+						hasMore={history.hasNextPage ?? false}
+						loadingMore={history.isFetchingNextPage}
+						onLoadMore={() => history.fetchNextPage()}
+					/>
 				)}
-				<span>{expanded ? "Masquer les événements" : "Voir les événements"}</span>
-			</button>
-			{expanded && (
-				<EventsPreview
-					rows={rows}
-					loading={history.isLoading}
-					error={history.isError}
-					hasMore={history.hasNextPage ?? false}
-					loadingMore={history.isFetchingNextPage}
-					onLoadMore={() => history.fetchNextPage()}
-				/>
-			)}
+			</div>
 		</div>
 	);
 }
