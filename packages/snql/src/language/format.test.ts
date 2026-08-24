@@ -258,6 +258,70 @@ describe("format — on-conflict edit action reste inline", () => {
 	});
 });
 
+describe("format — propagation multi-ligne parent ← enfant", () => {
+	it("array 2 rows dont chaque objet est lourd → array parent ouvert", () => {
+		expect(
+			fmt("add [{a: 1, b: 2, c: 3}, {a: 4, b: 5, c: 6}] into t")
+		).toBe(
+			[
+				"add [",
+				"    {",
+				"        a: 1,",
+				"        b: 2,",
+				"        c: 3",
+				"    },",
+				"    {",
+				"        a: 4,",
+				"        b: 5,",
+				"        c: 6",
+				"    }",
+				"  ]",
+				"  into t"
+			].join("\n")
+		);
+	});
+
+	it("array 1 row lourd → array parent ouvert (pas d'objet décollé à droite)", () => {
+		expect(
+			fmt("add [{a: 1, b: 2, c: 3, d: 4, e: 5}] into t")
+		).toBe(
+			[
+				"add [",
+				"    {",
+				"        a: 1,",
+				"        b: 2,",
+				"        c: 3,",
+				"        d: 4,",
+				"        e: 5",
+				"    }",
+				"  ]",
+				"  into t"
+			].join("\n")
+		);
+	});
+
+	it("array 2 rows objets légers → tout reste inline", () => {
+		expect(
+			fmt("add [{a: 1, b: 2}, {c: 3, d: 4}] into t")
+		).toBe(
+			"add [{a: 1, b: 2}, {c: 3, d: 4}]\n  into t"
+		);
+	});
+
+	it("idempotence sur le canonique employé lourd", () => {
+		const src =
+			'add { first_name: "Nancy", last_name: "Edwards", email: "nancy@chinook.com", phone: "+1 (555) 555-5555", city: "Calgary", country: "Canada", postal_code: "T3B 3L4", birth_date: "1961-06-15", hire_date: "2011-05-01", title: "Sales Manager", reports_to: 1 } into employee';
+		const once = fmt(src);
+		const twice = fmt(once);
+		expect(twice).toBe(once);
+	});
+
+	it("tolérant à source incomplète (accolades non appariées) — pas de crash", () => {
+		expect(() => fmt("add {a: 1, b: 2, c: into t")).not.toThrow();
+		expect(() => fmt('add { name: "x", email: "y')).not.toThrow();
+	});
+});
+
 describe("format — let CTE", () => {
 	it("un let + body — `;` en fin de ligne, body sur nouvelle ligne", () => {
 		expect(fmt('let x = find users; find x pick email')).toBe(

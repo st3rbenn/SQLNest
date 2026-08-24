@@ -263,6 +263,11 @@ function markBlockLiterals(
 		readonly openerIdx: number;
 		readonly depth: number; // profondeur du contenu du bloc (childIndent = ITEM_INDENT × depth)
 		readonly commas: number[];
+		// Un enfant passé en multi-ligne force le parent à s'ouvrir même s'il a
+		// < 3 items. Évite `[{ … lourd multi-ligne … }]` avec array parent inline
+		// et objet décollé à droite. Effet naturel : `add [{a,b,c,d}] into t` et
+		// `add [{a,b,c},{d,e,f}] into t` ouvrent le array parent.
+		hasMultilineChild: boolean;
 	}
 	const stack: Frame[] = [];
 	// Track si on est actuellement dans les items d'un stage pick/sort/set
@@ -285,14 +290,24 @@ function markBlockLiterals(
 					: inMultilineStage
 						? 1
 						: 0;
-			stack.push({ openerIdx: i, depth: parentDepth + 1, commas: [] });
+			stack.push({
+				openerIdx: i,
+				depth: parentDepth + 1,
+				commas: [],
+				hasMultilineChild: false
+			});
 		} else if (tok.kind === "rbrace" || tok.kind === "rbracket") {
 			const frame = stack.pop();
 			if (frame === undefined) continue;
-			// Multi-ligne si ≥ MULTILINE_MIN_ITEMS items (items = commas + 1).
-			// Empty `{}` / `[]` (0 comma, 0 item) reste inline.
 			const itemCount = frame.commas.length + 1;
-			if (itemCount < MULTILINE_MIN_ITEMS) continue;
+			// Empty `{}` / `[]` (0 comma, 0 item, aucun enfant) reste inline.
+			// Sinon : multi-ligne si assez d'items OU si un enfant est déjà passé
+			// en multi-ligne (propagation bottom-up).
+			const isEmpty = frame.commas.length === 0 && !frame.hasMultilineChild;
+			if (isEmpty) continue;
+			if (itemCount < MULTILINE_MIN_ITEMS && !frame.hasMultilineChild) continue;
+			const parent = stack[stack.length - 1] as Frame | undefined;
+			if (parent) parent.hasMultilineChild = true;
 			const childIndent = ITEM_INDENT.repeat(frame.depth);
 			// Closer aligné : depth > 1 → parent bloc (ITEM_INDENT × depth-1),
 			// depth == 1 → parent stage (STAGE_INDENT, aligné avec le keyword).
