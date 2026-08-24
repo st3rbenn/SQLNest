@@ -55,6 +55,7 @@ export function CanvasLeftPanel() {
 				topBar={
 					<CanvasFilesHUD
 						dbName={dbName}
+						schema={schema}
 						drawerVisible={true}
 						onToggleDrawer={toggleDrawer}
 						variant="embedded"
@@ -66,6 +67,7 @@ export function CanvasLeftPanel() {
 	return (
 		<CanvasFilesHUD
 			dbName={dbName}
+			schema={schema}
 			drawerVisible={false}
 			onToggleDrawer={toggleDrawer}
 			variant="floating"
