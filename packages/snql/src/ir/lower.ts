@@ -16,6 +16,10 @@ import type {
 	UpdateStatement
 } from "../parser/ast";
 import { CAST_TARGETS } from "../parser/ast";
+import {
+	READONLY_SYSTEM_TARGETS,
+	RESERVED_SYSTEM_TARGETS
+} from "../planner/introspect/support";
 import { toCompensationOp } from "../planner/planner";
 import type {
 	Relation,
@@ -118,6 +122,11 @@ export function lower(query: Query, schema?: SchemaModel): LogicalPlan {
 }
 
 function lowerInternal(query: Query, schema?: SchemaModel): LogicalPlan {
+	// Refuse un scan sur une table système SQLNest. Hint vers le verbe
+	// introspect adapté (aujourd'hui : `list schema_events`). Break net choisi
+	// contre alias transparent — un scan de table système via `find` cache la
+	// vraie source d'exécution (backend SQLNest) derrière un verbe de query.
+	assertNotReservedSystemTarget(query.source.collection, query.source.span);
 	// typecheck cross-type predicates si schema dispo.
 	// Fire-early : messages actionnables avant PG remonte du 42883 cryptique.
 	typecheckQuery(query, schema);
@@ -872,6 +881,10 @@ export function lowerMutation(
 	statement: InsertStatement | UpdateStatement | DeleteStatement,
 	schema?: SchemaModel
 ): MutationPlan {
+	// Refuse toute mutation sur une table système SQLNest readonly. Cohérent
+	// avec le refus `find schema_events` — le contract SNQL classe la table
+	// comme readonly par défaut, aucune surface d'écriture user.
+	assertNotReadonlySystemTarget(statement.collection, statement.span);
 	if (statement.operation === "insert") {
 		return lowerInsert(statement, schema);
 	}
@@ -3931,4 +3944,40 @@ function typecheckMutation(
 			typecheckExprTypes(a.value, source, schema);
 		}
 	}
+}
+
+/**
+ * Refuse un scan sur une table système SQLNest (schema_events et futurs).
+ * Message pointe vers le verbe introspect adapté. Break net : coexistence
+ * `find schema_events` ↔ `list schema_events` = dette permanente + confusion
+ * doc — audit trail = beta interne, casse acceptée.
+ */
+function assertNotReservedSystemTarget(
+	collection: string,
+	span: import("../lexer/token").Span
+): void {
+	if (!RESERVED_SYSTEM_TARGETS.has(collection)) return;
+	throw new SnqlError(
+		`'${collection}' est une table système SQLNest — utilise 'list ${collection}' (introspection).`,
+		"planner_unknown_target_use_introspect",
+		span
+	);
+}
+
+/**
+ * Refuse toute mutation (add / update / remove) sur une table système
+ * SQLNest en lecture seule. Cohérent avec `assertNotReservedSystemTarget` pour
+ * les lectures — le contract SNQL classe la table système comme readonly par
+ * défaut.
+ */
+function assertNotReadonlySystemTarget(
+	collection: string,
+	span: import("../lexer/token").Span
+): void {
+	if (!READONLY_SYSTEM_TARGETS.has(collection)) return;
+	throw new SnqlError(
+		`'${collection}' est une table système en lecture seule — utilise 'list ${collection}' pour la consulter.`,
+		"planner_readonly_system_target",
+		span
+	);
 }

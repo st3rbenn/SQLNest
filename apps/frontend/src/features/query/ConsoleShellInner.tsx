@@ -35,7 +35,6 @@ import {
 	useRef,
 	useState
 } from "react";
-import { injectSchemaEventsCollection } from "../checksum-history/schemaEventsCollection";
 import { useDbConnections } from "../db-connections/useDbConnections";
 import { useConsolePersistence } from "../schema/console/useConsolePersistence";
 import { useSchema } from "../schema/useSchema";
@@ -159,17 +158,6 @@ export function ConsoleShellInner({
 	const engine = connection?.engine ?? "postgres";
 
 	const schemaQuery = useSchema(connId, teamSlug);
-	// Inject la table système `schema_events` dans le SchemaModel côté console
-	// — la vraie DB user ignore l'existence de cette table (elle vit dans le
-	// backend SQLNest), mais l'autocomplete SNQL doit la voir pour proposer
-	// `find schema_events pick …` sans erreur "table inconnue". L'exécution
-	// est routée par useRunQuery vers l'API SQLNest, jamais vers la DB user.
-	const schemaWithSystem = useMemo(() => {
-		if (!schemaQuery.data) return schemaQuery.data;
-		return injectSchemaEventsCollection(
-			schemaQuery.data as unknown as import("../schema/schema-model").SchemaModel
-		) as unknown as typeof schemaQuery.data;
-	}, [schemaQuery.data]);
 
 	const tabs = useConsoleTabs(connId, tabsScopeSuffix);
 	// History scopée par connectionId — pas de leak dev→prod
@@ -236,7 +224,7 @@ export function ConsoleShellInner({
 	const { diag: liveDiagnostic, rawStatementSpan } = useLiveDiagnostics(
 		activeSource,
 		engine,
-		schemaWithSystem ?? undefined
+		schemaQuery.data ?? undefined
 	);
 
 	const editorRef = useRef<SnqlEditorHandle>(null);
@@ -674,7 +662,7 @@ export function ConsoleShellInner({
 							onChange={(v) => tabs.updateSource(activeTabId, v)}
 							onRun={execute}
 							onRunInTransaction={executeInTransaction}
-							schema={schemaWithSystem ?? null}
+							schema={schemaQuery.data ?? null}
 							placeholder="get <table> pick <fields>"
 							errorSpans={errorSpans}
 							liveDiagnostic={liveDiagnostic}
@@ -712,7 +700,7 @@ export function ConsoleShellInner({
 							onFocusSpan={onFocusSpan}
 							engine={engine}
 							lastSource={queryState.lastSource}
-							schema={schemaWithSystem ?? undefined}
+							schema={schemaQuery.data ?? undefined}
 						/>
 					</>
 				) : null}

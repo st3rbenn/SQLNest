@@ -81,8 +81,25 @@ export type PlannerErrorCode =
 	| "planner_savepoint_body_write_join_v3"
 	| "planner_savepoint_body_insert_select_v3"
 	| "planner_savepoint_body_upsert_v3"
-	// Introspect
+	// Introspect — un code par kind, engine dans le message. Cohérent avec
+	// planner_upsert_unsupported / planner_write_join_unsupported.
+	// L'ancien `planner_introspect_unsupported` reste réservé pour les cas où
+	// l'engine ne connaît AUCUN kind (capability `introspect` absente).
 	| "planner_introspect_unsupported"
+	| "planner_introspect_tables_unsupported"
+	| "planner_introspect_schemas_unsupported"
+	| "planner_introspect_indexes_unsupported"
+	| "planner_introspect_databases_unsupported"
+	| "planner_introspect_schema_events_unsupported"
+	| "planner_introspect_describe_table_unsupported"
+	// Table système réservée (schema_events / autres SQLNest system) utilisée
+	// comme collection user (find / add / update / remove). Hint vers le
+	// verbe introspect adapté.
+	| "planner_reserved_system_target"
+	// Write refusé sur table système readonly (schema_events).
+	| "planner_readonly_system_target"
+	// Break net `find schema_events` → hint vers `list schema_events`.
+	| "planner_unknown_target_use_introspect"
 	// refus json_contains nested (flat scalar accepté via $setIsSubset)
 	| "planner_mongo_json_contains_nested_unsupported"
 	// capability-probe driver Mongo au bootstrap; refus typé si le driver
@@ -148,6 +165,15 @@ export const PLANNER_ERROR_CODES: ReadonlySet<PlannerErrorCode> =
 		"planner_savepoint_body_insert_select_v3",
 		"planner_savepoint_body_upsert_v3",
 		"planner_introspect_unsupported",
+		"planner_introspect_tables_unsupported",
+		"planner_introspect_schemas_unsupported",
+		"planner_introspect_indexes_unsupported",
+		"planner_introspect_databases_unsupported",
+		"planner_introspect_schema_events_unsupported",
+		"planner_introspect_describe_table_unsupported",
+		"planner_reserved_system_target",
+		"planner_readonly_system_target",
+		"planner_unknown_target_use_introspect",
 		"planner_mongo_json_contains_nested_unsupported",
 		"planner_mongo_version_capability_missing",
 		"planner_mongo_perf_non_indexable"

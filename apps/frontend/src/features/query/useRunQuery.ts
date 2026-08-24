@@ -1,42 +1,35 @@
 import { useMutation } from "@tanstack/react-query";
+import { parse, tokenize } from "@sqlnest/snql";
 import { fetchChecksumHistory } from "../checksum-history/checksumHistoryClient";
-import { SCHEMA_EVENTS_NAME } from "../checksum-history/schemaEventsCollection";
 
 const API_BASE = window.CONTEXT.apiBaseUrl;
 
 /**
- * Classification d'une source SNQL vs. la table système `schema_events`.
- * Basée sur un lexer léger (regex) — les casse-limites (ident quoté, source
- * multiline, string literal contenant "schema_events") sont acceptables v1
- * car la fausse positive fait juste échouer la query sur la vraie DB user
- * avec un message clair "table introuvable" — pas de silent write détourné.
+ * Détecte si la source SNQL cible une table système SQLNest — aujourd'hui :
+ * `list schema_events` route backend vers l'audit trail interne (pas la DB
+ * user via tunnel). Parse via le vrai lexer/parser SNQL — plus de regex
+ * intercept fragile. Erreur parser propagée comme les autres (les mêmes
+ * marqueurs éditeur remontent).
+ *
+ * Renvoie le kind d'introspection SQLNest à router, ou null pour le flow
+ * proxy tunnel normal.
  */
-export function classifySchemaEventsUsage(source: string): {
-	readonly kind: "none" | "read" | "write";
-} {
-	// Verbes de lecture — cible tout de suite après le verbe.
-	const readMatch = /^\s*(?:find|get)\s+([a-zA-Z_][\w]*)/i.exec(source);
-	if (readMatch && readMatch[1] === SCHEMA_EVENTS_NAME) {
-		return { kind: "read" };
+function detectSqlnestIntrospect(source: string):
+	| { readonly kind: "schema-events" }
+	| null {
+	try {
+		const stmt = parse(tokenize(source));
+		if (
+			stmt.operation === "introspect" &&
+			stmt.kind === "list-schema-events"
+		) {
+			return { kind: "schema-events" };
+		}
+	} catch {
+		// Erreur parser → laisse le flow normal remonter le vrai message
+		// via le POST proxy (le backend/CLI la re-parse et renvoie).
 	}
-	// Verbes d'écriture — target après `into` (add), après verbe (update/remove/edit).
-	const writeVerbs = /^\s*(?:add|create|edit|update|remove|delete)\b/i.test(source);
-	if (writeVerbs) {
-		const targetInto = /\binto\s+([a-zA-Z_][\w]*)/i.exec(source);
-		if (targetInto && targetInto[1] === SCHEMA_EVENTS_NAME) {
-			return { kind: "write" };
-		}
-		const targetFrom = /\bfrom\s+([a-zA-Z_][\w]*)/i.exec(source);
-		if (targetFrom && targetFrom[1] === SCHEMA_EVENTS_NAME) {
-			return { kind: "write" };
-		}
-		const targetDirect =
-			/^\s*(?:update|edit)\s+([a-zA-Z_][\w]*)/i.exec(source);
-		if (targetDirect && targetDirect[1] === SCHEMA_EVENTS_NAME) {
-			return { kind: "write" };
-		}
-	}
-	return { kind: "none" };
+	return null;
 }
 
 /**
@@ -160,23 +153,18 @@ export interface RunQueryInput {
 }
 
 export async function runQueryRequest(input: RunQueryInput): Promise<QueryResult> {
-	// Table système `schema_events` — interceptée avant l'appel proxy. Les
-	// events vivent dans le backend SQLNest (`canvas_checksum_event`), jamais
-	// dans la DB user, donc l'exécution ne doit JAMAIS descendre au tunnel.
-	const systemUsage = classifySchemaEventsUsage(input.source);
-	if (systemUsage.kind === "write") {
-		throw new SnqlRuntimeError(
-			"Table système 'schema_events' en lecture seule — écriture refusée."
-		);
-	}
-	if (systemUsage.kind === "read") {
+	// Table système SQLNest — routée backend interne. Le tunnel proxy ne
+	// touche jamais la DB user pour ces kinds. Aujourd'hui : `list
+	// schema_events` (audit trail `canvas_checksum_event`). Détection via
+	// parser SNQL — plus de regex intercept fragile.
+	const introspect = detectSqlnestIntrospect(input.source);
+	if (introspect?.kind === "schema-events") {
 		const page = await fetchChecksumHistory(
 			input.connectionId,
 			input.teamSlug ?? null,
-			// v1 : les stages SNQL (where/pick/sort/limit) ne sont pas encore
-			// poussés vers l'API — la table système renvoie les 50 derniers
-			// events bruts. Un utilisateur qui a besoin de filtrer peut ajouter
-			// un stage supplémentaire côté DS, à défaut d'un vrai lower.
+			// Matérialisation client-side des stages SNQL : les postOps
+			// (where/pick/sort/limit) sont appliqués sur les rows retournées
+			// après le fetch. Pushdown vrai (cursor keyset) = v-next.
 			{ limit: 50 }
 		);
 		// Canvas pas encore synchronisé (heartbeat CLI n'a pas capté cette

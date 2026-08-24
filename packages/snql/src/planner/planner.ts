@@ -12,6 +12,11 @@ import type {
 import { linearize, requiredCapability } from "../ir/plan";
 import type { Span } from "../lexer/token";
 import type { Capabilities } from "./capabilities";
+import {
+	INTROSPECT_ERROR_CODES,
+	introspectHintFor,
+	isIntrospectSupported
+} from "./introspect/support";
 
 /**
  * Opérateur de compensation : à appliquer dans le runtime SNQL, au-dessus du
@@ -675,18 +680,28 @@ function assertSavepointBodyAnalyzable(
 }
 
 /**
- * refuse `list tables` / `describe …` / etc. si l'engine cible
- * n'a pas la capability `introspect`. Message actionable pointant les
- * alternatives (raw commands côté power user).
+ * refuse `list <kind>` / `describe …` si l'engine cible n'a pas ce kind. Deux
+ * niveaux : (1) capability `introspect` absente = l'adapter ne connaît AUCUN
+ * kind ; (2) capability présente mais matrice `INTROSPECT_SUPPORT` refuse ce
+ * kind sur cet engine. Message + hint actionable.
  */
 export function assertIntrospectSupported(
 	plan: import("../ir/plan").IntrospectPlan,
 	capabilities: Capabilities
 ): void {
-	if (capabilities.supports.has("introspect")) return;
+	if (!capabilities.supports.has("introspect")) {
+		throw new SnqlError(
+			`'${plan.kind}' non supporté sur '${capabilities.engine}' — capability 'introspect' absente. Utilise \`raw "…"\` (SQL) ou \`raw {…}\` (Mongo) pour les commandes natives.`,
+			"planner_introspect_unsupported"
+		);
+	}
+	if (isIntrospectSupported(plan.kind, capabilities.engine)) return;
+	const hint = introspectHintFor(plan.kind, capabilities.engine);
+	const base = `'${plan.kind}' non supporté sur '${capabilities.engine}'`;
+	const message = hint ? `${base} — ${hint}.` : `${base}.`;
 	throw new SnqlError(
-		`'${plan.kind}' non supporté sur '${capabilities.engine}' — capability 'introspect' absente. Utilise \`raw "…"\` (SQL) ou \`raw {…}\` (Mongo) pour les commandes natives.`,
-		"planner_introspect_unsupported"
+		message,
+		INTROSPECT_ERROR_CODES[plan.kind] as import("./errors/registry").PlannerErrorCode
 	);
 }
 
