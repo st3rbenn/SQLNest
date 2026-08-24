@@ -1,5 +1,11 @@
 import { useMutation } from "@tanstack/react-query";
-import { parse, tokenize } from "@sqlnest/snql";
+import {
+	compensate,
+	lowerIntrospect,
+	parse,
+	type Row,
+	tokenize
+} from "@sqlnest/snql";
 import { fetchChecksumHistory } from "../checksum-history/checksumHistoryClient";
 
 const API_BASE = window.CONTEXT.apiBaseUrl;
@@ -11,11 +17,15 @@ const API_BASE = window.CONTEXT.apiBaseUrl;
  * intercept fragile. Erreur parser propagée comme les autres (les mêmes
  * marqueurs éditeur remontent).
  *
- * Renvoie le kind d'introspection SQLNest à router, ou null pour le flow
- * proxy tunnel normal.
+ * Renvoie le kind d'introspection SQLNest à router + les postOps lowered pour
+ * matérialisation client-side (where/pick/sort/limit sur les rows après
+ * fetch), ou null pour le flow proxy tunnel normal.
  */
 function detectSqlnestIntrospect(source: string):
-	| { readonly kind: "schema-events" }
+	| {
+			readonly kind: "schema-events";
+			readonly postOps: ReturnType<typeof lowerIntrospect>["postOps"];
+	  }
 	| null {
 	try {
 		const stmt = parse(tokenize(source));
@@ -23,7 +33,8 @@ function detectSqlnestIntrospect(source: string):
 			stmt.operation === "introspect" &&
 			stmt.kind === "list-schema-events"
 		) {
-			return { kind: "schema-events" };
+			const plan = lowerIntrospect(stmt);
+			return { kind: "schema-events", postOps: plan.postOps };
 		}
 	} catch {
 		// Erreur parser → laisse le flow normal remonter le vrai message
@@ -162,14 +173,32 @@ export async function runQueryRequest(input: RunQueryInput): Promise<QueryResult
 		const page = await fetchChecksumHistory(
 			input.connectionId,
 			input.teamSlug ?? null,
-			// Matérialisation client-side des stages SNQL : les postOps
-			// (where/pick/sort/limit) sont appliqués sur les rows retournées
-			// après le fetch. Pushdown vrai (cursor keyset) = v-next.
-			{ limit: 50 }
+			// Fetch un batch large (max endpoint) puis matérialisation
+			// client-side des stages SNQL en dessous. Pushdown vrai (cursor
+			// keyset traduit depuis where/limit) = v-next.
+			{ limit: 100 }
 		);
 		// Canvas pas encore synchronisé (heartbeat CLI n'a pas capté cette
 		// connexion) → table vide, cohérent avec "aucun événement". Pas d'erreur.
-		return schemaEventsToQueryResult(page?.entries ?? []);
+		const base = schemaEventsToQueryResult(page?.entries ?? []);
+		if (
+			introspect.postOps === undefined ||
+			introspect.postOps.length === 0
+		) {
+			return base;
+		}
+		// Matérialisation client-side : `where` / `pick` / `sort` / `limit` du
+		// pipeline SNQL appliqués sur les rows retournées via `compensate`
+		// (référence sémantique 3VL du cœur).
+		const compensated = compensate(
+			introspect.postOps,
+			base.rows as readonly Row[]
+		);
+		return {
+			...base,
+			rows: compensated,
+			rowCount: compensated.length
+		};
 	}
 
 	const url = input.teamSlug
