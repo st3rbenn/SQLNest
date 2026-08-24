@@ -1,6 +1,74 @@
 import { useMutation } from "@tanstack/react-query";
+import { fetchChecksumHistory } from "../checksum-history/checksumHistoryClient";
+import { SCHEMA_EVENTS_NAME } from "../checksum-history/schemaEventsCollection";
 
 const API_BASE = window.CONTEXT.apiBaseUrl;
+
+/**
+ * Classification d'une source SNQL vs. la table système `schema_events`.
+ * Basée sur un lexer léger (regex) — les casse-limites (ident quoté, source
+ * multiline, string literal contenant "schema_events") sont acceptables v1
+ * car la fausse positive fait juste échouer la query sur la vraie DB user
+ * avec un message clair "table introuvable" — pas de silent write détourné.
+ */
+export function classifySchemaEventsUsage(source: string): {
+	readonly kind: "none" | "read" | "write";
+} {
+	// Verbes de lecture — cible tout de suite après le verbe.
+	const readMatch = /^\s*(?:find|get)\s+([a-zA-Z_][\w]*)/i.exec(source);
+	if (readMatch && readMatch[1] === SCHEMA_EVENTS_NAME) {
+		return { kind: "read" };
+	}
+	// Verbes d'écriture — target après `into` (add), après verbe (update/remove/edit).
+	const writeVerbs = /^\s*(?:add|create|edit|update|remove|delete)\b/i.test(source);
+	if (writeVerbs) {
+		const targetInto = /\binto\s+([a-zA-Z_][\w]*)/i.exec(source);
+		if (targetInto && targetInto[1] === SCHEMA_EVENTS_NAME) {
+			return { kind: "write" };
+		}
+		const targetFrom = /\bfrom\s+([a-zA-Z_][\w]*)/i.exec(source);
+		if (targetFrom && targetFrom[1] === SCHEMA_EVENTS_NAME) {
+			return { kind: "write" };
+		}
+		const targetDirect =
+			/^\s*(?:update|edit)\s+([a-zA-Z_][\w]*)/i.exec(source);
+		if (targetDirect && targetDirect[1] === SCHEMA_EVENTS_NAME) {
+			return { kind: "write" };
+		}
+	}
+	return { kind: "none" };
+}
+
+/**
+ * Convertit une page d'historique en `QueryResult` compatible avec le rendu
+ * de la console. Les colonnes sont hard-codées (shape stable de la table
+ * système), les rows viennent tel quel de l'API SQLNest.
+ */
+function schemaEventsToQueryResult(
+	entries: ReadonlyArray<{
+		id: string;
+		dbSchemaChecksum: string;
+		dbConnectionId: string | null;
+		seenAt: string;
+	}>
+): QueryResult {
+	return {
+		columns: [
+			{ name: "id", type: "string", nullable: false },
+			{ name: "seen_at", type: "date", nullable: false },
+			{ name: "checksum", type: "string", nullable: false },
+			{ name: "db_connection_id", type: "string", nullable: true }
+		],
+		rows: entries.map((e) => ({
+			id: e.id,
+			seen_at: e.seenAt,
+			checksum: e.dbSchemaChecksum,
+			db_connection_id: e.dbConnectionId
+		})),
+		rowCount: entries.length,
+		written: false
+	};
+}
 
 /**
  * Type SNQL d'une colonne — aligné sur `SnqlType` de
@@ -92,6 +160,33 @@ export interface RunQueryInput {
 }
 
 export async function runQueryRequest(input: RunQueryInput): Promise<QueryResult> {
+	// Table système `schema_events` — interceptée avant l'appel proxy. Les
+	// events vivent dans le backend SQLNest (`canvas_checksum_event`), jamais
+	// dans la DB user, donc l'exécution ne doit JAMAIS descendre au tunnel.
+	const systemUsage = classifySchemaEventsUsage(input.source);
+	if (systemUsage.kind === "write") {
+		throw new SnqlRuntimeError(
+			"Table système 'schema_events' en lecture seule — écriture refusée."
+		);
+	}
+	if (systemUsage.kind === "read") {
+		const page = await fetchChecksumHistory(
+			input.connectionId,
+			input.teamSlug ?? null,
+			// v1 : les stages SNQL (where/pick/sort/limit) ne sont pas encore
+			// poussés vers l'API — la table système renvoie les 50 derniers
+			// events bruts. Un utilisateur qui a besoin de filtrer peut ajouter
+			// un stage supplémentaire côté DS, à défaut d'un vrai lower.
+			{ limit: 50 }
+		);
+		if (page === null) {
+			throw new SnqlRuntimeError(
+				"Canvas introuvable pour cette connexion — impossible de lire schema_events."
+			);
+		}
+		return schemaEventsToQueryResult(page.entries);
+	}
+
 	const url = input.teamSlug
 		? `${API_BASE}/api/teams/${encodeURIComponent(input.teamSlug)}/db-connections/${encodeURIComponent(input.connectionId)}/query`
 		: `${API_BASE}/api/db-connections/${encodeURIComponent(input.connectionId)}/query`;

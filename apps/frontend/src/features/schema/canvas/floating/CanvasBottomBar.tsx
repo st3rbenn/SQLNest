@@ -7,20 +7,14 @@ import { useCanvasActionsCtx, useCanvasUI } from "../CanvasContext";
  * button) + modal de confirmation Auto-layout.
  */
 export function CanvasBottomBar() {
-	const {
-		activeTool,
-		setActiveTool,
-		layoutConfirmOpen,
-		setLayoutConfirmOpen,
-		setHistoryDrawerOpen
-	} = useCanvasUI();
+	const { activeTool, setActiveTool, layoutConfirmOpen, setLayoutConfirmOpen } =
+		useCanvasUI();
 	const { relayoutAll, createConsole } = useCanvasActionsCtx();
 	return (
 		<>
 			<CanvasToolbar
 				onAutoLayout={() => setLayoutConfirmOpen(true)}
 				onCreateConsole={createConsole}
-				onOpenHistory={() => setHistoryDrawerOpen(true)}
 				bottomOffset={0}
 				activeTool={activeTool}
 				onSelectTool={setActiveTool}

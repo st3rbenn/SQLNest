@@ -15,7 +15,6 @@ import "@xyflow/react/dist/style.css";
 import "./canvas-overrides.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useCurrentUser } from "../auth/sessionQuery";
-import { ChecksumHistoryDrawer } from "../checksum-history/ChecksumHistoryDrawer";
 import type { CanvasTool } from "./CanvasToolbar";
 import { CanvasProviders } from "./canvas/CanvasContext";
 import { useResizableDrawer } from "./canvas/DrawerPane";
@@ -48,6 +47,12 @@ import { buildLayout, type LayoutResult } from "./layout";
 import { ConsoleNode, type ConsoleNodeType } from "./nodes/ConsoleNode";
 import type { SchemaModel } from "./schema-model";
 import {
+	SystemSchemaEventsNode,
+	SYSTEM_TABLE_ID,
+	type SystemSchemaEventsNodeType
+} from "../checksum-history/SystemSchemaEventsNode";
+import { useSchemaEventsNode } from "../checksum-history/useSchemaEventsNode";
+import {
 	NODE_WIDTH,
 	nodeHeight,
 	TableNode,
@@ -66,11 +71,16 @@ const INFERRED = "#ffc933";
 const nodeTypes = {
 	table: TableNode,
 	frame: FrameNode,
-	console: ConsoleNode
+	console: ConsoleNode,
+	"system-schema-events": SystemSchemaEventsNode
 };
 const edgeTypes = { fk: InteractiveEdge };
 
-type SchemaNode = TableNodeType | FrameNodeType | ConsoleNodeType;
+type SchemaNode =
+	| TableNodeType
+	| FrameNodeType
+	| ConsoleNodeType
+	| SystemSchemaEventsNodeType;
 
 /** Exportées + queryKey helper — permet à `useNavigateToCanvas` de
  *  prefetch le layout ELK dans le queryClient AVANT de naviguer. Le
@@ -579,9 +589,16 @@ function CanvasInner({
 		]
 	);
 
+	const systemEvents = useSchemaEventsNode(connectionId, teamSlug);
+
 	const displayNodes = useMemo<SchemaNode[]>(
-		() => [...frameNodes, ...displayTableNodes, ...consoleDisplayNodes],
-		[frameNodes, displayTableNodes, consoleDisplayNodes]
+		() => [
+			...frameNodes,
+			...displayTableNodes,
+			...consoleDisplayNodes,
+			systemEvents.node
+		],
+		[frameNodes, displayTableNodes, consoleDisplayNodes, systemEvents.node]
 	);
 
 	// Espace réservé en bas du canvas pour la toolbar flottante — sert au
@@ -597,10 +614,6 @@ function CanvasInner({
 	// plus embêtante qu'utile (le drawer revient à sa position par défaut
 	// à chaque rechargement, plus prévisible que "ce qu'il était avant").
 	const [leftDrawerVisible, setLeftDrawerVisible] = useState(false);
-
-	// Drawer bas checksum history — audit trail des events de schéma vus par
-	// le canvas. Ouvert on-demand depuis la toolbar, ferme à ESC / clic outside.
-	const [historyDrawerOpen, setHistoryDrawerOpen] = useState(false);
 
 	// Largeur du drawer — resizable via le handle droit. State + handlers
 	// encapsulés dans `useResizableDrawer` (persistance localStorage,
@@ -814,8 +827,6 @@ function CanvasInner({
 			consoleGap: CONSOLE_GAP,
 			layoutConfirmOpen,
 			setLayoutConfirmOpen,
-			historyDrawerOpen,
-			setHistoryDrawerOpen,
 			selectedTables,
 			clearSelection,
 			hoveredTableName,
@@ -831,8 +842,6 @@ function CanvasInner({
 			leftPadding,
 			layoutConfirmOpen,
 			setLayoutConfirmOpen,
-			historyDrawerOpen,
-			setHistoryDrawerOpen,
 			selectedTables,
 			clearSelection,
 			hoveredTableName
@@ -1021,6 +1030,9 @@ function CanvasInner({
 					) {
 						consoleNodes.updatePosition(node.id, node.position);
 					}
+					if (node.id === SYSTEM_TABLE_ID) {
+						systemEvents.onPositionChange(node.position);
+					}
 				}}
 				onNodesDelete={(deleted) => {
 					// RF fire ce callback quand le user press Backspace/Delete
@@ -1095,12 +1107,6 @@ function CanvasInner({
 				<CanvasBottomBar />
 				<CanvasLeftPanel />
 				<CanvasOverlays />
-				<ChecksumHistoryDrawer
-					opened={historyDrawerOpen}
-					onClose={() => setHistoryDrawerOpen(false)}
-					connectionId={connectionId}
-					teamSlug={teamSlug}
-				/>
 			</CanvasProviders>
 		</div>
 	);

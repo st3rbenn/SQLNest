@@ -8,7 +8,6 @@ import {
 	IconArrowsShuffle,
 	IconDeviceFloppy,
 	IconDownload,
-	IconHistory,
 	IconMessage,
 	IconMoon,
 	IconPointer,
@@ -41,7 +40,6 @@ interface Props {
 	readonly onSelectTool: (tool: CanvasTool) => void;
 	/** T5 : crée un node console SNQL au centre du viewport courant. */
 	readonly onCreateConsole?: () => void;
-	readonly onOpenHistory?: () => void;
 }
 
 const ICON = { size: 18, stroke: 1.8 } as const;
@@ -52,8 +50,7 @@ export function CanvasToolbar({
 	bottomOffset = 0,
 	activeTool,
 	onSelectTool,
-	onCreateConsole,
-	onOpenHistory
+	onCreateConsole
 }: Props) {
 	// Le tool « comment » reste local — pas d'implémentation côté canvas
 	// donc pas la peine de le remonter. Basculer sur select/frame quitte
@@ -116,15 +113,6 @@ export function CanvasToolbar({
 					}}
 				>
 					<IconArrowsShuffle {...ICON} />
-				</ToolbarButton>
-				<ToolbarButton
-					label="Historique du schéma"
-					onClick={() => {
-						if (onOpenHistory) onOpenHistory();
-						else notImplemented("Historique");
-					}}
-				>
-					<IconHistory {...ICON} />
 				</ToolbarButton>
 				<ToolbarButton
 					label="IA (bientôt)"
