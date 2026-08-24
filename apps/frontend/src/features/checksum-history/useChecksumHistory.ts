@@ -13,10 +13,13 @@ export function useChecksumHistory(
 ) {
 	return useInfiniteQuery({
 		queryKey: ["checksum-history", teamSlug, connectionId],
-		enabled: connectionId !== null && options.enabled !== false,
+		enabled:
+			connectionId !== null && teamSlug !== null && options.enabled !== false,
 		initialPageParam: undefined as string | undefined,
 		queryFn: ({ pageParam }) => {
-			if (connectionId === null) throw new Error("connectionId required");
+			if (connectionId === null || teamSlug === null) {
+				throw new Error("connectionId+teamSlug required");
+			}
 			return fetchChecksumHistory(connectionId, teamSlug, {
 				...(pageParam !== undefined ? { cursor: pageParam } : {}),
 				limit: 50

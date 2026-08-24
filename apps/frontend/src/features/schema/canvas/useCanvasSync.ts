@@ -74,8 +74,7 @@ export interface CanvasSyncReplaceAll {
 export interface UseCanvasSyncOptions extends CanvasSources {
 	readonly connectionId: string;
 	readonly replaceAll: CanvasSyncReplaceAll;
-	/** Team courante — si présente, utilise les URLs team-scoped ; sinon
-	 *  fallback URLs legacy (transitionnel). */
+	/** Team courante — null hors context team (tests) : le hook gate le fetch. */
 	readonly teamSlug?: string | null;
 }
 
@@ -116,7 +115,9 @@ interface PendingPush {
 export function useCanvasSync(opts: UseCanvasSyncOptions): UseCanvasSyncReturn {
 	const { data: session } = useCurrentUser();
 	const user = session?.user ?? null;
-	const enabled = user !== null && opts.connectionId.length > 0;
+	const teamSlug = opts.teamSlug ?? null;
+	const enabled =
+		user !== null && opts.connectionId.length > 0 && teamSlug !== null;
 	const queryClient = useQueryClient();
 
 	const [syncStatus, setSyncStatus] = useState<SyncStatus>("idle");
@@ -174,10 +175,9 @@ export function useCanvasSync(opts: UseCanvasSyncOptions): UseCanvasSyncReturn {
 	// `staleTime: Infinity` + `retry: false` : on ne veut PAS que RQ refetch
 	// après le mount. Un refetch → hydratation refire → replaceAll écrase
 	// les gestes user depuis le mount → chaos. L'hydratation est one-shot.
-	const teamSlug = opts.teamSlug ?? null;
 	const query = useQuery({
 		queryKey: ["canvas-state", teamSlug, opts.connectionId],
-		queryFn: () => fetchCanvasState(opts.connectionId, teamSlug),
+		queryFn: () => fetchCanvasState(opts.connectionId, teamSlug as string),
 		enabled,
 		staleTime: Number.POSITIVE_INFINITY,
 		gcTime: Number.POSITIVE_INFINITY,
@@ -347,7 +347,7 @@ export function useCanvasSync(opts: UseCanvasSyncOptions): UseCanvasSyncReturn {
 				const result = await putCanvasState(
 					pending.connectionId,
 					payload,
-					teamSlug
+					teamSlug as string
 				);
 				// Baseline mise à jour APRÈS confirmation du serveur : si un autre
 				// change arrive entre-temps, le comparateur du push effect verra
@@ -371,7 +371,7 @@ export function useCanvasSync(opts: UseCanvasSyncOptions): UseCanvasSyncReturn {
 				setSyncStatus("error");
 			}
 		},
-		[queryClient]
+		[queryClient, teamSlug]
 	);
 	const doPushRef = useRef(doPush);
 	doPushRef.current = doPush;
@@ -440,14 +440,15 @@ export function useCanvasSync(opts: UseCanvasSyncOptions): UseCanvasSyncReturn {
 				debounceTimeoutRef.current = null;
 			}
 			pendingPushRef.current = null;
+			// Flush au beforeunload ne part pas si pas de team : le hook est
+			// gated en amont, aucun push n'a jamais été armé.
+			if (teamSlug === null) return;
 			try {
 				const body = JSON.stringify({
 					connectionId: pending.connectionId,
 					payload: JSON.parse(pending.serialized) as Record<string, unknown>
 				});
-				const url = teamSlug
-					? `${window.CONTEXT.apiBaseUrl}/api/teams/${encodeURIComponent(teamSlug)}/canvas-state`
-					: `${window.CONTEXT.apiBaseUrl}/api/canvas-state`;
+				const url = `${window.CONTEXT.apiBaseUrl}/api/teams/${encodeURIComponent(teamSlug)}/canvas-state`;
 
 				if (body.length < KEEPALIVE_MAX_BODY_BYTES) {
 					// `keepalive:true` = la request continue même si le document

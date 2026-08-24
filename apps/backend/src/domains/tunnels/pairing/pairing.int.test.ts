@@ -9,7 +9,6 @@
  * Portée :
  *   - `POST /pairings`                     (create)
  *   - `GET  /pairings/:code/status`        (status)
- *   - `POST /pairings/:code/approve`       (approve, auth requise + CSRF)
  *   - `POST /authenticate`                 (finalise, verify Ed25519)
  *
  * Le test dédié au rate-limit vit dans `pairing-rate-limit.int.test.ts`
@@ -35,14 +34,15 @@ import {
 	formatPairingCode,
 	hashSha256Hex
 } from "../../../domains/tunnels/pairing/crypto";
-import { getCanvasState } from "../../canvas-state/get";
-import { putCanvasState } from "../../canvas-state/put";
+import teamsTunnelsRoute from "../../../routes/api/teams/tunnels";
 import tunnelsRoute from "../../../routes/api/tunnels/root";
 import {
 	createTestApp,
 	ensureTeamForUser,
 	truncateTunnelsAndAuth
 } from "../../../utils/testapp";
+import { getCanvasState } from "../../canvas-state/get";
+import { putCanvasState } from "../../canvas-state/put";
 
 // ─── .env RACINE (identique aux autres int tests) ────────────────────
 const rootEnv = resolve(
@@ -156,6 +156,7 @@ describe.skipIf(!DATABASE_URL)("/api/tunnels — device flow", () => {
 	beforeAll(async () => {
 		app = createTestApp({ withAuth: true });
 		await app.register(tunnelsRoute, { prefix: "/api/tunnels" });
+		await app.register(teamsTunnelsRoute, { prefix: "/api/teams" });
 		await app.ready();
 	});
 
@@ -439,240 +440,6 @@ describe.skipIf(!DATABASE_URL)("/api/tunnels — device flow", () => {
 			});
 			expect(res.statusCode).toBe(200);
 			expect((res.json() as { status: string }).status).toBe("pending");
-		});
-	});
-
-	// ═══════════════════════════════════════════════════════════════
-	// POST /pairings/:code/approve
-	// ═══════════════════════════════════════════════════════════════
-	describe("POST /pairings/:code/approve", () => {
-		test("sans cookie → 401", async () => {
-			const res = await app.inject({
-				method: "POST",
-				url: "/api/tunnels/pairings/ABCD-1234/approve",
-				headers: {
-					"content-type": "application/json",
-					origin: "http://localhost:3000"
-				},
-				payload: { deviceName: "test" }
-			});
-			expect(res.statusCode).toBe(401);
-		});
-
-		test("sans Origin → 403", async () => {
-			const { cookie } = await createTestUser(
-				app,
-				"carol@example.com",
-				"carol-carol-carol-carol"
-			);
-			const res = await app.inject({
-				method: "POST",
-				url: "/api/tunnels/pairings/ABCD-1234/approve",
-				headers: { cookie, "content-type": "application/json" },
-				payload: { deviceName: "test" }
-			});
-			expect(res.statusCode).toBe(403);
-		});
-
-		test("Origin hostile → 403", async () => {
-			const { cookie } = await createTestUser(
-				app,
-				"dave@example.com",
-				"dave-dave-dave-dave-dave"
-			);
-			const res = await app.inject({
-				method: "POST",
-				url: "/api/tunnels/pairings/ABCD-1234/approve",
-				headers: {
-					cookie,
-					"content-type": "application/json",
-					origin: "https://evil.com"
-				},
-				payload: { deviceName: "test" }
-			});
-			expect(res.statusCode).toBe(403);
-		});
-
-		test("code inexistant → 404", async () => {
-			const { cookie } = await createTestUser(
-				app,
-				"erin@example.com",
-				"erin-erin-erin-erin-erin"
-			);
-			const res = await app.inject({
-				method: "POST",
-				url: "/api/tunnels/pairings/ABCD-1234/approve",
-				headers: {
-					cookie,
-					"content-type": "application/json",
-					origin: "http://localhost:3000"
-				},
-				payload: { deviceName: "erin-mac" }
-			});
-			expect(res.statusCode).toBe(404);
-		});
-
-		test("code expiré → 410", async () => {
-			const { cookie } = await createTestUser(
-				app,
-				"frank@example.com",
-				"frank-frank-frank-frank"
-			);
-			const { pubkeyHex } = makeCliKeypair();
-			await seedPairing(app, {
-				code: "EXPX0001",
-				cliPubkeyEd25519: pubkeyHex,
-				expiresAt: new Date(Date.now() - 60_000)
-			});
-			const res = await app.inject({
-				method: "POST",
-				url: "/api/tunnels/pairings/EXPX-0001/approve",
-				headers: {
-					cookie,
-					"content-type": "application/json",
-					origin: "http://localhost:3000"
-				},
-				payload: { deviceName: "test" }
-			});
-			expect(res.statusCode).toBe(410);
-		});
-
-		test("code déjà consumed → 410", async () => {
-			const { cookie, userId } = await createTestUser(
-				app,
-				"gina@example.com",
-				"gina-gina-gina-gina-gina"
-			);
-			const { pubkeyHex } = makeCliKeypair();
-			await seedPairing(app, {
-				code: "DEAD0001",
-				cliPubkeyEd25519: pubkeyHex,
-				userId,
-				deviceName: "gina-mac",
-				approvedAt: new Date(),
-				consumedAt: new Date()
-			});
-			const res = await app.inject({
-				method: "POST",
-				url: "/api/tunnels/pairings/DEAD-0001/approve",
-				headers: {
-					cookie,
-					"content-type": "application/json",
-					origin: "http://localhost:3000"
-				},
-				payload: { deviceName: "gina-mac-2" }
-			});
-			expect(res.statusCode).toBe(410);
-		});
-
-		test("nom conflit avec db_connection existante → 409", async () => {
-			const { cookie, userId } = await createTestUser(
-				app,
-				"heidi@example.com",
-				"heidi-heidi-heidi-heidi"
-			);
-			// Seed une db_connection existante avec le nom.
-			const heidiTeamId = await ensureTeamForUser(app, userId);
-			await app.db.insert(schema.dbConnection).values({
-				userId,
-				teamId: heidiTeamId,
-				name: "prod",
-				cliFingerprint: "0".repeat(64),
-				engine: "postgres"
-			});
-			const { pubkeyHex } = makeCliKeypair();
-			await seedPairing(app, {
-				code: "NEWX0001",
-				cliPubkeyEd25519: pubkeyHex
-			});
-			const res = await app.inject({
-				method: "POST",
-				url: "/api/tunnels/pairings/NEWX-0001/approve",
-				headers: {
-					cookie,
-					"content-type": "application/json",
-					origin: "http://localhost:3000"
-				},
-				payload: { deviceName: "prod" }
-			});
-			expect(res.statusCode).toBe(409);
-		});
-
-		test("happy path → 200 + row updated", async () => {
-			const { cookie, userId } = await createTestUser(
-				app,
-				"ivan@example.com",
-				"ivan-ivan-ivan-ivan-ivan"
-			);
-			const { pubkeyHex } = makeCliKeypair();
-			await seedPairing(app, {
-				code: "PRDX0001",
-				cliPubkeyEd25519: pubkeyHex
-			});
-			const res = await app.inject({
-				method: "POST",
-				url: "/api/tunnels/pairings/PRDX-0001/approve",
-				headers: {
-					cookie,
-					"content-type": "application/json",
-					origin: "http://localhost:3000"
-				},
-				payload: { deviceName: "ivan-mac" }
-			});
-			expect(res.statusCode).toBe(200);
-			expect(res.json()).toEqual({ ok: true });
-
-			const rows = await app.db
-				.select()
-				.from(schema.tunnelPairing)
-				.where(eq(schema.tunnelPairing.code, "PRDX0001"));
-			expect(rows.length).toBe(1);
-			// biome-ignore lint/style/noNonNullAssertion: length checked
-			expect(rows[0]!.userId).toBe(userId);
-			// biome-ignore lint/style/noNonNullAssertion: length checked
-			expect(rows[0]!.deviceName).toBe("ivan-mac");
-			// biome-ignore lint/style/noNonNullAssertion: length checked
-			expect(rows[0]!.approvedAt).toBeInstanceOf(Date);
-		});
-
-		test("re-approve idempotent — 2ème approve override deviceName", async () => {
-			const { cookie, userId } = await createTestUser(
-				app,
-				"judy@example.com",
-				"judy-judy-judy-judy-judy"
-			);
-			const { pubkeyHex } = makeCliKeypair();
-			await seedPairing(app, {
-				code: "RTRY0001",
-				cliPubkeyEd25519: pubkeyHex
-			});
-			const commonHeaders = {
-				cookie,
-				"content-type": "application/json",
-				origin: "http://localhost:3000"
-			};
-			await app.inject({
-				method: "POST",
-				url: "/api/tunnels/pairings/RTRY-0001/approve",
-				headers: commonHeaders,
-				payload: { deviceName: "first" }
-			});
-			const second = await app.inject({
-				method: "POST",
-				url: "/api/tunnels/pairings/RTRY-0001/approve",
-				headers: commonHeaders,
-				payload: { deviceName: "second" }
-			});
-			expect(second.statusCode).toBe(200);
-			const rows = await app.db
-				.select()
-				.from(schema.tunnelPairing)
-				.where(eq(schema.tunnelPairing.code, "RTRY0001"));
-			// biome-ignore lint/style/noNonNullAssertion: length checked
-			expect(rows[0]!.deviceName).toBe("second");
-			// Le userId n'a pas changé.
-			// biome-ignore lint/style/noNonNullAssertion: length checked
-			expect(rows[0]!.userId).toBe(userId);
 		});
 	});
 
@@ -991,8 +758,7 @@ describe.skipIf(!DATABASE_URL)("/api/tunnels — device flow", () => {
 				}
 			});
 			expect(macAuth.statusCode).toBe(200);
-			const macConn = (macAuth.json() as { connectionId: string })
-				.connectionId;
+			const macConn = (macAuth.json() as { connectionId: string }).connectionId;
 
 			// PUT canvas depuis Mac via domain fn.
 			await putCanvasState(app.db, userId, macConn, {
@@ -1019,8 +785,7 @@ describe.skipIf(!DATABASE_URL)("/api/tunnels — device flow", () => {
 				}
 			});
 			expect(winAuth.statusCode).toBe(200);
-			const winConn = (winAuth.json() as { connectionId: string })
-				.connectionId;
+			const winConn = (winAuth.json() as { connectionId: string }).connectionId;
 			// MÊME db_connection (pas de dupliqué).
 			expect(winConn).toBe(macConn);
 
@@ -1028,9 +793,9 @@ describe.skipIf(!DATABASE_URL)("/api/tunnels — device flow", () => {
 			// par Mac (canvas partagé).
 			const winCanvas = await getCanvasState(app.db, userId, winConn);
 			expect(winCanvas).not.toBeNull();
-			expect(
-				(winCanvas!.payload as { positions?: unknown }).positions
-			).toEqual({ artist: { x: 100, y: 200 } });
+			expect((winCanvas!.payload as { positions?: unknown }).positions).toEqual(
+				{ artist: { x: 100, y: 200 } }
+			);
 
 			// 1 seule db_connection ET 1 seul canvas_state en DB.
 			const connCount = await app.db
@@ -1120,9 +885,7 @@ describe.skipIf(!DATABASE_URL)("/api/tunnels — device flow", () => {
 			const events = await app.db
 				.select({ checksum: schema.canvasChecksumEvent.dbSchemaChecksum })
 				.from(schema.canvasChecksumEvent)
-				.where(
-					eq(schema.canvasChecksumEvent.canvasStateId, canvasRow[0]!.id)
-				);
+				.where(eq(schema.canvasChecksumEvent.canvasStateId, canvasRow[0]!.id));
 			expect(events.length).toBe(2);
 			expect(events.map((e) => e.checksum).sort()).toEqual([cs1, cs2]);
 		});
@@ -1285,11 +1048,19 @@ describe.skipIf(!DATABASE_URL)("/api/tunnels — device flow", () => {
 	describe("cycle E2E", () => {
 		test("create → status pending → approve → status approved → authenticate → status consumed", async () => {
 			const { pubkeyHex, sign } = makeCliKeypair();
-			const { cookie } = await createTestUser(
+			const { cookie, userId } = await createTestUser(
 				app,
 				"peter@example.com",
 				"peter-peter-peter-peter"
 			);
+			const teamRow = (
+				await app.db
+					.select({ slug: schema.team.slug })
+					.from(schema.team)
+					.where(eq(schema.team.ownerId, userId))
+			)[0];
+			if (!teamRow?.slug) throw new Error("no personal team for user");
+			const teamSlug = teamRow.slug;
 
 			// 1. Create pairing.
 			const create = await app.inject({
@@ -1311,7 +1082,7 @@ describe.skipIf(!DATABASE_URL)("/api/tunnels — device flow", () => {
 			// 3. Approve (user connecté).
 			const approve = await app.inject({
 				method: "POST",
-				url: `/api/tunnels/pairings/${code}/approve`,
+				url: `/api/teams/${teamSlug}/tunnels/pairings/${code}/approve`,
 				headers: {
 					cookie,
 					"content-type": "application/json",

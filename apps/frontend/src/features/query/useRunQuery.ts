@@ -1,4 +1,3 @@
-import { useMutation } from "@tanstack/react-query";
 import {
 	compensate,
 	lowerIntrospect,
@@ -6,6 +5,7 @@ import {
 	type Row,
 	tokenize
 } from "@sqlnest/snql";
+import { useMutation } from "@tanstack/react-query";
 import { fetchChecksumHistory } from "../checksum-history/checksumHistoryClient";
 
 const API_BASE = window.CONTEXT.apiBaseUrl;
@@ -21,18 +21,13 @@ const API_BASE = window.CONTEXT.apiBaseUrl;
  * matérialisation client-side (where/pick/sort/limit sur les rows après
  * fetch), ou null pour le flow proxy tunnel normal.
  */
-function detectSqlnestIntrospect(source: string):
-	| {
-			readonly kind: "schema-events";
-			readonly postOps: ReturnType<typeof lowerIntrospect>["postOps"];
-	  }
-	| null {
+function detectSqlnestIntrospect(source: string): {
+	readonly kind: "schema-events";
+	readonly postOps: ReturnType<typeof lowerIntrospect>["postOps"];
+} | null {
 	try {
 		const stmt = parse(tokenize(source));
-		if (
-			stmt.operation === "introspect" &&
-			stmt.kind === "list-schema-events"
-		) {
+		if (stmt.operation === "introspect" && stmt.kind === "list-schema-events") {
 			const plan = lowerIntrospect(stmt);
 			return { kind: "schema-events", postOps: plan.postOps };
 		}
@@ -158,21 +153,29 @@ export class SnqlRuntimeError extends Error {
 export interface RunQueryInput {
 	readonly connectionId: string;
 	readonly source: string;
-	/** Si présent, appelle la route team-scoped ; sinon la route legacy
-	 *  (transitionnel). */
+	/** Team courante — obligatoire pour les kinds système (schema_events)
+	 *  qui appellent une route team-scopée. Optionnel pour le proxy tunnel
+	 *  générique (fallback legacy user-scoped). */
 	readonly teamSlug?: string | null;
 }
 
-export async function runQueryRequest(input: RunQueryInput): Promise<QueryResult> {
+export async function runQueryRequest(
+	input: RunQueryInput
+): Promise<QueryResult> {
 	// Table système SQLNest — routée backend interne. Le tunnel proxy ne
 	// touche jamais la DB user pour ces kinds. Aujourd'hui : `list
 	// schema_events` (audit trail `canvas_checksum_event`). Détection via
 	// parser SNQL — plus de regex intercept fragile.
 	const introspect = detectSqlnestIntrospect(input.source);
 	if (introspect?.kind === "schema-events") {
+		if (input.teamSlug == null) {
+			throw new SnqlRuntimeError(
+				"list schema_events nécessite un context team — recharge le canvas"
+			);
+		}
 		const page = await fetchChecksumHistory(
 			input.connectionId,
-			input.teamSlug ?? null,
+			input.teamSlug,
 			// Fetch un batch large (max endpoint) puis matérialisation
 			// client-side des stages SNQL en dessous. Pushdown vrai (cursor
 			// keyset traduit depuis where/limit) = v-next.
@@ -181,10 +184,7 @@ export async function runQueryRequest(input: RunQueryInput): Promise<QueryResult
 		// Canvas pas encore synchronisé (heartbeat CLI n'a pas capté cette
 		// connexion) → table vide, cohérent avec "aucun événement". Pas d'erreur.
 		const base = schemaEventsToQueryResult(page?.entries ?? []);
-		if (
-			introspect.postOps === undefined ||
-			introspect.postOps.length === 0
-		) {
+		if (introspect.postOps === undefined || introspect.postOps.length === 0) {
 			return base;
 		}
 		// Matérialisation client-side : `where` / `pick` / `sort` / `limit` du

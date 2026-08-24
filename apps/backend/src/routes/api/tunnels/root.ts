@@ -1,19 +1,12 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { parseBearerHeader } from "../../../domains/api-tokens/crypto";
-import {
-	assertAuthenticated,
-	requireUser
-} from "../../../domains/auth/require";
 import { authenticateTunnelWithToken } from "../../../domains/tunnels/authenticate-token";
 import { heartbeatTunnel } from "../../../domains/tunnels/heartbeat";
-import { approvePairing } from "../../../domains/tunnels/pairing/approve";
 import { authenticatePairing } from "../../../domains/tunnels/pairing/authenticate";
 import { createPairing } from "../../../domains/tunnels/pairing/create";
 import { normalizePairingCode } from "../../../domains/tunnels/pairing/crypto";
 import {
-	ApprovePairingBody,
-	ApprovePairingResponse,
 	AuthenticateBody,
 	AuthenticateResponse,
 	AuthenticateTokenBody,
@@ -29,8 +22,7 @@ import {
 import { getPairingStatus } from "../../../domains/tunnels/pairing/status";
 
 /**
- * Routes `/api/tunnels/*` — device flow CLI ↔ compte user + finalisation
- * (device flow OU mode CI Bearer).
+ * Routes `/api/tunnels/*` — endpoints publics du device flow CLI.
  *
  * ─── Endpoints ─────────────────────────────────────────────────────────
  *   POST /api/tunnels/pairings                       (public, RL 10/min/IP)
@@ -39,46 +31,31 @@ import { getPairingStatus } from "../../../domains/tunnels/pairing/status";
  *   GET  /api/tunnels/pairings/:code/status          (public, RL 30/min/IP)
  *     → { status, deviceName }
  *
- *   POST /api/tunnels/pairings/:code/approve         (auth cookie + CSRF)
- *     → { ok: true }
- *
  *   POST /api/tunnels/authenticate                    (public, RL 10/min IP+code)
  *     → { token, tunnelId, connectionId, expiresAt }
  *
  *   POST /api/tunnels/authenticate-token              (Bearer sn_..., RL 10/min/IP)
  *     → { token, tunnelId, connectionId, expiresAt }
  *
+ *   POST /api/tunnels/heartbeat                       (Bearer tn_..., RL 60/min/IP)
+ *     → { ok: true }
+ *
+ * L'approve vit sous `/api/teams/:slug/tunnels/pairings/:code/approve`
+ * (`routes/api/teams/tunnels.ts`) — le browser transporte le team-slug,
+ * le CLI n'a pas besoin d'approuver.
+ *
  * ─── Rate-limiting ────────────────────────────────────────────────────
  * - `POST /pairings` : cap 10/min par IP — protège contre l'énumération
  *   massive de codes (un attaquant qui inonderait la DB de pairings).
  * - `GET /pairings/:code/status` : cap 30/min par IP — plus large parce
  *   que le CLI poll toutes les 2s (30/min = 1 par 2s).
- * - `POST /pairings/:code/approve` : global 100/min (rate-limit global
- *   suffit — le user est déjà authentifié, c'est une action volontaire).
  * - `POST /authenticate` : cap 10/min par (IP, code) — protège contre
  *   le brute-force de signature. Combiné avec l'entropie 40 bits du
  *   code + TTL 5 min, ça rend l'attaque non-viable.
  * - `POST /authenticate-token` : cap 10/min par IP. Le token clair a
  *   256 bits d'entropie — brute-force impossible en pratique ; le
  *   rate-limit protège contre le DoS de la DB.
- *
- * ─── CSRF sur /approve ────────────────────────────────────────────────
- * Même pattern que canvas-state : check du header `Origin` contre
- * `TRUSTED_ORIGINS`. Le cookie de session est SameSite=Lax ; la
- * validation Origin est une ceinture sur bretelle rendue explicite.
  */
-
-// ─── CSRF helper (dupliqué de canvas-state — même pattern, factorisable
-// plus tard si un 3e domain en a besoin). ────────────────────────────
-function isTrustedOrigin(origin: string | undefined): boolean {
-	if (typeof origin !== "string" || origin.length === 0) return false;
-	const trustedRaw = process.env.TRUSTED_ORIGINS ?? "http://localhost:3000";
-	const trusted = trustedRaw
-		.split(",")
-		.map((s) => s.trim())
-		.filter(Boolean);
-	return trusted.includes(origin);
-}
 
 const RATE_LIMIT_CREATE = {
 	max: 10,
@@ -202,70 +179,6 @@ export default function tunnelsRoute(fastify: FastifyInstance) {
 				canonical,
 				userId !== undefined ? { userId } : {}
 			);
-		}
-	);
-
-	// ─── POST /pairings/:code/approve ─────────────────────────────────
-	instance.post(
-		"/pairings/:code/approve",
-		{
-			preHandler: [requireUser],
-			schema: {
-				params: PairingCodeParams,
-				body: ApprovePairingBody,
-				response: {
-					200: ApprovePairingResponse,
-					400: TunnelsErrorResponse,
-					403: TunnelsErrorResponse,
-					404: TunnelsErrorResponse,
-					409: TunnelsErrorResponse,
-					410: TunnelsErrorResponse
-				}
-			}
-		},
-		async (request, reply) => {
-			assertAuthenticated(request);
-
-			if (!isTrustedOrigin(request.headers.origin)) {
-				request.log.warn(
-					{ origin: request.headers.origin, path: request.url },
-					"tunnels /approve refusé — Origin non autorisé"
-				);
-				return reply.code(403).send({ message: "Origin non autorisé" });
-			}
-
-			const canonical = normalizePairingCode(request.params.code);
-			if (canonical == null) {
-				return reply.code(400).send({ message: "Code invalide" });
-			}
-
-			const result = await approvePairing(
-				fastify.db,
-				canonical,
-				request.user.id,
-				request.body.deviceName
-			);
-
-			if (result.ok) return { ok: true as const };
-
-			switch (result.reason) {
-				case "not_found":
-					return reply.code(404).send({ message: "Code introuvable" });
-				case "expired":
-					return reply.code(410).send({ message: "Code expiré" });
-				case "already_used":
-					return reply.code(410).send({ message: "Code déjà utilisé" });
-				case "name_conflict":
-					return reply.code(409).send({
-						message:
-							"Une connexion avec ce nom existe déjà. Choisis un autre nom ou révoque la connexion existante."
-					});
-				case "name_required":
-					return reply.code(400).send({
-						message:
-							"Le nom de la connexion est requis pour un nouveau pairing."
-					});
-			}
 		}
 	);
 

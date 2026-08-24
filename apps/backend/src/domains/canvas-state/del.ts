@@ -14,9 +14,8 @@ export interface DelCanvasResult {
  * Utilise `resolveCanvasByConnection` pour trouver le canvas (via
  * fp/checksum/legacy). ATTENTION : le canvas moderne est partagé entre
  * plusieurs db_connections d'un user (Mac + Windows sur la même DB). Le
- * DELETE via `/api/canvas-state/:connectionId` supprime le canvas partagé,
- * pas juste la liaison — décision UX : l'user reset son layout, pas juste
- * pour un device. Documenter côté UI.
+ * DELETE supprime le canvas partagé, pas juste la liaison — décision UX :
+ * l'user reset son layout, pas juste pour un device. Documenter côté UI.
  *
  * Idempotent (retourne `deleted: false` si aucun canvas).
  */

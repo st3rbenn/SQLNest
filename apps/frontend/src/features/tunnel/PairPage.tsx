@@ -193,13 +193,11 @@ interface StatusResponse {
  *  D3 pré-approve (mitigation stale fp post `docker down/up`). Retourne
  *  `null` sur non-OK / abort — le caller gère le cas fallback. */
 async function fetchPairingStatus(
-	teamSlug: string | null,
+	teamSlug: string,
 	canonicalCode: string,
 	signal?: AbortSignal
 ): Promise<StatusResponse | null> {
-	const url = teamSlug
-		? `${apiBase()}/api/teams/${encodeURIComponent(teamSlug)}/tunnels/pairings/${encodeURIComponent(canonicalCode)}/status`
-		: `${apiBase()}/api/tunnels/pairings/${encodeURIComponent(canonicalCode)}/status`;
+	const url = `${apiBase()}/api/teams/${encodeURIComponent(teamSlug)}/tunnels/pairings/${encodeURIComponent(canonicalCode)}/status`;
 	const res = await fetch(url, { credentials: "include", signal });
 	if (!res.ok) return null;
 	return (await res.json()) as StatusResponse;
@@ -224,7 +222,7 @@ export function PairPage() {
 
 	useEffect(() => {
 		const normalized = normalizeCode(code);
-		if (normalized.length !== CODE_CANONICAL_LEN) {
+		if (normalized.length !== CODE_CANONICAL_LEN || teamSlug === null) {
 			setExistingConnection(null);
 			return;
 		}
@@ -259,6 +257,13 @@ export function PairPage() {
 			setError("Nom requis");
 			return;
 		}
+		if (teamSlug === null) {
+			// La route /pair racine redirect vers /team/:slug/pair — arriver
+			// ici sans team veut dire que le redirect n'a pas fini de résoudre.
+			// Empêcher un approve orphelin.
+			setError("Team non résolue — recharge la page");
+			return;
+		}
 		setIsSubmitting(true);
 		try {
 			// Refetch la session AU SUBMIT — la page peut être restée
@@ -266,13 +271,10 @@ export function PairPage() {
 			// attache un CLI à une db_connection team-scoped, effet
 			// persistant ; on ne doit pas approuver avec un cookie mort).
 			// Sur `data === null`, redirect vers login avec `?redirect=`
-			// pointant sur ce même /pair — même contrat que le guard
-			// `_authenticated.tsx:34-38`. LoginPage relit ce paramètre.
+			// pointant sur ce même /pair — LoginPage relit ce paramètre.
 			const sessionData = await queryClient.fetchQuery(sessionQueryOptions());
 			if (sessionData === null) {
-				const returnPath = teamSlug
-					? `/team/${encodeURIComponent(teamSlug)}/pair?code=${encodeURIComponent(normalized)}`
-					: `/pair?code=${encodeURIComponent(normalized)}`;
+				const returnPath = `/team/${encodeURIComponent(teamSlug)}/pair?code=${encodeURIComponent(normalized)}`;
 				void navigate({ to: "/login", search: { redirect: returnPath } });
 				return;
 			}
@@ -295,9 +297,7 @@ export function PairPage() {
 			}
 			const body =
 				existingConnection == null ? { deviceName: deviceName.trim() } : {};
-			const approveUrl = teamSlug
-				? `${apiBase()}/api/teams/${encodeURIComponent(teamSlug)}/tunnels/pairings/${encodeURIComponent(normalized)}/approve`
-				: `${apiBase()}/api/tunnels/pairings/${encodeURIComponent(normalized)}/approve`;
+			const approveUrl = `${apiBase()}/api/teams/${encodeURIComponent(teamSlug)}/tunnels/pairings/${encodeURIComponent(normalized)}/approve`;
 			const res = await fetch(approveUrl, {
 				method: "POST",
 				credentials: "include",

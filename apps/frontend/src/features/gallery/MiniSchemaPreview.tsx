@@ -15,6 +15,7 @@ import {
 } from "../schema/layout";
 import type { SchemaModel } from "../schema/schema-model";
 import { useSchema } from "../schema/useSchema";
+import { useCurrentTeamSlug } from "../teams/useCurrentTeam";
 
 /**
  * Preview miniature d'un schéma pour les cards de la gallery.
@@ -215,11 +216,15 @@ function OfflineBadge(): React.ReactNode {
 
 /** Fetch canvas_state (positions user) — partage le MÊME cache TanStack
  *  que useCanvasSync du canvas. Un PUT depuis le canvas met à jour ce
- *  cache via setQueryData → la preview re-render aussi. */
+ *  cache via setQueryData → la preview re-render aussi. Gated sur la
+ *  team courante : hors context team (aucun cas au runtime prod), on
+ *  fallback layout ELK au lieu d'un fetch orphelin. */
 function useUserCanvasState(connectionId: string) {
+	const teamSlug = useCurrentTeamSlug();
 	return useQuery<CanvasStateGetResponse | null>({
-		queryKey: ["canvas-state", connectionId],
-		queryFn: () => fetchCanvasState(connectionId),
+		queryKey: ["canvas-state", teamSlug, connectionId],
+		queryFn: () => fetchCanvasState(connectionId, teamSlug as string),
+		enabled: teamSlug !== null,
 		staleTime: Number.POSITIVE_INFINITY,
 		gcTime: Number.POSITIVE_INFINITY,
 		retry: false,

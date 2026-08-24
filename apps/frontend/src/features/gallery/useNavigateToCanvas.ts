@@ -24,11 +24,13 @@ export async function prefetchCanvasData(
 	teamSlug: string | null,
 	connectionId: string
 ): Promise<void> {
-	void queryClient.prefetchQuery({
-		queryKey: ["canvas-state", teamSlug, connectionId],
-		queryFn: () => fetchCanvasState(connectionId, teamSlug),
-		staleTime: Number.POSITIVE_INFINITY
-	});
+	if (teamSlug !== null) {
+		void queryClient.prefetchQuery({
+			queryKey: ["canvas-state", teamSlug, connectionId],
+			queryFn: () => fetchCanvasState(connectionId, teamSlug),
+			staleTime: Number.POSITIVE_INFINITY
+		});
+	}
 	const schema = await queryClient.ensureQueryData({
 		queryKey: ["schema", teamSlug, connectionId],
 		queryFn: () => fetchSchema(connectionId, teamSlug),

@@ -68,6 +68,10 @@ function makeOpts(
 		frames: [] as readonly Frame[],
 		hidden: new Set<string>(),
 		edgeAnchors: {} as AnchorMap,
+		// teamSlug non-null exercise le path prod (route team-scoped).
+		// Les tests qui veulent exercer le no-op « hors context team »
+		// override explicitement via overrides.
+		teamSlug: "test-team",
 		replaceAll: {
 			positions: vi.fn(),
 			sizes: vi.fn(),
@@ -235,7 +239,9 @@ describe("useCanvasSync", () => {
 			expect(fetchMock).toHaveBeenCalledTimes(2);
 		});
 		const putCall = fetchMock.mock.calls[1];
-		expect(putCall?.[0]).toBe("http://api.test/api/canvas-state");
+		expect(putCall?.[0]).toBe(
+			"http://api.test/api/teams/test-team/canvas-state"
+		);
 		expect(putCall?.[1]?.method).toBe("PUT");
 		const body = JSON.parse((putCall?.[1]?.body as string) ?? "{}") as {
 			readonly signature: string;
@@ -351,7 +357,9 @@ describe("useCanvasSync", () => {
 
 		expect(fetchMock).toHaveBeenCalledTimes(2);
 		const flushCall = fetchMock.mock.calls[1];
-		expect(flushCall?.[0]).toBe("http://api.test/api/canvas-state");
+		expect(flushCall?.[0]).toBe(
+			"http://api.test/api/teams/test-team/canvas-state"
+		);
 		expect(flushCall?.[1]?.method).toBe("PUT");
 		expect(flushCall?.[1]?.keepalive).toBe(true);
 		const flushBody = JSON.parse((flushCall?.[1]?.body as string) ?? "{}") as {
