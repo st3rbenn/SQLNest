@@ -27,6 +27,7 @@
  */
 
 import {
+	assertIntrospectSupported,
 	capabilitiesFor,
 	lower,
 	lowerIntrospect,
@@ -193,9 +194,29 @@ function validateStatement(
 		case "transaction":
 			lowerTransaction(statement, schema);
 			return;
-		case "introspect":
-			lowerIntrospect(statement, schema);
+		case "introspect": {
+			const plan = lowerIntrospect(statement, schema);
+			// Refus par kind au planner (matrice INTROSPECT_SUPPORT) — sinon
+			// `list databases` sur PG n'a de squiggly qu'au run. Le hint
+			// actionable (« utilise 'list schemas' ») remonte tel quel.
+			// L'assert ne porte pas de span (refus engine-level), on ré-injecte
+			// celui du statement pour que le live diag ancre la squiggly.
+			const caps = capabilitiesFor(engine);
+			if (caps === undefined) return;
+			try {
+				assertIntrospectSupported(plan, caps);
+			} catch (err) {
+				if (err instanceof SnqlError) {
+					throw new SnqlError(
+						err.message,
+						err.code as Parameters<typeof SnqlError>[1],
+						statement.span
+					);
+				}
+				throw err;
+			}
 			return;
+		}
 		case "raw":
 			lowerRaw(statement);
 			return;
