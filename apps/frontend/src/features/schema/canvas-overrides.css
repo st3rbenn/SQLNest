@@ -119,18 +119,6 @@
 }
 
 /*
- * Attribution React Flow — masquée visuellement, PAS désactivée côté RF
- * (`proOptions.hideAttribution: false`). Le node reste émis dans le DOM,
- * seule la présentation est nulle. Choix commercial en attendant l'arbitrage
- * final : souscription React Flow Pro ($169/mois) OU migration vers un
- * engine MIT sans clause d'attribution (@antv/x6, react-diagrams). Réévaluer
- * AVANT toute mise en vente publique — cf. Obsidian « Roadmap / Licence RF ».
- */
-.react-flow__attribution {
-	display: none !important;
-}
-
-/*
  * NodeResizer console — hidden by default, revealed on hover OR when the
  * node is `.selected` (single-click focus — l'user attend que les
  * handles restent visibles tant qu'il "travaille" sur ce node). En

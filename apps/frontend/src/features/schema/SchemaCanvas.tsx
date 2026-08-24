@@ -1065,7 +1065,7 @@ function CanvasInner({
 				minZoom={0.02}
 				maxZoom={1.75}
 				onlyRenderVisibleElements
-				proOptions={{ hideAttribution: false }}
+				proOptions={{ hideAttribution: true }}
 			>
 				{/* Grille de points fine sur bg #1E1E1E — couleur pilotée par
 				 * `--sqlnest-canvas-dot` (rgba blanc à 8% pour rester discrète).
