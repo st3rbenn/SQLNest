@@ -62,6 +62,7 @@ function makeOpts(
 	overrides: Partial<UseCanvasSyncOptions> = {}
 ): UseCanvasSyncOptions {
 	return {
+		connectionId: "test-conn-id",
 		signature: "postgres:orders,users",
 		positions: {} as PositionsMap,
 		sizes: {} as SizesMap,
@@ -244,7 +245,7 @@ describe("useCanvasSync", () => {
 		);
 		expect(putCall?.[1]?.method).toBe("PUT");
 		const body = JSON.parse((putCall?.[1]?.body as string) ?? "{}") as {
-			readonly signature: string;
+			readonly connectionId: string;
 			readonly payload: {
 				readonly positions: Record<
 					string,
@@ -252,7 +253,7 @@ describe("useCanvasSync", () => {
 				>;
 			};
 		};
-		expect(body.signature).toBe("postgres:orders,users");
+		expect(body.connectionId).toBe("test-conn-id");
 		expect(body.payload.positions).toEqual({ users: { x: 100, y: 200 } });
 
 		await waitFor(() => {
@@ -470,10 +471,10 @@ describe("useCanvasSync", () => {
 		expect(body.payload.positions).toEqual({ users: { x: 5, y: 5 } });
 	});
 
-	// ─── Capture signature au moment de l'armement (MED) ──────────────
-	it("changement de signature pendant debounce → PUT part avec l'ancienne signature + ancien payload", async () => {
+	// ─── Capture connectionId au moment de l'armement ─────────────────
+	it("changement de connectionId pendant debounce → PUT part avec l'ancien connectionId + ancien payload", async () => {
 		// Mock URL-based : GET renvoie 404, PUT renvoie 200. Ordre de fire
-		// entre GET nouvelle-sig et PUT ancienne-sig indéterministe → on
+		// entre GET nouvelle-conn et PUT ancienne-conn indéterministe → on
 		// route par méthode/query pour éviter les race d'ordre.
 		fetchMock.mockImplementation((_url: string, init?: RequestInit) => {
 			if ((init?.method ?? "GET") === "GET") {
@@ -484,21 +485,21 @@ describe("useCanvasSync", () => {
 			);
 		});
 
-		const initialOpts = makeOpts({ signature: "postgres:orders,users" });
+		const initialOpts = makeOpts({ connectionId: "conn-a" });
 		const { rerender } = renderHook(
 			(props: UseCanvasSyncOptions) => useCanvasSync(props),
 			{ wrapper: makeWrapper(), initialProps: initialOpts }
 		);
 
-		// GET initial orders,users settle → hydraté avec baseline vide.
+		// GET initial conn-a settle → hydraté avec baseline vide.
 		await waitFor(() => {
 			expect(fetchMock).toHaveBeenCalledTimes(1);
 		});
 		await new Promise((r) => setTimeout(r, 0));
 
-		// Change position → arme un débounce pour la signature ORIGINALE.
-		// On n'attend PAS l'expiration du débounce (2 s) : l'effet
-		// signature-change ci-dessous flush immédiatement le pending.
+		// Change position → arme un débounce pour la connectionId ORIGINALE.
+		// On n'attend PAS l'expiration du débounce : l'effet connectionId-change
+		// ci-dessous flush immédiatement le pending.
 		rerender({
 			...initialOpts,
 			positions: { users: { x: 77, y: 77 } }
@@ -506,17 +507,17 @@ describe("useCanvasSync", () => {
 		// Laisse React commit l'effet debounce (setTimeout armé + pendingPushRef).
 		await new Promise((r) => setTimeout(r, 0));
 
-		// Change de schéma (nouvelle signature) AVANT que le débounce ne fire.
-		// L'effet signature-change doit flush le pending push IMMÉDIATEMENT
-		// avec l'ANCIENNE signature (celle capturée à l'armement), puis reset
-		// l'état pour la nouvelle sig.
+		// Change de connection AVANT que le débounce ne fire. L'effet
+		// connectionId-change flush le pending push IMMÉDIATEMENT avec
+		// l'ANCIEN connectionId (capturé à l'armement), puis reset pour la
+		// nouvelle — le payload appartient au canvas de l'ancienne connection.
 		rerender({
 			...initialOpts,
-			signature: "postgres:products,users",
+			connectionId: "conn-b",
 			positions: { users: { x: 77, y: 77 } }
 		});
 
-		// Le PUT part avec l'ANCIENNE signature.
+		// Le PUT part avec l'ANCIEN connectionId.
 		await waitFor(() => {
 			const putCall = fetchMock.mock.calls.find(
 				(c) => (c[1] as { method?: string } | undefined)?.method === "PUT"
@@ -529,7 +530,7 @@ describe("useCanvasSync", () => {
 		const putBody = JSON.parse(
 			((putCall?.[1] as { body?: string }).body as string) ?? "{}"
 		) as {
-			readonly signature: string;
+			readonly connectionId: string;
 			readonly payload: {
 				readonly positions: Record<
 					string,
@@ -537,7 +538,7 @@ describe("useCanvasSync", () => {
 				>;
 			};
 		};
-		expect(putBody.signature).toBe("postgres:orders,users");
+		expect(putBody.connectionId).toBe("conn-a");
 		expect(putBody.payload.positions).toEqual({ users: { x: 77, y: 77 } });
 	});
 
