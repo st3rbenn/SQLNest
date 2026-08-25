@@ -9,6 +9,7 @@ import { SnqlError } from "../diagnostics";
 import type {
 	AddColumnStmt,
 	AddIndexStmt,
+	CreateEnumStmt,
 	CreateTableStmt,
 	DDLStatement,
 	DropColumnStmt,
@@ -20,6 +21,7 @@ import type { SchemaModel, SnqlType } from "../schema/model";
 import type {
 	AddColumnPlan,
 	AddIndexPlan,
+	CreateEnumPlan,
 	CreateTableField,
 	CreateTablePlan,
 	DdlDefault,
@@ -61,10 +63,47 @@ export function lowerDDL(
 	if (statement.kind === "drop-column") {
 		return lowerDropColumn(statement);
 	}
+	if (statement.kind === "create-enum") {
+		return lowerCreateEnum(statement);
+	}
 	throw new SnqlError(
 		`DDL kind '${(statement as { kind: string }).kind}' non supporté au lower`,
 		"lower_ddl_unsupported_kind"
 	);
+}
+
+/**
+ * Lower `create enum` (ADR-030 Enum/1) : D1 ident regex sur name + tous les
+ * members, refus si doublon (case-sensitive), refus si liste vide.
+ */
+function lowerCreateEnum(stmt: CreateEnumStmt): CreateEnumPlan {
+	assertIdent(stmt.name, "enum name");
+	if (stmt.members.length === 0) {
+		throw new SnqlError(
+			`'create enum ${stmt.name}' attend au moins un member`,
+			"lower_ddl_create_enum_empty",
+			stmt.span
+		);
+	}
+	const seen = new Set<string>();
+	for (const m of stmt.members) {
+		if (seen.has(m)) {
+			throw new SnqlError(
+				`Member '${m}' dupliqué dans 'create enum ${stmt.name}'`,
+				"lower_ddl_enum_member_duplicate",
+				stmt.span
+			);
+		}
+		seen.add(m);
+	}
+	return {
+		op: "ddl",
+		kind: "create-enum",
+		name: stmt.name,
+		members: stmt.members,
+		ifNotExists: stmt.ifNotExists ?? false,
+		...(stmt.span !== undefined ? { span: stmt.span } : {})
+	};
 }
 
 function lowerDropTable(stmt: DropTableStmt): DropTablePlan {

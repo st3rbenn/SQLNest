@@ -52,6 +52,14 @@ export interface Field {
 	 * Absent quand `type !== "enum"`.
 	 */
 	readonly enumValues?: readonly string[];
+	/**
+	 * Nom de l'enum type si la colonne est typée par un enum nommé
+	 * (ADR-030). Permet la résolution `type: role_type` dans le parser,
+	 * l'autocomplete du cast `"user" as role_type` et le round-trip PG
+	 * catalog (`pg_type.typname`). Absent quand la colonne a un type enum
+	 * inline (rare) ou que ce n'est pas un enum.
+	 */
+	readonly enumTypeName?: string;
 }
 
 export interface Collection {
@@ -76,9 +84,29 @@ export interface Relation {
 	readonly confidence: number;
 }
 
+/**
+ * Type énum nommé, scope per-schema (ADR-030). Réutilisable entre plusieurs
+ * colonnes/tables. Introspection PG lit `pg_type` + `pg_enum` ; Mongo/KV
+ * lisent leur metadata `_snql_enums`.
+ */
+export interface EnumTypeDef {
+	readonly name: string;
+	readonly members: readonly string[];
+	readonly source: SchemaSource;
+}
+
 /** Structure complète d'une base pour un moteur donné. */
 export interface SchemaModel {
 	readonly engine: string;
 	readonly collections: readonly Collection[];
 	readonly relations: readonly Relation[];
+	readonly enums?: readonly EnumTypeDef[];
+}
+
+/** Retourne le `EnumTypeDef` du schema par nom, ou `undefined` si absent. */
+export function getEnum(
+	schema: SchemaModel,
+	name: string
+): EnumTypeDef | undefined {
+	return schema.enums?.find((e) => e.name === name);
 }

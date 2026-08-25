@@ -14,6 +14,7 @@ import { SnqlError } from "../diagnostics";
 import type {
 	AddColumnPlan,
 	AddIndexPlan,
+	CreateEnumPlan,
 	CreateTablePlan,
 	DDLPlan,
 	DropColumnPlan,
@@ -24,6 +25,7 @@ import type { SnqlType } from "../schema/model";
 import type {
 	KvDDLAddColumnQuery,
 	KvDDLAddIndexQuery,
+	KvDDLCreateEnumQuery,
 	KvDDLCreateTableQuery,
 	KvDDLDropColumnQuery,
 	KvDDLDropIndexQuery,
@@ -68,10 +70,27 @@ export function mapKvDDL(plan: DDLPlan): KvDDLQuery {
 	if (plan.kind === "drop-index") return renderKvDropIndex(plan);
 	if (plan.kind === "drop-table") return renderKvDropTable(plan);
 	if (plan.kind === "drop-column") return renderKvDropColumn(plan);
+	if (plan.kind === "create-enum") return renderKvCreateEnum(plan);
 	throw new SnqlError(
 		`DDL kind '${(plan as { kind: string }).kind}' non supporté par le codegen KV V1`,
 		"codegen_ddl_unsupported"
 	);
+}
+
+/**
+ * Rend `create enum NAME { "m1", "m2" }` en `KvDDLCreateEnumQuery` (ADR-030
+ * Enum/1). L'adapter runtime `HSET _snql_enums <name> <json members>` — shape
+ * shipped V1, wiring adapter Redis-protocol V-next (miroir statut KV DDL/1-4).
+ */
+function renderKvCreateEnum(plan: CreateEnumPlan): KvDDLCreateEnumQuery {
+	return {
+		engine: "kv",
+		kind: "kv-ddl",
+		operation: "create-enum",
+		name: plan.name,
+		members: plan.members,
+		ifNotExists: plan.ifNotExists
+	};
 }
 
 /**

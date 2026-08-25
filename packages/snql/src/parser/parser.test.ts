@@ -238,6 +238,75 @@ describe("create table DDL (ADR-029)", () => {
 	});
 });
 
+// ─── Enum/1 — create enum (ADR-030) ───────────────────────────────
+describe("create enum DDL (ADR-030 Enum/1)", () => {
+	it("parse minimal create enum", () => {
+		expect(stmt('create enum role_type { "user", "admin" }')).toMatchObject({
+			operation: "ddl",
+			kind: "create-enum",
+			name: "role_type",
+			members: ["user", "admin"]
+		});
+	});
+
+	it("parse create enum single member", () => {
+		expect(stmt('create enum status { "active" }')).toMatchObject({
+			kind: "create-enum",
+			name: "status",
+			members: ["active"]
+		});
+	});
+
+	it("parse if not exists", () => {
+		expect(
+			stmt('create enum if not exists role_type { "user" }')
+		).toMatchObject({
+			kind: "create-enum",
+			ifNotExists: true,
+			members: ["user"]
+		});
+	});
+
+	it("préserve `create { … } into t` insert alias (dispatch enum non-invasif)", () => {
+		expect(stmt('create { enum: "x" } into t')).toMatchObject({
+			operation: "insert",
+			verb: "create"
+		});
+	});
+
+	it("refuse body vide", () => {
+		expect(() => stmt("create enum role_type {}")).toThrow(
+			/attend au moins un member/
+		);
+	});
+
+	it("refuse member non-string (ident)", () => {
+		expect(() => stmt("create enum role_type { user }")).toThrow(
+			/doit être un string literal/
+		);
+	});
+
+	it("refuse member non-string (number)", () => {
+		expect(() => stmt("create enum n { 1, 2 }")).toThrow(
+			/doit être un string literal/
+		);
+	});
+
+	it("Q1 tranché — casing libre (PascalCase OK)", () => {
+		expect(stmt('create enum Role { "user" }')).toMatchObject({
+			kind: "create-enum",
+			name: "Role"
+		});
+	});
+
+	it("Q1 tranché — casing libre (snake_case OK)", () => {
+		expect(stmt('create enum user_role { "u" }')).toMatchObject({
+			kind: "create-enum",
+			name: "user_role"
+		});
+	});
+});
+
 // ─── DDL/2 — add column (ADR-029) ───────────────────────────────────
 describe("add column DDL (ADR-029 DDL/2)", () => {
 	it("parse minimal add column", () => {

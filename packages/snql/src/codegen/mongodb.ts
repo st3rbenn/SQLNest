@@ -5,6 +5,7 @@ import type {
 	AddIndexPlan,
 	CastTarget,
 	CompareOp,
+	CreateEnumPlan,
 	CreateTablePlan,
 	DDLPlan,
 	DropColumnPlan,
@@ -29,6 +30,7 @@ import type {
 	MongoDDLAddColumnQuery,
 	MongoDDLAddIndexQuery,
 	MongoDDLCreateCollectionQuery,
+	MongoDDLCreateEnumQuery,
 	MongoDDLDropCollectionQuery,
 	MongoDDLDropColumnQuery,
 	MongoDDLDropIndexQuery,
@@ -206,6 +208,7 @@ export const mongoMapper: Mapper = {
 		if (plan.kind === "drop-index") return renderMongoDropIndex(plan);
 		if (plan.kind === "drop-table") return renderMongoDropCollection(plan);
 		if (plan.kind === "drop-column") return renderMongoDropColumn(plan);
+		if (plan.kind === "create-enum") return renderMongoCreateEnum(plan);
 		throw new SnqlError(
 			`DDL kind '${(plan as { kind: string }).kind}' non supporté par le codegen Mongo V1`,
 			"codegen_ddl_unsupported"
@@ -2956,6 +2959,25 @@ function renderMongoDropColumn(
 		collection: plan.target,
 		column: plan.column,
 		ifExists: plan.ifExists
+	};
+}
+
+/**
+ * Rend `create enum NAME { "m1", "m2" }` en `MongoDDLCreateEnumQuery`
+ * (ADR-030 Enum/1). Compensation runtime : l'adapter `insertOne` dans
+ * collection `_snql_enums` avec `{_id: name, members}`. Idempotent par `_id`
+ * — l'adapter catch DuplicateKey 11000 si `ifNotExists=true` et silence.
+ * Le validator `enum: [...]` sera propagé aux $jsonSchema des tables
+ * utilisatrices via Enum/2.
+ */
+function renderMongoCreateEnum(plan: CreateEnumPlan): MongoDDLCreateEnumQuery {
+	return {
+		engine: "mongodb",
+		kind: "mongo-ddl",
+		operation: "create-enum",
+		name: plan.name,
+		members: plan.members,
+		ifNotExists: plan.ifNotExists
 	};
 }
 

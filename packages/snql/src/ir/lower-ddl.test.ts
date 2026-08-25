@@ -6,6 +6,7 @@ import { lowerDDL } from "./lower-ddl";
 import type {
 	AddColumnPlan,
 	AddIndexPlan,
+	CreateEnumPlan,
 	CreateTablePlan,
 	DropColumnPlan,
 	DropIndexPlan,
@@ -429,5 +430,50 @@ describe("lower DDL — drop table / drop column (ADR-029 DDL/4)", () => {
 		expect(
 			lowerDropCol("drop column age from users if exists")
 		).toMatchObject({ ifExists: true });
+	});
+});
+
+function lowerCreateEnum(source: string): CreateEnumPlan {
+	const parsed = parse(tokenize(source)) as DDLStatement;
+	const plan = lowerDDL(parsed);
+	if (plan.kind !== "create-enum") {
+		throw new Error(`expected create-enum plan, got ${plan.kind}`);
+	}
+	return plan;
+}
+
+describe("lower DDL — create enum (ADR-030 Enum/1)", () => {
+	it("abaisse create enum minimal", () => {
+		expect(lowerCreateEnum('create enum role_type { "user", "admin" }')).toMatchObject({
+			op: "ddl",
+			kind: "create-enum",
+			name: "role_type",
+			members: ["user", "admin"],
+			ifNotExists: false
+		});
+	});
+
+	it("propage if not exists (D3)", () => {
+		expect(
+			lowerCreateEnum('create enum if not exists status { "a" }')
+		).toMatchObject({ ifNotExists: true });
+	});
+
+	it("D1 : refuse enum name commençant par un chiffre", () => {
+		expect(() => lowerCreateEnum('create enum 1bad { "a" }')).toThrow();
+	});
+
+	it("refuse member dupliqué", () => {
+		expect(() =>
+			lowerCreateEnum('create enum role_type { "user", "user" }')
+		).toThrow(/dupliqué/);
+	});
+
+	it("accepte 63 chars pile pour enum name (D1 boundary)", () => {
+		const long = `x${"y".repeat(62)}`;
+		expect(long.length).toBe(63);
+		expect(lowerCreateEnum(`create enum ${long} { "a" }`)).toMatchObject({
+			name: long
+		});
 	});
 });

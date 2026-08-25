@@ -330,13 +330,31 @@ export interface MongoDDLDropColumnQuery {
 	readonly ifExists: boolean;
 }
 
+/**
+ * Enum/1 create-enum sur Mongo. Compensation runtime : `insertOne` dans
+ * collection metadata `_snql_enums` avec `{_id: name, members}` — idempotent
+ * par `_id`. Si `ifNotExists=true`, l'adapter catch DuplicateKey (11000) et
+ * silence. Le validator `enum: [...]` sera propagé aux $jsonSchema des
+ * tables utilisatrices via Enum/2 (resolve `type: role_type` dans body
+ * create-table + adaptation validator).
+ */
+export interface MongoDDLCreateEnumQuery {
+	readonly engine: string;
+	readonly kind: "mongo-ddl";
+	readonly operation: "create-enum";
+	readonly name: string;
+	readonly members: readonly string[];
+	readonly ifNotExists: boolean;
+}
+
 export type MongoDDLQuery =
 	| MongoDDLCreateCollectionQuery
 	| MongoDDLAddColumnQuery
 	| MongoDDLAddIndexQuery
 	| MongoDDLDropIndexQuery
 	| MongoDDLDropCollectionQuery
-	| MongoDDLDropColumnQuery;
+	| MongoDDLDropColumnQuery
+	| MongoDDLCreateEnumQuery;
 
 /**
  * DDL Tier-2 sur KV (ADR-029). Entièrement compensé — KV est schema-less,
@@ -471,13 +489,30 @@ export interface KvDDLDropColumnQuery {
 	readonly ifExists: boolean;
 }
 
+/**
+ * Enum/1 create-enum sur KV. Compensation runtime : `HSET _snql_enums <name>
+ * <json members>`. Idempotent par HSET (écrase la valeur si présente, ou pose
+ * la 1re fois). `ifNotExists=true` check `HEXISTS _snql_enums <name>` avant
+ * pour silence. Middleware write refuse valeur hors set aux tables
+ * utilisatrices (Enum/2).
+ */
+export interface KvDDLCreateEnumQuery {
+	readonly engine: string;
+	readonly kind: "kv-ddl";
+	readonly operation: "create-enum";
+	readonly name: string;
+	readonly members: readonly string[];
+	readonly ifNotExists: boolean;
+}
+
 export type KvDDLQuery =
 	| KvDDLCreateTableQuery
 	| KvDDLAddColumnQuery
 	| KvDDLAddIndexQuery
 	| KvDDLDropIndexQuery
 	| KvDDLDropTableQuery
-	| KvDDLDropColumnQuery;
+	| KvDDLDropColumnQuery
+	| KvDDLCreateEnumQuery;
 
 /**
  * native shape pour un `raw {...}` Mongo — command native

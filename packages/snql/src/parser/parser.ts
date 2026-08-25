@@ -6,6 +6,7 @@ import type {
 	AddColumnStmt,
 	AddIndexStmt,
 	Assignment,
+	CreateEnumStmt,
 	CreateTableStmt,
 	DDLFieldDef,
 	DeleteStatement,
@@ -125,6 +126,16 @@ function parseStatement(cursor: TokenCursor): Statement {
 		peekKeyword(cursor, "table", 1)
 	) {
 		return parseCreateTable(cursor);
+	}
+	// Enum/1 (ADR-030) : `create enum <name> { "m1", "m2" }`. `enum` reste
+	// soft-ident (préserve `add {enum: "x"} into t`). Peek 1 ahead pour
+	// discriminer avec `create {...} into T` (verb insert alias).
+	if (
+		first.kind === "verb" &&
+		first.value.toLowerCase() === "create" &&
+		peekIdent(cursor, "enum", 1)
+	) {
+		return parseCreateEnum(cursor);
 	}
 	// DDL/2 : `add column <col> <type> ... into <table>` — dispatch avant le
 	// check verb `add` (alias insert). `column` reste soft-ident (une col
@@ -2237,6 +2248,95 @@ function parseDropTable(cursor: TokenCursor): DropTableStmt {
  * validator sans property + updateMany `$unset` batched). KV compensation
  * (SCAN + HDEL par row batched, wiring V-next).
  */
+/**
+ * `create enum <name> [if not exists] { "m1", "m2", ... }` (ADR-030 Enum/1).
+ * Body = string literals uniquement, séparés par comma. Non-empty. Dedup
+ * member = refus au lower. Le nom de l'enum est libre (Q1 tranché — pas de
+ * convention imposée).
+ */
+function parseCreateEnum(cursor: TokenCursor): CreateEnumStmt {
+	const createTok = cursor.next(); // `create` verb
+	cursor.next(); // `enum` ident (déjà peeked au dispatch)
+
+	let ifNotExists = false;
+	if (peekIdent(cursor, "if")) {
+		cursor.next();
+		if (!peekKeyword(cursor, "not")) {
+			throw new SnqlError(
+				"'if' doit être suivi de 'not exists' dans un create enum",
+				"parse_ddl_expected_not_after_if",
+				cursor.peek().span
+			);
+		}
+		cursor.next();
+		if (!peekKeyword(cursor, "exists")) {
+			throw new SnqlError(
+				"'if not' doit être suivi de 'exists' dans un create enum",
+				"parse_ddl_expected_exists_after_not",
+				cursor.peek().span
+			);
+		}
+		cursor.next();
+		ifNotExists = true;
+	}
+
+	const nameTok = cursor.expect(
+		"ident",
+		"un nom d'enum après 'create enum'"
+	);
+
+	cursor.expect("lbrace", "'{' pour ouvrir le body du create enum");
+
+	const members: string[] = [];
+	if (cursor.peek().kind !== "rbrace") {
+		for (;;) {
+			const memberTok = cursor.peek();
+			if (memberTok.kind !== "string") {
+				throw new SnqlError(
+					"Un member d'enum doit être un string literal — ex : \"user\"",
+					"parse_ddl_enum_member_not_string",
+					memberTok.span
+				);
+			}
+			cursor.next();
+			members.push(memberTok.value);
+			const nxt = cursor.peek();
+			if (nxt.kind === "comma") {
+				cursor.next();
+				continue;
+			}
+			if (nxt.kind === "rbrace") break;
+			throw new SnqlError(
+				"',' ou '}' attendu",
+				"parse_ddl_enum_body_close_expected",
+				nxt.span
+			);
+		}
+	}
+
+	const closeBrace = cursor.expect(
+		"rbrace",
+		"'}' pour fermer le body du create enum"
+	);
+
+	if (members.length === 0) {
+		throw new SnqlError(
+			"'create enum' attend au moins un member",
+			"parse_ddl_create_enum_empty_body",
+			{ start: createTok.span.start, end: closeBrace.span.end }
+		);
+	}
+
+	return {
+		operation: "ddl",
+		kind: "create-enum",
+		name: nameTok.value,
+		members,
+		...(ifNotExists ? { ifNotExists } : {}),
+		span: { start: createTok.span.start, end: closeBrace.span.end }
+	};
+}
+
 function parseDropColumn(cursor: TokenCursor): DropColumnStmt {
 	const dropTok = cursor.next(); // `drop` soft-ident
 	cursor.next(); // `column` soft-ident (déjà peeked)

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type {
 	AddColumnPlan,
 	AddIndexPlan,
+	CreateEnumPlan,
 	CreateTablePlan,
 	DropColumnPlan,
 	DropIndexPlan,
@@ -10,6 +11,7 @@ import type {
 import type {
 	KvDDLAddColumnQuery,
 	KvDDLAddIndexQuery,
+	KvDDLCreateEnumQuery,
 	KvDDLCreateTableQuery,
 	KvDDLDropColumnQuery,
 	KvDDLDropIndexQuery,
@@ -479,6 +481,47 @@ describe("codegen KV — drop table / drop column (ADR-029 DDL/4.5)", () => {
 				column: "age",
 				ifExists: true
 			}).ifExists
+		).toBe(true);
+	});
+});
+
+describe("codegen KV — create enum (ADR-030 Enum/1.7)", () => {
+	function mapEnum(plan: CreateEnumPlan): KvDDLCreateEnumQuery {
+		const q = mapKvDDL(plan);
+		if (q.operation !== "create-enum") {
+			throw new Error(`attendu create-enum, got ${q.operation}`);
+		}
+		return q;
+	}
+
+	it("émet shape create-enum avec name + members", () => {
+		expect(
+			mapEnum({
+				op: "ddl",
+				kind: "create-enum",
+				name: "role_type",
+				members: ["user", "admin"],
+				ifNotExists: false
+			})
+		).toEqual({
+			engine: "kv",
+			kind: "kv-ddl",
+			operation: "create-enum",
+			name: "role_type",
+			members: ["user", "admin"],
+			ifNotExists: false
+		});
+	});
+
+	it("propage ifNotExists (adapter HEXISTS pre-check)", () => {
+		expect(
+			mapEnum({
+				op: "ddl",
+				kind: "create-enum",
+				name: "s",
+				members: ["a"],
+				ifNotExists: true
+			}).ifNotExists
 		).toBe(true);
 	});
 });

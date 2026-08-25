@@ -645,9 +645,24 @@ export interface DropColumnPlan {
 }
 
 /**
- * Union des plans DDL. DDL/1 = `create-table`, DDL/2 = `add-column`,
- * DDL/3 = `add-index` | `add-unique-index` | `drop-index`, DDL/4 =
- * `drop-table` | `drop-column`. Corpus Tier-2 complet.
+ * `create enum` lowered (ADR-030 Enum/1). Le lower a validé D1 ident regex
+ * sur `name` + tous les `members`, dédupliqué les members (refus si doublon)
+ * et vérifié que la liste est non-empty. Cross-engine : PG `CREATE TYPE AS
+ * ENUM(…)` natif, Mongo `_snql_enums` metadata + validator propagé aux
+ * $jsonSchema, KV `HSET _snql_enums` + middleware write.
+ */
+export interface CreateEnumPlan {
+	readonly op: "ddl";
+	readonly kind: "create-enum";
+	readonly name: string;
+	readonly members: readonly string[];
+	readonly ifNotExists: boolean;
+	readonly span?: Span;
+}
+
+/**
+ * Union des plans DDL. Corpus Tier-2 (create-table/add-column/[add-|drop-]
+ * index/drop-table/drop-column) + Enum Tier-3+ (create-enum).
  */
 export type DDLPlan =
 	| CreateTablePlan
@@ -655,7 +670,8 @@ export type DDLPlan =
 	| AddIndexPlan
 	| DropIndexPlan
 	| DropTablePlan
-	| DropColumnPlan;
+	| DropColumnPlan
+	| CreateEnumPlan;
 
 /** Un plan complet : lecture, mutation, transaction, introspect, raw, let/CTE ou DDL Tier-2. */
 export type Plan =

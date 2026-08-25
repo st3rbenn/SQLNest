@@ -382,3 +382,48 @@ describe("codegen PG — drop table / drop column (ADR-029 DDL/4.3)", () => {
 		);
 	});
 });
+
+describe("codegen PG — create enum (ADR-030 Enum/1.5)", () => {
+	it("émet CREATE TYPE ... AS ENUM inline", () => {
+		const q = mapDDL({
+			op: "ddl",
+			kind: "create-enum",
+			name: "role_type",
+			members: ["user", "admin"],
+			ifNotExists: false
+		});
+		if (q.kind !== "sql") throw new Error("attendu sql");
+		expect(q.text).toBe(
+			`CREATE TYPE "role_type" AS ENUM ('user', 'admin')`
+		);
+		expect(q.params).toEqual([]);
+	});
+
+	it("if not exists → DO $$ EXCEPTION duplicate_object (D3 idempotence)", () => {
+		const q = mapDDL({
+			op: "ddl",
+			kind: "create-enum",
+			name: "status",
+			members: ["active", "archived"],
+			ifNotExists: true
+		});
+		if (q.kind !== "sql") throw new Error("attendu sql");
+		expect(q.text).toBe(
+			`DO $$ BEGIN CREATE TYPE "status" AS ENUM ('active', 'archived'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`
+		);
+	});
+
+	it("escape single-quote dans les members", () => {
+		const q = mapDDL({
+			op: "ddl",
+			kind: "create-enum",
+			name: "quotes",
+			members: ["o'brien", "d'arcy"],
+			ifNotExists: false
+		});
+		if (q.kind !== "sql") throw new Error("attendu sql");
+		expect(q.text).toBe(
+			`CREATE TYPE "quotes" AS ENUM ('o''brien', 'd''arcy')`
+		);
+	});
+});

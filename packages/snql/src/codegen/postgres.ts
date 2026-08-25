@@ -5,6 +5,7 @@ import type {
 	AddIndexPlan,
 	CastTarget,
 	CompareOp,
+	CreateEnumPlan,
 	CreateTablePlan,
 	DDLPlan,
 	DropColumnPlan,
@@ -193,6 +194,7 @@ export const postgresMapper: Mapper = {
 		if (plan.kind === "drop-index") return renderDropIndex(plan);
 		if (plan.kind === "drop-table") return renderDropTable(plan);
 		if (plan.kind === "drop-column") return renderDropColumn(plan);
+		if (plan.kind === "create-enum") return renderCreateEnum(plan);
 		throw new SnqlError(
 			`DDL kind '${(plan as { kind: string }).kind}' non supporté par le codegen Postgres V1`,
 			"codegen_ddl_unsupported"
@@ -1143,6 +1145,30 @@ function renderDropTable(plan: DropTablePlan): NativeQuery {
 function renderDropColumn(plan: DropColumnPlan): NativeQuery {
 	const ifExists = plan.ifExists ? "IF EXISTS " : "";
 	const text = `ALTER TABLE ${quoteIdent(plan.target)} DROP COLUMN ${ifExists}${quoteIdent(plan.column)} RESTRICT`;
+	return {
+		engine: "postgres",
+		kind: "sql",
+		text,
+		params: [],
+		paramSpans: []
+	};
+}
+
+/**
+ * Rend `create enum NAME { "m1", "m2" }` en `CREATE TYPE "NAME" AS ENUM ('m1',
+ * 'm2')` (ADR-030 Enum/1). PG DDL rejette les $N bindés (08P01) — les members
+ * sont inline via `pgInlineDefault`.
+ *
+ * PG n'a pas de `CREATE TYPE IF NOT EXISTS` natif. Idempotence D3 via un
+ * `DO $$` PL/pgSQL qui catch `duplicate_object` (SQLSTATE 42710). Le block
+ * ne peut pas bind de params — cohérent avec inline members.
+ */
+function renderCreateEnum(plan: CreateEnumPlan): NativeQuery {
+	const members = plan.members.map((m) => pgInlineDefault(m)).join(", ");
+	const createStmt = `CREATE TYPE ${quoteIdent(plan.name)} AS ENUM (${members})`;
+	const text = plan.ifNotExists
+		? `DO $$ BEGIN ${createStmt}; EXCEPTION WHEN duplicate_object THEN NULL; END $$`
+		: createStmt;
 	return {
 		engine: "postgres",
 		kind: "sql",

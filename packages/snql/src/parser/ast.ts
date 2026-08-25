@@ -553,7 +553,8 @@ export type DDLKind =
 	| "drop-column"
 	| "add-index"
 	| "add-unique-index"
-	| "drop-index";
+	| "drop-index"
+	| "create-enum";
 
 /**
  * Field d'un `create table` — le body `{ field: type [nullable] [default v] [unique], ... }`
@@ -663,9 +664,25 @@ export interface DropColumnStmt {
 }
 
 /**
- * Union des statements DDL. DDL/1 = `create-table` ; DDL/2 = `add-column` ;
- * DDL/3 = `add-index` | `add-unique-index` | `drop-index` ; DDL/4 =
- * `drop-table` | `drop-column`. Corpus Tier-2 complet.
+ * `create enum <name> { "m1", "m2", ... } [if not exists]` (ADR-030 Enum/1).
+ * Type énum nommé, scope per-schema (Q3 tranché). Members = string literals
+ * uniquement (Q2 D2). Cross-engine : PG `CREATE TYPE AS ENUM` natif, Mongo
+ * `_snql_enums` metadata + validator, KV `HSET _snql_enums` + middleware.
+ * L'inline union `type: string in ("a", "b")` est refusé (Q4 tranché) —
+ * force nommer l'enum.
+ */
+export interface CreateEnumStmt {
+	readonly operation: "ddl";
+	readonly kind: "create-enum";
+	readonly name: string;
+	readonly members: readonly string[];
+	readonly ifNotExists?: boolean;
+	readonly span: Span;
+}
+
+/**
+ * Union des statements DDL. Corpus Tier-2 (create-table/add-column/[add-|
+ * drop-]index/drop-table/drop-column) + Enum Tier-3+ (create-enum).
  */
 export type DDLStatement =
 	| CreateTableStmt
@@ -673,7 +690,8 @@ export type DDLStatement =
 	| AddIndexStmt
 	| DropIndexStmt
 	| DropTableStmt
-	| DropColumnStmt;
+	| DropColumnStmt
+	| CreateEnumStmt;
 
 /** Racine de l'AST : lecture (`Query`), mutation, transaction, introspection, raw, let/CTE ou DDL Tier-2. */
 export type Statement =

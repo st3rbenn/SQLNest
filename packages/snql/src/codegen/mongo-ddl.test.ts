@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type {
 	AddColumnPlan,
 	AddIndexPlan,
+	CreateEnumPlan,
 	CreateTablePlan,
 	DDLPlan,
 	DropColumnPlan,
@@ -12,6 +13,7 @@ import type {
 	MongoDDLAddColumnQuery,
 	MongoDDLAddIndexQuery,
 	MongoDDLCreateCollectionQuery,
+	MongoDDLCreateEnumQuery,
 	MongoDDLDropCollectionQuery,
 	MongoDDLDropColumnQuery,
 	MongoDDLDropIndexQuery
@@ -511,6 +513,48 @@ describe("codegen Mongo — drop table / drop column (ADR-029 DDL/4.4)", () => {
 				column: "age",
 				ifExists: true
 			}).ifExists
+		).toBe(true);
+	});
+});
+
+describe("codegen Mongo — create enum (ADR-030 Enum/1.6)", () => {
+	function mapEnum(plan: CreateEnumPlan): MongoDDLCreateEnumQuery {
+		if (mongoMapper.mapDDL === undefined) throw new Error("mapDDL manquant");
+		const q = mongoMapper.mapDDL(plan);
+		if (q.kind !== "mongo-ddl" || q.operation !== "create-enum") {
+			throw new Error(`attendu mongo-ddl create-enum, got ${q.kind}`);
+		}
+		return q;
+	}
+
+	it("émet shape create-enum avec name + members", () => {
+		expect(
+			mapEnum({
+				op: "ddl",
+				kind: "create-enum",
+				name: "role_type",
+				members: ["user", "admin"],
+				ifNotExists: false
+			})
+		).toEqual({
+			engine: "mongodb",
+			kind: "mongo-ddl",
+			operation: "create-enum",
+			name: "role_type",
+			members: ["user", "admin"],
+			ifNotExists: false
+		});
+	});
+
+	it("propage ifNotExists (adapter catch DuplicateKey 11000)", () => {
+		expect(
+			mapEnum({
+				op: "ddl",
+				kind: "create-enum",
+				name: "status",
+				members: ["a"],
+				ifNotExists: true
+			}).ifNotExists
 		).toBe(true);
 	});
 });
