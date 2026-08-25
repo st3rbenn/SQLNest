@@ -537,7 +537,60 @@ export interface LetStatement {
 	readonly span: Span;
 }
 
-/** Racine de l'AST : lecture (`Query`), mutation, transaction, introspection, raw ou let/CTE. */
+/**
+ * Corpus DDL Tier-2 — voir [[ADR-029 — SNQL Langage Unifié Tier-2 DDL]]. Chaque
+ * kind est une opération atomique modifiant le schéma DB. Discriminated union
+ * par kind. V1 (DDL/1) livre `create-table` cross-engine PG + Mongo + KV ; les
+ * autres kinds seront ajoutés au fil des sprints DDL/2..DDL/4.
+ */
+export type DDLKind =
+	| "create-table"
+	| "drop-table"
+	| "add-column"
+	| "drop-column"
+	| "add-index"
+	| "add-unique-index"
+	| "drop-index";
+
+/**
+ * Field d'un `create table` — le body `{ field: type [nullable] [default v] [unique], ... }`
+ * (exception D0 ADR-029 à Grammar v2). Le type reste `SnqlType` unifié
+ * (`packages/snql/src/schema/model.ts`) — les alias natifs PG (`varchar(N)`,
+ * `jsonb`, `timestamptz`, `bigserial`, ...) sont normalisés au lower via D6.
+ */
+export interface DDLFieldDef {
+	readonly name: string;
+	readonly type: import("../schema/model").SnqlType;
+	readonly nullable?: boolean;
+	readonly defaultExpr?: Expr;
+	readonly unique?: boolean;
+	readonly span: Span;
+}
+
+/**
+ * `create table T [if not exists] { field: type ..., primary key (fields) } [into <namespace>]`.
+ * D3 `if not exists` = name-only cross-engine (drift schéma NON détecté).
+ * D13 primary key : PG natif, Mongo alias `_id` single-field ou compound
+ * unique, KV refus planner. Escape identifiers D1 au lower.
+ */
+export interface CreateTableStmt {
+	readonly operation: "ddl";
+	readonly kind: "create-table";
+	readonly target: string;
+	readonly ifNotExists?: boolean;
+	readonly fields: readonly DDLFieldDef[];
+	readonly primaryKey?: readonly string[];
+	readonly span: Span;
+}
+
+/**
+ * Union des statements DDL. V1 = `create-table` uniquement ; extends aux
+ * autres kinds à mesure des sprints DDL/2..DDL/4 (drop-table, add-column,
+ * drop-column, add/drop-index, add-unique-index).
+ */
+export type DDLStatement = CreateTableStmt;
+
+/** Racine de l'AST : lecture (`Query`), mutation, transaction, introspection, raw, let/CTE ou DDL Tier-2. */
 export type Statement =
 	| Query
 	| InsertStatement
@@ -546,4 +599,5 @@ export type Statement =
 	| TransactionStatement
 	| IntrospectStatement
 	| RawStatement
-	| LetStatement;
+	| LetStatement
+	| DDLStatement;
