@@ -32,6 +32,34 @@ describe("codegen PG — create table (ADR-029 DDL/1.5)", () => {
 		expect(q.params).toEqual([]);
 	});
 
+	it("default json compound inline en '...'::jsonb", () => {
+		const q = mapDDL({
+			op: "ddl",
+			kind: "create-table",
+			target: "t",
+			ifNotExists: false,
+			fields: [
+				{ name: "id", type: "uuid", nullable: false, unique: false },
+				{
+					name: "meta",
+					type: "json",
+					nullable: false,
+					unique: false,
+					defaultValue: {
+						kind: "json",
+						raw: '{"tier":"free","quota":10}',
+						parsed: { tier: "free", quota: 10 }
+					}
+				}
+			]
+		});
+		if (q.kind !== "sql") throw new Error("attendu sql");
+		expect(q.text).toBe(
+			`CREATE TABLE "t" ("id" uuid NOT NULL, "meta" jsonb NOT NULL DEFAULT '{"tier":"free","quota":10}'::jsonb)`
+		);
+		expect(q.params).toEqual([]);
+	});
+
 	it("nullable / not null / default bindé + span", () => {
 		const q = mapDDL({
 			op: "ddl",

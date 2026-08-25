@@ -22,7 +22,7 @@ import type {
 	TransactionPlan,
 	TransactionPlanItem
 } from "../ir/plan";
-import { isSqlDecimal, linearize } from "../ir/plan";
+import { isSqlDecimal, isSqlJsonLiteral, linearize } from "../ir/plan";
 import type { SnqlType } from "../schema/model";
 import type {
 	Mapper,
@@ -2967,11 +2967,16 @@ function renderMongoAddColumn(plan: AddColumnPlan): MongoDDLAddColumnQuery {
 	// D2 preflight = NOT NULL sans default. Si NOT NULL + default, le backfill
 	// D10 assure l'invariance (les rows existantes reçoivent la valeur).
 	const preflightNotNull = required && !backfill;
+	// SqlJsonLiteral → unwrap `.parsed` : l'adapter $set attend un objet natif,
+	// pas le wrapper `{kind, raw, parsed}`.
+	const nativeDefault = isSqlJsonLiteral(f.defaultValue)
+		? f.defaultValue.parsed
+		: f.defaultValue;
 	const columnSpec: MongoDDLAddColumnQuery["column"] = {
 		name: f.name,
 		bsonType: bson,
 		required,
-		...(f.defaultValue !== undefined ? { defaultValue: f.defaultValue } : {})
+		...(f.defaultValue !== undefined ? { defaultValue: nativeDefault } : {})
 	};
 	const index: MongoIndexSpec | undefined = f.unique
 		? { keys: { [f.name]: 1 }, options: { unique: true, name: `unique_${f.name}` } }

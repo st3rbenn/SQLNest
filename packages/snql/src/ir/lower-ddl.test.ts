@@ -194,6 +194,40 @@ describe("lower DDL — create table (ADR-029)", () => {
 		);
 		expect(plan.fields[0]?.defaultValue).toBe("$where");
 	});
+
+	it("accepte un default object literal sur type json", () => {
+		const plan = lowerCreate(
+			`create table t { meta: json default {tier: "free", quota: 10} }`
+		);
+		expect(plan.fields[0]?.defaultValue).toEqual({
+			kind: "json",
+			raw: '{"tier":"free","quota":10}',
+			parsed: { tier: "free", quota: 10 }
+		});
+	});
+
+	it("accepte un default array literal sur type json (imbriqué)", () => {
+		const plan = lowerCreate(
+			`create table t { tags: json default [1, "a", true, null] }`
+		);
+		expect(plan.fields[0]?.defaultValue).toEqual({
+			kind: "json",
+			raw: '[1,"a",true,null]',
+			parsed: [1, "a", true, null]
+		});
+	});
+
+	it("rejette un default object literal sur type non-json", () => {
+		expect(() =>
+			lowerCreate("create table t { meta: text default {a: 1} }")
+		).toThrow(/l'object\/array literal n'est admis que sur 'type: json'/);
+	});
+
+	it("rejette un default json avec call imbriqué", () => {
+		expect(() =>
+			lowerCreate("create table t { meta: json default {t: now()} }")
+		).toThrow(/n'est pas un littéral/);
+	});
 });
 
 describe("lower DDL — add column (ADR-029 DDL/2)", () => {
@@ -237,6 +271,17 @@ describe("lower DDL — add column (ADR-029 DDL/2)", () => {
 		expect(() =>
 			lowerAdd("add column x int default now() into t")
 		).toThrow(/littéral scalaire/);
+	});
+
+	it("accepte un default object literal sur type json (add column)", () => {
+		const plan = lowerAdd(
+			`add column meta json default {tier: "free"} into users`
+		);
+		expect(plan.column.defaultValue).toEqual({
+			kind: "json",
+			raw: '{"tier":"free"}',
+			parsed: { tier: "free" }
+		});
 	});
 
 	it("rejette un target non-ident (D1 safety-net via parser DDL)", () => {

@@ -213,5 +213,12 @@ function serializeDefault(value: unknown): unknown {
 	) {
 		return (value as { raw: string }).raw;
 	}
+	if (
+		typeof value === "object" &&
+		value !== null &&
+		(value as { kind?: unknown }).kind === "json"
+	) {
+		return (value as { parsed: unknown }).parsed;
+	}
 	return value;
 }

@@ -311,6 +311,28 @@ describe("codegen Mongo — add column (ADR-029 DDL/2.4)", () => {
 		expect(q.preflightNotNull).toBe(false);
 	});
 
+	it("default json compound → unwrap `.parsed` natif pour l'adapter $set", () => {
+		const q = mapAdd({
+			op: "ddl",
+			kind: "add-column",
+			target: "users",
+			ifNotExists: false,
+			column: {
+				name: "meta",
+				type: "json",
+				nullable: false,
+				unique: false,
+				defaultValue: {
+					kind: "json",
+					raw: '{"tier":"free"}',
+					parsed: { tier: "free" }
+				}
+			}
+		});
+		expect(q.column.defaultValue).toEqual({ tier: "free" });
+		expect(q.backfill).toBe(true);
+	});
+
 	it("unique → index secondaire propagé", () => {
 		const q = mapAdd({
 			op: "ddl",

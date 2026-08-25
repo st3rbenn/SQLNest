@@ -22,10 +22,12 @@ import type {
 	AddIndexPlan,
 	CreateTableField,
 	CreateTablePlan,
+	DdlDefault,
 	DDLPlan,
 	DropColumnPlan,
 	DropIndexPlan,
 	DropTablePlan,
+	SqlJsonLiteral,
 	SqlValue
 } from "./plan";
 
@@ -239,10 +241,23 @@ function assertIdent(name: string, kind: "target" | "field"): void {
 	}
 }
 
-// Literals only : le codegen bind un `SqlValue`, pas une `PlanExpr`. Refuse
-// aussi tôt les calls/refs qui masqueraient des divergences cross-engine
-// (`now()` PG vs `$currentDate` Mongo vs rien KV).
-function lowerDefault(expr: Expr, fieldName: string, type: SnqlType): SqlValue {
+// Literals only : le codegen bind une `DdlDefault`, pas une `PlanExpr`.
+// Refuse les calls/refs qui masqueraient des divergences cross-engine
+// (`now()` PG vs `$currentDate` Mongo vs rien KV). Cas particulier : un
+// object/array literal est admis SEULEMENT sur `type: json` (PG `::jsonb`,
+// Mongo/KV natif au backfill) — récurse en profondeur pour interdire les
+// call/field imbriqués.
+function lowerDefault(expr: Expr, fieldName: string, type: SnqlType): DdlDefault {
+	if (expr.type === "object" || expr.type === "array") {
+		if (type !== "json") {
+			throw new SnqlError(
+				`'default' de '${fieldName}' (type ${type}) doit être un littéral scalaire — l'object/array literal n'est admis que sur 'type: json'`,
+				"lower_ddl_default_compound_wrong_type",
+				expr.span
+			);
+		}
+		return jsonLiteralFromExpr(expr, fieldName);
+	}
 	if (expr.type !== "literal") {
 		throw new SnqlError(
 			`'default' de '${fieldName}' doit être un littéral scalaire (string, number, bool, null)`,
@@ -261,6 +276,45 @@ function lowerDefault(expr: Expr, fieldName: string, type: SnqlType): SqlValue {
 		case "null":
 			return null;
 	}
+}
+
+// Sérialise récursivement un object/array literal en valeur JSON. Refuse tout
+// noeud non-literal — `default { foo: now() }` ou `default { foo: t.bar }`
+// remontent l'erreur au field d'origine (pas au fieldName imbriqué anonyme).
+function jsonLiteralFromExpr(expr: Expr, fieldName: string): SqlJsonLiteral {
+	const parsed = jsonValueFromExpr(expr, fieldName);
+	return { kind: "json", raw: JSON.stringify(parsed), parsed };
+}
+
+function jsonValueFromExpr(expr: Expr, fieldName: string): unknown {
+	if (expr.type === "object") {
+		const out: Record<string, unknown> = {};
+		for (const entry of expr.entries) {
+			out[entry.key] = jsonValueFromExpr(entry.value, fieldName);
+		}
+		return out;
+	}
+	if (expr.type === "array") {
+		return expr.items.map((item) => jsonValueFromExpr(item, fieldName));
+	}
+	if (expr.type === "literal") {
+		const v = expr.value;
+		switch (v.kind) {
+			case "string":
+				return v.value;
+			case "number":
+				return Number(v.raw);
+			case "boolean":
+				return v.value;
+			case "null":
+				return null;
+		}
+	}
+	throw new SnqlError(
+		`'default' de '${fieldName}' (type json) : littéral compound admis, mais un noeud '${expr.type}' n'est pas un littéral`,
+		"lower_ddl_default_json_non_literal",
+		expr.span
+	);
 }
 
 /**

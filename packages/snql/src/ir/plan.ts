@@ -87,6 +87,27 @@ export function isSqlDecimal(value: unknown): value is SqlDecimal {
 	);
 }
 
+// Object/array literal en position de `default` sur un field `type: json` —
+// PG bind `'raw'::jsonb`, Mongo/KV ré-injectent `parsed` natif au backfill.
+// Restreint à `type: json` : les autres types refusent en amont (lower).
+export interface SqlJsonLiteral {
+	readonly kind: "json";
+	readonly raw: string;
+	readonly parsed: unknown;
+}
+
+export type DdlDefault = SqlValue | SqlJsonLiteral;
+
+export function isSqlJsonLiteral(value: unknown): value is SqlJsonLiteral {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		(value as { kind?: unknown }).kind === "json" &&
+		typeof (value as { raw?: unknown }).raw === "string" &&
+		"parsed" in (value as object)
+	);
+}
+
 export type CompareOp = "eq" | "ne" | "lt" | "gt" | "le" | "ge" | "like";
 
 /** Op arithmétique canonique côté IR — mêmes symboles qu'à la surface. */
@@ -528,7 +549,7 @@ export interface CreateTableField {
 	readonly type: import("../schema/model").SnqlType;
 	readonly nullable: boolean;
 	readonly unique: boolean;
-	readonly defaultValue?: SqlValue;
+	readonly defaultValue?: DdlDefault;
 	readonly span?: Span;
 }
 

@@ -15,6 +15,7 @@ import type {
 	LogicalPlan,
 	MutationPlan,
 	PlanExpr,
+	DdlDefault,
 	PlanProjectField,
 	PlanRowValue,
 	PlanSortKey,
@@ -24,7 +25,7 @@ import type {
 	TransactionPlanItem
 } from "../ir/plan";
 import type { SnqlType } from "../schema/model";
-import { isSqlDecimal, linearize } from "../ir/plan";
+import { isSqlDecimal, isSqlJsonLiteral, linearize } from "../ir/plan";
 import type { Span } from "../lexer/token";
 import type {
 	Mapper,
@@ -965,7 +966,7 @@ const PG_DDL_TYPE: Readonly<Record<SnqlType, string>> = {
  *  - boolean : `TRUE` / `FALSE`.
  *  - null : `NULL`.
  */
-function pgInlineDefault(value: SqlValue): string {
+function pgInlineDefault(value: DdlDefault): string {
 	if (value === null) return "NULL";
 	if (typeof value === "string") {
 		const escaped = value.replace(/'/g, "''");
@@ -976,6 +977,10 @@ function pgInlineDefault(value: SqlValue): string {
 	if (typeof value === "bigint") return `${value.toString()}::bigint`;
 	if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
 	if (isSqlDecimal(value)) return `${value.raw}::numeric`;
+	if (isSqlJsonLiteral(value)) {
+		const escaped = value.raw.replace(/'/g, "''");
+		return `'${escaped}'::jsonb`;
+	}
 	throw new SnqlError(
 		`Type de default DDL non supporté par pgInlineDefault : ${typeof value}`,
 		"codegen_ddl_default_unsupported"
