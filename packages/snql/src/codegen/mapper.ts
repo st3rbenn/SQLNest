@@ -229,6 +229,41 @@ export interface MongoDDLQuery {
 }
 
 /**
+ * DDL Tier-2 sur KV (ADR-029). Entièrement compensé — KV est schema-less,
+ * la « création de table » est du metadata stocké sous `namespace:_schema:{table}`.
+ * L'adapter KV runtime consomme ce shape et exécute :
+ *  1. `HSET namespace:_schema:{table} <field> <encoded-descriptor>` par field.
+ *  2. `HSET namespace:_schema:{table} __primary_key <json>` si `primaryKey`.
+ *  3. Enregistre les uniques `uniqueFields` dans le middleware pré-write SETNX
+ *     (D12 — arrive vraiment à DDL/3 `add unique index` ; ici on transporte
+ *     l'info, pas d'enforcement encore).
+ * D3 : `ifNotExists=true` → l'adapter check l'existence du hash `_schema` et
+ * no-op si présent.
+ *
+ * D13 : jamais de refus PK. `primaryKey` (single ou compound) est stocké tel
+ * quel dans le metadata — l'adapter s'en sert pour construire une clé unique
+ * `namespace:{table}:pk:<val1>:<val2>` au write, via middleware.
+ */
+export interface KvFieldDescriptor {
+	readonly name: string;
+	readonly type: string;
+	readonly nullable: boolean;
+	readonly unique: boolean;
+	readonly defaultValue?: unknown;
+}
+
+export interface KvDDLQuery {
+	readonly engine: string;
+	readonly kind: "kv-ddl";
+	readonly operation: "create-table";
+	readonly collection: string;
+	readonly ifNotExists: boolean;
+	readonly fields: readonly KvFieldDescriptor[];
+	readonly primaryKey?: readonly string[];
+	readonly uniqueFields?: readonly string[];
+}
+
+/**
  * native shape pour un `raw {...}` Mongo — command native
  * exécutée via db.runCommand(). Le document est déjà évalué en clé/valeur
  * scalaires par le codegen (Expr.object → Record<string, unknown>).
@@ -280,6 +315,7 @@ export type NativeQuery =
 	| MongoIntrospectQuery
 	| MongoRawQuery
 	| MongoDDLQuery
+	| KvDDLQuery
 	| SqlnestIntrospectQuery;
 
 /** Contrat de codegen par moteur : plan → requête native. Pur, sans I/O. */

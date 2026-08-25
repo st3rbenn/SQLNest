@@ -83,9 +83,14 @@ export function planFor(
 	return plan(lower(statement, options.schema), capabilities, options);
 }
 
+export { mapKvDDL } from "./codegen/kv-ddl";
 export type {
+	KvDDLQuery,
+	KvFieldDescriptor,
 	Mapper,
 	MapperContext,
+	MongoDDLQuery,
+	MongoIndexSpec,
 	MongoIntrospectQuery,
 	MongoQuery,
 	MongoStage,
