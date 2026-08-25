@@ -58,7 +58,18 @@ export const KEYWORDS: ReadonlySet<string> = new Set([
 	"in",
 	"like",
 	"asc",
-	"desc"
+	"desc",
+	// DDL Tier-2 (ADR-029). `table` fait passer `create table T` en DDL au
+	// parser (peek 1 token après `create` — sinon `create` reste alias insert).
+	// `primary`/`unique`/`nullable`/`default` sont field-modifiers dans le
+	// body `{...}` (D0 exception). `column`/`index`/`drop` seront ajoutés à
+	// DDL/2..DDL/4 pour add/drop column/index. `key` reste soft-ident,
+	// contextuel après `primary`.
+	"table",
+	"primary",
+	"unique",
+	"nullable",
+	"default"
 ]);
 
 /** Alias de mots-clés normalisés à la lecture (ex. `take` → `limit`). */
