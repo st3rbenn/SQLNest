@@ -1,8 +1,11 @@
 import { SnqlError } from "../diagnostics";
 import { verbOperation } from "../lexer/dictionary";
-import type { Token } from "../lexer/token";
+import type { Span, Token } from "../lexer/token";
+import type { SnqlType } from "../schema/model";
 import type {
 	Assignment,
+	CreateTableStmt,
+	DDLFieldDef,
 	DeleteStatement,
 	Expr,
 	FieldSelection,
@@ -36,9 +39,21 @@ import {
 } from "./expression";
 
 /** Mots-clés de stage d'un select, dans l'ordre canonique imposé. */
-const SELECT_STAGE_ORDER = ["with", "where", "group", "having", "pick", "sort", "limit"] as const;
+const SELECT_STAGE_ORDER = [
+	"with",
+	"where",
+	"group",
+	"having",
+	"pick",
+	"sort",
+	"limit"
+] as const;
 const SELECT_STAGE_KEYWORDS: ReadonlySet<string> = new Set(SELECT_STAGE_ORDER);
-const UPDATE_STAGE_KEYWORDS: ReadonlySet<string> = new Set(["with", "where", "set"]);
+const UPDATE_STAGE_KEYWORDS: ReadonlySet<string> = new Set([
+	"with",
+	"where",
+	"set"
+]);
 const DELETE_STAGE_KEYWORDS: ReadonlySet<string> = new Set(["where"]);
 
 function peekKeyword(cursor: TokenCursor, value: string, ahead = 0): boolean {
@@ -84,6 +99,17 @@ function parseStatement(cursor: TokenCursor): Statement {
 	// Soft-keyword pour ne pas casser une col nommée `raw` ailleurs.
 	if (first.kind === "ident" && first.value.toLowerCase() === "raw") {
 		return parseRaw(cursor);
+	}
+	// DDL Tier-2 (ADR-029) — dispatch avant le check verb `create` (alias
+	// insert). `create table T {...}` = DDL create-table ; `create {...} into T`
+	// reste insert alias (`create` ∈ VERB_SYNONYMS → 'insert'). Peek à 1 ahead
+	// pour discriminer sans casser la surface DML existante.
+	if (
+		first.kind === "verb" &&
+		first.value.toLowerCase() === "create" &&
+		peekKeyword(cursor, "table", 1)
+	) {
+		return parseCreateTable(cursor);
 	}
 	const verbTok = first;
 	if (verbTok.kind !== "verb") {
@@ -134,9 +160,10 @@ function parseIntrospectList(cursor: TokenCursor): IntrospectStatement {
 	if (subLower === "tables") {
 		const subTok = cursor.next();
 		const tail = parseIntrospectTail(cursor);
-		const endSpan = tail.stages.length > 0
-			? tail.stages[tail.stages.length - 1]!.span
-			: subTok.span;
+		const endSpan =
+			tail.stages.length > 0
+				? tail.stages[tail.stages.length - 1]!.span
+				: subTok.span;
 		return {
 			operation: "introspect",
 			kind: "list-tables",
@@ -147,9 +174,10 @@ function parseIntrospectList(cursor: TokenCursor): IntrospectStatement {
 	if (subLower === "schemas") {
 		const subTok = cursor.next();
 		const tail = parseIntrospectTail(cursor);
-		const endSpan = tail.stages.length > 0
-			? tail.stages[tail.stages.length - 1]!.span
-			: subTok.span;
+		const endSpan =
+			tail.stages.length > 0
+				? tail.stages[tail.stages.length - 1]!.span
+				: subTok.span;
 		return {
 			operation: "introspect",
 			kind: "list-schemas",
@@ -177,9 +205,10 @@ function parseIntrospectList(cursor: TokenCursor): IntrospectStatement {
 			targetEnd = targetTok.span.end;
 		}
 		const tail = parseIntrospectTail(cursor);
-		const endSpan = tail.stages.length > 0
-			? tail.stages[tail.stages.length - 1]!.span
-			: { start: targetEnd, end: targetEnd };
+		const endSpan =
+			tail.stages.length > 0
+				? tail.stages[tail.stages.length - 1]!.span
+				: { start: targetEnd, end: targetEnd };
 		return {
 			operation: "introspect",
 			kind: "list-indexes",
@@ -191,9 +220,10 @@ function parseIntrospectList(cursor: TokenCursor): IntrospectStatement {
 	if (subLower === "databases") {
 		const subTok = cursor.next();
 		const tail = parseIntrospectTail(cursor);
-		const endSpan = tail.stages.length > 0
-			? tail.stages[tail.stages.length - 1]!.span
-			: subTok.span;
+		const endSpan =
+			tail.stages.length > 0
+				? tail.stages[tail.stages.length - 1]!.span
+				: subTok.span;
 		return {
 			operation: "introspect",
 			kind: "list-databases",
@@ -204,9 +234,10 @@ function parseIntrospectList(cursor: TokenCursor): IntrospectStatement {
 	if (subLower === "schema_events") {
 		const subTok = cursor.next();
 		const tail = parseIntrospectTail(cursor);
-		const endSpan = tail.stages.length > 0
-			? tail.stages[tail.stages.length - 1]!.span
-			: subTok.span;
+		const endSpan =
+			tail.stages.length > 0
+				? tail.stages[tail.stages.length - 1]!.span
+				: subTok.span;
 		return {
 			operation: "introspect",
 			kind: "list-schema-events",
@@ -257,7 +288,10 @@ function parseLet(cursor: TokenCursor): LetStatement {
 		operation: "let",
 		bindings,
 		body,
-		span: { start: firstTok.span.start, end: body.span?.end ?? lastBinding.span.end }
+		span: {
+			start: firstTok.span.start,
+			end: body.span?.end ?? lastBinding.span.end
+		}
 	};
 }
 
@@ -495,9 +529,10 @@ function parseIntrospectDescribe(cursor: TokenCursor): IntrospectStatement {
 	}
 	cursor.next();
 	const tail = parseIntrospectTail(cursor);
-	const endSpan = tail.stages.length > 0
-		? tail.stages[tail.stages.length - 1]!.span
-		: target.span;
+	const endSpan =
+		tail.stages.length > 0
+			? tail.stages[tail.stages.length - 1]!.span
+			: target.span;
 	return {
 		operation: "introspect",
 		kind: "describe-table",
@@ -573,7 +608,10 @@ function parseIntrospectTail(cursor: TokenCursor): { stages: Stage[] } {
 	// Soft-keyword contextuel : `for` n'est jamais dans KEYWORDS (pas de
 	// conflit avec les usages ident ailleurs). Ordre canonique impose
 	// `for` avant `where` — s'il vient après on refuse (message dédié).
-	if (peekedFirst.kind === "ident" && peekedFirst.value.toLowerCase() === "for") {
+	if (
+		peekedFirst.kind === "ident" &&
+		peekedFirst.value.toLowerCase() === "for"
+	) {
 		stages.push(parseIntrospectForShortcut(cursor));
 	}
 	if (peekKeyword(cursor, "where")) stages.push(parseWhere(cursor));
@@ -590,11 +628,12 @@ function parseIntrospectTail(cursor: TokenCursor): { stages: Stage[] } {
 		);
 	}
 	// Un stage encore présent après le parse dans l'ordre = ordre violé.
-	rejectTrailingStage(
-		cursor,
-		new Set(["where", "pick", "sort", "limit"]),
-		["where", "pick", "sort", "limit"]
-	);
+	rejectTrailingStage(cursor, new Set(["where", "pick", "sort", "limit"]), [
+		"where",
+		"pick",
+		"sort",
+		"limit"
+	]);
 	return { stages };
 }
 
@@ -760,12 +799,17 @@ function parseTransactionItem(cursor: TokenCursor): TransactionBodyItem {
  */
 function parseSavepoint(cursor: TokenCursor): SavepointStatement {
 	const spTok = cursor.next(); // `savepoint`
-	const nameTok = cursor.expect("ident", "un nom de savepoint après 'savepoint'");
+	const nameTok = cursor.expect(
+		"ident",
+		"un nom de savepoint après 'savepoint'"
+	);
 	cursor.expect("lbrace", "'{' pour ouvrir le bloc savepoint");
 	const body: TransactionBodyItem[] = [];
 	if (cursor.peek().kind === "rbrace") {
 		throw new SnqlError(
-			"'savepoint " + nameTok.value + " { }' vide refusé — le savepoint doit contenir au moins un statement.",
+			"'savepoint " +
+				nameTok.value +
+				" { }' vide refusé — le savepoint doit contenir au moins un statement.",
 			"parse_savepoint_empty",
 			cursor.peek().span
 		);
@@ -863,7 +907,10 @@ function parseInsert(cursor: TokenCursor, verbTok: Token): InsertStatement {
  * `pick` présent + exactement 1..N fields est faite au lower.
  */
 function parseInsertSourceQuery(cursor: TokenCursor): Query {
-	cursor.expect("lparen", "'(' pour ouvrir la sub-query source d'un INSERT SELECT");
+	cursor.expect(
+		"lparen",
+		"'(' pour ouvrir la sub-query source d'un INSERT SELECT"
+	);
 	const verbTok = cursor.peek();
 	if (verbTok.kind !== "verb") {
 		throw new SnqlError(
@@ -895,7 +942,10 @@ function parseInsertSourceQuery(cursor: TokenCursor): Query {
 function parseOnConflict(cursor: TokenCursor): OnConflictClause {
 	const onTok = cursor.next(); // 'on'
 	cursor.next(); // 'conflict'
-	cursor.expect("lparen", "'(' après 'on conflict' — les keys sont entre parens");
+	cursor.expect(
+		"lparen",
+		"'(' après 'on conflict' — les keys sont entre parens"
+	);
 	const keys: string[] = [cursor.expect("ident", "un nom de colonne").value];
 	while (cursor.peek().kind === "comma") {
 		cursor.next();
@@ -959,10 +1009,13 @@ function parseOnConflict(cursor: TokenCursor): OnConflictClause {
  * avec la fonction `count()` qui exige `(` derrière). Renvoie le span consommé
  * ou undefined.
  */
-function tryConsumePickCount(cursor: TokenCursor): { end: import("../lexer/token").Position } | undefined {
+function tryConsumePickCount(
+	cursor: TokenCursor
+): { end: import("../lexer/token").Position } | undefined {
 	if (!peekKeyword(cursor, "pick")) return undefined;
 	const p1 = cursor.peek(1);
-	if (!(p1.kind === "ident" && p1.value.toLowerCase() === "count")) return undefined;
+	if (!(p1.kind === "ident" && p1.value.toLowerCase() === "count"))
+		return undefined;
 	const p2 = cursor.peek(2);
 	// `count(` = fonction (interdite en mutation de toute façon, mais on ne
 	// veut pas capturer ici pour laisser l'erreur remonter proprement).
@@ -1133,7 +1186,8 @@ function parseUpdate(cursor: TokenCursor, verbTok: Token): UpdateStatement {
 
 	// `where` optionnel : sans lui, l'update porte sur toutes les lignes (assumé).
 	const span = { start: verbTok.span.start, end };
-	const returnRowCount = rrc !== undefined ? { returnRowCount: true as const } : {};
+	const returnRowCount =
+		rrc !== undefined ? { returnRowCount: true as const } : {};
 	const optional = {
 		...(alias !== undefined ? { alias } : {}),
 		...(joins !== undefined && joins.length > 0 ? { joins } : {}),
@@ -1187,7 +1241,8 @@ function parseDelete(cursor: TokenCursor, verbTok: Token): DeleteStatement {
 
 	// `where` optionnel : sans lui, le remove porte sur toutes les lignes (assumé).
 	const span = { start: verbTok.span.start, end };
-	const returnRowCount = rrc !== undefined ? { returnRowCount: true as const } : {};
+	const returnRowCount =
+		rrc !== undefined ? { returnRowCount: true as const } : {};
 	return predicate !== undefined
 		? {
 				operation: "delete",
@@ -1385,7 +1440,10 @@ function parsePick(cursor: TokenCursor): Stage {
 			// `on (k1, k2, ...)` — parens obligatoires, keys sont des field paths.
 			if (peekKeyword(cursor, "on")) {
 				cursor.next();
-				cursor.expect("lparen", "'(' après 'unique on' — les keys DISTINCT ON sont entre parens");
+				cursor.expect(
+					"lparen",
+					"'(' après 'unique on' — les keys DISTINCT ON sont entre parens"
+				);
 				const keys: (readonly string[])[] = [parseFieldPath(cursor).path];
 				while (cursor.peek().kind === "comma") {
 					cursor.next();
@@ -1527,3 +1585,275 @@ setSubqueryParser((cursor: TokenCursor): Query => {
 	cursor.next();
 	return parseSelect(cursor, verbTok);
 });
+
+// ─── DDL Tier-2 (ADR-029) ───────────────────────────────────────────────
+// V1 corpus = `create table T [if not exists] { field: type [nullable]
+// [default v] [unique], ..., primary key (f1, f2) }`. D0 exception body
+// motivée (deuxième après `transaction { }`) — règle stricte : body accepté
+// UNIQUEMENT sur create table v1.
+
+/** Alias types natifs PG paste-friendly (D6). `varchar(N)` accepté comme ident
+ * bare `varchar` — le `(N)` optionnel après reste à parser v-next (ignoré au
+ * lower pour l'instant, cohérent avec `text`). Tous les alias normalisent vers
+ * un SnqlType canonique déjà supporté par `packages/snql/src/schema/model.ts`. */
+const SNQL_TYPE_ALIAS: Readonly<Record<string, SnqlType>> = {
+	string: "string",
+	int: "int",
+	bigint: "bigint",
+	float: "float",
+	decimal: "decimal",
+	bool: "bool",
+	date: "date",
+	json: "json",
+	array: "array",
+	uuid: "uuid",
+	enum: "enum",
+	unknown: "unknown",
+	text: "string",
+	varchar: "string",
+	int4: "int",
+	int8: "bigint",
+	integer: "int",
+	jsonb: "json",
+	timestamp: "date",
+	timestamptz: "date",
+	numeric: "decimal",
+	real: "float",
+	double: "float",
+	serial: "int",
+	bigserial: "bigint",
+	boolean: "bool"
+};
+
+function normalizeSnqlType(raw: string, span: Span): SnqlType {
+	const t = SNQL_TYPE_ALIAS[raw.toLowerCase()];
+	if (t === undefined) {
+		throw new SnqlError(
+			`Type inconnu '${raw}' — types portables : uuid, string(text), int, bigint, decimal(numeric), float, bool, date(timestamp/timestamptz), json(jsonb), array, enum. Alias PG : varchar, int4, int8, jsonb, timestamptz, bigserial, ...`,
+			"parse_ddl_unknown_type",
+			span
+		);
+	}
+	return t;
+}
+
+function parseCreateTable(cursor: TokenCursor): CreateTableStmt {
+	const createTok = cursor.next(); // `create` verb
+	cursor.next(); // `table` keyword (déjà peeked au dispatch)
+
+	// `if not exists` optionnel (D3 — name-only sémantique cross-engine, drift
+	// schéma NON détecté, documenté dans ADR-029 D3 + `divergences.yaml`).
+	let ifNotExists = false;
+	const maybeIf = cursor.peek();
+	if (maybeIf.kind === "ident" && maybeIf.value.toLowerCase() === "if") {
+		cursor.next();
+		if (!peekKeyword(cursor, "not")) {
+			throw new SnqlError(
+				"'if' doit être suivi de 'not exists' dans un create table",
+				"parse_ddl_expected_not_after_if",
+				cursor.peek().span
+			);
+		}
+		cursor.next();
+		if (!peekKeyword(cursor, "exists")) {
+			throw new SnqlError(
+				"'if not' doit être suivi de 'exists' dans un create table",
+				"parse_ddl_expected_exists_after_not",
+				cursor.peek().span
+			);
+		}
+		cursor.next();
+		ifNotExists = true;
+	}
+
+	const targetTok = cursor.expect(
+		"ident",
+		"un nom de table après 'create table'"
+	);
+	const target = targetTok.value;
+
+	// Body `{ field: type ..., primary key (...) }` — D0 exception.
+	cursor.expect("lbrace", "'{' pour ouvrir le body du create table");
+
+	const fields: DDLFieldDef[] = [];
+	let primaryKey: readonly string[] | undefined;
+	const seenFieldNames = new Set<string>();
+
+	if (cursor.peek().kind !== "rbrace") {
+		for (;;) {
+			if (peekKeyword(cursor, "primary")) {
+				if (primaryKey !== undefined) {
+					throw new SnqlError(
+						"'primary key' déclaré deux fois dans le body",
+						"parse_ddl_primary_key_duplicate",
+						cursor.peek().span
+					);
+				}
+				primaryKey = parsePrimaryKeyClause(cursor);
+			} else {
+				const field = parseCreateTableField(cursor);
+				if (seenFieldNames.has(field.name)) {
+					throw new SnqlError(
+						`Field dupliqué '${field.name}' dans le body du create table`,
+						"parse_ddl_field_duplicate",
+						field.span
+					);
+				}
+				seenFieldNames.add(field.name);
+				fields.push(field);
+			}
+			const nxt = cursor.peek();
+			if (nxt.kind === "comma") {
+				cursor.next();
+				continue;
+			}
+			if (nxt.kind === "rbrace") break;
+			throw new SnqlError(
+				"',' ou '}' attendu",
+				"parse_ddl_body_close_expected",
+				nxt.span
+			);
+		}
+	}
+
+	const closeBrace = cursor.expect(
+		"rbrace",
+		"'}' pour fermer le body du create table"
+	);
+
+	if (fields.length === 0) {
+		throw new SnqlError(
+			"'create table' attend au moins un field",
+			"parse_ddl_create_table_empty_body",
+			{ start: createTok.span.start, end: closeBrace.span.end }
+		);
+	}
+
+	return {
+		operation: "ddl",
+		kind: "create-table",
+		target,
+		ifNotExists,
+		fields,
+		...(primaryKey !== undefined ? { primaryKey } : {}),
+		span: { start: createTok.span.start, end: closeBrace.span.end }
+	};
+}
+
+function parseCreateTableField(cursor: TokenCursor): DDLFieldDef {
+	const nameTok = cursor.expect("ident", "un nom de field dans le body");
+	cursor.expect("colon", "':' entre le nom du field et son type");
+	const typeTok = cursor.expect(
+		"ident",
+		"un type SNQL (uuid/string/int/...) ou alias PG (varchar/jsonb/...)"
+	);
+	const type = normalizeSnqlType(typeTok.value, typeTok.span);
+
+	// Modifiers optionnels : `nullable` | `not null` | `default <expr>` | `unique`
+	let nullable: boolean | undefined;
+	let defaultExpr: Expr | undefined;
+	let unique = false;
+	let endSpan: Span = typeTok.span;
+
+	for (;;) {
+		const nxt = cursor.peek();
+		const v = nxt.value.toLowerCase();
+		if (nxt.kind === "keyword" && v === "nullable") {
+			cursor.next();
+			nullable = true;
+			endSpan = nxt.span;
+		} else if (nxt.kind === "keyword" && v === "not") {
+			cursor.next();
+			const nullTok = cursor.peek();
+			// `null` est tokenizé comme literal (kind === "null"), pas ident.
+			const isNullTok =
+				nullTok.kind === "null" ||
+				(nullTok.kind === "ident" && nullTok.value.toLowerCase() === "null");
+			if (!isNullTok) {
+				throw new SnqlError(
+					"'not' doit être suivi de 'null' (alias SQL pour non-nullable)",
+					"parse_ddl_expected_null_after_not",
+					nullTok.span
+				);
+			}
+			cursor.next();
+			nullable = false;
+			endSpan = nullTok.span;
+		} else if (nxt.kind === "keyword" && v === "default") {
+			cursor.next();
+			defaultExpr = parseExpression(cursor);
+			endSpan = defaultExpr.span;
+		} else if (nxt.kind === "keyword" && v === "unique") {
+			cursor.next();
+			unique = true;
+			endSpan = nxt.span;
+		} else {
+			break;
+		}
+	}
+
+	return {
+		name: nameTok.value,
+		type,
+		...(nullable !== undefined ? { nullable } : {}),
+		...(defaultExpr !== undefined ? { defaultExpr } : {}),
+		...(unique ? { unique } : {}),
+		span: { start: nameTok.span.start, end: endSpan.end }
+	};
+}
+
+function parsePrimaryKeyClause(cursor: TokenCursor): readonly string[] {
+	cursor.next(); // `primary` keyword
+	const keyTok = cursor.peek();
+	// `key` reste soft-ident (courant en col name), contextuel après `primary`.
+	if (keyTok.kind !== "ident" || keyTok.value.toLowerCase() !== "key") {
+		throw new SnqlError(
+			"'primary' doit être suivi de 'key'",
+			"parse_ddl_primary_key_missing_key",
+			keyTok.span
+		);
+	}
+	cursor.next();
+	cursor.expect("lparen", "'(' après 'primary key'");
+
+	const cols: string[] = [];
+	const seen = new Set<string>();
+	if (cursor.peek().kind !== "rparen") {
+		for (;;) {
+			const colTok = cursor.expect(
+				"ident",
+				"un nom de colonne dans primary key"
+			);
+			if (seen.has(colTok.value)) {
+				throw new SnqlError(
+					`Colonne '${colTok.value}' dupliquée dans primary key`,
+					"parse_ddl_primary_key_duplicate_col",
+					colTok.span
+				);
+			}
+			seen.add(colTok.value);
+			cols.push(colTok.value);
+			const nxt = cursor.peek();
+			if (nxt.kind === "comma") {
+				cursor.next();
+				continue;
+			}
+			if (nxt.kind === "rparen") break;
+			throw new SnqlError(
+				"',' ou ')' attendu dans primary key",
+				"parse_ddl_primary_key_close_expected",
+				nxt.span
+			);
+		}
+	}
+	const closeParen = cursor.expect("rparen", "')' pour fermer primary key");
+
+	if (cols.length === 0) {
+		throw new SnqlError(
+			"'primary key ()' vide interdit",
+			"parse_ddl_primary_key_empty",
+			closeParen.span
+		);
+	}
+	return cols;
+}

@@ -398,7 +398,10 @@ export interface InsertStatement {
  * `BEGIN ISOLATION LEVEL READ COMMITTED` etc. Absent = default du serveur
  * (READ COMMITTED sur PG standard).
  */
-export type IsolationLevel = "read_committed" | "repeatable_read" | "serializable";
+export type IsolationLevel =
+	| "read_committed"
+	| "repeatable_read"
+	| "serializable";
 
 /**
  * élément du body d'une transaction — soit un statement

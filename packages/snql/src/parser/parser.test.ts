@@ -127,3 +127,113 @@ describe("parser", () => {
 		expect(() => ast("get users with orders")).toThrow(/on/i);
 	});
 });
+
+// ─── DDL Tier-2 (ADR-029) — create table ───────────────────────────────
+import type { Statement } from "./ast";
+
+function stmt(source: string): Statement {
+	return parse(tokenize(source));
+}
+
+describe("create table DDL (ADR-029)", () => {
+	it("parse minimal create table", () => {
+		expect(stmt("create table users { id: uuid, email: text }")).toMatchObject({
+			operation: "ddl",
+			kind: "create-table",
+			target: "users",
+			ifNotExists: false,
+			fields: [
+				{ name: "id", type: "uuid" },
+				{ name: "email", type: "string" }
+			]
+		});
+	});
+
+	it("parse if not exists (D3)", () => {
+		expect(
+			stmt("create table if not exists sessions { token: text }")
+		).toMatchObject({
+			kind: "create-table",
+			target: "sessions",
+			ifNotExists: true
+		});
+	});
+
+	it("parse primary key single (D13)", () => {
+		expect(
+			stmt("create table users { id: uuid, name: text, primary key (id) }")
+		).toMatchObject({ primaryKey: ["id"] });
+	});
+
+	it("parse primary key compound (D13)", () => {
+		expect(
+			stmt("create table pairs { a: uuid, b: uuid, primary key (a, b) }")
+		).toMatchObject({ primaryKey: ["a", "b"] });
+	});
+
+	it("parse field modifiers nullable / not null / default / unique", () => {
+		const s = stmt(
+			`create table users {
+				id: uuid unique,
+				email: text not null,
+				age: int nullable,
+				tier: text default "free"
+			}`
+		);
+		expect((s as { fields: unknown[] }).fields).toMatchObject([
+			{ name: "id", type: "uuid", unique: true },
+			{ name: "email", type: "string", nullable: false },
+			{ name: "age", type: "int", nullable: true },
+			{ name: "tier", type: "string" }
+		]);
+	});
+
+	it("parse alias types PG paste-friendly (D6)", () => {
+		const s = stmt(
+			"create table t { a: varchar, b: jsonb, c: timestamptz, d: bigserial, e: int8, f: boolean }"
+		) as { fields: readonly { type: string }[] };
+		expect(s.fields.map((f) => f.type)).toEqual([
+			"string",
+			"json",
+			"date",
+			"bigint",
+			"bigint",
+			"bool"
+		]);
+	});
+
+	it("préserve `create { ... } into t` insert alias (dispatch DDL non-invasif)", () => {
+		expect(stmt('create { name: "a" } into t')).toMatchObject({
+			operation: "insert",
+			verb: "create"
+		});
+	});
+
+	it("refuse type inconnu", () => {
+		expect(() => stmt("create table t { a: fakeType }")).toThrow(
+			/parse_ddl_unknown_type|Type inconnu/
+		);
+	});
+
+	it("refuse 'primary' sans 'key'", () => {
+		expect(() => stmt("create table t { a: uuid, primary (a) }")).toThrow(
+			/'primary' doit être suivi de 'key'/
+		);
+	});
+
+	it("refuse body vide", () => {
+		expect(() => stmt("create table t {}")).toThrow(/attend au moins un field/);
+	});
+
+	it("refuse field dupliqué dans le body", () => {
+		expect(() => stmt("create table t { a: uuid, a: text }")).toThrow(
+			/Field dupliqué/
+		);
+	});
+
+	it("refuse primary key déclaré deux fois", () => {
+		expect(() =>
+			stmt("create table t { a: uuid, primary key (a), primary key (a) }")
+		).toThrow(/déclaré deux fois/);
+	});
+});
