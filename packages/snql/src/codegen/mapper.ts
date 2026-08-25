@@ -191,6 +191,44 @@ export interface MongoTransaction {
 }
 
 /**
+ * DDL Tier-2 sur Mongo (ADR-029). Compensated : pas de `CREATE TABLE`
+ * natif, on émet un plan structuré que l'adapter Mongo exécute via
+ * `db.createCollection` + `createIndex`. V1 (DDL/1) couvre `create-collection`
+ * uniquement.
+ *
+ * D13 primary key :
+ *  - `primaryKeyAlias='id'` = single-field id-like UUID aliasé vers `_id`
+ *    (le validator omet `id` — c'est _id BSON).
+ *  - `indexes[]` porte les compound PK + les uniques field-level.
+ *
+ * D3 idempotence (`ifNotExists=true`) : l'adapter catch NamespaceExists
+ * code 48 sur `createCollection` et traite comme succès.
+ */
+export interface MongoIndexSpec {
+	readonly keys: Readonly<Record<string, 1>>;
+	readonly options: {
+		readonly unique?: boolean;
+		readonly name?: string;
+	};
+}
+
+export interface MongoDDLQuery {
+	readonly engine: string;
+	readonly kind: "mongo-ddl";
+	readonly operation: "create-collection";
+	readonly collection: string;
+	readonly ifNotExists: boolean;
+	readonly validator?: Record<string, unknown>;
+	readonly indexes?: readonly MongoIndexSpec[];
+	/**
+	 * Si présent, nom du field SNQL aliasé vers `_id` BSON (D13 single-field
+	 * id-like UUID). L'adapter renomme au read/write pour préserver le nom
+	 * SNQL côté user.
+	 */
+	readonly primaryKeyAlias?: string;
+}
+
+/**
  * native shape pour un `raw {...}` Mongo — command native
  * exécutée via db.runCommand(). Le document est déjà évalué en clé/valeur
  * scalaires par le codegen (Expr.object → Record<string, unknown>).
@@ -241,6 +279,7 @@ export type NativeQuery =
 	| MongoTransaction
 	| MongoIntrospectQuery
 	| MongoRawQuery
+	| MongoDDLQuery
 	| SqlnestIntrospectQuery;
 
 /** Contrat de codegen par moteur : plan → requête native. Pur, sans I/O. */

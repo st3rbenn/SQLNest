@@ -3,6 +3,8 @@ import { SNQL_FUNCTIONS } from "../functions";
 import type {
 	CastTarget,
 	CompareOp,
+	CreateTablePlan,
+	DDLPlan,
 	IntrospectPlan,
 	LogicalPlan,
 	MutationPlan,
@@ -16,8 +18,11 @@ import type {
 	TransactionPlanItem
 } from "../ir/plan";
 import { isSqlDecimal, linearize } from "../ir/plan";
+import type { SnqlType } from "../schema/model";
 import type {
 	Mapper,
+	MongoDDLQuery,
+	MongoIndexSpec,
 	MongoQuery,
 	MongoStage,
 	MongoTransaction,
@@ -168,6 +173,26 @@ export const mongoMapper: Mapper = {
 		return plan.isolation !== undefined
 			? { engine: "mongodb", kind: "mongo-transaction", isolation: plan.isolation, steps }
 			: { engine: "mongodb", kind: "mongo-transaction", steps };
+	},
+	/**
+	 * DDL Tier-2 sur Mongo (ADR-029). `create-collection` compensated : émet
+	 * un `MongoDDLQuery` avec le validator `$jsonSchema` (types + required)
+	 * pré-rendu, les indexes secondaires (unique field-level + PK compound),
+	 * et un éventuel `primaryKeyAlias` pour aliaser `id` → `_id` (D13). L'adapter
+	 * runtime dispatch vers `db.createCollection` (+ `createIndex` par index) et
+	 * catch NamespaceExists code 48 si `ifNotExists=true` (D3).
+	 *
+	 * Refus D13 admis (invariance sémantique, PAS gap engine) : primary key
+	 * single-field sur un field ≠ `id` — Mongo n'a pas de PK secondaire vraie,
+	 * l'user doit passer par `add unique index` (DDL/3 v-next) pour un unique
+	 * secondaire.
+	 */
+	mapDDL(plan: DDLPlan): NativeQuery {
+		if (plan.kind === "create-table") return renderMongoCreateTable(plan);
+		throw new SnqlError(
+			`DDL kind '${(plan as { kind: string }).kind}' non supporté par le codegen Mongo V1`,
+			"codegen_ddl_unsupported"
+		);
 	},
 	/**
 	 * `raw {...}` Mongo → MongoRawQuery pour db.runCommand().
@@ -2709,4 +2734,110 @@ function likeToRegex(pattern: string): string {
 		}
 	}
 	return `${out}\\z`;
+}
+
+/**
+ * Mapping SnqlType canonique → BSON type pour `$jsonSchema` validator (ADR-029
+ * D1). Aligné MONGO_CAST_TYPE + choix explicit `date → date` (BSON Date =
+ * instant UTC), `array → array`. `enum` = string (les enums PG-only, Mongo
+ * n'a pas d'enum type — passe par validator `enum: [...]` v-next). `unknown`
+ * = null (pas de contrainte type).
+ */
+const MONGO_BSON_TYPE: Readonly<Record<SnqlType, string | null>> = {
+	string: "string",
+	int: "int",
+	bigint: "long",
+	float: "double",
+	decimal: "decimal",
+	bool: "bool",
+	date: "date",
+	json: "object",
+	array: "array",
+	uuid: "binData",
+	enum: "string",
+	unknown: null
+};
+
+/**
+ * Rend un `create table` en `MongoDDLQuery` (ADR-029 D13 + validator BSON).
+ * L'adapter runtime :
+ *  1. `db.createCollection(collection, { validator: {$jsonSchema} })` (D3 catch
+ *     NamespaceExists code 48 si `ifNotExists=true`).
+ *  2. Pour chaque `indexes[]` : `db.<collection>.createIndex(keys, options)`
+ *     (compound PK + uniques field-level).
+ *  3. `primaryKeyAlias` : alias `id` ↔ `_id` géré au read/write layer.
+ *
+ * Refus D13 (invariance sémantique, PAS gap engine) : PK single-field sur
+ * field ≠ `id` refusé — Mongo n'a pas de PK secondaire vraie. Hint pointe vers
+ * `add unique index` (DDL/3).
+ */
+function renderMongoCreateTable(plan: CreateTablePlan): MongoDDLQuery {
+	const pk = plan.primaryKey;
+	// D13 : détecte le cas alias `_id` (single-field, nom == "id") — le field
+	// n'entre PAS dans le $jsonSchema car _id est géré natif par Mongo.
+	const primaryKeyAlias =
+		pk !== undefined && pk.length === 1 && pk[0] === "id" ? "id" : undefined;
+
+	// D13 refus : PK single sur field ≠ "id" — refus sémantique admis.
+	if (
+		pk !== undefined &&
+		pk.length === 1 &&
+		primaryKeyAlias === undefined
+	) {
+		throw new SnqlError(
+			`primary key sur '${pk[0]}' non supporté sur Mongo — Mongo utilise '_id' comme PK unique. Pour un unique secondaire, utilise 'add unique index (${pk[0]}) into ${plan.target}' (DDL/3).`,
+			"codegen_mongo_primary_key_not_id"
+		);
+	}
+
+	// Validator $jsonSchema : properties par field + required pour les non-nullables.
+	// Skip le field aliasé _id (Mongo le gère natif comme ObjectId/UUID).
+	const properties: Record<string, unknown> = {};
+	const required: string[] = [];
+	for (const f of plan.fields) {
+		if (primaryKeyAlias !== undefined && f.name === primaryKeyAlias) continue;
+		const bson = MONGO_BSON_TYPE[f.type];
+		const property: Record<string, unknown> = {};
+		if (bson !== null) property.bsonType = bson;
+		properties[f.name] = property;
+		if (!f.nullable) required.push(f.name);
+	}
+	const jsonSchema: Record<string, unknown> = {
+		bsonType: "object",
+		properties
+	};
+	if (required.length > 0) jsonSchema.required = required;
+	const validator: Record<string, unknown> = { $jsonSchema: jsonSchema };
+
+	// Indexes : PK compound + uniques field-level (D13).
+	const indexes: MongoIndexSpec[] = [];
+	if (pk !== undefined && pk.length > 1) {
+		const keys: Record<string, 1> = {};
+		for (const k of pk) keys[k] = 1;
+		indexes.push({
+			keys,
+			options: { unique: true, name: `pk_${pk.join("_")}` }
+		});
+	}
+	for (const f of plan.fields) {
+		if (!f.unique) continue;
+		// Aliasé _id : Mongo gère l'unicité natif, pas d'index à créer.
+		if (primaryKeyAlias !== undefined && f.name === primaryKeyAlias) continue;
+		indexes.push({
+			keys: { [f.name]: 1 },
+			options: { unique: true, name: `unique_${f.name}` }
+		});
+	}
+
+	const ddl: MongoDDLQuery = {
+		engine: "mongodb",
+		kind: "mongo-ddl",
+		operation: "create-collection",
+		collection: plan.target,
+		ifNotExists: plan.ifNotExists,
+		validator,
+		...(indexes.length > 0 ? { indexes } : {}),
+		...(primaryKeyAlias !== undefined ? { primaryKeyAlias } : {})
+	};
+	return ddl;
 }
