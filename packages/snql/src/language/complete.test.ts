@@ -544,6 +544,22 @@ describe("completeSnql — DDL/5 (ADR-029)", () => {
 			expect(opts).toContain("default");
 			expect(opts).toContain("unique");
 		});
+
+		it("`create table t { ` propose `primary` (nouveau field libre + keyword structurel)", () => {
+			expect(labels("create table t { ")).toContain("primary");
+		});
+
+		it("`create table t { id: uuid, ` propose `primary` (nouveau field après comma)", () => {
+			expect(labels("create table t { id: uuid, ")).toContain("primary");
+		});
+
+		it("`create table t { a: uuid, primary ` propose `key`", () => {
+			expect(labels("create table t { a: uuid, primary ")).toEqual(["key"]);
+		});
+
+		it("`create table t { a: uuid, primary key ` propose `(`", () => {
+			expect(labels("create table t { a: uuid, primary key ")).toEqual(["("]);
+		});
 	});
 
 	describe("add column — types + modifiers + into", () => {

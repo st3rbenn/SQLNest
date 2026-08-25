@@ -1474,6 +1474,15 @@ function createTableCompletions(
 	const inBody = toks.some((t) => t.kind === "lbrace");
 	if (!inBody) return [];
 
+	// `{ |` (juste après ouverture body) OU `, |` (après un field terminé) :
+	// début de nouveau field. Le nom est libre (pas de suggestion précise),
+	// mais on propose `primary key` qui est le seul keyword structurel valide
+	// à cette position (D0 ADR-029). L'user peut aussi taper directement un
+	// ident (nom de field) — pas de suggestion nécessaire pour ça.
+	if (last.kind === "lbrace" || last.kind === "comma") {
+		return [keyword("primary")];
+	}
+
 	// `{ col :` → types SNQL + aliases (D6).
 	if (last.kind === "colon") return ddlTypeSuggestions();
 
@@ -1493,6 +1502,16 @@ function createTableCompletions(
 			// Après un modifier → autres modifiers restants.
 			return DDL_FIELD_MODIFIERS.map(keyword);
 		}
+	}
+
+	// `primary |` → `key` (primary est kind:"keyword" via KEYWORDS lexer DDL/1).
+	if (last.kind === "keyword" && last.value === "primary") {
+		return [keyword("key")];
+	}
+
+	// `primary key |` → `(` (parens obligatoires). `key` reste soft-ident.
+	if (last.kind === "ident" && last.value.toLowerCase() === "key") {
+		return [{ label: "(", type: "keyword" }];
 	}
 
 	return [];
