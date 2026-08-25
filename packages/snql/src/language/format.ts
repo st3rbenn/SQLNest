@@ -52,6 +52,15 @@ export function formatSnql(source: string): string {
 	// signale au walker principal de traiter le stage keyword comme un token
 	// regular (sans newline+indent).
 	const inlineStages = markInlineStages(toks);
+	// Body `create table T { … }` = TOUJOURS multi-ligne, même 1 field. Indent
+	// 2 spaces (comme un stage), closer au top-level. Détecté avant tout autre
+	// traitement — le walker et markBlockLiterals reçoivent les Sets pour
+	// éviter double-traitement.
+	const {
+		createBodyOpeners,
+		createBodyClosers,
+		createBodyCommas
+	} = markCreateTableBodies(toks);
 	const { splitCommas, multilineStages } = markMultiline(toks, inlineStages);
 	// Sprint object-literals — marker les {…} / […] multi-ligne (≥ 3 items).
 	// Ajoute aux splitCommas les commas internes du bloc + retourne les
@@ -59,7 +68,9 @@ export function formatSnql(source: string): string {
 	const { blockOpeners, blockClosers } = markBlockLiterals(
 		toks,
 		splitCommas,
-		multilineStages
+		multilineStages,
+		createBodyOpeners,
+		createBodyClosers
 	);
 	// marker les blocs `transaction { … }` / `savepoint <name>
 	// { … }`. Ces containers indentent leurs stmts enfants + split sur `;`.
@@ -90,6 +101,9 @@ export function formatSnql(source: string): string {
 		const containerOpenIndent = containerOpeners.get(i);
 		const containerCloseIndent = containerClosers.get(i);
 		const containerSemicolonIndent = containerSemicolons.get(i);
+		const createBodyOpen = createBodyOpeners.has(i);
+		const createBodyClose = createBodyClosers.has(i);
+		const createBodyCommaIndent = createBodyCommas.get(i);
 		// offset d'indent additionnel pour stages/ands quand
 		// on est dans un container (transaction/savepoint). Depth 0 = pas
 		// d'offset (top-level), depth ≥ 1 = CONTAINER_STEP × depth spaces.
@@ -103,6 +117,12 @@ export function formatSnql(source: string): string {
 		}
 		if (isChainAnd) {
 			parts.push(`\n${containerOffset}${AND_INDENT}and`);
+			continue;
+		}
+		if (createBodyCommaIndent !== undefined) {
+			// Virgule top-level d'un body `create table … { … }` — split systématique.
+			parts.push(`,\n${containerOffset}${createBodyCommaIndent}`);
+			suppressNextSpace = true;
 			continue;
 		}
 		if (splitIndent !== undefined) {
@@ -132,6 +152,11 @@ export function formatSnql(source: string): string {
 			parts.push(`\n${containerCloseIndent}${tok.value}`);
 			continue;
 		}
+		if (createBodyClose) {
+			// `}` d'un body `create table … { … }` — top-level, aucun indent.
+			parts.push(`\n${containerOffset}${tok.value}`);
+			continue;
+		}
 		if (blockCloseIndent !== undefined) {
 			// `}` ou `]` d'un bloc multi-ligne : newline+indent parent avant le closer.
 			parts.push(`\n${blockCloseIndent}${tok.value}`);
@@ -156,6 +181,10 @@ export function formatSnql(source: string): string {
 		if (containerOpenIndent !== undefined) {
 			// `{` d'un container — newline + indent child après.
 			parts.push(`\n${containerOpenIndent}`);
+			suppressNextSpace = true;
+		} else if (createBodyOpen) {
+			// `{` d'un body create-table — newline + STAGE_INDENT avant le 1er field.
+			parts.push(`\n${containerOffset}${STAGE_INDENT}`);
 			suppressNextSpace = true;
 		} else if (blockOpenIndent !== undefined) {
 			// `{` ou `[` d'un bloc multi-ligne : émettre newline+indent enfant
@@ -251,7 +280,9 @@ function markMultiline(
 function markBlockLiterals(
 	toks: readonly Token[],
 	splitCommas: Map<number, string>,
-	multilineStages: ReadonlySet<number>
+	multilineStages: ReadonlySet<number>,
+	createBodyOpeners: ReadonlySet<number>,
+	createBodyClosers: ReadonlySet<number>
 ): {
 	blockOpeners: Map<number, string>;
 	blockClosers: Map<number, string>;
@@ -261,19 +292,28 @@ function markBlockLiterals(
 
 	interface Frame {
 		readonly openerIdx: number;
-		readonly depth: number; // profondeur du contenu du bloc (childIndent = ITEM_INDENT × depth)
+		// Indent absolu où s'aligne le closer de ce frame (et où s'ouvre son
+		// premier ancêtre visible). Le childIndent = baseIndent + ITEM_INDENT.
+		readonly baseIndent: string;
+		// Indent absolu à émettre pour les enfants (= childIndent du bloc si
+		// object/array, ou STAGE_INDENT si body create-table).
+		readonly effectiveChildIndent: string;
 		readonly commas: number[];
 		// Un enfant passé en multi-ligne force le parent à s'ouvrir même s'il a
 		// < 3 items. Évite `[{ … lourd multi-ligne … }]` avec array parent inline
-		// et objet décollé à droite. Effet naturel : `add [{a,b,c,d}] into t` et
-		// `add [{a,b,c},{d,e,f}] into t` ouvrent le array parent.
+		// et objet décollé à droite.
 		hasMultilineChild: boolean;
+		readonly isCreateBody: boolean;
 	}
 	const stack: Frame[] = [];
 	// Track si on est actuellement dans les items d'un stage pick/sort/set
 	// multi-ligne — dans ce cas, l'opener `{`/`[` d'un bloc top-level est déjà
 	// à ITEM_INDENT, donc son contenu doit s'indenter à ITEM_INDENT × 2.
 	let inMultilineStage = false;
+	// `(...)` interne (ex : `primary key (id, email)`) : ses commas NE sont pas
+	// des séparateurs de items — le stack {}/[] ne les voit pas, donc on suit
+	// parenDepth séparément pour ignorer.
+	let parenDepth = 0;
 
 	for (let i = 0; i < toks.length; i += 1) {
 		const tok = toks[i] as Token;
@@ -281,45 +321,74 @@ function markBlockLiterals(
 			inMultilineStage = multilineStages.has(i);
 			continue;
 		}
-		if (tok.kind === "lbrace" || tok.kind === "lbracket") {
-			// Depth du contenu = depth du parent + 1. Sans parent : 1 seul si
-			// pas dans un stage multi-ligne, sinon 2 (car opener déjà à indent 1).
-			const parentDepth =
-				stack.length > 0
-					? (stack[stack.length - 1] as Frame).depth
-					: inMultilineStage
-						? 1
-						: 0;
+		if (tok.kind === "lparen") {
+			parenDepth += 1;
+			continue;
+		}
+		if (tok.kind === "rparen") {
+			parenDepth -= 1;
+			continue;
+		}
+		if (tok.kind === "lbrace" && createBodyOpeners.has(i)) {
+			// Body create-table : frame implicit — baseIndent top-level, enfants
+			// à STAGE_INDENT (2 spaces). N'émet PAS d'opener/closer (walker
+			// dédié via createBodyOpeners/Closers).
 			stack.push({
 				openerIdx: i,
-				depth: parentDepth + 1,
+				baseIndent: "",
+				effectiveChildIndent: STAGE_INDENT,
 				commas: [],
-				hasMultilineChild: false
+				hasMultilineChild: false,
+				isCreateBody: true
+			});
+			continue;
+		}
+		if (tok.kind === "rbrace" && createBodyClosers.has(i)) {
+			stack.pop();
+			continue;
+		}
+		if (tok.kind === "lbrace" || tok.kind === "lbracket") {
+			// baseIndent hérité : contexte parent = childIndent du parent (bloc
+			// ou body), OU ITEM_INDENT si on est dans un stage multi-ligne
+			// top-level (l'opener est déjà à cet indent), OU "" sinon.
+			const parentFrame = stack[stack.length - 1] as Frame | undefined;
+			const baseIndent =
+				parentFrame !== undefined
+					? parentFrame.effectiveChildIndent
+					: inMultilineStage
+						? ITEM_INDENT
+						: "";
+			stack.push({
+				openerIdx: i,
+				baseIndent,
+				effectiveChildIndent: baseIndent + ITEM_INDENT,
+				commas: [],
+				hasMultilineChild: false,
+				isCreateBody: false
 			});
 		} else if (tok.kind === "rbrace" || tok.kind === "rbracket") {
 			const frame = stack.pop();
 			if (frame === undefined) continue;
 			const itemCount = frame.commas.length + 1;
-			// Empty `{}` / `[]` (0 comma, 0 item, aucun enfant) reste inline.
-			// Sinon : multi-ligne si assez d'items OU si un enfant est déjà passé
-			// en multi-ligne (propagation bottom-up).
 			const isEmpty = frame.commas.length === 0 && !frame.hasMultilineChild;
 			if (isEmpty) continue;
 			if (itemCount < MULTILINE_MIN_ITEMS && !frame.hasMultilineChild) continue;
 			const parent = stack[stack.length - 1] as Frame | undefined;
 			if (parent) parent.hasMultilineChild = true;
-			const childIndent = ITEM_INDENT.repeat(frame.depth);
-			// Closer aligné : depth > 1 → parent bloc (ITEM_INDENT × depth-1),
-			// depth == 1 → parent stage (STAGE_INDENT, aligné avec le keyword).
+			// Closer aligné avec le baseIndent. Cas top-level : STAGE_INDENT pour
+			// rester aligné avec le keyword du stage (comportement historique).
 			const parentIndent =
-				frame.depth > 1 ? ITEM_INDENT.repeat(frame.depth - 1) : STAGE_INDENT;
-			blockOpeners.set(frame.openerIdx, childIndent);
+				frame.baseIndent !== "" ? frame.baseIndent : STAGE_INDENT;
+			blockOpeners.set(frame.openerIdx, frame.effectiveChildIndent);
 			blockClosers.set(i, parentIndent);
 			for (const commaIdx of frame.commas) {
-				splitCommas.set(commaIdx, childIndent);
+				splitCommas.set(commaIdx, frame.effectiveChildIndent);
 			}
-		} else if (tok.kind === "comma" && stack.length > 0) {
-			(stack[stack.length - 1] as Frame).commas.push(i);
+		} else if (tok.kind === "comma" && stack.length > 0 && parenDepth === 0) {
+			const top = stack[stack.length - 1] as Frame;
+			// Body create-table : ses commas top-level sont gérés séparément.
+			if (top.isCreateBody) continue;
+			top.commas.push(i);
 		}
 	}
 
@@ -564,6 +633,91 @@ function markChainingAnds(toks: readonly Token[]): ReadonlySet<number> {
 	return result;
 }
 
+// Détecte les body `create table <ident> [if not exists] { … }`. Ces bodies
+// sont TOUJOURS multi-ligne (même 1 field) avec indent STAGE_INDENT (2 spaces)
+// et closer top-level, distinct des object literals génériques.
+function markCreateTableBodies(toks: readonly Token[]): {
+	createBodyOpeners: Set<number>;
+	createBodyClosers: Set<number>;
+	createBodyCommas: Map<number, string>;
+} {
+	const createBodyOpeners = new Set<number>();
+	const createBodyClosers = new Set<number>();
+	const createBodyCommas = new Map<number, string>();
+
+	for (let i = 0; i < toks.length; i += 1) {
+		const t = toks[i] as Token;
+		if (t.value !== "create") continue;
+		const next = toks[i + 1];
+		if (next === undefined || next.value !== "table") continue;
+		// Skip ident + optionally `if not exists` — cherche le premier `{`
+		// dans une fenêtre raisonnable (bail-out si autre construct rencontré).
+		let j = i + 2;
+		while (j < toks.length) {
+			const tj = toks[j] as Token;
+			if (tj.kind === "lbrace") break;
+			if (tj.kind === "semicolon" || tj.kind === "rbrace") {
+				j = toks.length;
+				break;
+			}
+			j += 1;
+		}
+		if (j >= toks.length) continue;
+		const openerIdx = j;
+		// Match balanced brace
+		let depth = 1;
+		let k = j + 1;
+		while (k < toks.length && depth > 0) {
+			const tk = toks[k] as Token;
+			if (tk.kind === "lbrace") depth += 1;
+			else if (tk.kind === "rbrace") {
+				depth -= 1;
+				if (depth === 0) break;
+			}
+			k += 1;
+		}
+		if (k >= toks.length) continue;
+		const closerIdx = k;
+
+		createBodyOpeners.add(openerIdx);
+		createBodyClosers.add(closerIdx);
+
+		// Collect top-level commas (skip nested {/[/( pour ne pas splitter
+		// `primary key (a, b)` ni un default json compound).
+		let d = 0;
+		for (let m = openerIdx + 1; m < closerIdx; m += 1) {
+			const tm = toks[m] as Token;
+			if (
+				tm.kind === "lparen" ||
+				tm.kind === "lbrace" ||
+				tm.kind === "lbracket"
+			) {
+				d += 1;
+			} else if (
+				tm.kind === "rparen" ||
+				tm.kind === "rbrace" ||
+				tm.kind === "rbracket"
+			) {
+				d -= 1;
+			} else if (tm.kind === "comma" && d === 0) {
+				createBodyCommas.set(m, STAGE_INDENT);
+			}
+		}
+	}
+
+	return { createBodyOpeners, createBodyClosers, createBodyCommas };
+}
+
+// Idents DDL qui prennent un `(` avec espace — pas des function calls.
+// Sans cette allow-list, `primary key (id)` devient `primary key(id)` par
+// la function-call detection (ident + lparen → pas d'espace).
+const DDL_NON_CALL_IDENTS: ReadonlySet<string> = new Set([
+	"key",
+	"index",
+	"column",
+	"table"
+]);
+
 function needsSpaceBefore(prev: Token, curr: Token): boolean {
 	if (
 		curr.kind === "comma" ||
@@ -577,7 +731,13 @@ function needsSpaceBefore(prev: Token, curr: Token): boolean {
 	}
 	// Appel de fonction : `upper(` ou `now(` — pas d'espace entre le nom de la
 	// fonction et sa parenthèse ouvrante. Un chemin `x.y(` reste callé aussi.
-	if (curr.kind === "lparen" && prev.kind === "ident") {
+	// Exception DDL : `primary key (…)`, `add [unique] index (…)`, `drop column`
+	// — l'ident précédent est un mot DDL, pas un nom de fn.
+	if (
+		curr.kind === "lparen" &&
+		prev.kind === "ident" &&
+		!DDL_NON_CALL_IDENTS.has(prev.value.toLowerCase())
+	) {
 		return false;
 	}
 	if (

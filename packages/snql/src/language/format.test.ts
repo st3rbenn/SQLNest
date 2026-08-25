@@ -345,3 +345,95 @@ describe("format — let CTE", () => {
 		);
 	});
 });
+
+describe("format — DDL create table body", () => {
+	it("body 1 field → multi-ligne quand même (structurel, pas comme un object literal)", () => {
+		expect(fmt("create table t {id: uuid}")).toBe(
+			"create table t {\n  id: uuid\n}"
+		);
+	});
+
+	it("body 2 fields → multi-ligne (règle body ≠ règle object literal)", () => {
+		expect(fmt("create table t {id: uuid, email: text}")).toBe(
+			"create table t {\n  id: uuid,\n  email: text\n}"
+		);
+	});
+
+	it("body avec primary key compound — commas dans parens PK restent inline", () => {
+		expect(
+			fmt(
+				"create table users {id: uuid not null, email: text unique, primary key (id, email)}"
+			)
+		).toBe(
+			[
+				"create table users {",
+				"  id: uuid not null,",
+				"  email: text unique,",
+				"  primary key (id, email)",
+				"}"
+			].join("\n")
+		);
+	});
+
+	it("body avec default json compound 2 items → nested reste inline", () => {
+		expect(
+			fmt(
+				'create table t {id: uuid, meta: json default {tier: "free", quota: 10}}'
+			)
+		).toBe(
+			[
+				"create table t {",
+				"  id: uuid,",
+				'  meta: json default {tier: "free", quota: 10}',
+				"}"
+			].join("\n")
+		);
+	});
+
+	it("body avec default json compound 3 items → nested multi-ligne à baseIndent + ITEM_INDENT", () => {
+		expect(
+			fmt(
+				'create table t {id: uuid, config: json default {tier: "free", quota: 10, ttl_days: 30}}'
+			)
+		).toBe(
+			[
+				"create table t {",
+				"  id: uuid,",
+				"  config: json default {",
+				'      tier: "free",',
+				"      quota: 10,",
+				"      ttl_days: 30",
+				"  }",
+				"}"
+			].join("\n")
+		);
+	});
+
+	it("idempotent : format(format(x)) == format(x) sur body avec default json compound", () => {
+		const src =
+			'create table t_json_e2e {id: uuid, meta: json default {tier: "free", quota: 10}}';
+		const once = fmt(src);
+		const twice = fmt(once);
+		expect(twice).toBe(once);
+	});
+
+	it("`add unique index (a, b) into t` — espace conservé entre `index` et `(`", () => {
+		expect(fmt("add unique index (email, tenant_id) into users")).toBe(
+			"add unique index (email, tenant_id)\n  into users"
+		);
+	});
+
+	it("`primary key (a, b)` — espace conservé entre `key` et `(`", () => {
+		expect(
+			fmt("create table t {id: uuid, name: text, primary key (id, name)}")
+		).toBe(
+			[
+				"create table t {",
+				"  id: uuid,",
+				"  name: text,",
+				"  primary key (id, name)",
+				"}"
+			].join("\n")
+		);
+	});
+});
