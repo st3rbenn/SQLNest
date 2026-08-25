@@ -669,21 +669,25 @@ class MongoConnection implements Connection {
 	}
 
 	/**
-	 * DDL Tier-2 sur Mongo (ADR-029) — `create-collection` compensated. Séquence :
-	 *  1. `db.createCollection(name, {validator: {$jsonSchema}})` — écrit le
-	 *     schema validator natif. `ifNotExists=true` : catch `NamespaceExists`
-	 *     (code 48) et traite comme succès (D3).
-	 *  2. Pour chaque index (compound PK + uniques field-level) :
-	 *     `collection.createIndex(keys, options)`. Idempotent nativement — Mongo
-	 *     renvoie le nom sans erreur si un index identique existe.
-	 *
-	 * Le `primaryKeyAlias` n'a rien à créer côté Mongo (le `_id` est natif).
-	 * Il sera consommé par les prochains reads/writes pour aliaser `id` ↔ `_id`.
-	 *
-	 * Renvoie un ResultSet vide + written=true — pas de RETURNING sur un DDL.
+	 * DDL Tier-2 sur Mongo (ADR-029). Dispatch par `operation` :
+	 *  - `create-collection` : createCollection + validator + createIndex.
+	 *  - `add-column` : preflight D2 + collMod validator étendu + backfill D10 batched.
+	 * Renvoie un ResultSet vide + written=true (pas de RETURNING sur un DDL).
 	 */
 	async #executeDDL(
 		query: Extract<NativeQuery, { kind: "mongo-ddl" }>
+	): Promise<ResultSet> {
+		if (query.operation === "create-collection") {
+			return this.#executeDDLCreateCollection(query);
+		}
+		return this.#executeDDLAddColumn(query);
+	}
+
+	async #executeDDLCreateCollection(
+		query: Extract<
+			NativeQuery,
+			{ kind: "mongo-ddl"; operation: "create-collection" }
+		>
 	): Promise<ResultSet> {
 		const db = this.#requireDb();
 		try {
@@ -712,6 +716,149 @@ class MongoConnection implements Connection {
 		} catch (cause) {
 			throw new EngineExecutionError(
 				`DDL MongoDB échouée sur '${query.collection}' — ${describeMongoExecutionError(cause)}`,
+				{ cause }
+			);
+		}
+	}
+
+	/**
+	 * DDL/2 add column Mongo (ADR-029 D2 + D10). Séquence :
+	 *  1. D2 preflight : si `preflightNotNull=true`, `countDocuments({[col]:
+	 *     {$exists:false}})` — refus runtime typé si > 0 avec message copiable
+	 *     actionnable pointant vers update-first (pattern PA/5).
+	 *  2. Lit le validator existant via `listCollections` + merge la nouvelle
+	 *     property (`bsonType` + `required` étendu) + `collMod` — écrire un
+	 *     validator ex nihilo écraserait les contraintes créées par
+	 *     `create-collection`, on merge.
+	 *  3. D10 backfill : si `backfill=true`, `updateMany` batched — pattern
+	 *     find({$exists:false}, {_id:1}).limit(batch) + updateMany({_id:{$in}}).
+	 *     50ms throttle inter-batches. Cap `MAX_ROWS` défaut 10M → diagnostic
+	 *     scale (non-bloquant, mais on stoppe et remonte pour ne pas bloquer
+	 *     la connection HTTP indéfiniment).
+	 *  4. Si `index` présent (add column ... unique), createIndex secondaire.
+	 * Idempotence D3 : `ifNotExists=true` skip si le field existe déjà dans le
+	 * validator (name-only).
+	 */
+	async #executeDDLAddColumn(
+		query: Extract<
+			NativeQuery,
+			{ kind: "mongo-ddl"; operation: "add-column" }
+		>
+	): Promise<ResultSet> {
+		const db = this.#requireDb();
+		const col = db.collection(query.collection);
+		const fieldName = query.column.name;
+		try {
+			// Lit le validator existant pour merger la nouvelle property. Pattern
+			// listCollections filter par nom + nameOnly:false.
+			const collInfoCursor = db.listCollections({ name: query.collection });
+			const collInfoArr = await collInfoCursor.toArray();
+			const existingInfo = collInfoArr[0] as
+				| { readonly options?: { readonly validator?: Record<string, unknown> } }
+				| undefined;
+			if (existingInfo === undefined) {
+				throw new EngineExecutionError(
+					`add column échouée : collection '${query.collection}' inexistante — utilise 'create table' avant`
+				);
+			}
+			const existingValidator = existingInfo.options?.validator ?? {};
+			const existingJsonSchema =
+				(existingValidator as { $jsonSchema?: Record<string, unknown> }).$jsonSchema ??
+				{ bsonType: "object", properties: {}, required: [] };
+			const existingProperties =
+				(existingJsonSchema as { properties?: Record<string, unknown> }).properties ?? {};
+			const existingRequired =
+				((existingJsonSchema as { required?: string[] }).required ?? []) as string[];
+
+			// D3 : idempotence name-only. Field présent = no-op silencieux.
+			if (query.ifNotExists && Object.hasOwn(existingProperties, fieldName)) {
+				return { columns: [], rows: [], rowCount: 0 };
+			}
+
+			// D2 preflight : NOT NULL sans default = compte les docs sans le field.
+			// Message copiable actionnable (contrat ADR-029 D2).
+			if (query.preflightNotNull) {
+				const orphanCount = await col.countDocuments({
+					[fieldName]: { $exists: false }
+				});
+				if (orphanCount > 0) {
+					throw new EngineExecutionError(
+						`${orphanCount} docs sans '${fieldName}' — exécute d'abord : update ${query.collection} set ${fieldName} = <val> where ${fieldName} is null, puis relance add column not null`
+					);
+				}
+			}
+
+			// collMod avec validator mergé : ajoute la nouvelle property + étend
+			// `required` si NOT NULL. Préserve les autres contraintes existantes.
+			const newProperty: Record<string, unknown> = {};
+			if (query.column.bsonType !== null) {
+				newProperty["bsonType"] = query.column.bsonType;
+			}
+			const newProperties = {
+				...existingProperties,
+				[fieldName]: newProperty
+			};
+			const requiredSet = new Set(existingRequired);
+			if (query.column.required) requiredSet.add(fieldName);
+			const newRequired = [...requiredSet];
+			const newJsonSchema: Record<string, unknown> = {
+				bsonType: "object",
+				properties: newProperties
+			};
+			if (newRequired.length > 0) newJsonSchema["required"] = newRequired;
+			await db.command({
+				collMod: query.collection,
+				validator: { $jsonSchema: newJsonSchema }
+			});
+
+			// D10 backfill : updateMany batched avec throttle. Pattern id-batch
+			// évite le lock long — on ne cible que N docs sans le field à la
+			// fois, chaque update est court. Cap MAX_ROWS pour ne pas bloquer
+			// la connection indéfiniment sur une collection énorme.
+			if (query.backfill) {
+				const BATCH_SIZE = 10_000;
+				const MAX_ROWS = 10_000_000;
+				const THROTTLE_MS = 50;
+				const defaultValue = query.column.defaultValue;
+				let totalBackfilled = 0;
+				for (;;) {
+					const batchCursor = col
+						.find({ [fieldName]: { $exists: false } }, { projection: { _id: 1 } })
+						.limit(BATCH_SIZE);
+					const batch = await batchCursor.toArray();
+					if (batch.length === 0) break;
+					const ids = batch.map(
+						(d) => (d as { readonly _id: unknown })._id
+					) as unknown as ObjectId[];
+					await col.updateMany(
+						{ _id: { $in: ids } },
+						{ $set: { [fieldName]: defaultValue } }
+					);
+					totalBackfilled += batch.length;
+					if (totalBackfilled >= MAX_ROWS) {
+						throw new EngineExecutionError(
+							`add column ${fieldName} sur '${query.collection}' : backfill dépasse le cap ${MAX_ROWS} docs — augmente mongo.ddl.backfill_max_rows ou pré-init les rows via update batché offline`
+						);
+					}
+					await new Promise((resolve) => setTimeout(resolve, THROTTLE_MS));
+				}
+			}
+
+			// Index unique secondaire optionnel (add column ... unique).
+			if (query.index !== undefined) {
+				const options: Record<string, unknown> = {};
+				if (query.index.options.unique === true) options["unique"] = true;
+				if (query.index.options.name !== undefined)
+					options["name"] = query.index.options.name;
+				await col.createIndex(query.index.keys, options);
+			}
+
+			return { columns: [], rows: [], rowCount: 0 };
+		} catch (cause) {
+			// EngineExecutionError propres (preflight / cap) déjà typées — re-throw sans wrap.
+			if (cause instanceof EngineExecutionError) throw cause;
+			throw new EngineExecutionError(
+				`add column MongoDB échouée sur '${query.collection}.${fieldName}' — ${describeMongoExecutionError(cause)}`,
 				{ cause }
 			);
 		}

@@ -37,6 +37,7 @@ import {
 	assertMutationWriteJoinSupported,
 	assertTransactionSupported,
 	capabilitiesFor,
+	getMapper,
 	lower,
 	lowerDDL,
 	lowerIntrospect,
@@ -44,6 +45,7 @@ import {
 	lowerMutation,
 	lowerRaw,
 	lowerTransaction,
+	mapKvDDL,
 	parse,
 	plan as planLogical,
 	type SchemaModel,
@@ -261,13 +263,26 @@ function validateStatement(
 			return;
 		}
 		case "ddl": {
-			// DDL Tier-2 (ADR-029). Refus prévus : PK Mongo sur field ≠ 'id'
-			// (codegen_mongo_primary_key_not_id), engine sans capability 'ddl'
-			// (planner_ddl_unsupported), ident invalide D1
-			// (lower_ddl_invalid_identifier). Squiggly live avant clic Execute.
+			// DDL Tier-2 (ADR-029). Deux niveaux de refus catchés en live :
+			//  1. Planner : assertDDLSupported (capability 'ddl' absente ou kind
+			//     non supporté par l'engine).
+			//  2. Codegen : dry-run mapper.mapDDL — attrape les refus sémantiques
+			//     admis (D13 PK Mongo ≠ id via codegen_mongo_primary_key_not_id)
+			//     sans passer par l'Execute. Le dry-run est pur (aucune I/O), le
+			//     coût est ~µs vs un roundtrip DB.
 			const ddlPlan = lowerDDL(statement, schema);
 			if (caps === undefined) return;
 			assertWithSpan(() => assertDDLSupported(ddlPlan, caps), statement);
+			// Dry-run codegen — n'a pas d'assert planner, throw directement
+			// SnqlError si refus. Ancrage span via assertWithSpan comme pour
+			// les autres asserts engine-level.
+			assertWithSpan(() => {
+				if (engine === "kv") {
+					mapKvDDL(ddlPlan);
+				} else if (engine === "postgres" || engine === "mongodb") {
+					getMapper(engine).mapDDL?.(ddlPlan);
+				}
+			}, statement);
 			return;
 		}
 		case "savepoint":
