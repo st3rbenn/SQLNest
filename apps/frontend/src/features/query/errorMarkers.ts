@@ -127,9 +127,25 @@ const liveDiagField = StateField.define<LiveDiagnostic | null>({
 		for (const effect of tr.effects) {
 			if (effect.is(setLiveDiagnostic)) return effect.value;
 		}
-		// Si le doc change, le span peut être invalidé — on garde tel quel
-		// (le hook debounced recomputera et dispatchera une valeur fraîche).
-		return diag;
+		// Si le doc change, on DOIT mapper les positions du span pour rester
+		// cohérent avec le nouveau doc — sinon CM crash au render de la
+		// decoration (`parents.pop() undefined` dans advance() du RangeSet
+		// walker, quand le span pointe hors du nouveau doc ou traverse une
+		// frontière de ligne mal). Le hook debounced recomputera au prochain
+		// tick avec une valeur fraîche, mais entre-temps on ne peut pas laisser
+		// un span obsolète pointer dans le vide.
+		if (diag === null || !tr.docChanged) return diag;
+		const [start, len] = diag.span;
+		const newStart = tr.changes.mapPos(start, 1);
+		const newEnd = tr.changes.mapPos(start + len, -1);
+		const newLen = Math.max(0, newEnd - newStart);
+		const docLen = tr.state.doc.length;
+		if (newStart < 0 || newLen <= 0 || newStart + newLen > docLen) {
+			// Span dégénéré après mapping (deleted range, out-of-bounds) —
+			// drop en attendant le prochain recompute du hook.
+			return null;
+		}
+		return { ...diag, span: [newStart, newLen] as SerializedSpan };
 	}
 });
 
@@ -237,7 +253,20 @@ const rawStatementField = StateField.define<SerializedSpan | null>({
 		for (const effect of tr.effects) {
 			if (effect.is(setRawStatementSpan)) return effect.value;
 		}
-		return current;
+		// Map les positions sur les doc changes — même raison que liveDiagField
+		// (crash CM `parents.pop() undefined` sur decoration obsolète). Le
+		// rawStatementGutter.lineMarker check déjà `start > docLen` mais ça
+		// n'empêche pas le walker interne d'échouer plus tôt.
+		if (current === null || !tr.docChanged) return current;
+		const [start, len] = current;
+		const newStart = tr.changes.mapPos(start, 1);
+		const newEnd = tr.changes.mapPos(start + len, -1);
+		const newLen = Math.max(0, newEnd - newStart);
+		const docLen = tr.state.doc.length;
+		if (newStart < 0 || newLen <= 0 || newStart + newLen > docLen) {
+			return null;
+		}
+		return [newStart, newLen] as SerializedSpan;
 	}
 });
 
