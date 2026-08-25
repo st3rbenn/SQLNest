@@ -635,15 +635,45 @@ export interface DropIndexStmt {
 }
 
 /**
+ * `drop table <name> [if exists]` (DDL/4). Destructif — le frontend applique
+ * D7 typing UI gate (WriteConfirmBar « tape DROP pour confirmer »). D3
+ * idempotence via `ifExists`. PG DROP TABLE RESTRICT par défaut (safe vs FK).
+ */
+export interface DropTableStmt {
+	readonly operation: "ddl";
+	readonly kind: "drop-table";
+	readonly target: string;
+	readonly ifExists?: boolean;
+	readonly span: Span;
+}
+
+/**
+ * `drop column <col> from <table> [if exists]` (DDL/4). Destructif — D7
+ * typing UI gate frontend. Compensation Mongo/KV : collMod validator (retire
+ * property) + updateMany `$unset` / SCAN + HDEL batched (pattern miroir D10
+ * backfill), pour purger la valeur dans les docs existants.
+ */
+export interface DropColumnStmt {
+	readonly operation: "ddl";
+	readonly kind: "drop-column";
+	readonly target: string;
+	readonly column: string;
+	readonly ifExists?: boolean;
+	readonly span: Span;
+}
+
+/**
  * Union des statements DDL. DDL/1 = `create-table` ; DDL/2 = `add-column` ;
- * DDL/3 = `add-index` | `add-unique-index` | `drop-index` ; extends aux
- * autres kinds à mesure du sprint DDL/4 (drop-table, drop-column).
+ * DDL/3 = `add-index` | `add-unique-index` | `drop-index` ; DDL/4 =
+ * `drop-table` | `drop-column`. Corpus Tier-2 complet.
  */
 export type DDLStatement =
 	| CreateTableStmt
 	| AddColumnStmt
 	| AddIndexStmt
-	| DropIndexStmt;
+	| DropIndexStmt
+	| DropTableStmt
+	| DropColumnStmt;
 
 /** Racine de l'AST : lecture (`Query`), mutation, transaction, introspection, raw, let/CTE ou DDL Tier-2. */
 export type Statement =

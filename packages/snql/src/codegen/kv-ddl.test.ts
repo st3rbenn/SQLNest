@@ -3,13 +3,17 @@ import type {
 	AddColumnPlan,
 	AddIndexPlan,
 	CreateTablePlan,
-	DropIndexPlan
+	DropColumnPlan,
+	DropIndexPlan,
+	DropTablePlan
 } from "../ir/plan";
 import type {
 	KvDDLAddColumnQuery,
 	KvDDLAddIndexQuery,
 	KvDDLCreateTableQuery,
-	KvDDLDropIndexQuery
+	KvDDLDropColumnQuery,
+	KvDDLDropIndexQuery,
+	KvDDLDropTableQuery
 } from "./mapper";
 import { mapKvDDL } from "./kv-ddl";
 
@@ -41,6 +45,22 @@ function mapDropIdx(plan: DropIndexPlan): KvDDLDropIndexQuery {
 	const q = mapKvDDL(plan);
 	if (q.operation !== "drop-index") {
 		throw new Error(`attendu drop-index, got ${q.operation}`);
+	}
+	return q;
+}
+
+function mapDropTbl(plan: DropTablePlan): KvDDLDropTableQuery {
+	const q = mapKvDDL(plan);
+	if (q.operation !== "drop-table") {
+		throw new Error(`attendu drop-table, got ${q.operation}`);
+	}
+	return q;
+}
+
+function mapDropCol(plan: DropColumnPlan): KvDDLDropColumnQuery {
+	const q = mapKvDDL(plan);
+	if (q.operation !== "drop-column") {
+		throw new Error(`attendu drop-column, got ${q.operation}`);
 	}
 	return q;
 }
@@ -398,6 +418,65 @@ describe("codegen KV — add/drop index (ADR-029 DDL/3.5 D12 middleware SETNX)",
 				kind: "drop-index",
 				target: "users",
 				name: "idx_users_email",
+				ifExists: true
+			}).ifExists
+		).toBe(true);
+	});
+});
+
+describe("codegen KV — drop table / drop column (ADR-029 DDL/4.5)", () => {
+	it("drop-table minimal (adapter SCAN + DEL batched + DEL _schema)", () => {
+		const q = mapDropTbl({
+			op: "ddl",
+			kind: "drop-table",
+			target: "users",
+			ifExists: false
+		});
+		expect(q).toEqual({
+			engine: "kv",
+			kind: "kv-ddl",
+			operation: "drop-table",
+			collection: "users",
+			ifExists: false
+		});
+	});
+
+	it("drop-table if exists (D3 adapter HEXISTS _schema skip si absent)", () => {
+		expect(
+			mapDropTbl({
+				op: "ddl",
+				kind: "drop-table",
+				target: "users",
+				ifExists: true
+			}).ifExists
+		).toBe(true);
+	});
+
+	it("drop-column minimal (adapter SCAN + HDEL batched miroir D10)", () => {
+		const q = mapDropCol({
+			op: "ddl",
+			kind: "drop-column",
+			target: "users",
+			column: "age",
+			ifExists: false
+		});
+		expect(q).toEqual({
+			engine: "kv",
+			kind: "kv-ddl",
+			operation: "drop-column",
+			collection: "users",
+			column: "age",
+			ifExists: false
+		});
+	});
+
+	it("drop-column if exists (D3 name-only)", () => {
+		expect(
+			mapDropCol({
+				op: "ddl",
+				kind: "drop-column",
+				target: "users",
+				column: "age",
 				ifExists: true
 			}).ifExists
 		).toBe(true);

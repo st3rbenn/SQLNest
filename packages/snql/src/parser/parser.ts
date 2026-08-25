@@ -9,7 +9,9 @@ import type {
 	CreateTableStmt,
 	DDLFieldDef,
 	DeleteStatement,
+	DropColumnStmt,
 	DropIndexStmt,
+	DropTableStmt,
 	Expr,
 	FieldSelection,
 	GroupKey,
@@ -157,6 +159,24 @@ function parseStatement(cursor: TokenCursor): Statement {
 		peekIdent(cursor, "index", 1)
 	) {
 		return parseDropIndex(cursor);
+	}
+	// DDL/4 : `drop table <name> [if exists]`. Destructive — le frontend applique
+	// D7 typing UI gate. `table` reste soft-keyword (déjà KEYWORDS pour DDL/1).
+	if (
+		first.kind === "ident" &&
+		first.value.toLowerCase() === "drop" &&
+		peekKeyword(cursor, "table", 1)
+	) {
+		return parseDropTable(cursor);
+	}
+	// DDL/4 : `drop column <col> from <table> [if exists]`. Destructive — D7 UI.
+	// `column` reste soft-ident (préserve `add {column: "id"} into T` insert alias).
+	if (
+		first.kind === "ident" &&
+		first.value.toLowerCase() === "drop" &&
+		peekIdent(cursor, "column", 1)
+	) {
+		return parseDropColumn(cursor);
 	}
 	const verbTok = first;
 	if (verbTok.kind !== "verb") {
@@ -2172,5 +2192,85 @@ function parseDropIndex(cursor: TokenCursor): DropIndexStmt {
 		name: nameTok.value,
 		...(ifExists ? { ifExists } : {}),
 		span: { start: dropTok.span.start, end: targetTok.span.end }
+	};
+}
+
+/**
+ * `drop table <name> [if exists]` (DDL/4). Destructive — le frontend applique
+ * D7 typing UI gate WriteConfirmBar. PG DROP TABLE RESTRICT (safe vs FK).
+ * Mongo dropCollection natif. KV compensation SCAN + DEL (wiring V-next).
+ */
+function parseDropTable(cursor: TokenCursor): DropTableStmt {
+	const dropTok = cursor.next(); // `drop` soft-ident
+	cursor.next(); // `table` keyword (déjà peeked)
+	const targetTok = cursor.expect("ident", "un nom de table après 'drop table'");
+
+	// `if exists` optionnel (D3 name-only sémantique).
+	let ifExists = false;
+	let endSpan = targetTok.span;
+	if (peekIdent(cursor, "if")) {
+		cursor.next();
+		if (!peekKeyword(cursor, "exists")) {
+			throw new SnqlError(
+				"'if' doit être suivi de 'exists' dans un drop table",
+				"parse_ddl_expected_exists_after_if",
+				cursor.peek().span
+			);
+		}
+		endSpan = cursor.next().span;
+		ifExists = true;
+	}
+	return {
+		operation: "ddl",
+		kind: "drop-table",
+		target: targetTok.value,
+		...(ifExists ? { ifExists } : {}),
+		span: { start: dropTok.span.start, end: endSpan.end }
+	};
+}
+
+/**
+ * `drop column <col> from <table> [if exists]` (DDL/4). Destructive — D7 UI.
+ * PG `ALTER TABLE ... DROP COLUMN ... RESTRICT`. Mongo compensation (collMod
+ * validator sans property + updateMany `$unset` batched). KV compensation
+ * (SCAN + HDEL par row batched, wiring V-next).
+ */
+function parseDropColumn(cursor: TokenCursor): DropColumnStmt {
+	const dropTok = cursor.next(); // `drop` soft-ident
+	cursor.next(); // `column` soft-ident (déjà peeked)
+	const colTok = cursor.expect("ident", "un nom de colonne après 'drop column'");
+
+	if (!peekKeyword(cursor, "from")) {
+		throw new SnqlError(
+			"'drop column' attend 'from <table>' pour cibler la table",
+			"parse_ddl_drop_column_missing_from",
+			cursor.peek().span
+		);
+	}
+	cursor.next();
+	const targetTok = cursor.expect("ident", "un nom de table après 'from'");
+
+	// `if exists` optionnel.
+	let ifExists = false;
+	let endSpan = targetTok.span;
+	if (peekIdent(cursor, "if")) {
+		cursor.next();
+		if (!peekKeyword(cursor, "exists")) {
+			throw new SnqlError(
+				"'if' doit être suivi de 'exists' dans un drop column",
+				"parse_ddl_expected_exists_after_if",
+				cursor.peek().span
+			);
+		}
+		endSpan = cursor.next().span;
+		ifExists = true;
+	}
+	return {
+		operation: "ddl",
+		kind: "drop-column",
+		target: targetTok.value,
+		column: colTok.value,
+		...(ifExists ? { ifExists } : {}),
+		span: { start: dropTok.span.start, end: endSpan.end }
 	};
 }

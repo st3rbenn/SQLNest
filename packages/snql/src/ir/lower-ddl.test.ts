@@ -7,7 +7,9 @@ import type {
 	AddColumnPlan,
 	AddIndexPlan,
 	CreateTablePlan,
-	DropIndexPlan
+	DropColumnPlan,
+	DropIndexPlan,
+	DropTablePlan
 } from "./plan";
 
 function lowerCreate(source: string): CreateTablePlan {
@@ -330,6 +332,57 @@ describe("lower DDL — add/drop index (ADR-029 DDL/3)", () => {
 	it("drop index if exists (D3)", () => {
 		expect(
 			lowerDrop("drop index idx_users_email from users if exists")
+		).toMatchObject({ ifExists: true });
+	});
+});
+
+function lowerDropTable(source: string): DropTablePlan {
+	const parsed = parse(tokenize(source)) as DDLStatement;
+	const plan = lowerDDL(parsed);
+	if (plan.kind !== "drop-table") {
+		throw new Error(`expected drop-table plan, got ${plan.kind}`);
+	}
+	return plan;
+}
+
+function lowerDropCol(source: string): DropColumnPlan {
+	const parsed = parse(tokenize(source)) as DDLStatement;
+	const plan = lowerDDL(parsed);
+	if (plan.kind !== "drop-column") {
+		throw new Error(`expected drop-column plan, got ${plan.kind}`);
+	}
+	return plan;
+}
+
+describe("lower DDL — drop table / drop column (ADR-029 DDL/4)", () => {
+	it("abaisse drop table minimal", () => {
+		expect(lowerDropTable("drop table users")).toMatchObject({
+			op: "ddl",
+			kind: "drop-table",
+			target: "users",
+			ifExists: false
+		});
+	});
+
+	it("drop table if exists (D3)", () => {
+		expect(
+			lowerDropTable("drop table users if exists")
+		).toMatchObject({ ifExists: true });
+	});
+
+	it("abaisse drop column minimal", () => {
+		expect(lowerDropCol("drop column age from users")).toMatchObject({
+			op: "ddl",
+			kind: "drop-column",
+			target: "users",
+			column: "age",
+			ifExists: false
+		});
+	});
+
+	it("drop column if exists (D3)", () => {
+		expect(
+			lowerDropCol("drop column age from users if exists")
 		).toMatchObject({ ifExists: true });
 	});
 });

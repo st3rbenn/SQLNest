@@ -4,12 +4,16 @@ import type {
 	AddIndexPlan,
 	CreateTablePlan,
 	DDLPlan,
-	DropIndexPlan
+	DropColumnPlan,
+	DropIndexPlan,
+	DropTablePlan
 } from "../ir/plan";
 import type {
 	MongoDDLAddColumnQuery,
 	MongoDDLAddIndexQuery,
 	MongoDDLCreateCollectionQuery,
+	MongoDDLDropCollectionQuery,
+	MongoDDLDropColumnQuery,
 	MongoDDLDropIndexQuery
 } from "./mapper";
 import { mongoMapper } from "./mongodb";
@@ -55,6 +59,24 @@ function mapDropIdx(plan: DropIndexPlan): MongoDDLDropIndexQuery {
 	const q = mongoMapper.mapDDL(plan);
 	if (q.kind !== "mongo-ddl" || q.operation !== "drop-index") {
 		throw new Error(`attendu drop-index, got ${q.kind}`);
+	}
+	return q;
+}
+
+function mapDropCol(plan: DropColumnPlan): MongoDDLDropColumnQuery {
+	if (mongoMapper.mapDDL === undefined) throw new Error("mapDDL manquant");
+	const q = mongoMapper.mapDDL(plan);
+	if (q.kind !== "mongo-ddl" || q.operation !== "drop-column") {
+		throw new Error(`attendu drop-column, got ${q.kind}`);
+	}
+	return q;
+}
+
+function mapDropTable(plan: DropTablePlan): MongoDDLDropCollectionQuery {
+	if (mongoMapper.mapDDL === undefined) throw new Error("mapDDL manquant");
+	const q = mongoMapper.mapDDL(plan);
+	if (q.kind !== "mongo-ddl" || q.operation !== "drop-collection") {
+		throw new Error(`attendu drop-collection, got ${q.kind}`);
 	}
 	return q;
 }
@@ -409,5 +431,64 @@ describe("codegen Mongo — add/drop index (ADR-029 DDL/3.4)", () => {
 			ifExists: true
 		});
 		expect(q.ifExists).toBe(true);
+	});
+});
+
+describe("codegen Mongo — drop table / drop column (ADR-029 DDL/4.4)", () => {
+	it("drop-collection minimal (D3 ifExists false)", () => {
+		const q = mapDropTable({
+			op: "ddl",
+			kind: "drop-table",
+			target: "users",
+			ifExists: false
+		});
+		expect(q).toEqual({
+			engine: "mongodb",
+			kind: "mongo-ddl",
+			operation: "drop-collection",
+			collection: "users",
+			ifExists: false
+		});
+	});
+
+	it("drop-collection if exists (D3 catch NamespaceNotFound 26)", () => {
+		expect(
+			mapDropTable({
+				op: "ddl",
+				kind: "drop-table",
+				target: "users",
+				ifExists: true
+			}).ifExists
+		).toBe(true);
+	});
+
+	it("drop-column minimal (compensation collMod + $unset batched)", () => {
+		const q = mapDropCol({
+			op: "ddl",
+			kind: "drop-column",
+			target: "users",
+			column: "age",
+			ifExists: false
+		});
+		expect(q).toEqual({
+			engine: "mongodb",
+			kind: "mongo-ddl",
+			operation: "drop-column",
+			collection: "users",
+			column: "age",
+			ifExists: false
+		});
+	});
+
+	it("drop-column if exists (D3 skip si property absente du validator)", () => {
+		expect(
+			mapDropCol({
+				op: "ddl",
+				kind: "drop-column",
+				target: "users",
+				column: "age",
+				ifExists: true
+			}).ifExists
+		).toBe(true);
 	});
 });

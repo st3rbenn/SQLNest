@@ -11,14 +11,20 @@ import type {
 	AddIndexPlan,
 	CreateTablePlan,
 	DDLStatement,
+	DropColumnPlan,
 	DropIndexPlan,
+	DropTablePlan,
 	KvDDLAddColumnQuery,
 	KvDDLAddIndexQuery,
 	KvDDLCreateTableQuery,
+	KvDDLDropColumnQuery,
 	KvDDLDropIndexQuery,
+	KvDDLDropTableQuery,
 	MongoDDLAddColumnQuery,
 	MongoDDLAddIndexQuery,
 	MongoDDLCreateCollectionQuery,
+	MongoDDLDropCollectionQuery,
+	MongoDDLDropColumnQuery,
 	MongoDDLDropIndexQuery
 } from "./index";
 import {
@@ -156,6 +162,68 @@ function kvDrop(source: string): KvDDLDropIndexQuery {
 	const q = mapKvDDL(lowerDrop(source));
 	if (q.operation !== "drop-index") {
 		throw new Error(`attendu kv-ddl drop-index, got ${q.operation}`);
+	}
+	return q;
+}
+
+function lowerDropTbl(source: string): DropTablePlan {
+	const stmt = parse(tokenize(source)) as DDLStatement;
+	const plan = lowerDDL(stmt);
+	if (plan.kind !== "drop-table") {
+		throw new Error(`expected drop-table plan, got ${plan.kind}`);
+	}
+	return plan;
+}
+
+function lowerDropColE2E(source: string): DropColumnPlan {
+	const stmt = parse(tokenize(source)) as DDLStatement;
+	const plan = lowerDDL(stmt);
+	if (plan.kind !== "drop-column") {
+		throw new Error(`expected drop-column plan, got ${plan.kind}`);
+	}
+	return plan;
+}
+
+function pgDropTbl(source: string) {
+	if (postgresMapper.mapDDL === undefined) throw new Error("mapDDL manquant");
+	return postgresMapper.mapDDL(lowerDropTbl(source));
+}
+
+function pgDropCol(source: string) {
+	if (postgresMapper.mapDDL === undefined) throw new Error("mapDDL manquant");
+	return postgresMapper.mapDDL(lowerDropColE2E(source));
+}
+
+function mongoDropTbl(source: string): MongoDDLDropCollectionQuery {
+	if (mongoMapper.mapDDL === undefined) throw new Error("mapDDL manquant");
+	const q = mongoMapper.mapDDL(lowerDropTbl(source));
+	if (q.kind !== "mongo-ddl" || q.operation !== "drop-collection") {
+		throw new Error(`attendu mongo-ddl drop-collection, got ${q.kind}`);
+	}
+	return q;
+}
+
+function mongoDropCol(source: string): MongoDDLDropColumnQuery {
+	if (mongoMapper.mapDDL === undefined) throw new Error("mapDDL manquant");
+	const q = mongoMapper.mapDDL(lowerDropColE2E(source));
+	if (q.kind !== "mongo-ddl" || q.operation !== "drop-column") {
+		throw new Error(`attendu mongo-ddl drop-column, got ${q.kind}`);
+	}
+	return q;
+}
+
+function kvDropTbl(source: string): KvDDLDropTableQuery {
+	const q = mapKvDDL(lowerDropTbl(source));
+	if (q.operation !== "drop-table") {
+		throw new Error(`attendu kv-ddl drop-table, got ${q.operation}`);
+	}
+	return q;
+}
+
+function kvDropCol(source: string): KvDDLDropColumnQuery {
+	const q = mapKvDDL(lowerDropColE2E(source));
+	if (q.operation !== "drop-column") {
+		throw new Error(`attendu kv-ddl drop-column, got ${q.operation}`);
 	}
 	return q;
 }
@@ -631,6 +699,80 @@ describe("DDL/3 E2E — add/drop index cross-engine (ADR-029)", () => {
 			);
 			expect(mongoDrop(srcDrop).ifExists).toBe(true);
 			expect(kvDrop(srcDrop).ifExists).toBe(true);
+		});
+	});
+});
+
+describe("DDL/4 E2E — drop table / drop column cross-engine (ADR-029)", () => {
+	describe("drop table", () => {
+		const source = "drop table users";
+
+		it("PG : DROP TABLE ... RESTRICT natif (safe vs FK)", () => {
+			const q = pgDropTbl(source);
+			if (q.kind !== "sql") throw new Error("attendu sql");
+			expect(q.text).toBe(`DROP TABLE "users" RESTRICT`);
+		});
+
+		it("Mongo : drop-collection (adapter db.<coll>.drop() + catch NamespaceNotFound 26)", () => {
+			expect(mongoDropTbl(source)).toMatchObject({
+				operation: "drop-collection",
+				collection: "users"
+			});
+		});
+
+		it("KV : drop-table (adapter SCAN + DEL batched + DEL _schema)", () => {
+			expect(kvDropTbl(source)).toMatchObject({
+				operation: "drop-table",
+				collection: "users"
+			});
+		});
+	});
+
+	describe("drop column", () => {
+		const source = "drop column age from users";
+
+		it("PG : ALTER TABLE DROP COLUMN ... RESTRICT natif", () => {
+			const q = pgDropCol(source);
+			if (q.kind !== "sql") throw new Error("attendu sql");
+			expect(q.text).toBe(
+				`ALTER TABLE "users" DROP COLUMN "age" RESTRICT`
+			);
+		});
+
+		it("Mongo : drop-column (adapter collMod validator + updateMany $unset batched)", () => {
+			expect(mongoDropCol(source)).toMatchObject({
+				operation: "drop-column",
+				collection: "users",
+				column: "age"
+			});
+		});
+
+		it("KV : drop-column (adapter SCAN + HDEL batched miroir D10)", () => {
+			expect(kvDropCol(source)).toMatchObject({
+				operation: "drop-column",
+				collection: "users",
+				column: "age"
+			});
+		});
+	});
+
+	describe("D3 idempotence drop cross-engine", () => {
+		it("drop table if exists", () => {
+			const src = "drop table users if exists";
+			expect((pgDropTbl(src) as { text: string }).text).toContain(
+				`IF EXISTS`
+			);
+			expect(mongoDropTbl(src).ifExists).toBe(true);
+			expect(kvDropTbl(src).ifExists).toBe(true);
+		});
+
+		it("drop column if exists", () => {
+			const src = "drop column age from users if exists";
+			expect((pgDropCol(src) as { text: string }).text).toContain(
+				`IF EXISTS`
+			);
+			expect(mongoDropCol(src).ifExists).toBe(true);
+			expect(kvDropCol(src).ifExists).toBe(true);
 		});
 	});
 });

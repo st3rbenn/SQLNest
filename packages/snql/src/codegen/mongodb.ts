@@ -7,7 +7,9 @@ import type {
 	CompareOp,
 	CreateTablePlan,
 	DDLPlan,
+	DropColumnPlan,
 	DropIndexPlan,
+	DropTablePlan,
 	IntrospectPlan,
 	LogicalPlan,
 	MutationPlan,
@@ -27,6 +29,8 @@ import type {
 	MongoDDLAddColumnQuery,
 	MongoDDLAddIndexQuery,
 	MongoDDLCreateCollectionQuery,
+	MongoDDLDropCollectionQuery,
+	MongoDDLDropColumnQuery,
 	MongoDDLDropIndexQuery,
 	MongoIndexSpec,
 	MongoQuery,
@@ -200,6 +204,8 @@ export const mongoMapper: Mapper = {
 			return renderMongoAddIndex(plan);
 		}
 		if (plan.kind === "drop-index") return renderMongoDropIndex(plan);
+		if (plan.kind === "drop-table") return renderMongoDropCollection(plan);
+		if (plan.kind === "drop-column") return renderMongoDropColumn(plan);
 		throw new SnqlError(
 			`DDL kind '${(plan as { kind: string }).kind}' non supporté par le codegen Mongo V1`,
 			"codegen_ddl_unsupported"
@@ -2912,6 +2918,44 @@ function renderMongoDropIndex(plan: DropIndexPlan): MongoDDLDropIndexQuery {
 		collection: plan.target,
 		ifExists: plan.ifExists,
 		name: plan.name
+	};
+}
+
+/**
+ * Rend `drop table T` en `MongoDDLDropCollectionQuery` (ADR-029 DDL/4).
+ * L'adapter runtime execute `db.<collection>.drop()` natif Mongo (retour bool
+ * true/false selon existence). D3 `ifExists=true` : catch `NamespaceNotFound`
+ * (code 26) traité comme succès silencieux.
+ */
+function renderMongoDropCollection(
+	plan: DropTablePlan
+): MongoDDLDropCollectionQuery {
+	return {
+		engine: "mongodb",
+		kind: "mongo-ddl",
+		operation: "drop-collection",
+		collection: plan.target,
+		ifExists: plan.ifExists
+	};
+}
+
+/**
+ * Rend `drop column COL from T` en `MongoDDLDropColumnQuery` (ADR-029 DDL/4).
+ * Compensation runtime : (1) collMod validator sans property + retire de
+ * required si présent, (2) updateMany `$unset` batched pattern miroir D10
+ * backfill pour purger la valeur dans les docs existants. `ifExists=true`
+ * skip si la property n'est pas dans le validator (D3 name-only).
+ */
+function renderMongoDropColumn(
+	plan: DropColumnPlan
+): MongoDDLDropColumnQuery {
+	return {
+		engine: "mongodb",
+		kind: "mongo-ddl",
+		operation: "drop-column",
+		collection: plan.target,
+		column: plan.column,
+		ifExists: plan.ifExists
 	};
 }
 

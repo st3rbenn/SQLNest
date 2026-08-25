@@ -302,3 +302,55 @@ describe("codegen PG — add/drop index (ADR-029 DDL/3.3, D11 CONCURRENTLY)", ()
 		).toThrow(/Identifiant invalide/);
 	});
 });
+
+describe("codegen PG — drop table / drop column (ADR-029 DDL/4.3)", () => {
+	it("DROP TABLE RESTRICT (safe vs FK)", () => {
+		const q = mapDDL({
+			op: "ddl",
+			kind: "drop-table",
+			target: "users",
+			ifExists: false
+		});
+		if (q.kind !== "sql") throw new Error("attendu sql");
+		expect(q.text).toBe(`DROP TABLE "users" RESTRICT`);
+	});
+
+	it("DROP TABLE IF EXISTS (D3)", () => {
+		const q = mapDDL({
+			op: "ddl",
+			kind: "drop-table",
+			target: "users",
+			ifExists: true
+		});
+		if (q.kind !== "sql") throw new Error("attendu sql");
+		expect(q.text).toBe(`DROP TABLE IF EXISTS "users" RESTRICT`);
+	});
+
+	it("ALTER TABLE DROP COLUMN RESTRICT", () => {
+		const q = mapDDL({
+			op: "ddl",
+			kind: "drop-column",
+			target: "users",
+			column: "age",
+			ifExists: false
+		});
+		if (q.kind !== "sql") throw new Error("attendu sql");
+		expect(q.text).toBe(
+			`ALTER TABLE "users" DROP COLUMN "age" RESTRICT`
+		);
+	});
+
+	it("ALTER TABLE DROP COLUMN IF EXISTS (D3)", () => {
+		const q = mapDDL({
+			op: "ddl",
+			kind: "drop-column",
+			target: "users",
+			column: "age",
+			ifExists: true
+		});
+		if (q.kind !== "sql") throw new Error("attendu sql");
+		expect(q.text).toBe(
+			`ALTER TABLE "users" DROP COLUMN IF EXISTS "age" RESTRICT`
+		);
+	});
+});

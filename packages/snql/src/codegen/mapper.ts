@@ -301,11 +301,42 @@ export interface MongoDDLDropIndexQuery {
 	readonly name: string;
 }
 
+/**
+ * DDL/4 drop collection (SNQL `drop table`) sur Mongo. `db.<collection>.drop()`
+ * natif — retour bool (true si dropped, false si n'existait pas). L'adapter
+ * runtime catch `NamespaceNotFound` (code 26) si `ifExists=true`.
+ */
+export interface MongoDDLDropCollectionQuery {
+	readonly engine: string;
+	readonly kind: "mongo-ddl";
+	readonly operation: "drop-collection";
+	readonly collection: string;
+	readonly ifExists: boolean;
+}
+
+/**
+ * DDL/4 drop column sur Mongo. Compensation runtime : (1) collMod validator
+ * retire la property (+ retire de `required` si présent), (2) `updateMany({},
+ * {$unset: {col: ""}})` batched pattern miroir D10 backfill pour purger la
+ * valeur dans les docs existants. `ifExists=true` skip si la property n'est
+ * pas dans le validator (name-only D3).
+ */
+export interface MongoDDLDropColumnQuery {
+	readonly engine: string;
+	readonly kind: "mongo-ddl";
+	readonly operation: "drop-column";
+	readonly collection: string;
+	readonly column: string;
+	readonly ifExists: boolean;
+}
+
 export type MongoDDLQuery =
 	| MongoDDLCreateCollectionQuery
 	| MongoDDLAddColumnQuery
 	| MongoDDLAddIndexQuery
-	| MongoDDLDropIndexQuery;
+	| MongoDDLDropIndexQuery
+	| MongoDDLDropCollectionQuery
+	| MongoDDLDropColumnQuery;
 
 /**
  * DDL Tier-2 sur KV (ADR-029). Entièrement compensé — KV est schema-less,
@@ -411,11 +442,42 @@ export interface KvDDLDropIndexQuery {
 	readonly name: string;
 }
 
+/**
+ * DDL/4 drop table sur KV (ADR-029). Compensation runtime : SCAN
+ * `namespace:{collection}:*` + DEL par batch pour purger toutes les rows, +
+ * DEL `namespace:_schema:{collection}` metadata + DEL `namespace:_unique:*`
+ * (middleware indexes). L'adapter runtime KV consomme le shape ; wiring
+ * runtime V-next Redis.
+ */
+export interface KvDDLDropTableQuery {
+	readonly engine: string;
+	readonly kind: "kv-ddl";
+	readonly operation: "drop-table";
+	readonly collection: string;
+	readonly ifExists: boolean;
+}
+
+/**
+ * DDL/4 drop column sur KV. Compensation : SCAN + HDEL par row batched
+ * (miroir D10 backfill) + HDEL `namespace:_schema:{collection}` col metadata.
+ * Idempotence D3 name-only via `ifExists`.
+ */
+export interface KvDDLDropColumnQuery {
+	readonly engine: string;
+	readonly kind: "kv-ddl";
+	readonly operation: "drop-column";
+	readonly collection: string;
+	readonly column: string;
+	readonly ifExists: boolean;
+}
+
 export type KvDDLQuery =
 	| KvDDLCreateTableQuery
 	| KvDDLAddColumnQuery
 	| KvDDLAddIndexQuery
-	| KvDDLDropIndexQuery;
+	| KvDDLDropIndexQuery
+	| KvDDLDropTableQuery
+	| KvDDLDropColumnQuery;
 
 /**
  * native shape pour un `raw {...}` Mongo — command native

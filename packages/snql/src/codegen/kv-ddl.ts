@@ -16,14 +16,18 @@ import type {
 	AddIndexPlan,
 	CreateTablePlan,
 	DDLPlan,
-	DropIndexPlan
+	DropColumnPlan,
+	DropIndexPlan,
+	DropTablePlan
 } from "../ir/plan";
 import type { SnqlType } from "../schema/model";
 import type {
 	KvDDLAddColumnQuery,
 	KvDDLAddIndexQuery,
 	KvDDLCreateTableQuery,
+	KvDDLDropColumnQuery,
 	KvDDLDropIndexQuery,
+	KvDDLDropTableQuery,
 	KvDDLQuery,
 	KvFieldDescriptor
 } from "./mapper";
@@ -62,10 +66,45 @@ export function mapKvDDL(plan: DDLPlan): KvDDLQuery {
 		return renderKvAddIndex(plan);
 	}
 	if (plan.kind === "drop-index") return renderKvDropIndex(plan);
+	if (plan.kind === "drop-table") return renderKvDropTable(plan);
+	if (plan.kind === "drop-column") return renderKvDropColumn(plan);
 	throw new SnqlError(
 		`DDL kind '${(plan as { kind: string }).kind}' non supporté par le codegen KV V1`,
 		"codegen_ddl_unsupported"
 	);
+}
+
+/**
+ * Rend `drop table T` en KvDDLDropTableQuery (ADR-029 DDL/4). Compensation
+ * runtime : adapter SCAN namespace:{collection}:* + DEL par batch + DEL
+ * namespace:_schema:{collection} + DEL namespace:_unique:* (middleware
+ * indexes). Idempotence D3 name-only via ifExists (adapter check HEXISTS
+ * _schema:{coll}).
+ */
+function renderKvDropTable(plan: DropTablePlan): KvDDLDropTableQuery {
+	return {
+		engine: "kv",
+		kind: "kv-ddl",
+		operation: "drop-table",
+		collection: plan.target,
+		ifExists: plan.ifExists
+	};
+}
+
+/**
+ * Rend `drop column COL from T` en KvDDLDropColumnQuery. Compensation
+ * runtime : SCAN + HDEL par row batched (miroir D10 backfill) + HDEL
+ * namespace:_schema:{collection} col metadata. Idempotence D3 name-only.
+ */
+function renderKvDropColumn(plan: DropColumnPlan): KvDDLDropColumnQuery {
+	return {
+		engine: "kv",
+		kind: "kv-ddl",
+		operation: "drop-column",
+		collection: plan.target,
+		column: plan.column,
+		ifExists: plan.ifExists
+	};
 }
 
 /**

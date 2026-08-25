@@ -11,7 +11,9 @@ import type {
 	AddIndexStmt,
 	CreateTableStmt,
 	DDLStatement,
+	DropColumnStmt,
 	DropIndexStmt,
+	DropTableStmt,
 	Expr
 } from "../parser/ast";
 import type { SchemaModel, SnqlType } from "../schema/model";
@@ -21,7 +23,9 @@ import type {
 	CreateTableField,
 	CreateTablePlan,
 	DDLPlan,
+	DropColumnPlan,
 	DropIndexPlan,
+	DropTablePlan,
 	SqlValue
 } from "./plan";
 
@@ -49,10 +53,40 @@ export function lowerDDL(
 	if (statement.kind === "drop-index") {
 		return lowerDropIndex(statement);
 	}
+	if (statement.kind === "drop-table") {
+		return lowerDropTable(statement);
+	}
+	if (statement.kind === "drop-column") {
+		return lowerDropColumn(statement);
+	}
 	throw new SnqlError(
 		`DDL kind '${(statement as { kind: string }).kind}' non supporté au lower`,
 		"lower_ddl_unsupported_kind"
 	);
+}
+
+function lowerDropTable(stmt: DropTableStmt): DropTablePlan {
+	assertIdent(stmt.target, "target");
+	return {
+		op: "ddl",
+		kind: "drop-table",
+		target: stmt.target,
+		ifExists: stmt.ifExists ?? false,
+		...(stmt.span !== undefined ? { span: stmt.span } : {})
+	};
+}
+
+function lowerDropColumn(stmt: DropColumnStmt): DropColumnPlan {
+	assertIdent(stmt.target, "target");
+	assertIdent(stmt.column, "field");
+	return {
+		op: "ddl",
+		kind: "drop-column",
+		target: stmt.target,
+		column: stmt.column,
+		ifExists: stmt.ifExists ?? false,
+		...(stmt.span !== undefined ? { span: stmt.span } : {})
+	};
 }
 
 /**

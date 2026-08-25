@@ -596,15 +596,45 @@ export interface DropIndexPlan {
 }
 
 /**
+ * `drop table` lowered (ADR-029 DDL/4). Le lower valide target via
+ * IDENT_REGEX D1. Idempotence D3 name-only via `ifExists`. Destructif —
+ * le frontend applique D7 typing UI gate WriteConfirmBar avant Execute.
+ */
+export interface DropTablePlan {
+	readonly op: "ddl";
+	readonly kind: "drop-table";
+	readonly target: string;
+	readonly ifExists: boolean;
+	readonly span?: Span;
+}
+
+/**
+ * `drop column` lowered (ADR-029 DDL/4). Le lower valide target + column
+ * via IDENT_REGEX D1. Destructif — D7 typing UI gate. Compensation Mongo :
+ * collMod validator (retire property) + updateMany `$unset` batched (miroir
+ * D10 backfill). Compensation KV : SCAN + HDEL batched.
+ */
+export interface DropColumnPlan {
+	readonly op: "ddl";
+	readonly kind: "drop-column";
+	readonly target: string;
+	readonly column: string;
+	readonly ifExists: boolean;
+	readonly span?: Span;
+}
+
+/**
  * Union des plans DDL. DDL/1 = `create-table`, DDL/2 = `add-column`,
- * DDL/3 = `add-index` | `add-unique-index` | `drop-index` ; extends
- * aux autres kinds à mesure du sprint DDL/4.
+ * DDL/3 = `add-index` | `add-unique-index` | `drop-index`, DDL/4 =
+ * `drop-table` | `drop-column`. Corpus Tier-2 complet.
  */
 export type DDLPlan =
 	| CreateTablePlan
 	| AddColumnPlan
 	| AddIndexPlan
-	| DropIndexPlan;
+	| DropIndexPlan
+	| DropTablePlan
+	| DropColumnPlan;
 
 /** Un plan complet : lecture, mutation, transaction, introspect, raw, let/CTE ou DDL Tier-2. */
 export type Plan =

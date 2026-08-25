@@ -7,7 +7,9 @@ import type {
 	CompareOp,
 	CreateTablePlan,
 	DDLPlan,
+	DropColumnPlan,
 	DropIndexPlan,
+	DropTablePlan,
 	IntrospectPlan,
 	LetPlan,
 	LogicalPlan,
@@ -188,6 +190,8 @@ export const postgresMapper: Mapper = {
 			return renderAddIndex(plan);
 		}
 		if (plan.kind === "drop-index") return renderDropIndex(plan);
+		if (plan.kind === "drop-table") return renderDropTable(plan);
+		if (plan.kind === "drop-column") return renderDropColumn(plan);
 		throw new SnqlError(
 			`DDL kind '${(plan as { kind: string }).kind}' non supporté par le codegen Postgres V1`,
 			"codegen_ddl_unsupported"
@@ -1099,6 +1103,41 @@ function renderAddIndex(plan: AddIndexPlan): NativeQuery {
 function renderDropIndex(plan: DropIndexPlan): NativeQuery {
 	const ifExists = plan.ifExists ? "IF EXISTS " : "";
 	const text = `DROP INDEX ${ifExists}${quoteIdent(plan.name)}`;
+	return {
+		engine: "postgres",
+		kind: "sql",
+		text,
+		params: [],
+		paramSpans: []
+	};
+}
+
+/**
+ * Rend `drop table NAME [if exists]` en `DROP TABLE [IF EXISTS] "T" RESTRICT`
+ * (ADR-029 DDL/4). RESTRICT par défaut (PG refuse si FK dépendent — safe vs
+ * cascade silencieux). Le frontend applique D7 typing UI gate WriteConfirmBar
+ * avant Execute pour prévenir l'accident.
+ */
+function renderDropTable(plan: DropTablePlan): NativeQuery {
+	const ifExists = plan.ifExists ? "IF EXISTS " : "";
+	const text = `DROP TABLE ${ifExists}${quoteIdent(plan.target)} RESTRICT`;
+	return {
+		engine: "postgres",
+		kind: "sql",
+		text,
+		params: [],
+		paramSpans: []
+	};
+}
+
+/**
+ * Rend `drop column NAME from T` en `ALTER TABLE "T" DROP COLUMN [IF EXISTS]
+ * "col" RESTRICT` (ADR-029 DDL/4). RESTRICT safe vs vues/FK dépendantes.
+ * Le frontend applique D7 typing UI gate avant Execute.
+ */
+function renderDropColumn(plan: DropColumnPlan): NativeQuery {
+	const ifExists = plan.ifExists ? "IF EXISTS " : "";
+	const text = `ALTER TABLE ${quoteIdent(plan.target)} DROP COLUMN ${ifExists}${quoteIdent(plan.column)} RESTRICT`;
 	return {
 		engine: "postgres",
 		kind: "sql",

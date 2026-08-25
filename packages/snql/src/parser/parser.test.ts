@@ -389,3 +389,49 @@ describe("add/drop index DDL (ADR-029 DDL/3)", () => {
 		});
 	});
 });
+
+// ─── DDL/4 — drop table / drop column (ADR-029) ────────────────────────
+describe("drop table / drop column DDL (ADR-029 DDL/4)", () => {
+	it("parse drop table minimal", () => {
+		expect(stmt("drop table users")).toMatchObject({
+			operation: "ddl",
+			kind: "drop-table",
+			target: "users"
+		});
+	});
+
+	it("parse drop table if exists (D3)", () => {
+		expect(stmt("drop table users if exists")).toMatchObject({
+			ifExists: true,
+			kind: "drop-table"
+		});
+	});
+
+	it("parse drop column minimal", () => {
+		expect(stmt("drop column age from users")).toMatchObject({
+			operation: "ddl",
+			kind: "drop-column",
+			target: "users",
+			column: "age"
+		});
+	});
+
+	it("parse drop column if exists (D3)", () => {
+		expect(stmt("drop column age from users if exists")).toMatchObject({
+			ifExists: true,
+			kind: "drop-column"
+		});
+	});
+
+	it("refuse drop column sans 'from'", () => {
+		expect(() => stmt("drop column age users")).toThrow(/'from <table>'/);
+	});
+
+	it("préserve `drop` comme ident hors DDL (soft-ident head-of-statement)", () => {
+		// `drop` en tant que field/ident dans un DML normal reste valide —
+		// dispatch DDL uniquement si suivi de `table`/`column`/`index`.
+		expect(stmt('add {drop: "yes"} into t')).toMatchObject({
+			operation: "insert"
+		});
+	});
+});
