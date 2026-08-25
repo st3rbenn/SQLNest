@@ -27,6 +27,7 @@
 import { useHotkeys, useLocalStorage } from "@mantine/hooks";
 import { formatSnql, parse, tokenize } from "@sqlnest/snql";
 import { showNotification } from "@sqlnest/design-system";
+import { useQueryClient } from "@tanstack/react-query";
 import {
 	type CSSProperties,
 	useCallback,
@@ -150,6 +151,7 @@ export function ConsoleShellInner({
 	extraLeftActions,
 	tabsScopeSuffix
 }: ConsoleShellInnerProps): React.ReactNode {
+	const queryClient = useQueryClient();
 	const { data: connections } = useDbConnections(teamSlug);
 	const connection = useMemo(
 		() => connections?.find((c) => c.id === connId),
@@ -490,6 +492,19 @@ export function ConsoleShellInner({
 					rolledBack: false
 				});
 			}
+			// DDL Tier-2 : un create/drop/alter modifie le schéma DB. Sans
+			// invalidation, `useSchema` renvoie le cache stale — SchemaTree,
+			// autocomplete et diagnostics live typent contre l'ancien schéma
+			// (nouvelle table absente, ancienne colonne encore listée).
+			// Approche : tout `written === true` invalide (les DML n'altèrent
+			// pas le schéma donc invalidation = no-op perf-quasi-nul au pire,
+			// un re-fetch au prochain useSchema). Le CLI serve.ts a le même
+			// pattern côté schemaCache in-memory.
+			if (queryState.data.written) {
+				queryClient.invalidateQueries({
+					queryKey: ["schema", teamSlug, connId]
+				});
+			}
 		} else if (
 			queryState.error !== null &&
 			queryState.lastSource !== undefined
@@ -517,7 +532,10 @@ export function ConsoleShellInner({
 		queryState.lastSource,
 		tabs,
 		activeTabId,
-		persistence
+		persistence,
+		queryClient,
+		teamSlug,
+		connId
 	]);
 
 	const format = useCallback(() => {

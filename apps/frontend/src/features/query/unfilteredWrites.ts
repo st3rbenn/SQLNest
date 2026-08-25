@@ -121,6 +121,13 @@ function walk(stmt: Statement, out: UnfilteredFinding[]): void {
 		case "let":
 			walkLetBody(stmt.body, out);
 			return;
+		case "ddl":
+			// DDL Tier-2 (ADR-029) : `create table` = non-destructif (échec
+			// idempotent avec `if not exists`, pas de row perdue). Pass-through
+			// V1 — pas de warning WriteConfirmBar. La gate typing UI (ADR-029
+			// D7) sera nécessaire pour DDL/2 (drop-table/column/index) qui
+			// arrivent en sprints suivants.
+			return;
 	}
 }
 

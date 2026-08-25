@@ -27,6 +27,7 @@
  */
 
 import {
+	assertDDLSupported,
 	assertIntrospectSupported,
 	assertLetSupported,
 	assertMongoMutationWriteCastCoercive,
@@ -37,6 +38,7 @@ import {
 	assertTransactionSupported,
 	capabilitiesFor,
 	lower,
+	lowerDDL,
 	lowerIntrospect,
 	lowerLet,
 	lowerMutation,
@@ -256,6 +258,16 @@ function validateStatement(
 			const letPlan = lowerLet(statement, schema);
 			if (caps === undefined) return;
 			assertWithSpan(() => assertLetSupported(letPlan, caps), statement);
+			return;
+		}
+		case "ddl": {
+			// DDL Tier-2 (ADR-029). Refus prévus : PK Mongo sur field ≠ 'id'
+			// (codegen_mongo_primary_key_not_id), engine sans capability 'ddl'
+			// (planner_ddl_unsupported), ident invalide D1
+			// (lower_ddl_invalid_identifier). Squiggly live avant clic Execute.
+			const ddlPlan = lowerDDL(statement, schema);
+			if (caps === undefined) return;
+			assertWithSpan(() => assertDDLSupported(ddlPlan, caps), statement);
 			return;
 		}
 		case "savepoint":
