@@ -106,9 +106,13 @@ export {
 	lowerRaw,
 	lowerTransaction
 } from "./ir/lower";
+export { lowerDDL } from "./ir/lower-ddl";
 export type {
 	Capability,
 	CompareOp,
+	CreateTableField,
+	CreateTablePlan,
+	DDLPlan,
 	IntrospectPlan,
 	LogicalPlan,
 	MutationPlan,

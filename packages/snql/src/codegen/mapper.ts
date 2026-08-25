@@ -261,4 +261,10 @@ export interface Mapper {
 	mapRaw?(plan: import("../ir/plan").RawPlan): NativeQuery;
 	/** CTE `let x = ...; body`. PG only v1. */
 	mapLet?(plan: import("../ir/plan").LetPlan): NativeQuery;
+	/**
+	 * DDL Tier-2 (ADR-029) — `create table` v1, extends aux autres kinds à
+	 * DDL/2..DDL/4. PG natif via SQL, Mongo compensated via `createCollection`
+	 * + `$jsonSchema`, KV compensated via `HSET namespace:_schema` metadata.
+	 */
+	mapDDL?(plan: import("../ir/plan").DDLPlan, ctx?: MapperContext): NativeQuery;
 }

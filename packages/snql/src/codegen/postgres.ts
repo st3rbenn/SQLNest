@@ -3,6 +3,8 @@ import { SNQL_FUNCTIONS } from "../functions";
 import type {
 	CastTarget,
 	CompareOp,
+	CreateTablePlan,
+	DDLPlan,
 	IntrospectPlan,
 	LetPlan,
 	LogicalPlan,
@@ -16,6 +18,7 @@ import type {
 	TransactionPlan,
 	TransactionPlanItem
 } from "../ir/plan";
+import type { SnqlType } from "../schema/model";
 import { isSqlDecimal, linearize } from "../ir/plan";
 import type { Span } from "../lexer/token";
 import type {
@@ -165,6 +168,22 @@ export const postgresMapper: Mapper = {
 			params: params.all(),
 			paramSpans: params.allSpans()
 		};
+	},
+	/**
+	 * DDL Tier-2 (ADR-029). `create table` V1. Émission :
+	 *  - Sans `if not exists` : SqlQuery simple `CREATE TABLE "T" (...)`.
+	 *  - Avec `if not exists` : SqlTransaction 2-steps qui pose un
+	 *    `pg_advisory_xact_lock(hashtextextended('sqlnest_ddl:'||$1, 0))`
+	 *    avant le `CREATE TABLE IF NOT EXISTS` (D3 sérialise le concurrent
+	 *    DDL pour éviter le drift schéma silencieux). L'engine wrap
+	 *    BEGIN/COMMIT — le lock est libéré au COMMIT (xact-scoped).
+	 */
+	mapDDL(plan: DDLPlan): NativeQuery {
+		if (plan.kind === "create-table") return renderCreateTable(plan);
+		throw new SnqlError(
+			`DDL kind '${(plan as { kind: string }).kind}' non supporté par le codegen Postgres V1`,
+			"codegen_ddl_unsupported"
+		);
 	},
 	/**
 	 * `raw "SQL"` → SqlQuery text-only, params vides. Refus
@@ -892,6 +911,92 @@ export const PG_CAST_TYPE: Readonly<Record<CastTarget, string>> = {
 	timestamp: "timestamptz",
 	json: "jsonb"
 };
+
+/**
+ * Mapping SnqlType canonique → type Postgres pour DDL (ADR-029 D1).
+ * Choix figés pour round-trip cross-engine :
+ *  - `int → integer` (INT32 natif PG — vs PG_CAST_TYPE.int=bigint pour élargir sur cast)
+ *  - `bigint → bigint` (INT64)
+ *  - `float → double precision` (IEEE 754 64-bit, aligné Mongo Double)
+ *  - `decimal → numeric` (précision arbitraire, aligné Mongo Decimal128)
+ *  - `date → timestamptz` (préserve instant UTC + tz, round-trip Mongo Date lossless — trap accepté vs DATE-only : le canonique SnqlType.date recouvre PG DATE/TIMESTAMP/TIMESTAMPTZ)
+ *  - `json → jsonb` (indexable, canonicalisé)
+ *  - `array → jsonb` (les tableaux PG natifs sont hors round-trip Mongo)
+ *  - `enum → text` (les enums PG nécessitent CREATE TYPE dédié — hors scope DDL/1)
+ *  - `unknown → text` (fallback safe : évite un refus DDL, l'user peut migrer plus tard)
+ */
+const PG_DDL_TYPE: Readonly<Record<SnqlType, string>> = {
+	string: "text",
+	int: "integer",
+	bigint: "bigint",
+	float: "double precision",
+	decimal: "numeric",
+	bool: "boolean",
+	date: "timestamptz",
+	json: "jsonb",
+	array: "jsonb",
+	uuid: "uuid",
+	enum: "text",
+	unknown: "text"
+};
+
+/**
+ * Rend un `create table` (avec ou sans idempotence D3). Sans `if not exists`,
+ * une seule SqlQuery. Avec, un SqlTransaction 2-steps où l'advisory lock
+ * sérialise les créations concurrentes (drift schéma prévenu — cf. ADR-029 D3).
+ */
+function renderCreateTable(plan: CreateTablePlan): NativeQuery {
+	const createParams = new ParamList();
+	const cols: string[] = [];
+	for (const f of plan.fields) {
+		const parts: string[] = [
+			quoteIdent(f.name),
+			PG_DDL_TYPE[f.type]
+		];
+		if (!f.nullable) parts.push("NOT NULL");
+		if (f.unique) parts.push("UNIQUE");
+		if (f.defaultValue !== undefined) {
+			parts.push(`DEFAULT ${createParams.add(f.defaultValue, f.span)}`);
+		}
+		cols.push(parts.join(" "));
+	}
+	if (plan.primaryKey !== undefined && plan.primaryKey.length > 0) {
+		cols.push(
+			`PRIMARY KEY (${plan.primaryKey.map(quoteIdent).join(", ")})`
+		);
+	}
+	const ifNotExists = plan.ifNotExists ? "IF NOT EXISTS " : "";
+	const createText = `CREATE TABLE ${ifNotExists}${quoteIdent(plan.target)} (${cols.join(", ")})`;
+	const createStep: SqlQuery = {
+		engine: "postgres",
+		kind: "sql",
+		text: createText,
+		params: createParams.all(),
+		paramSpans: createParams.allSpans()
+	};
+	if (!plan.ifNotExists) return createStep;
+	// D3 : sérialise concurrent DDL avec un advisory lock scopé transaction.
+	// Le hash est calculé côté PG (deterministe) — sans overflow risque sur un
+	// nom > 63 chars puisque le lower a serré la vis (IDENT_REGEX 63 max D1).
+	const lockParams = new ParamList();
+	const targetRef = lockParams.add(plan.target);
+	const lockStep: SqlQuery = {
+		engine: "postgres",
+		kind: "sql",
+		text: `SELECT pg_advisory_xact_lock(hashtextextended('sqlnest_ddl:' || ${targetRef}, 0))`,
+		params: lockParams.all(),
+		paramSpans: lockParams.allSpans()
+	};
+	const transaction: SqlTransaction = {
+		engine: "postgres",
+		kind: "transaction",
+		steps: [
+			{ kind: "statement", query: lockStep },
+			{ kind: "statement", query: createStep }
+		]
+	};
+	return transaction;
+}
 
 function renderExpr(expr: PlanExpr, params: ParamList): string {
 	switch (expr.kind) {
