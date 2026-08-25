@@ -84,6 +84,8 @@ export function planFor(
 }
 
 export { mapKvDDL } from "./codegen/kv-ddl";
+export { mongoMapper } from "./codegen/mongodb";
+export { postgresMapper } from "./codegen/postgres";
 export type {
 	KvDDLQuery,
 	KvFieldDescriptor,
@@ -190,6 +192,7 @@ export type {
 	PlanOptions
 } from "./planner/planner";
 export {
+	assertDDLSupported,
 	assertIntrospectSupported,
 	assertLetSupported,
 	assertMutationCastTargetsSupported,
