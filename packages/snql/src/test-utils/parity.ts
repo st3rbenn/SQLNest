@@ -253,10 +253,12 @@ function dispatchNative(
 		}
 		case "introspect":
 		case "raw":
+		case "ddl":
 			// Introspect passe par assertIntrospectSupported au planner ; raw
 			// n'a pas d'assert planner (codegen direct dispatchant sur payload
-			// shape). Ces cas ont des helpers dédiés dans les tests concernés
-			// (introspect-e2e / raw-e2e) — pas de dispatch générique ici.
+			// shape) ; DDL a assertDDLSupported + mapper.mapDDL. Ces cas ont
+			// des helpers dédiés dans les tests concernés (introspect-e2e /
+			// raw-e2e / ddl-e2e) — pas de dispatch générique ici.
 			void assertIntrospectSupported;
 			throw new Error(
 				`${engine}: operation '${statement.operation}' non couverte par ces helpers — utiliser un test dédié.`

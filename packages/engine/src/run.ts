@@ -8,6 +8,7 @@ import type {
 	Statement
 } from "@sqlnest/snql";
 import {
+	assertDDLSupported,
 	assertIntrospectSupported,
 	assertMongoMutationWriteCastCoercive,
 	assertMutationCastTargetsSupported,
@@ -24,11 +25,13 @@ import {
 	inferResultColumns,
 	linearize,
 	lower,
+	lowerDDL,
 	lowerIntrospect,
 	lowerLet,
 	lowerMutation,
 	lowerRaw,
 	lowerTransaction,
+	mapKvDDL,
 	parse,
 	plan,
 	type SupportedEngine,
@@ -172,6 +175,30 @@ export async function runQuery(
 			);
 		}
 		const native = withIdentSpans(mapper.mapTransaction(txPlan), identSpans);
+		return { ...(await connection.execute(native)), written: true };
+	}
+
+	// DDL Tier-2 (ADR-029). Précède le check `!= "select"` car un DDL n'est ni
+	// select ni mutation DML (opération distincte au parser). PG natif via
+	// SqlQuery ou SqlTransaction (advisory_xact_lock D3). Mongo compensated via
+	// MongoDDLQuery (createCollection + $jsonSchema + createIndex). KV
+	// compensated via KvDDLQuery (mapKvDDL standalone — pas dans le mapper
+	// registry car aucun KV adapter engine V1). Toute écriture DDL fixe
+	// `written: true` pour que l'UI invalide le cache schema post-run.
+	if (statement.operation === "ddl") {
+		const ddlPlan = lowerDDL(statement, schema);
+		assertDDLSupported(ddlPlan, capabilities);
+		let native: NativeQuery;
+		if (engine === "kv") {
+			native = mapKvDDL(ddlPlan);
+		} else {
+			if (mapper.mapDDL === undefined) {
+				throw new EngineExecutionError(
+					`Aucun codegen 'ddl' pour le moteur '${engine}'`
+				);
+			}
+			native = withIdentSpans(mapper.mapDDL(ddlPlan), identSpans);
+		}
 		return { ...(await connection.execute(native)), written: true };
 	}
 

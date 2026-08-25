@@ -376,6 +376,9 @@ class MongoConnection implements Connection {
 		if (query.kind === "mongo-transaction") {
 			return this.#executeTransaction(query);
 		}
+		if (query.kind === "mongo-ddl") {
+			return this.#executeDDL(query);
+		}
 		if (query.kind !== "mongo") {
 			throw new EngineExecutionError(
 				`Adapter MongoDB : requête native '${query.kind}' non supportée (pipeline attendu)`
@@ -660,6 +663,55 @@ class MongoConnection implements Connection {
 		} catch (cause) {
 			throw new EngineExecutionError(
 				`raw MongoDB échouée — ${describeMongoExecutionError(cause)}`,
+				{ cause }
+			);
+		}
+	}
+
+	/**
+	 * DDL Tier-2 sur Mongo (ADR-029) — `create-collection` compensated. Séquence :
+	 *  1. `db.createCollection(name, {validator: {$jsonSchema}})` — écrit le
+	 *     schema validator natif. `ifNotExists=true` : catch `NamespaceExists`
+	 *     (code 48) et traite comme succès (D3).
+	 *  2. Pour chaque index (compound PK + uniques field-level) :
+	 *     `collection.createIndex(keys, options)`. Idempotent nativement — Mongo
+	 *     renvoie le nom sans erreur si un index identique existe.
+	 *
+	 * Le `primaryKeyAlias` n'a rien à créer côté Mongo (le `_id` est natif).
+	 * Il sera consommé par les prochains reads/writes pour aliaser `id` ↔ `_id`.
+	 *
+	 * Renvoie un ResultSet vide + written=true — pas de RETURNING sur un DDL.
+	 */
+	async #executeDDL(
+		query: Extract<NativeQuery, { kind: "mongo-ddl" }>
+	): Promise<ResultSet> {
+		const db = this.#requireDb();
+		try {
+			const createOptions: Record<string, unknown> = {};
+			if (query.validator !== undefined) {
+				createOptions["validator"] = query.validator;
+			}
+			try {
+				await db.createCollection(query.collection, createOptions);
+			} catch (cause) {
+				const isNamespaceExists =
+					query.ifNotExists &&
+					typeof cause === "object" &&
+					cause !== null &&
+					(cause as { code?: unknown }).code === 48;
+				if (!isNamespaceExists) throw cause;
+			}
+			const indexes = query.indexes ?? [];
+			for (const spec of indexes) {
+				const options: Record<string, unknown> = {};
+				if (spec.options.unique === true) options["unique"] = true;
+				if (spec.options.name !== undefined) options["name"] = spec.options.name;
+				await db.collection(query.collection).createIndex(spec.keys, options);
+			}
+			return { columns: [], rows: [], rowCount: 0 };
+		} catch (cause) {
+			throw new EngineExecutionError(
+				`DDL MongoDB échouée sur '${query.collection}' — ${describeMongoExecutionError(cause)}`,
 				{ cause }
 			);
 		}

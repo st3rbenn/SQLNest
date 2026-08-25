@@ -202,6 +202,18 @@ async function dispatchOp(
 				}
 			}
 			const rs = await runQuery(conn, op.src, schema);
+			// DDL Tier-2 (ADR-029) : un create/drop/alter modifie le schéma. Sans
+			// invalidation, la prochaine query typerait contre un cache stale
+			// (colonne connue absente, colonne nouvelle inconnue). Approche safe :
+			// tout write invalide — les mutations DML ne changent pas le schéma,
+			// donc l'invalidation est un no-op perf-quasi-nul (au pire un re-fetch
+			// au prochain runSnql, ~50ms). Cible : le DDL qui change le catalog.
+			// Aujourd'hui `written` couvre INSERT/UPDATE/DELETE aussi ; un check
+			// plus fin sur `operation === "ddl"` demanderait de parser deux fois
+			// le source — le coût actuel est acceptable.
+			if (rs.written) {
+				schemaCache.delete(connectionName);
+			}
 			return {
 				ok: true,
 				data: {

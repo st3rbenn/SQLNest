@@ -275,7 +275,8 @@ function parseLet(cursor: TokenCursor): LetStatement {
 		body.operation === "let" ||
 		body.operation === "transaction" ||
 		body.operation === "introspect" ||
-		body.operation === "raw"
+		body.operation === "raw" ||
+		body.operation === "ddl"
 	) {
 		throw new SnqlError(
 			`'${body.operation}' non supporté comme body d'un 'let' v1 — utilise find / add / update / remove.`,
@@ -786,6 +787,17 @@ function parseTransactionItem(cursor: TokenCursor): TransactionBodyItem {
 		throw new SnqlError(
 			"'let' interdit dans une transaction v1 — mets les 'let' à l'intérieur de chaque statement individuel.",
 			"parse_let_in_transaction",
+			first.span
+		);
+	}
+	// DDL interdit dans une transaction v1 (ADR-029). PG natif l'accepterait
+	// (BEGIN; CREATE TABLE …; INSERT …; COMMIT;) mais Mongo n'a pas
+	// d'atomicité DDL équivalente — refus V1 pour cohérence cross-engine ;
+	// à réévaluer si un pattern user réel remonte.
+	if (stmt.operation === "ddl") {
+		throw new SnqlError(
+			"DDL ('create table', ...) interdit dans une transaction v1 — exécute-le à part (Mongo n'a pas d'atomicité DDL équivalente à PG).",
+			"parse_ddl_in_transaction",
 			first.span
 		);
 	}
