@@ -560,6 +560,24 @@ describe("completeSnql — DDL/5 (ADR-029)", () => {
 		it("`create table t { a: uuid, primary key ` propose `(`", () => {
 			expect(labels("create table t { a: uuid, primary key ")).toEqual(["("]);
 		});
+
+		it("`create table t { id: uuid, email: text, primary key (` propose les fields du body", () => {
+			expect(
+				labels("create table t { id: uuid, email: text, primary key (")
+			).toEqual(["id", "email"]);
+		});
+
+		it("`create table t { id: uuid, email: text, primary key (id, ` filtre `id` (déjà dans PK)", () => {
+			expect(
+				labels("create table t { id: uuid, email: text, primary key (id, ")
+			).toEqual(["email"]);
+		});
+
+		it("`create table t { a: uuid, b: text, c: int, primary key (a, b, ` filtre a+b", () => {
+			expect(
+				labels("create table t { a: uuid, b: text, c: int, primary key (a, b, ")
+			).toEqual(["c"]);
+		});
 	});
 
 	describe("add column — types + modifiers + into", () => {

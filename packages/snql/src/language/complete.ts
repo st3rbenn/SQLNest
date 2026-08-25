@@ -1474,11 +1474,18 @@ function createTableCompletions(
 	const inBody = toks.some((t) => t.kind === "lbrace");
 	if (!inBody) return [];
 
-	// `{ |` (juste après ouverture body) OU `, |` (après un field terminé) :
-	// début de nouveau field. Le nom est libre (pas de suggestion précise),
-	// mais on propose `primary key` qui est le seul keyword structurel valide
-	// à cette position (D0 ADR-029). L'user peut aussi taper directement un
-	// ident (nom de field) — pas de suggestion nécessaire pour ça.
+	// PK-fields d'abord : `primary key (|` et `primary key (a, |` ont un
+	// `comma`/`lparen` en tail qui match aussi le case start-of-field plus bas
+	// — sans ce court-circuit, `primary` gagnerait.
+	if (
+		(last.kind === "lparen" || last.kind === "comma") &&
+		isInsidePrimaryKeyParens(toks)
+	) {
+		return primaryKeyFieldSuggestions(toks);
+	}
+
+	// `{ |` ou `, |` = début d'un nouveau field. Nom libre, on propose juste
+	// le seul keyword structurel valide ici (D0 ADR-029).
 	if (last.kind === "lbrace" || last.kind === "comma") {
 		return [keyword("primary")];
 	}
@@ -1515,6 +1522,67 @@ function createTableCompletions(
 	}
 
 	return [];
+}
+
+function isInsidePrimaryKeyParens(toks: readonly Token[]): boolean {
+	for (let i = toks.length - 1; i >= 0; i--) {
+		const t = toks[i];
+		if (t === undefined) return false;
+		if (t.kind === "lparen") {
+			const before1 = toks[i - 1];
+			const before2 = toks[i - 2];
+			return (
+				before1?.kind === "ident" &&
+				before1.value.toLowerCase() === "key" &&
+				before2?.kind === "keyword" &&
+				before2.value === "primary"
+			);
+		}
+		if (t.kind !== "ident" && t.kind !== "comma") return false;
+	}
+	return false;
+}
+
+function primaryKeyFieldSuggestions(
+	toks: readonly Token[]
+): readonly SnqlCompletion[] {
+	const bodyStart = toks.findIndex((t) => t.kind === "lbrace");
+	if (bodyStart < 0) return [];
+	const declaredFields: string[] = [];
+	for (let i = bodyStart + 1; i < toks.length; i++) {
+		const t = toks[i];
+		if (t?.kind === "colon" && i > 0) {
+			const prev = toks[i - 1];
+			if (prev?.kind === "ident") declaredFields.push(prev.value);
+		}
+	}
+	const alreadyInPk = new Set<string>();
+	let inPk = false;
+	for (let i = 0; i < toks.length; i++) {
+		const t = toks[i];
+		if (t === undefined) continue;
+		if (t.kind === "lparen") {
+			const before1 = toks[i - 1];
+			const before2 = toks[i - 2];
+			if (
+				before1?.kind === "ident" &&
+				before1.value.toLowerCase() === "key" &&
+				before2?.kind === "keyword" &&
+				before2.value === "primary"
+			) {
+				inPk = true;
+				continue;
+			}
+		}
+		if (inPk && t.kind === "ident") alreadyInPk.add(t.value);
+	}
+	return declaredFields
+		.filter((f) => !alreadyInPk.has(f))
+		.map((label) => ({
+			label,
+			type: "field" as const,
+			detail: "field du body"
+		}));
 }
 
 /** Complétions pour `add column X int [modifiers] into T` (DDL/2). */
