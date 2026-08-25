@@ -67,6 +67,11 @@ export function expectedFor(finding: UnfilteredFinding): string {
 			return `ADD INTO ${finding.target}`;
 		case "raw_opaque":
 			return "RAW";
+		case "destructive_drop":
+			// ADR-029 D7 typing UI gate destructive : "DROP <target>". Target
+			// = table name pour drop-table/drop-column, index name pour
+			// drop-index — cohérent avec ce que l'user voit dans son SNQL.
+			return `DROP ${finding.target}`;
 	}
 }
 

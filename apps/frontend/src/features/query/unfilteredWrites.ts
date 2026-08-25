@@ -56,7 +56,13 @@ export type UnfilteredKind =
 	| "unfiltered_update"
 	| "unfiltered_delete"
 	| "bulk_copy_insert"
-	| "raw_opaque";
+	| "raw_opaque"
+	// DDL Tier-2 destructive (ADR-029 D7). `drop table` / `drop column` /
+	// `drop index` — WriteConfirmBar gate typing "Tape DROP <target>". Les
+	// 3 kinds partagent le même UnfilteredKind pour un traitement UI
+	// uniforme (target = table pour drop-table/drop-column, index name pour
+	// drop-index).
+	| "destructive_drop";
 
 /**
  * Un finding = un span source (ancre pour squiggly/tooltip) + son kind (pour
@@ -122,11 +128,28 @@ function walk(stmt: Statement, out: UnfilteredFinding[]): void {
 			walkLetBody(stmt.body, out);
 			return;
 		case "ddl":
-			// DDL Tier-2 (ADR-029) : `create table` = non-destructif (échec
-			// idempotent avec `if not exists`, pas de row perdue). Pass-through
-			// V1 — pas de warning WriteConfirmBar. La gate typing UI (ADR-029
-			// D7) sera nécessaire pour DDL/2 (drop-table/column/index) qui
-			// arrivent en sprints suivants.
+			// DDL Tier-2 (ADR-029). `create-table` / `add-column` /
+			// `add-index` / `add-unique-index` = non-destructifs (pass-through
+			// V1). `drop-table` / `drop-column` / `drop-index` = destructifs
+			// D7 → typing UI gate WriteConfirmBar "Tape DROP <target> pour
+			// confirmer".
+			if (
+				stmt.kind === "drop-table" ||
+				stmt.kind === "drop-column" ||
+				stmt.kind === "drop-index"
+			) {
+				// target = table pour drop-table/drop-column, name pour drop-index
+				// (l'user retape ce qu'il voit dans son SNQL — l'index a un nom
+				// distinct, une table/col a un nom de table).
+				const dropTarget =
+					stmt.kind === "drop-index" ? stmt.name : stmt.target;
+				out.push({
+					span: stmt.span,
+					kind: "destructive_drop",
+					verb: "drop",
+					target: dropTarget
+				});
+			}
 			return;
 	}
 }
@@ -251,6 +274,8 @@ export function labelForFinding(finding: UnfilteredFinding): string {
 			return `Copie massive — copie l'intégralité de la source dans ${finding.target}`;
 		case "raw_opaque":
 			return "Raw query — non analysable, aucun garde-fou AST";
+		case "destructive_drop":
+			return `Drop destructif — supprime ${finding.target}`;
 	}
 }
 

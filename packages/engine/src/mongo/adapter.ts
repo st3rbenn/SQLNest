@@ -686,7 +686,140 @@ class MongoConnection implements Connection {
 		if (query.operation === "add-index") {
 			return this.#executeDDLAddIndex(query);
 		}
-		return this.#executeDDLDropIndex(query);
+		if (query.operation === "drop-index") {
+			return this.#executeDDLDropIndex(query);
+		}
+		if (query.operation === "drop-collection") {
+			return this.#executeDDLDropCollection(query);
+		}
+		return this.#executeDDLDropColumn(query);
+	}
+
+	/**
+	 * DDL/4 drop table Mongo. `db.<collection>.drop()` natif. D3 `ifExists=true` :
+	 * catch `NamespaceNotFound` (code 26) traité comme succès silencieux.
+	 */
+	async #executeDDLDropCollection(
+		query: Extract<
+			NativeQuery,
+			{ kind: "mongo-ddl"; operation: "drop-collection" }
+		>
+	): Promise<ResultSet> {
+		const db = this.#requireDb();
+		try {
+			await db.collection(query.collection).drop();
+			return { columns: [], rows: [], rowCount: 0 };
+		} catch (cause) {
+			const code = (cause as { code?: unknown } | null)?.code;
+			if (query.ifExists && code === 26) {
+				return { columns: [], rows: [], rowCount: 0 };
+			}
+			throw new EngineExecutionError(
+				`drop table MongoDB échouée sur '${query.collection}' — ${describeMongoExecutionError(cause)}`,
+				{ cause }
+			);
+		}
+	}
+
+	/**
+	 * DDL/4 drop column Mongo (ADR-029). Compensation runtime miroir strict de
+	 * #executeDDLAddColumn D10 backfill :
+	 *  1. Lit le validator existant via listCollections. Si `ifExists=true`
+	 *     et property absente : no-op silencieux (D3 name-only).
+	 *  2. collMod avec validator sans la property + retire de `required` si
+	 *     présent.
+	 *  3. `updateMany({[col]: {$exists:true}}, {$unset: {[col]: ""}})` batched
+	 *     pattern id-batch identique add-column D10 — cap MAX_ROWS 10M +
+	 *     throttle 50ms. Jamais refus (PA/1-8).
+	 */
+	async #executeDDLDropColumn(
+		query: Extract<
+			NativeQuery,
+			{ kind: "mongo-ddl"; operation: "drop-column" }
+		>
+	): Promise<ResultSet> {
+		const db = this.#requireDb();
+		const col = db.collection(query.collection);
+		const fieldName = query.column;
+		try {
+			const collInfoCursor = db.listCollections({ name: query.collection });
+			const collInfoArr = await collInfoCursor.toArray();
+			const existingInfo = collInfoArr[0] as
+				| { readonly options?: { readonly validator?: Record<string, unknown> } }
+				| undefined;
+			if (existingInfo === undefined) {
+				if (query.ifExists) {
+					return { columns: [], rows: [], rowCount: 0 };
+				}
+				throw new EngineExecutionError(
+					`drop column échouée : collection '${query.collection}' inexistante`
+				);
+			}
+			const existingValidator = existingInfo.options?.validator ?? {};
+			const existingJsonSchema =
+				(existingValidator as { $jsonSchema?: Record<string, unknown> }).$jsonSchema ??
+				{ bsonType: "object", properties: {}, required: [] };
+			const existingProperties =
+				(existingJsonSchema as { properties?: Record<string, unknown> }).properties ?? {};
+			const existingRequired =
+				((existingJsonSchema as { required?: string[] }).required ?? []) as string[];
+
+			// D3 name-only : property absente = no-op silencieux si ifExists.
+			if (!Object.hasOwn(existingProperties, fieldName)) {
+				if (query.ifExists) {
+					return { columns: [], rows: [], rowCount: 0 };
+				}
+			}
+
+			// collMod validator sans la property + retire required.
+			const newProperties: Record<string, unknown> = { ...existingProperties };
+			delete newProperties[fieldName];
+			const newRequired = existingRequired.filter((r) => r !== fieldName);
+			const newJsonSchema: Record<string, unknown> = {
+				bsonType: "object",
+				properties: newProperties
+			};
+			if (newRequired.length > 0) newJsonSchema["required"] = newRequired;
+			await db.command({
+				collMod: query.collection,
+				validator: { $jsonSchema: newJsonSchema }
+			});
+
+			// D10-miroir $unset batched : purge la valeur dans chaque doc existant.
+			const BATCH_SIZE = 10_000;
+			const MAX_ROWS = 10_000_000;
+			const THROTTLE_MS = 50;
+			let totalUnset = 0;
+			for (;;) {
+				const batchCursor = col
+					.find({ [fieldName]: { $exists: true } }, { projection: { _id: 1 } })
+					.limit(BATCH_SIZE);
+				const batch = await batchCursor.toArray();
+				if (batch.length === 0) break;
+				const ids = batch.map(
+					(d) => (d as { readonly _id: unknown })._id
+				) as unknown as ObjectId[];
+				await col.updateMany(
+					{ _id: { $in: ids } },
+					{ $unset: { [fieldName]: "" } }
+				);
+				totalUnset += batch.length;
+				if (totalUnset >= MAX_ROWS) {
+					throw new EngineExecutionError(
+						`drop column ${fieldName} sur '${query.collection}' : purge dépasse le cap ${MAX_ROWS} docs — augmente mongo.ddl.backfill_max_rows ou purge offline`
+					);
+				}
+				await new Promise((resolve) => setTimeout(resolve, THROTTLE_MS));
+			}
+
+			return { columns: [], rows: [], rowCount: 0 };
+		} catch (cause) {
+			if (cause instanceof EngineExecutionError) throw cause;
+			throw new EngineExecutionError(
+				`drop column MongoDB échouée sur '${query.collection}.${fieldName}' — ${describeMongoExecutionError(cause)}`,
+				{ cause }
+			);
+		}
 	}
 
 	/**
