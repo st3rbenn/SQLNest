@@ -1758,7 +1758,7 @@ function parseCreateTableField(cursor: TokenCursor): DDLFieldDef {
 	for (;;) {
 		const nxt = cursor.peek();
 		const v = nxt.value.toLowerCase();
-		if (nxt.kind === "keyword" && v === "nullable") {
+		if (nxt.kind === "ident" && v === "nullable") {
 			cursor.next();
 			nullable = true;
 			endSpan = nxt.span;
@@ -1783,7 +1783,7 @@ function parseCreateTableField(cursor: TokenCursor): DDLFieldDef {
 			cursor.next();
 			defaultExpr = parseExpression(cursor);
 			endSpan = defaultExpr.span;
-		} else if (nxt.kind === "keyword" && v === "unique") {
+		} else if (nxt.kind === "ident" && v === "unique") {
 			cursor.next();
 			unique = true;
 			endSpan = nxt.span;

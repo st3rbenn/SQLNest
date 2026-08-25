@@ -61,14 +61,17 @@ export const KEYWORDS: ReadonlySet<string> = new Set([
 	"desc",
 	// DDL Tier-2 (ADR-029). `table` fait passer `create table T` en DDL au
 	// parser (peek 1 token après `create` — sinon `create` reste alias insert).
-	// `primary`/`unique`/`nullable`/`default` sont field-modifiers dans le
-	// body `{...}` (D0 exception). `column`/`index`/`drop` seront ajoutés à
-	// DDL/2..DDL/4 pour add/drop column/index. `key` reste soft-ident,
+	// `primary`/`default` sont field-modifiers dans le body `{...}` (D0
+	// exception). `unique` et `nullable` restent soft-idents :
+	//  - `unique` : déjà modifier dans `count(unique x)` / `pick unique` ;
+	//  - `nullable` : nom de colonne retourné par `describe <table>` (les tests
+	//    filtrent `where nullable = true`) ;
+	// promouvoir keyword casserait ces paths. Le parser DDL les matche
+	// par valeur (kind-agnostique) dans les field-modifiers. `column`/`index`/
+	// `drop` seront ajoutés à DDL/2..DDL/4. `key` reste soft-ident,
 	// contextuel après `primary`.
 	"table",
 	"primary",
-	"unique",
-	"nullable",
 	"default"
 ]);
 

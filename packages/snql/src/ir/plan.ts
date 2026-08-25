@@ -507,14 +507,51 @@ export interface LetPlan {
 	readonly body: LogicalPlan | MutationPlan;
 }
 
-/** Un plan complet : lecture, mutation, transaction, introspect, raw ou let/CTE. */
+/**
+ * `create table` lowered. Le lower a :
+ *  - validé les identifiers (D1 regex `^[A-Za-z_][A-Za-z0-9_]{0,62}$`),
+ *  - normalisé le type via `SnqlType` (D6 aliases déjà résolus au parser),
+ *  - matérialisé chaque default en `SqlValue` scalaire canonique (literal only),
+ *  - vérifié que chaque field du `primaryKey` existe dans `fields`.
+ *
+ * Le dispatch cross-engine (PG natif / Mongo compensated + alias `_id` D13 /
+ * KV compensated via `HSET namespace:_schema`) se fait au planner + codegen ;
+ * ici le plan reste engine-agnostique.
+ */
+export interface CreateTableField {
+	readonly name: string;
+	readonly type: import("../schema/model").SnqlType;
+	readonly nullable: boolean;
+	readonly unique: boolean;
+	readonly defaultValue?: SqlValue;
+	readonly span?: Span;
+}
+
+export interface CreateTablePlan {
+	readonly op: "ddl";
+	readonly kind: "create-table";
+	readonly target: string;
+	readonly ifNotExists: boolean;
+	readonly fields: readonly CreateTableField[];
+	readonly primaryKey?: readonly string[];
+	readonly span?: Span;
+}
+
+/**
+ * Union des plans DDL. V1 (DDL/1) = `create-table` seul ; extends aux autres
+ * kinds à mesure des sprints DDL/2..DDL/4.
+ */
+export type DDLPlan = CreateTablePlan;
+
+/** Un plan complet : lecture, mutation, transaction, introspect, raw, let/CTE ou DDL Tier-2. */
 export type Plan =
 	| LogicalPlan
 	| MutationPlan
 	| TransactionPlan
 	| IntrospectPlan
 	| RawPlan
-	| LetPlan;
+	| LetPlan
+	| DDLPlan;
 
 export type PlanOp = LogicalPlan["op"];
 
