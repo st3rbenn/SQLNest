@@ -115,6 +115,7 @@ export {
 } from "./ir/lower";
 export { lowerDDL } from "./ir/lower-ddl";
 export type {
+	AddColumnPlan,
 	Capability,
 	CompareOp,
 	CreateTableField,

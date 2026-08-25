@@ -237,3 +237,75 @@ describe("create table DDL (ADR-029)", () => {
 		).toThrow(/déclaré deux fois/);
 	});
 });
+
+// ─── DDL/2 — add column (ADR-029) ───────────────────────────────────
+describe("add column DDL (ADR-029 DDL/2)", () => {
+	it("parse minimal add column", () => {
+		expect(stmt("add column age int into users")).toMatchObject({
+			operation: "ddl",
+			kind: "add-column",
+			target: "users",
+			column: { name: "age", type: "int" }
+		});
+	});
+
+	it("parse add column not null default (D10 backfill obligatoire cross-engine)", () => {
+		expect(
+			stmt('add column tier text not null default "free" into users')
+		).toMatchObject({
+			kind: "add-column",
+			target: "users",
+			column: {
+				name: "tier",
+				type: "string",
+				nullable: false
+			}
+		});
+	});
+
+	it("parse add column nullable + unique", () => {
+		expect(stmt("add column phone text nullable unique into users")).toMatchObject({
+			column: { name: "phone", nullable: true, unique: true }
+		});
+	});
+
+	it("parse if not exists (D3)", () => {
+		expect(
+			stmt("add column tier text default \"free\" if not exists into users")
+		).toMatchObject({
+			ifNotExists: true,
+			target: "users"
+		});
+	});
+
+	it("parse alias types PG paste-friendly (D6) sur add column", () => {
+		expect(stmt("add column at timestamptz into users")).toMatchObject({
+			column: { name: "at", type: "date" }
+		});
+	});
+
+	it("préserve `add {...} into t` insert alias (dispatch non-invasif)", () => {
+		expect(stmt('add { name: "a" } into t')).toMatchObject({
+			operation: "insert",
+			verb: "add"
+		});
+	});
+
+	it("préserve un field nommé 'column' dans un insert (soft-ident)", () => {
+		expect(stmt('add { column: "id", value: 1 } into t')).toMatchObject({
+			operation: "insert"
+		});
+	});
+
+	it("refuse type inconnu", () => {
+		expect(() => stmt("add column x fakeType into t")).toThrow(
+			/parse_ddl_unknown_type|Type inconnu/
+		);
+	});
+
+	it("refuse missing 'into'", () => {
+		expect(() => stmt("add column x int users")).toThrow(
+			/'into <table>'/
+		);
+	});
+});

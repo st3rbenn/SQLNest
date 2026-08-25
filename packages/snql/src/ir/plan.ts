@@ -543,10 +543,30 @@ export interface CreateTablePlan {
 }
 
 /**
- * Union des plans DDL. V1 (DDL/1) = `create-table` seul ; extends aux autres
- * kinds à mesure des sprints DDL/2..DDL/4.
+ * `add column` lowered (ADR-029 DDL/2). Le lower a :
+ *  - validé les identifiers (D1 regex `^[A-Za-z_][A-Za-z0-9_]{0,62}$`) sur
+ *    target + column name,
+ *  - normalisé le type via `SnqlType` (D6 aliases déjà résolus au parser),
+ *  - matérialisé le default en `SqlValue` scalaire canonique (literal only).
+ *
+ * D2 (`add column NOT NULL` sans default = preflight Mongo `countDocuments
+ * {$exists:false}` avant `collMod`) et D10 (backfill obligatoire cross-engine)
+ * se font au runtime adapter, PAS ici — le plan reste engine-agnostique.
  */
-export type DDLPlan = CreateTablePlan;
+export interface AddColumnPlan {
+	readonly op: "ddl";
+	readonly kind: "add-column";
+	readonly target: string;
+	readonly ifNotExists: boolean;
+	readonly column: CreateTableField;
+	readonly span?: Span;
+}
+
+/**
+ * Union des plans DDL. DDL/1 = `create-table`, DDL/2 = `add-column` ; extends
+ * aux autres kinds à mesure des sprints DDL/3..DDL/4.
+ */
+export type DDLPlan = CreateTablePlan | AddColumnPlan;
 
 /** Un plan complet : lecture, mutation, transaction, introspect, raw, let/CTE ou DDL Tier-2. */
 export type Plan =

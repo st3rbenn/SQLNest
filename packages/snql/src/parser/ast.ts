@@ -587,11 +587,28 @@ export interface CreateTableStmt {
 }
 
 /**
- * Union des statements DDL. V1 = `create-table` uniquement ; extends aux
- * autres kinds à mesure des sprints DDL/2..DDL/4 (drop-table, add-column,
+ * `add column <col> <type> [nullable] [default <val>] into <table>` (DDL/2).
+ * Préposition unifiée `into` (D6 ADR-029). Backfill obligatoire cross-engine
+ * (D10) : PG natif via `DEFAULT v`, Mongo compensation runtime `updateMany`
+ * batched, KV `SCAN + HSET`. D2 : `add column NOT NULL` sans default →
+ * preflight Mongo `countDocuments {$exists:false}` avant `collMod`, refus
+ * runtime typé si > 0 (pattern PA/5).
+ */
+export interface AddColumnStmt {
+	readonly operation: "ddl";
+	readonly kind: "add-column";
+	readonly target: string;
+	readonly column: DDLFieldDef;
+	readonly ifNotExists?: boolean;
+	readonly span: Span;
+}
+
+/**
+ * Union des statements DDL. V1/DDL/1 = `create-table` ; V1/DDL/2 = `add-column` ;
+ * extends aux autres kinds à mesure des sprints DDL/3..DDL/4 (drop-table,
  * drop-column, add/drop-index, add-unique-index).
  */
-export type DDLStatement = CreateTableStmt;
+export type DDLStatement = CreateTableStmt | AddColumnStmt;
 
 /** Racine de l'AST : lecture (`Query`), mutation, transaction, introspection, raw, let/CTE ou DDL Tier-2. */
 export type Statement =

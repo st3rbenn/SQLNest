@@ -3,13 +3,22 @@ import { tokenize } from "../lexer/lexer";
 import type { CreateTableStmt, DDLFieldDef, DDLStatement } from "../parser/ast";
 import { parse } from "../parser/parser";
 import { lowerDDL } from "./lower-ddl";
-import type { CreateTablePlan } from "./plan";
+import type { AddColumnPlan, CreateTablePlan } from "./plan";
 
 function lowerCreate(source: string): CreateTablePlan {
 	const parsed = parse(tokenize(source)) as DDLStatement;
 	const plan = lowerDDL(parsed);
 	if (plan.kind !== "create-table") {
 		throw new Error(`expected create-table plan, got ${plan.kind}`);
+	}
+	return plan;
+}
+
+function lowerAdd(source: string): AddColumnPlan {
+	const parsed = parse(tokenize(source)) as DDLStatement;
+	const plan = lowerDDL(parsed);
+	if (plan.kind !== "add-column") {
+		throw new Error(`expected add-column plan, got ${plan.kind}`);
 	}
 	return plan;
 }
@@ -177,5 +186,57 @@ describe("lower DDL — create table (ADR-029)", () => {
 			`create table t { flag: text default "$where" }`
 		);
 		expect(plan.fields[0]?.defaultValue).toBe("$where");
+	});
+});
+
+describe("lower DDL — add column (ADR-029 DDL/2)", () => {
+	it("abaisse un add column minimal", () => {
+		expect(lowerAdd("add column age int into users")).toMatchObject({
+			op: "ddl",
+			kind: "add-column",
+			target: "users",
+			ifNotExists: false,
+			column: { name: "age", type: "int", nullable: false, unique: false }
+		});
+	});
+
+	it("propage nullable + default (D10 backfill = adapter runtime, PAS lower)", () => {
+		const plan = lowerAdd(
+			'add column tier text nullable default "free" into users'
+		);
+		expect(plan.column).toMatchObject({
+			name: "tier",
+			type: "string",
+			nullable: true,
+			defaultValue: "free"
+		});
+	});
+
+	it("propage `if not exists` (D3)", () => {
+		expect(
+			lowerAdd(
+				'add column tier text default "free" if not exists into users'
+			)
+		).toMatchObject({ ifNotExists: true, target: "users" });
+	});
+
+	it("D6 alias PG paste-friendly sur add column", () => {
+		expect(lowerAdd("add column at timestamptz into users")).toMatchObject({
+			column: { name: "at", type: "date" }
+		});
+	});
+
+	it("rejette un default non-literal (D1 safety)", () => {
+		expect(() =>
+			lowerAdd("add column x int default now() into t")
+		).toThrow(/littéral scalaire/);
+	});
+
+	it("rejette un target non-ident (D1 safety-net via parser DDL)", () => {
+		// Parser rejette d'abord — safety net réel via AST synthétique déjà
+		// couvert dans le suite create-table (assertIdent partagée).
+		expect(() =>
+			lowerAdd("add column x int into 1users")
+		).toThrow();
 	});
 });

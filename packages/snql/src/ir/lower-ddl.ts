@@ -6,9 +6,20 @@
  */
 
 import { SnqlError } from "../diagnostics";
-import type { CreateTableStmt, DDLStatement, Expr } from "../parser/ast";
+import type {
+	AddColumnStmt,
+	CreateTableStmt,
+	DDLStatement,
+	Expr
+} from "../parser/ast";
 import type { SchemaModel, SnqlType } from "../schema/model";
-import type { CreateTableField, CreateTablePlan, DDLPlan, SqlValue } from "./plan";
+import type {
+	AddColumnPlan,
+	CreateTableField,
+	CreateTablePlan,
+	DDLPlan,
+	SqlValue
+} from "./plan";
 
 /**
  * Longueur max = 63 chars (WiredTiger + PG NAMEDATALEN aligné). D1 ADR-029.
@@ -25,10 +36,46 @@ export function lowerDDL(
 	if (statement.kind === "create-table") {
 		return lowerCreateTable(statement);
 	}
+	if (statement.kind === "add-column") {
+		return lowerAddColumn(statement);
+	}
 	throw new SnqlError(
 		`DDL kind '${(statement as { kind: string }).kind}' non supporté au lower`,
 		"lower_ddl_unsupported_kind"
 	);
+}
+
+function lowerAddColumn(stmt: AddColumnStmt): AddColumnPlan {
+	assertIdent(stmt.target, "target");
+	assertIdent(stmt.column.name, "field");
+	const nullable = stmt.column.nullable ?? false;
+	const unique = stmt.column.unique ?? false;
+	const base: CreateTableField = {
+		name: stmt.column.name,
+		type: stmt.column.type,
+		nullable,
+		unique,
+		...(stmt.column.span !== undefined ? { span: stmt.column.span } : {})
+	};
+	const column: CreateTableField =
+		stmt.column.defaultExpr !== undefined
+			? {
+					...base,
+					defaultValue: lowerDefault(
+						stmt.column.defaultExpr,
+						stmt.column.name,
+						stmt.column.type
+					)
+				}
+			: base;
+	return {
+		op: "ddl",
+		kind: "add-column",
+		target: stmt.target,
+		ifNotExists: stmt.ifNotExists ?? false,
+		column,
+		...(stmt.span !== undefined ? { span: stmt.span } : {})
+	};
 }
 
 function lowerCreateTable(stmt: CreateTableStmt): CreateTablePlan {

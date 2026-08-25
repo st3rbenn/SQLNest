@@ -3,6 +3,7 @@ import { verbOperation } from "../lexer/dictionary";
 import type { Span, Token } from "../lexer/token";
 import type { SnqlType } from "../schema/model";
 import type {
+	AddColumnStmt,
 	Assignment,
 	CreateTableStmt,
 	DDLFieldDef,
@@ -61,6 +62,16 @@ function peekKeyword(cursor: TokenCursor, value: string, ahead = 0): boolean {
 	return tok.kind === "keyword" && tok.value === value;
 }
 
+/**
+ * Peek soft-ident (kind === "ident" + value comparé case-insensitive) —
+ * miroir peekKeyword pour les mots comme `column`, `unique`, `nullable`
+ * qui restent idents pour ne pas casser un usage nom-de-champ ailleurs.
+ */
+function peekIdent(cursor: TokenCursor, value: string, ahead = 0): boolean {
+	const tok = cursor.peek(ahead);
+	return tok.kind === "ident" && tok.value.toLowerCase() === value;
+}
+
 /** Parse un flux de tokens en un AST [[Statement]] (lecture ou mutation). */
 export function parse(tokens: readonly Token[]): Statement {
 	const cursor = new TokenCursor(tokens);
@@ -110,6 +121,18 @@ function parseStatement(cursor: TokenCursor): Statement {
 		peekKeyword(cursor, "table", 1)
 	) {
 		return parseCreateTable(cursor);
+	}
+	// DDL/2 : `add column <col> <type> ... into <table>` — dispatch avant le
+	// check verb `add` (alias insert). `column` reste soft-ident (une col
+	// nommée `column` dans `add {column: "id", ...}` reste valide). Peek à 1
+	// ahead pour discriminer avec `add {...} into T` (`add` ∈ VERB_SYNONYMS
+	// → 'insert') sans casser la surface DML existante.
+	if (
+		first.kind === "verb" &&
+		first.value.toLowerCase() === "add" &&
+		peekIdent(cursor, "column", 1)
+	) {
+		return parseAddColumn(cursor);
 	}
 	const verbTok = first;
 	if (verbTok.kind !== "verb") {
@@ -1868,4 +1891,127 @@ function parsePrimaryKeyClause(cursor: TokenCursor): readonly string[] {
 		);
 	}
 	return cols;
+}
+
+/**
+ * `add column <col> <type> [nullable | not null] [default <val>] [unique] [if not exists] into <table>` (DDL/2).
+ * `column` reste soft-ident (peekIdent au dispatch — safe pour un field
+ * nommé `column` dans un `add {column: "id", ...} into T`). Backfill D10 +
+ * preflight D2 sont côté runtime adapter, PAS ici — le parser produit un
+ * shape neutre engine.
+ */
+function parseAddColumn(cursor: TokenCursor): AddColumnStmt {
+	const addTok = cursor.next(); // `add` verb
+	cursor.next(); // `column` ident (déjà peeked au dispatch)
+
+	// Nom de la colonne à ajouter — même règle IDENT_REGEX D1 que create table.
+	// Surface SQL-familière : pas de `:` séparateur (aligné `ALTER TABLE t ADD
+	// COLUMN col TYPE`), contrairement au body `create table { col: type }` qui
+	// est un object literal.
+	const nameTok = cursor.expect("ident", "un nom de colonne après 'add column'");
+	const typeTok = cursor.expect(
+		"ident",
+		"un type SNQL (uuid/string/int/...) ou alias PG (varchar/jsonb/...)"
+	);
+	const type = normalizeSnqlType(typeTok.value, typeTok.span);
+
+	// Modifiers optionnels — même dispatch que parseCreateTableField.
+	// `unique` sur `add column` = équivaut à créer un UNIQUE INDEX secondaire ;
+	// V1 on accepte le flag et l'engine adapter décide (PG natif, Mongo
+	// createIndex, KV middleware D12). Note : sur Mongo, `unique` = createIndex
+	// non atomique avec le collMod — cf. D12.
+	let nullable: boolean | undefined;
+	let defaultExpr: Expr | undefined;
+	let unique = false;
+	let endSpan: Span = typeTok.span;
+	for (;;) {
+		const nxt = cursor.peek();
+		const v = nxt.value.toLowerCase();
+		if (nxt.kind === "ident" && v === "nullable") {
+			cursor.next();
+			nullable = true;
+			endSpan = nxt.span;
+		} else if (nxt.kind === "keyword" && v === "not") {
+			cursor.next();
+			const nullTok = cursor.peek();
+			const isNullTok =
+				nullTok.kind === "null" ||
+				(nullTok.kind === "ident" && nullTok.value.toLowerCase() === "null");
+			if (!isNullTok) {
+				throw new SnqlError(
+					"'not' doit être suivi de 'null' (alias SQL pour non-nullable)",
+					"parse_ddl_expected_null_after_not",
+					nullTok.span
+				);
+			}
+			cursor.next();
+			nullable = false;
+			endSpan = nullTok.span;
+		} else if (nxt.kind === "keyword" && v === "default") {
+			cursor.next();
+			defaultExpr = parseExpression(cursor);
+			endSpan = defaultExpr.span;
+		} else if (nxt.kind === "ident" && v === "unique") {
+			cursor.next();
+			unique = true;
+			endSpan = nxt.span;
+		} else {
+			break;
+		}
+	}
+
+	// `if not exists` optionnel — parsé APRÈS les modifiers pour matcher la
+	// grammaire naturelle « add column X int default 0 if not exists into T ».
+	// D3 : name-only sémantique cross-engine (drift NON détecté).
+	let ifNotExists = false;
+	const maybeIf = cursor.peek();
+	if (maybeIf.kind === "ident" && maybeIf.value.toLowerCase() === "if") {
+		cursor.next();
+		if (!peekKeyword(cursor, "not")) {
+			throw new SnqlError(
+				"'if' doit être suivi de 'not exists' dans un add column",
+				"parse_ddl_expected_not_after_if",
+				cursor.peek().span
+			);
+		}
+		cursor.next();
+		if (!peekKeyword(cursor, "exists")) {
+			throw new SnqlError(
+				"'if not' doit être suivi de 'exists' dans un add column",
+				"parse_ddl_expected_exists_after_not",
+				cursor.peek().span
+			);
+		}
+		const existsTok = cursor.next();
+		ifNotExists = true;
+		endSpan = existsTok.span;
+	}
+
+	// Préposition unifiée `into <table>` (D6 ADR-029, aligné DML).
+	if (!peekKeyword(cursor, "into")) {
+		throw new SnqlError(
+			"'add column' attend 'into <table>' pour cibler la table",
+			"parse_ddl_add_column_missing_into",
+			cursor.peek().span
+		);
+	}
+	cursor.next();
+	const targetTok = cursor.expect("ident", "un nom de table après 'into'");
+
+	const column: DDLFieldDef = {
+		name: nameTok.value,
+		type,
+		...(nullable !== undefined ? { nullable } : {}),
+		...(defaultExpr !== undefined ? { defaultExpr } : {}),
+		...(unique ? { unique } : {}),
+		span: { start: nameTok.span.start, end: endSpan.end }
+	};
+	return {
+		operation: "ddl",
+		kind: "add-column",
+		target: targetTok.value,
+		column,
+		...(ifNotExists ? { ifNotExists } : {}),
+		span: { start: addTok.span.start, end: targetTok.span.end }
+	};
 }
