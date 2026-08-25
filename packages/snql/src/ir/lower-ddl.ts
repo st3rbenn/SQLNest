@@ -271,7 +271,10 @@ function lowerCreateTable(stmt: CreateTableStmt): CreateTablePlan {
 	return plan;
 }
 
-function assertIdent(name: string, kind: "target" | "field"): void {
+function assertIdent(
+	name: string,
+	kind: "target" | "field" | "enum name"
+): void {
 	if (!IDENT_REGEX.test(name)) {
 		throw new SnqlError(
 			`'${name}' n'est pas un identifiant DDL valide (${kind}) — alphanumeric + underscore uniquement, doit commencer par une lettre ou '_', 63 chars max (limite WiredTiger + PG NAMEDATALEN)`,

@@ -692,7 +692,44 @@ class MongoConnection implements Connection {
 		if (query.operation === "drop-collection") {
 			return this.#executeDDLDropCollection(query);
 		}
-		return this.#executeDDLDropColumn(query);
+		if (query.operation === "drop-column") {
+			return this.#executeDDLDropColumn(query);
+		}
+		return this.#executeDDLCreateEnum(query);
+	}
+
+	/**
+	 * Enum/1w create enum Mongo. Compensation runtime — Mongo n'a pas d'enum
+	 * type natif : on stocke `{_id: name, members}` dans la collection
+	 * metadata `_snql_enums`. Idempotence D3 via catch DuplicateKey (11000) si
+	 * `ifNotExists=true`. Le validator `enum: [...]` sera propagé aux
+	 * $jsonSchema des tables utilisatrices via Enum/2 (résolution `type:
+	 * role_type` dans create-table body).
+	 */
+	async #executeDDLCreateEnum(
+		query: Extract<
+			NativeQuery,
+			{ kind: "mongo-ddl"; operation: "create-enum" }
+		>
+	): Promise<ResultSet> {
+		const db = this.#requireDb();
+		try {
+			await db
+				.collection<{ _id: string; members: readonly string[] }>(
+					"_snql_enums"
+				)
+				.insertOne({ _id: query.name, members: query.members });
+			return { columns: [], rows: [], rowCount: 0 };
+		} catch (cause) {
+			const code = (cause as { code?: unknown } | null)?.code;
+			if (query.ifNotExists && code === 11000) {
+				return { columns: [], rows: [], rowCount: 0 };
+			}
+			throw new EngineExecutionError(
+				`create enum MongoDB échouée sur '${query.name}' — ${describeMongoExecutionError(cause)}`,
+				{ cause }
+			);
+		}
 	}
 
 	/**
