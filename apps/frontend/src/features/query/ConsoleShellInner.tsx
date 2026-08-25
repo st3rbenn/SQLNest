@@ -675,12 +675,22 @@ export function ConsoleShellInner({
 				>
 					<div style={editorFillStyle}>
 						<SnqlEditor
+							// key={activeTabId} force React à re-monter SnqlEditor à
+							// chaque switch de tab → nouvelle EditorView CodeMirror
+							// avec state fresh (autocomplete active, positions from/to,
+							// sélections, history). Sans ce key, l'EditorView est un
+							// singleton scopé au shell : les positions from stockées
+							// dans le pending ActiveResult (autocomplete) leakent d'un
+							// tab à l'autre — repro : Tab-accepter un completion sur
+							// un tab, switch, taper, Tab → applyCompletion insère à la
+							// mauvaise position → `ttable` au lieu de `table`.
+							key={activeTabId}
 							ref={editorRef}
 							value={activeSource}
 							onChange={(v) => tabs.updateSource(activeTabId, v)}
 							onRun={execute}
 							onRunInTransaction={executeInTransaction}
-							schema={schemaQuery.data ?? null}
+							schema={schemaQuery.data ?? undefined}
 							placeholder="get <table> pick <fields>"
 							errorSpans={errorSpans}
 							liveDiagnostic={liveDiagnostic}
