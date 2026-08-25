@@ -87,10 +87,14 @@ export { mapKvDDL } from "./codegen/kv-ddl";
 export { mongoMapper } from "./codegen/mongodb";
 export { postgresMapper } from "./codegen/postgres";
 export type {
+	KvDDLAddColumnQuery,
+	KvDDLCreateTableQuery,
 	KvDDLQuery,
 	KvFieldDescriptor,
 	Mapper,
 	MapperContext,
+	MongoDDLAddColumnQuery,
+	MongoDDLCreateCollectionQuery,
 	MongoDDLQuery,
 	MongoIndexSpec,
 	MongoIntrospectQuery,

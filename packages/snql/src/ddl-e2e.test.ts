@@ -6,7 +6,15 @@
  */
 
 import { describe, expect, it } from "vitest";
-import type { CreateTablePlan, DDLStatement } from "./index";
+import type {
+	AddColumnPlan,
+	CreateTablePlan,
+	DDLStatement,
+	KvDDLAddColumnQuery,
+	KvDDLCreateTableQuery,
+	MongoDDLAddColumnQuery,
+	MongoDDLCreateCollectionQuery
+} from "./index";
 import {
 	lowerDDL,
 	mapKvDDL,
@@ -15,7 +23,6 @@ import {
 	postgresMapper,
 	tokenize
 } from "./index";
-import type { KvDDLQuery, MongoDDLQuery } from "./index";
 
 function lowerCreate(source: string): CreateTablePlan {
 	const stmt = parse(tokenize(source)) as DDLStatement;
@@ -26,20 +33,63 @@ function lowerCreate(source: string): CreateTablePlan {
 	return plan;
 }
 
-function pg(source: string) {
-	if (postgresMapper.mapDDL === undefined) throw new Error("postgresMapper.mapDDL manquant");
-	return postgresMapper.mapDDL(lowerCreate(source));
+function lowerAdd(source: string): AddColumnPlan {
+	const stmt = parse(tokenize(source)) as DDLStatement;
+	const plan = lowerDDL(stmt);
+	if (plan.kind !== "add-column") {
+		throw new Error(`expected add-column plan, got ${plan.kind}`);
+	}
+	return plan;
 }
 
-function mongo(source: string): MongoDDLQuery {
+function pg(source: string) {
+	if (postgresMapper.mapDDL === undefined) throw new Error("postgresMapper.mapDDL manquant");
+	const plan = parse(tokenize(source)) as DDLStatement;
+	return postgresMapper.mapDDL(lowerDDL(plan));
+}
+
+function mongoCreate(source: string): MongoDDLCreateCollectionQuery {
 	if (mongoMapper.mapDDL === undefined) throw new Error("mongoMapper.mapDDL manquant");
 	const q = mongoMapper.mapDDL(lowerCreate(source));
-	if (q.kind !== "mongo-ddl") throw new Error(`attendu mongo-ddl, got ${q.kind}`);
+	if (q.kind !== "mongo-ddl" || q.operation !== "create-collection") {
+		throw new Error(`attendu mongo-ddl create-collection, got ${q.kind}`);
+	}
 	return q;
 }
 
-function kv(source: string): KvDDLQuery {
-	return mapKvDDL(lowerCreate(source));
+function mongoAdd(source: string): MongoDDLAddColumnQuery {
+	if (mongoMapper.mapDDL === undefined) throw new Error("mongoMapper.mapDDL manquant");
+	const q = mongoMapper.mapDDL(lowerAdd(source));
+	if (q.kind !== "mongo-ddl" || q.operation !== "add-column") {
+		throw new Error(`attendu mongo-ddl add-column, got ${q.kind}`);
+	}
+	return q;
+}
+
+/** legacy alias — les tests DDL/1 utilisaient `mongo(source)` sans narrow. */
+function mongo(source: string): MongoDDLCreateCollectionQuery {
+	return mongoCreate(source);
+}
+
+function kvCreate(source: string): KvDDLCreateTableQuery {
+	const q = mapKvDDL(lowerCreate(source));
+	if (q.operation !== "create-table") {
+		throw new Error(`attendu kv-ddl create-table, got ${q.operation}`);
+	}
+	return q;
+}
+
+function kvAdd(source: string): KvDDLAddColumnQuery {
+	const q = mapKvDDL(lowerAdd(source));
+	if (q.operation !== "add-column") {
+		throw new Error(`attendu kv-ddl add-column, got ${q.operation}`);
+	}
+	return q;
+}
+
+/** legacy alias. */
+function kv(source: string): KvDDLCreateTableQuery {
+	return kvCreate(source);
 }
 
 describe("DDL/1 E2E — pipeline complet cross-engine (ADR-029)", () => {
@@ -279,6 +329,149 @@ describe("DDL/1 E2E — pipeline complet cross-engine (ADR-029)", () => {
 				true,
 				null
 			]);
+		});
+	});
+});
+
+describe("DDL/2 E2E — add column cross-engine (ADR-029)", () => {
+	describe("minimal add column + D1 types portables", () => {
+		const source = "add column age int into users";
+
+		it("PG : ALTER TABLE ADD COLUMN natif", () => {
+			const q = pg(source);
+			if (q.kind !== "sql") throw new Error("attendu sql");
+			expect(q.text).toBe(
+				`ALTER TABLE "users" ADD COLUMN "age" integer NOT NULL`
+			);
+		});
+
+		it("Mongo : mongo-ddl add-column avec bsonType + required + preflightNotNull", () => {
+			const q = mongoAdd(source);
+			expect(q).toMatchObject({
+				operation: "add-column",
+				collection: "users",
+				column: { name: "age", bsonType: "int", required: true },
+				backfill: false,
+				preflightNotNull: true
+			});
+		});
+
+		it("KV : kv-ddl add-column avec descriptor 1:1 + preflightNotNull", () => {
+			const q = kvAdd(source);
+			expect(q).toMatchObject({
+				operation: "add-column",
+				collection: "users",
+				column: { name: "age", type: "int", nullable: false, unique: false },
+				backfill: false,
+				preflightNotNull: true
+			});
+		});
+	});
+
+	describe("D10 backfill obligatoire cross-engine (default v)", () => {
+		const source = 'add column tier text not null default "free" into users';
+
+		it("PG : DEFAULT bindé $1 — backfill natif PG (metadata-trick PG 11+)", () => {
+			const q = pg(source);
+			if (q.kind !== "sql") throw new Error("attendu sql");
+			expect(q.text).toBe(
+				`ALTER TABLE "users" ADD COLUMN "tier" text NOT NULL DEFAULT $1`
+			);
+			expect(q.params).toEqual(["free"]);
+		});
+
+		it("Mongo : backfill=true + defaultValue propagé au shape (adapter runtime updateMany batched)", () => {
+			const q = mongoAdd(source);
+			expect(q.backfill).toBe(true);
+			expect(q.preflightNotNull).toBe(false);
+			expect(q.column.defaultValue).toBe("free");
+		});
+
+		it("KV : backfill=true + defaultValue propagé (adapter runtime SCAN + HSET batched)", () => {
+			const q = kvAdd(source);
+			expect(q.backfill).toBe(true);
+			expect(q.preflightNotNull).toBe(false);
+			expect(q.column.defaultValue).toBe("free");
+		});
+	});
+
+	describe("D2 preflight NOT NULL sans default", () => {
+		const source = "add column handle text into users";
+
+		it("PG : émet NOT NULL — PG remonte l'erreur si rows existent (attendu, comportement natif)", () => {
+			const q = pg(source);
+			if (q.kind !== "sql") throw new Error("attendu sql");
+			expect(q.text).toContain(`NOT NULL`);
+			expect(q.text).not.toContain(`DEFAULT`);
+		});
+
+		it("Mongo : preflightNotNull=true — adapter count $exists false + refus si > 0 (invariance sémantique)", () => {
+			const q = mongoAdd(source);
+			expect(q.preflightNotNull).toBe(true);
+			expect(q.backfill).toBe(false);
+		});
+
+		it("KV : preflightNotNull=true — adapter SCAN + count sans field + refus si > 0", () => {
+			const q = kvAdd(source);
+			expect(q.preflightNotNull).toBe(true);
+			expect(q.backfill).toBe(false);
+		});
+	});
+
+	describe("D3 if not exists cross-engine (name-only sémantique)", () => {
+		const source = "add column at date if not exists into users";
+
+		it("PG : IF NOT EXISTS natif PG 9.6+", () => {
+			const q = pg(source);
+			if (q.kind !== "sql") throw new Error("attendu sql");
+			expect(q.text).toContain(`ADD COLUMN IF NOT EXISTS`);
+		});
+
+		it("Mongo : ifNotExists propagé (adapter check field présent dans validator)", () => {
+			expect(mongoAdd(source).ifNotExists).toBe(true);
+		});
+
+		it("KV : ifNotExists propagé (adapter HEXISTS namespace:_schema field)", () => {
+			expect(kvAdd(source).ifNotExists).toBe(true);
+		});
+	});
+
+	describe("D6 alias PG paste-friendly sur add column", () => {
+		const source = "add column at timestamptz nullable into users";
+
+		it("PG : timestamptz préservé", () => {
+			const q = pg(source);
+			if (q.kind !== "sql") throw new Error("attendu sql");
+			expect(q.text).toContain(`"at" timestamptz`);
+		});
+
+		it("Mongo : timestamptz → bsonType date", () => {
+			expect(mongoAdd(source).column.bsonType).toBe("date");
+		});
+
+		it("KV : timestamptz → type date (SnqlType canonique)", () => {
+			expect(kvAdd(source).column.type).toBe("date");
+		});
+	});
+
+	describe("unique field-level (index secondaire)", () => {
+		const source = "add column email text nullable unique into users";
+
+		it("PG : UNIQUE inline", () => {
+			const q = pg(source);
+			if (q.kind !== "sql") throw new Error("attendu sql");
+			expect(q.text).toContain(`UNIQUE`);
+		});
+
+		it("Mongo : createIndex secondaire unique_<name>", () => {
+			expect(mongoAdd(source).index).toEqual({
+				keys: { email: 1 },
+				options: { unique: true, name: "unique_email" }
+			});
+		});
+
+		it("KV : column.unique=true (adapter enregistre pour middleware SETNX D12 futur)", () => {
+			expect(kvAdd(source).column.unique).toBe(true);
 		});
 	});
 });

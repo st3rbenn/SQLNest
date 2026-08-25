@@ -11,9 +11,14 @@
  */
 
 import { SnqlError } from "../diagnostics";
-import type { CreateTablePlan, DDLPlan } from "../ir/plan";
+import type { AddColumnPlan, CreateTablePlan, DDLPlan } from "../ir/plan";
 import type { SnqlType } from "../schema/model";
-import type { KvDDLQuery, KvFieldDescriptor } from "./mapper";
+import type {
+	KvDDLAddColumnQuery,
+	KvDDLCreateTableQuery,
+	KvDDLQuery,
+	KvFieldDescriptor
+} from "./mapper";
 
 /**
  * Mapping SnqlType canonique → nom sérialisé stocké dans le hash `_schema`
@@ -43,16 +48,47 @@ const KV_META_TYPE: Readonly<Record<SnqlType, string>> = {
  * dérive une clé unique `namespace:{table}:pk:<v1>:<v2>` au write.
  */
 export function mapKvDDL(plan: DDLPlan): KvDDLQuery {
-	if (plan.kind !== "create-table") {
-		throw new SnqlError(
-			`DDL kind '${(plan as { kind: string }).kind}' non supporté par le codegen KV V1`,
-			"codegen_ddl_unsupported"
-		);
-	}
-	return renderKvCreateTable(plan);
+	if (plan.kind === "create-table") return renderKvCreateTable(plan);
+	if (plan.kind === "add-column") return renderKvAddColumn(plan);
+	throw new SnqlError(
+		`DDL kind '${(plan as { kind: string }).kind}' non supporté par le codegen KV V1`,
+		"codegen_ddl_unsupported"
+	);
 }
 
-function renderKvCreateTable(plan: CreateTablePlan): KvDDLQuery {
+/**
+ * Rend un `add column` en KvDDLAddColumnQuery. D2 preflight + D10 backfill
+ * sont computés ici (booleans) — l'adapter runtime KV s'en sert pour décider
+ * du SCAN preflight et du HSET batched. Toujours compensation, jamais refus.
+ */
+function renderKvAddColumn(plan: AddColumnPlan): KvDDLAddColumnQuery {
+	const f = plan.column;
+	const descriptor: KvFieldDescriptor = {
+		name: f.name,
+		type: KV_META_TYPE[f.type],
+		nullable: f.nullable,
+		unique: f.unique,
+		...(f.defaultValue !== undefined
+			? { defaultValue: serializeDefault(f.defaultValue) }
+			: {})
+	};
+	const backfill = f.defaultValue !== undefined;
+	// D2 preflight = NOT NULL sans default. Si NOT NULL + default, le backfill
+	// D10 pose la valeur sur toutes les rows → invariance garantie.
+	const preflightNotNull = !f.nullable && !backfill;
+	return {
+		engine: "kv",
+		kind: "kv-ddl",
+		operation: "add-column",
+		collection: plan.target,
+		ifNotExists: plan.ifNotExists,
+		column: descriptor,
+		backfill,
+		preflightNotNull
+	};
+}
+
+function renderKvCreateTable(plan: CreateTablePlan): KvDDLCreateTableQuery {
 	const fields: KvFieldDescriptor[] = plan.fields.map((f) => {
 		const base: KvFieldDescriptor = {
 			name: f.name,
@@ -65,7 +101,7 @@ function renderKvCreateTable(plan: CreateTablePlan): KvDDLQuery {
 			: base;
 	});
 	const uniqueFields = plan.fields.filter((f) => f.unique).map((f) => f.name);
-	const q: KvDDLQuery = {
+	const q: KvDDLCreateTableQuery = {
 		engine: "kv",
 		kind: "kv-ddl",
 		operation: "create-table",

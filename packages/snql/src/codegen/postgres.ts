@@ -1,6 +1,7 @@
 import { SnqlError } from "../diagnostics";
 import { SNQL_FUNCTIONS } from "../functions";
 import type {
+	AddColumnPlan,
 	CastTarget,
 	CompareOp,
 	CreateTablePlan,
@@ -180,6 +181,7 @@ export const postgresMapper: Mapper = {
 	 */
 	mapDDL(plan: DDLPlan): NativeQuery {
 		if (plan.kind === "create-table") return renderCreateTable(plan);
+		if (plan.kind === "add-column") return renderAddColumn(plan);
 		throw new SnqlError(
 			`DDL kind '${(plan as { kind: string }).kind}' non supporté par le codegen Postgres V1`,
 			"codegen_ddl_unsupported"
@@ -996,6 +998,36 @@ function renderCreateTable(plan: CreateTablePlan): NativeQuery {
 		]
 	};
 	return transaction;
+}
+
+/**
+ * Rend un `add column` en `ALTER TABLE ... ADD COLUMN ...` (ADR-029 DDL/2).
+ * D10 backfill natif PG : `DEFAULT v` sur ADD COLUMN backfille les rows
+ * existants (metadata-trick PG 11+ pour un DEFAULT constant, table rewrite
+ * sinon). Pas d'advisory lock ici — un ADD COLUMN prend déjà un AccessExclusive
+ * lock sur la table (PG sérialise nativement).
+ *
+ * `IF NOT EXISTS` PG 9.6+ natif — pas d'astuce à ajouter côté codegen (name-only
+ * D3, drift schéma NON détecté ; l'user peut re-check via `describe`).
+ */
+function renderAddColumn(plan: AddColumnPlan): NativeQuery {
+	const params = new ParamList();
+	const f = plan.column;
+	const parts: string[] = [quoteIdent(f.name), PG_DDL_TYPE[f.type]];
+	if (!f.nullable) parts.push("NOT NULL");
+	if (f.unique) parts.push("UNIQUE");
+	if (f.defaultValue !== undefined) {
+		parts.push(`DEFAULT ${params.add(f.defaultValue, f.span)}`);
+	}
+	const ifNotExists = plan.ifNotExists ? "IF NOT EXISTS " : "";
+	const text = `ALTER TABLE ${quoteIdent(plan.target)} ADD COLUMN ${ifNotExists}${parts.join(" ")}`;
+	return {
+		engine: "postgres",
+		kind: "sql",
+		text,
+		params: params.all(),
+		paramSpans: params.allSpans()
+	};
 }
 
 function renderExpr(expr: PlanExpr, params: ParamList): string {

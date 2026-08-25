@@ -1,10 +1,27 @@
 import { describe, expect, it } from "vitest";
-import type { CreateTablePlan } from "../ir/plan";
+import type { AddColumnPlan, CreateTablePlan } from "../ir/plan";
+import type { KvDDLAddColumnQuery, KvDDLCreateTableQuery } from "./mapper";
 import { mapKvDDL } from "./kv-ddl";
+
+function mapCreate(plan: CreateTablePlan): KvDDLCreateTableQuery {
+	const q = mapKvDDL(plan);
+	if (q.operation !== "create-table") {
+		throw new Error(`attendu create-table, got ${q.operation}`);
+	}
+	return q;
+}
+
+function mapAdd(plan: AddColumnPlan): KvDDLAddColumnQuery {
+	const q = mapKvDDL(plan);
+	if (q.operation !== "add-column") {
+		throw new Error(`attendu add-column, got ${q.operation}`);
+	}
+	return q;
+}
 
 describe("codegen KV — create table (ADR-029 DDL/1.7)", () => {
 	it("émet KvDDLQuery minimal avec fields descriptors", () => {
-		const q = mapKvDDL({
+		const q = mapCreate({
 			op: "ddl",
 			kind: "create-table",
 			target: "users",
@@ -26,7 +43,7 @@ describe("codegen KV — create table (ADR-029 DDL/1.7)", () => {
 	});
 
 	it("map SnqlType 1:1 (D1 round-trip identity — pas de coercion)", () => {
-		const q = mapKvDDL({
+		const q = mapCreate({
 			op: "ddl",
 			kind: "create-table",
 			target: "matrix",
@@ -63,7 +80,7 @@ describe("codegen KV — create table (ADR-029 DDL/1.7)", () => {
 	});
 
 	it("D13 : primary key single (id) propagé tel quel (jamais refus)", () => {
-		const q = mapKvDDL({
+		const q = mapCreate({
 			op: "ddl",
 			kind: "create-table",
 			target: "users",
@@ -78,7 +95,7 @@ describe("codegen KV — create table (ADR-029 DDL/1.7)", () => {
 	});
 
 	it("D13 : primary key compound propagé tel quel (jamais refus)", () => {
-		const q = mapKvDDL({
+		const q = mapCreate({
 			op: "ddl",
 			kind: "create-table",
 			target: "pairs",
@@ -95,7 +112,7 @@ describe("codegen KV — create table (ADR-029 DDL/1.7)", () => {
 	it("D13 : primary key sur field ≠ 'id' propagé (compensation runtime, PAS refus)", () => {
 		// C'est le fix qui prouve la doctrine : sur Mongo c'est refus sémantique,
 		// sur KV c'est compensation. Aucun refus « engine gap » sur KV.
-		const q = mapKvDDL({
+		const q = mapCreate({
 			op: "ddl",
 			kind: "create-table",
 			target: "users",
@@ -109,7 +126,7 @@ describe("codegen KV — create table (ADR-029 DDL/1.7)", () => {
 	});
 
 	it("uniqueFields extrait de fields.unique=true", () => {
-		const q = mapKvDDL({
+		const q = mapCreate({
 			op: "ddl",
 			kind: "create-table",
 			target: "users",
@@ -124,7 +141,7 @@ describe("codegen KV — create table (ADR-029 DDL/1.7)", () => {
 	});
 
 	it("bigint / decimal defaults sérialisés lossless (D1)", () => {
-		const q = mapKvDDL({
+		const q = mapCreate({
 			op: "ddl",
 			kind: "create-table",
 			target: "t",
@@ -151,7 +168,7 @@ describe("codegen KV — create table (ADR-029 DDL/1.7)", () => {
 	});
 
 	it("ifNotExists propagé (D3 : adapter existence-check `_schema` hash)", () => {
-		const q = mapKvDDL({
+		const q = mapCreate({
 			op: "ddl",
 			kind: "create-table",
 			target: "sessions",
@@ -159,6 +176,123 @@ describe("codegen KV — create table (ADR-029 DDL/1.7)", () => {
 			fields: [
 				{ name: "token", type: "string", nullable: false, unique: false }
 			]
+		});
+		expect(q.ifNotExists).toBe(true);
+	});
+});
+
+describe("codegen KV — add column (ADR-029 DDL/2.5)", () => {
+	it("émet KvDDLAddColumnQuery minimal (nullable, pas de default, pas de preflight)", () => {
+		const q = mapAdd({
+			op: "ddl",
+			kind: "add-column",
+			target: "users",
+			ifNotExists: false,
+			column: { name: "phone", type: "string", nullable: true, unique: false }
+		});
+		expect(q).toEqual({
+			engine: "kv",
+			kind: "kv-ddl",
+			operation: "add-column",
+			collection: "users",
+			ifNotExists: false,
+			column: {
+				name: "phone",
+				type: "string",
+				nullable: true,
+				unique: false
+			},
+			backfill: false,
+			preflightNotNull: false
+		});
+	});
+
+	it("D2 preflight = NOT NULL sans default → preflightNotNull=true", () => {
+		const q = mapAdd({
+			op: "ddl",
+			kind: "add-column",
+			target: "users",
+			ifNotExists: false,
+			column: { name: "handle", type: "string", nullable: false, unique: false }
+		});
+		expect(q.backfill).toBe(false);
+		expect(q.preflightNotNull).toBe(true);
+	});
+
+	it("D10 backfill = default présent → backfill=true, preflightNotNull=false", () => {
+		const q = mapAdd({
+			op: "ddl",
+			kind: "add-column",
+			target: "users",
+			ifNotExists: false,
+			column: {
+				name: "tier",
+				type: "string",
+				nullable: false,
+				unique: false,
+				defaultValue: "free"
+			}
+		});
+		expect(q.column).toMatchObject({
+			name: "tier",
+			type: "string",
+			nullable: false,
+			unique: false,
+			defaultValue: "free"
+		});
+		expect(q.backfill).toBe(true);
+		expect(q.preflightNotNull).toBe(false);
+	});
+
+	it("bigint / decimal defaults sérialisés lossless (D1)", () => {
+		const bigQ = mapAdd({
+			op: "ddl",
+			kind: "add-column",
+			target: "t",
+			ifNotExists: false,
+			column: {
+				name: "big",
+				type: "bigint",
+				nullable: false,
+				unique: false,
+				defaultValue: 9007199254740993n
+			}
+		});
+		expect(bigQ.column.defaultValue).toBe("9007199254740993");
+		const decQ = mapAdd({
+			op: "ddl",
+			kind: "add-column",
+			target: "t",
+			ifNotExists: false,
+			column: {
+				name: "price",
+				type: "decimal",
+				nullable: false,
+				unique: false,
+				defaultValue: { kind: "decimal", raw: "3.1415926535" }
+			}
+		});
+		expect(decQ.column.defaultValue).toBe("3.1415926535");
+	});
+
+	it("KV_META_TYPE identity 1:1 (D1)", () => {
+		const q = mapAdd({
+			op: "ddl",
+			kind: "add-column",
+			target: "t",
+			ifNotExists: false,
+			column: { name: "at", type: "date", nullable: true, unique: false }
+		});
+		expect(q.column.type).toBe("date");
+	});
+
+	it("ifNotExists propagé (D3)", () => {
+		const q = mapAdd({
+			op: "ddl",
+			kind: "add-column",
+			target: "users",
+			ifNotExists: true,
+			column: { name: "x", type: "int", nullable: true, unique: false }
 		});
 		expect(q.ifNotExists).toBe(true);
 	});

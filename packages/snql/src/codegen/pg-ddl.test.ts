@@ -152,3 +152,82 @@ describe("codegen PG — create table (ADR-029 DDL/1.5)", () => {
 		).toThrow(/Identifiant invalide/);
 	});
 });
+
+describe("codegen PG — add column (ADR-029 DDL/2.3)", () => {
+	it("émet ALTER TABLE ADD COLUMN minimal", () => {
+		const q = mapDDL({
+			op: "ddl",
+			kind: "add-column",
+			target: "users",
+			ifNotExists: false,
+			column: { name: "age", type: "int", nullable: false, unique: false }
+		});
+		if (q.kind !== "sql") throw new Error("attendu sql");
+		expect(q.text).toBe(`ALTER TABLE "users" ADD COLUMN "age" integer NOT NULL`);
+		expect(q.params).toEqual([]);
+	});
+
+	it("D10 backfill natif PG : DEFAULT bindé $1", () => {
+		const q = mapDDL({
+			op: "ddl",
+			kind: "add-column",
+			target: "users",
+			ifNotExists: false,
+			column: {
+				name: "tier",
+				type: "string",
+				nullable: false,
+				unique: false,
+				defaultValue: "free"
+			}
+		});
+		if (q.kind !== "sql") throw new Error("attendu sql");
+		expect(q.text).toBe(
+			`ALTER TABLE "users" ADD COLUMN "tier" text NOT NULL DEFAULT $1`
+		);
+		expect(q.params).toEqual(["free"]);
+	});
+
+	it("nullable + unique", () => {
+		const q = mapDDL({
+			op: "ddl",
+			kind: "add-column",
+			target: "users",
+			ifNotExists: false,
+			column: {
+				name: "phone",
+				type: "string",
+				nullable: true,
+				unique: true
+			}
+		});
+		if (q.kind !== "sql") throw new Error("attendu sql");
+		expect(q.text).toBe(`ALTER TABLE "users" ADD COLUMN "phone" text UNIQUE`);
+	});
+
+	it("if not exists (D3 name-only sémantique)", () => {
+		const q = mapDDL({
+			op: "ddl",
+			kind: "add-column",
+			target: "users",
+			ifNotExists: true,
+			column: { name: "at", type: "date", nullable: true, unique: false }
+		});
+		if (q.kind !== "sql") throw new Error("attendu sql");
+		expect(q.text).toBe(
+			`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "at" timestamptz`
+		);
+	});
+
+	it("interdit un target non-quoté-safe (safety-net quoteIdent)", () => {
+		expect(() =>
+			mapDDL({
+				op: "ddl",
+				kind: "add-column",
+				target: 'bad"quote',
+				ifNotExists: false,
+				column: { name: "age", type: "int", nullable: false, unique: false }
+			})
+		).toThrow(/Identifiant invalide/);
+	});
+});

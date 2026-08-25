@@ -212,7 +212,7 @@ export interface MongoIndexSpec {
 	};
 }
 
-export interface MongoDDLQuery {
+export interface MongoDDLCreateCollectionQuery {
 	readonly engine: string;
 	readonly kind: "mongo-ddl";
 	readonly operation: "create-collection";
@@ -227,6 +227,54 @@ export interface MongoDDLQuery {
 	 */
 	readonly primaryKeyAlias?: string;
 }
+
+/**
+ * DDL/2 add column sur Mongo (ADR-029). Compensated via `collMod` +
+ * `$jsonSchema` validator étendu + backfill runtime `updateMany` batched
+ * (D10 obligatoire cross-engine).
+ *
+ * L'adapter runtime doit :
+ *  1. **D2 preflight** : si `preflightNotNull=true` (add column NOT NULL sans
+ *     default), `countDocuments({[column.name]: {$exists:false}})` — si `> 0`
+ *     refus runtime typé `runtime_mongo_add_column_not_null_would_orphan_N_docs`
+ *     avec message copiable pointant vers `update ... set = ... where ... is null`
+ *     puis relance.
+ *  2. Applique `collMod` avec le validator étendu (`properties.<col>` +
+ *     required éventuel).
+ *  3. **D10 backfill** : si `backfill=true` (defaultValue défini),
+ *     `updateMany({[column.name]: {$exists:false}}, {$set: {[column.name]:
+ *     defaultValue}})` batched (défaut 10k docs/batch + 50ms throttle,
+ *     `mongo.ddl.backfill_batch_size` / `mongo.ddl.backfill_max_rows` config).
+ *  4. Si `index` présent, `createIndex(keys, options)` — DDL/3 pattern D12.
+ */
+export interface MongoDDLAddColumnQuery {
+	readonly engine: string;
+	readonly kind: "mongo-ddl";
+	readonly operation: "add-column";
+	readonly collection: string;
+	readonly ifNotExists: boolean;
+	readonly column: {
+		readonly name: string;
+		/** null = SnqlType `unknown` — pas de contrainte bsonType côté validator. */
+		readonly bsonType: string | null;
+		/** `required` du validator étendu (contrat cross-engine : NOT NULL). */
+		readonly required: boolean;
+		readonly defaultValue?: unknown;
+	};
+	/** true si `defaultValue !== undefined` → D10 backfill obligatoire. */
+	readonly backfill: boolean;
+	/**
+	 * true si `column.required && !backfill` → D2 preflight obligatoire.
+	 * L'adapter count `$exists:false` avant `collMod`, refus si > 0.
+	 */
+	readonly preflightNotNull: boolean;
+	/** Index unique secondaire optionnel (add column ... unique). */
+	readonly index?: MongoIndexSpec;
+}
+
+export type MongoDDLQuery =
+	| MongoDDLCreateCollectionQuery
+	| MongoDDLAddColumnQuery;
 
 /**
  * DDL Tier-2 sur KV (ADR-029). Entièrement compensé — KV est schema-less,
@@ -252,7 +300,7 @@ export interface KvFieldDescriptor {
 	readonly defaultValue?: unknown;
 }
 
-export interface KvDDLQuery {
+export interface KvDDLCreateTableQuery {
 	readonly engine: string;
 	readonly kind: "kv-ddl";
 	readonly operation: "create-table";
@@ -262,6 +310,33 @@ export interface KvDDLQuery {
 	readonly primaryKey?: readonly string[];
 	readonly uniqueFields?: readonly string[];
 }
+
+/**
+ * DDL/2 add column sur KV (ADR-029). L'adapter runtime KV consomme et
+ * exécute :
+ *  1. **D2 preflight** : si `preflightNotNull=true` (NOT NULL sans default),
+ *     `SCAN namespace:{collection}:*` + count des rows sans le field — refus
+ *     runtime typé si > 0 avec message pointing vers update-first.
+ *  2. `HSET namespace:_schema:{collection} <col.name> <encoded-descriptor>` —
+ *     ajoute le field au schema metadata.
+ *  3. **D10 backfill** : si `backfill=true` (defaultValue défini), `SCAN` +
+ *     `HSET` batched — chaque row existante reçoit `HSET row col default`.
+ *     Jamais refus (PA/1-8).
+ *  4. Si `column.unique`, l'adapter enregistre le field dans le middleware
+ *     pré-write SETNX (D12) — arrivera vraiment à DDL/3.
+ */
+export interface KvDDLAddColumnQuery {
+	readonly engine: string;
+	readonly kind: "kv-ddl";
+	readonly operation: "add-column";
+	readonly collection: string;
+	readonly ifNotExists: boolean;
+	readonly column: KvFieldDescriptor;
+	readonly backfill: boolean;
+	readonly preflightNotNull: boolean;
+}
+
+export type KvDDLQuery = KvDDLCreateTableQuery | KvDDLAddColumnQuery;
 
 /**
  * native shape pour un `raw {...}` Mongo — command native

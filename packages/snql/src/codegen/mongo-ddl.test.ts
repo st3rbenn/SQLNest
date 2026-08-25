@@ -1,15 +1,36 @@
 import { describe, expect, it } from "vitest";
-import type { CreateTablePlan, DDLPlan } from "../ir/plan";
-import type { MongoDDLQuery } from "./mapper";
+import type { AddColumnPlan, CreateTablePlan, DDLPlan } from "../ir/plan";
+import type {
+	MongoDDLAddColumnQuery,
+	MongoDDLCreateCollectionQuery
+} from "./mapper";
 import { mongoMapper } from "./mongodb";
 
-function mapDDL(plan: DDLPlan): MongoDDLQuery {
+function mapCreate(plan: CreateTablePlan): MongoDDLCreateCollectionQuery {
 	if (mongoMapper.mapDDL === undefined) {
 		throw new Error("mongoMapper.mapDDL manquant");
 	}
 	const q = mongoMapper.mapDDL(plan);
-	if (q.kind !== "mongo-ddl") throw new Error(`attendu mongo-ddl, got ${q.kind}`);
+	if (q.kind !== "mongo-ddl" || q.operation !== "create-collection") {
+		throw new Error(`attendu mongo-ddl create-collection, got ${q.kind}`);
+	}
 	return q;
+}
+
+function mapAdd(plan: AddColumnPlan): MongoDDLAddColumnQuery {
+	if (mongoMapper.mapDDL === undefined) {
+		throw new Error("mongoMapper.mapDDL manquant");
+	}
+	const q = mongoMapper.mapDDL(plan);
+	if (q.kind !== "mongo-ddl" || q.operation !== "add-column") {
+		throw new Error(`attendu mongo-ddl add-column, got ${q.kind}`);
+	}
+	return q;
+}
+
+/** compat wrapper : les tests DDL/1 utilisent mapDDL générique. */
+function mapDDL(plan: DDLPlan): MongoDDLCreateCollectionQuery {
+	return mapCreate(plan as CreateTablePlan);
 }
 
 describe("codegen Mongo — create table (ADR-029 DDL/1.6)", () => {
@@ -160,6 +181,137 @@ describe("codegen Mongo — create table (ADR-029 DDL/1.6)", () => {
 			fields: [
 				{ name: "token", type: "string", nullable: false, unique: false }
 			]
+		});
+		expect(q.ifNotExists).toBe(true);
+	});
+});
+
+describe("codegen Mongo — add column (ADR-029 DDL/2.4)", () => {
+	it("émet mongo-ddl add-column minimal (nullable, pas de default, pas de preflight)", () => {
+		const q = mapAdd({
+			op: "ddl",
+			kind: "add-column",
+			target: "users",
+			ifNotExists: false,
+			column: { name: "phone", type: "string", nullable: true, unique: false }
+		});
+		expect(q).toEqual({
+			engine: "mongodb",
+			kind: "mongo-ddl",
+			operation: "add-column",
+			collection: "users",
+			ifNotExists: false,
+			column: { name: "phone", bsonType: "string", required: false },
+			backfill: false,
+			preflightNotNull: false
+		});
+	});
+
+	it("D2 preflight = NOT NULL sans default → preflightNotNull=true", () => {
+		const q = mapAdd({
+			op: "ddl",
+			kind: "add-column",
+			target: "users",
+			ifNotExists: false,
+			column: { name: "handle", type: "string", nullable: false, unique: false }
+		});
+		expect(q.column.required).toBe(true);
+		expect(q.backfill).toBe(false);
+		expect(q.preflightNotNull).toBe(true);
+	});
+
+	it("D10 backfill = default présent → backfill=true, preflightNotNull=false (default couvre l'invariance)", () => {
+		const q = mapAdd({
+			op: "ddl",
+			kind: "add-column",
+			target: "users",
+			ifNotExists: false,
+			column: {
+				name: "tier",
+				type: "string",
+				nullable: false,
+				unique: false,
+				defaultValue: "free"
+			}
+		});
+		expect(q.column).toMatchObject({
+			name: "tier",
+			bsonType: "string",
+			required: true,
+			defaultValue: "free"
+		});
+		expect(q.backfill).toBe(true);
+		expect(q.preflightNotNull).toBe(false);
+	});
+
+	it("nullable + default → backfill=true, preflightNotNull=false, required=false", () => {
+		const q = mapAdd({
+			op: "ddl",
+			kind: "add-column",
+			target: "users",
+			ifNotExists: false,
+			column: {
+				name: "note",
+				type: "string",
+				nullable: true,
+				unique: false,
+				defaultValue: ""
+			}
+		});
+		expect(q.column.required).toBe(false);
+		expect(q.backfill).toBe(true);
+		expect(q.preflightNotNull).toBe(false);
+	});
+
+	it("unique → index secondaire propagé", () => {
+		const q = mapAdd({
+			op: "ddl",
+			kind: "add-column",
+			target: "users",
+			ifNotExists: false,
+			column: {
+				name: "email",
+				type: "string",
+				nullable: false,
+				unique: true,
+				defaultValue: ""
+			}
+		});
+		expect(q.index).toEqual({
+			keys: { email: 1 },
+			options: { unique: true, name: "unique_email" }
+		});
+	});
+
+	it("MONGO_BSON_TYPE mapping (D1)", () => {
+		const q = mapAdd({
+			op: "ddl",
+			kind: "add-column",
+			target: "t",
+			ifNotExists: false,
+			column: { name: "at", type: "date", nullable: true, unique: false }
+		});
+		expect(q.column.bsonType).toBe("date");
+	});
+
+	it("unknown SnqlType → bsonType null (pas de contrainte validator)", () => {
+		const q = mapAdd({
+			op: "ddl",
+			kind: "add-column",
+			target: "t",
+			ifNotExists: false,
+			column: { name: "raw", type: "unknown", nullable: true, unique: false }
+		});
+		expect(q.column.bsonType).toBeNull();
+	});
+
+	it("ifNotExists propagé (D3)", () => {
+		const q = mapAdd({
+			op: "ddl",
+			kind: "add-column",
+			target: "users",
+			ifNotExists: true,
+			column: { name: "x", type: "int", nullable: true, unique: false }
 		});
 		expect(q.ifNotExists).toBe(true);
 	});

@@ -1,6 +1,7 @@
 import { SnqlError } from "../diagnostics";
 import { SNQL_FUNCTIONS } from "../functions";
 import type {
+	AddColumnPlan,
 	CastTarget,
 	CompareOp,
 	CreateTablePlan,
@@ -21,7 +22,8 @@ import { isSqlDecimal, linearize } from "../ir/plan";
 import type { SnqlType } from "../schema/model";
 import type {
 	Mapper,
-	MongoDDLQuery,
+	MongoDDLAddColumnQuery,
+	MongoDDLCreateCollectionQuery,
 	MongoIndexSpec,
 	MongoQuery,
 	MongoStage,
@@ -189,6 +191,7 @@ export const mongoMapper: Mapper = {
 	 */
 	mapDDL(plan: DDLPlan): NativeQuery {
 		if (plan.kind === "create-table") return renderMongoCreateTable(plan);
+		if (plan.kind === "add-column") return renderMongoAddColumn(plan);
 		throw new SnqlError(
 			`DDL kind '${(plan as { kind: string }).kind}' non supporté par le codegen Mongo V1`,
 			"codegen_ddl_unsupported"
@@ -2771,7 +2774,9 @@ const MONGO_BSON_TYPE: Readonly<Record<SnqlType, string | null>> = {
  * field ≠ `id` refusé — Mongo n'a pas de PK secondaire vraie. Hint pointe vers
  * `add unique index` (DDL/3).
  */
-function renderMongoCreateTable(plan: CreateTablePlan): MongoDDLQuery {
+function renderMongoCreateTable(
+	plan: CreateTablePlan
+): MongoDDLCreateCollectionQuery {
 	const pk = plan.primaryKey;
 	// D13 : détecte le cas alias `_id` (single-field, nom == "id") — le field
 	// n'entre PAS dans le $jsonSchema car _id est géré natif par Mongo.
@@ -2829,7 +2834,7 @@ function renderMongoCreateTable(plan: CreateTablePlan): MongoDDLQuery {
 		});
 	}
 
-	const ddl: MongoDDLQuery = {
+	const ddl: MongoDDLCreateCollectionQuery = {
 		engine: "mongodb",
 		kind: "mongo-ddl",
 		operation: "create-collection",
@@ -2840,4 +2845,51 @@ function renderMongoCreateTable(plan: CreateTablePlan): MongoDDLQuery {
 		...(primaryKeyAlias !== undefined ? { primaryKeyAlias } : {})
 	};
 	return ddl;
+}
+
+/**
+ * Rend un `add column` en `MongoDDLAddColumnQuery` (ADR-029 DDL/2). L'adapter
+ * runtime consomme le shape et exécute :
+ *  1. D2 preflight : si `preflightNotNull=true` → `countDocuments({[col]:
+ *     {$exists:false}})` avant `collMod`. Si > 0, refus runtime typé.
+ *  2. `collMod` avec validator étendu (ajoute properties.<col> + éventuel
+ *     required). L'adapter merge avec le validator existant.
+ *  3. D10 backfill : si `backfill=true` → `updateMany({[col]: {$exists:false}},
+ *     {$set: {[col]: defaultValue}})` batched. Jamais refus (transformer NON
+ *     en OUI, PA/1-8).
+ *  4. Si `index` présent, `createIndex(keys, options)` (add column ... unique).
+ *
+ * Refus D13 admis (adjacent, à surface dans les tests indexes) : un
+ * `add column ... unique` sur un field qui deviendrait un PK secondaire n'est
+ * PAS refusé côté add-column — DDL/2 accepte l'unique index secondaire (D12
+ * arrivera avec l'enforcement).
+ */
+function renderMongoAddColumn(plan: AddColumnPlan): MongoDDLAddColumnQuery {
+	const f = plan.column;
+	const bson = MONGO_BSON_TYPE[f.type];
+	const required = !f.nullable;
+	const backfill = f.defaultValue !== undefined;
+	// D2 preflight = NOT NULL sans default. Si NOT NULL + default, le backfill
+	// D10 assure l'invariance (les rows existantes reçoivent la valeur).
+	const preflightNotNull = required && !backfill;
+	const columnSpec: MongoDDLAddColumnQuery["column"] = {
+		name: f.name,
+		bsonType: bson,
+		required,
+		...(f.defaultValue !== undefined ? { defaultValue: f.defaultValue } : {})
+	};
+	const index: MongoIndexSpec | undefined = f.unique
+		? { keys: { [f.name]: 1 }, options: { unique: true, name: `unique_${f.name}` } }
+		: undefined;
+	return {
+		engine: "mongodb",
+		kind: "mongo-ddl",
+		operation: "add-column",
+		collection: plan.target,
+		ifNotExists: plan.ifNotExists,
+		column: columnSpec,
+		backfill,
+		preflightNotNull,
+		...(index !== undefined ? { index } : {})
+	};
 }
