@@ -269,8 +269,13 @@ async function runConnect(args: string[], ctx: RunContext): Promise<number> {
 			} catch (err) {
 				// Nettoie la ligne du spinner avant que le handler stderr
 				// print le message d'erreur — sinon le `⠋ En attente…`
-				// reste collé devant l'erreur.
-				spinner?.stop();
+				// reste collé devant l'erreur. Cast explicite : le TS narrow
+				// tombe à `never` sur le catch parce que l'assignation
+				// `spinner = createSpinner(...)` vit dans un callback closure
+				// (`onCodeDisplayed`) que le flow-analyzer ne peut pas prouver
+				// exécuté avant l'await. La déclaration `spinner: SpinnerHandle
+				// | null` reste la vérité.
+				(spinner as SpinnerHandle | null)?.stop();
 				throw err;
 			}
 		}
