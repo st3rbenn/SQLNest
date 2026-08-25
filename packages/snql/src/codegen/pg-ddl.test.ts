@@ -233,3 +233,72 @@ describe("codegen PG — add column (ADR-029 DDL/2.3)", () => {
 		).toThrow(/Identifiant invalide/);
 	});
 });
+
+describe("codegen PG — add/drop index (ADR-029 DDL/3.3, D11 CONCURRENTLY)", () => {
+	it("émet CREATE INDEX CONCURRENTLY (single field)", () => {
+		const q = mapDDL({
+			op: "ddl",
+			kind: "add-index",
+			target: "users",
+			fields: ["email"],
+			name: "idx_users_email",
+			ifNotExists: false
+		});
+		if (q.kind !== "sql") throw new Error("attendu sql");
+		expect(q.text).toBe(
+			`CREATE INDEX CONCURRENTLY "idx_users_email" ON "users" ("email")`
+		);
+		expect(q.params).toEqual([]);
+	});
+
+	it("compound + UNIQUE + IF NOT EXISTS (D3)", () => {
+		const q = mapDDL({
+			op: "ddl",
+			kind: "add-unique-index",
+			target: "pages",
+			fields: ["tenant_id", "slug"],
+			name: "unique_pages_tenant_id_slug",
+			ifNotExists: true
+		});
+		if (q.kind !== "sql") throw new Error("attendu sql");
+		expect(q.text).toBe(
+			`CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS "unique_pages_tenant_id_slug" ON "pages" ("tenant_id", "slug")`
+		);
+	});
+
+	it("DROP INDEX minimal (pas de CONCURRENTLY sur drop V1)", () => {
+		const q = mapDDL({
+			op: "ddl",
+			kind: "drop-index",
+			target: "users",
+			name: "idx_users_email",
+			ifExists: false
+		});
+		if (q.kind !== "sql") throw new Error("attendu sql");
+		expect(q.text).toBe(`DROP INDEX "idx_users_email"`);
+	});
+
+	it("DROP INDEX IF EXISTS (D3)", () => {
+		const q = mapDDL({
+			op: "ddl",
+			kind: "drop-index",
+			target: "users",
+			name: "idx_users_email",
+			ifExists: true
+		});
+		if (q.kind !== "sql") throw new Error("attendu sql");
+		expect(q.text).toBe(`DROP INDEX IF EXISTS "idx_users_email"`);
+	});
+
+	it("interdit un name non-quoté-safe (safety-net quoteIdent)", () => {
+		expect(() =>
+			mapDDL({
+				op: "ddl",
+				kind: "drop-index",
+				target: "users",
+				name: 'bad"idx',
+				ifExists: false
+			})
+		).toThrow(/Identifiant invalide/);
+	});
+});

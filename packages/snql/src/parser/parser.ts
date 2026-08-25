@@ -4,10 +4,12 @@ import type { Span, Token } from "../lexer/token";
 import type { SnqlType } from "../schema/model";
 import type {
 	AddColumnStmt,
+	AddIndexStmt,
 	Assignment,
 	CreateTableStmt,
 	DDLFieldDef,
 	DeleteStatement,
+	DropIndexStmt,
 	Expr,
 	FieldSelection,
 	GroupKey,
@@ -133,6 +135,28 @@ function parseStatement(cursor: TokenCursor): Statement {
 		peekIdent(cursor, "column", 1)
 	) {
 		return parseAddColumn(cursor);
+	}
+	// DDL/3 : `add index (fields) into <table>` ou `add unique index (fields) into <table>`.
+	// `index` reste soft-ident (une col nommée `index` reste valide). Peek à 1
+	// ahead : `add index` direct, OU `add unique index` (peek 2 ahead sur `index`
+	// après `unique` à position 1).
+	if (
+		first.kind === "verb" &&
+		first.value.toLowerCase() === "add" &&
+		(peekIdent(cursor, "index", 1) ||
+			(peekIdent(cursor, "unique", 1) && peekIdent(cursor, "index", 2)))
+	) {
+		return parseAddIndex(cursor);
+	}
+	// DDL/3 : `drop index <name> from <table> [if exists]`. `drop` reste
+	// soft-ident (comme `list`/`describe`/`raw`) — un ident nommé `drop`
+	// dans le DML reste valide. Dispatch au head-of-statement uniquement.
+	if (
+		first.kind === "ident" &&
+		first.value.toLowerCase() === "drop" &&
+		peekIdent(cursor, "index", 1)
+	) {
+		return parseDropIndex(cursor);
 	}
 	const verbTok = first;
 	if (verbTok.kind !== "verb") {
@@ -2013,5 +2037,140 @@ function parseAddColumn(cursor: TokenCursor): AddColumnStmt {
 		column,
 		...(ifNotExists ? { ifNotExists } : {}),
 		span: { start: addTok.span.start, end: targetTok.span.end }
+	};
+}
+
+/**
+ * `add [unique] index (<field>[, ...]) [if not exists] into <table>` (DDL/3).
+ * `index` reste soft-ident (peekIdent au dispatch). `unique` idem — préserve
+ * `count(unique x)` / `pick unique` déjà en place. Le nom d'index est
+ * auto-généré au lower si absent (pattern `idx_<table>_<f1_f2>`).
+ */
+function parseAddIndex(cursor: TokenCursor): AddIndexStmt {
+	const addTok = cursor.next(); // `add` verb
+	let unique = false;
+	if (peekIdent(cursor, "unique")) {
+		cursor.next();
+		unique = true;
+	}
+	// `index` soft-ident (déjà peeked au dispatch — on le consomme).
+	cursor.next();
+
+	// `(field, field, ...)` — parens obligatoires, au moins un field.
+	cursor.expect("lparen", "'(' pour ouvrir la liste de fields de l'index");
+	const fields: string[] = [];
+	if (cursor.peek().kind === "rparen") {
+		throw new SnqlError(
+			"'add index' attend au moins un field entre les parens",
+			"parse_ddl_index_empty_fields",
+			cursor.peek().span
+		);
+	}
+	for (;;) {
+		const fieldTok = cursor.expect("ident", "un nom de field dans l'index");
+		fields.push(fieldTok.value);
+		const nxt = cursor.peek();
+		if (nxt.kind === "comma") {
+			cursor.next();
+			continue;
+		}
+		if (nxt.kind === "rparen") break;
+		throw new SnqlError(
+			"',' ou ')' attendu après le field de l'index",
+			"parse_ddl_index_field_delim_expected",
+			nxt.span
+		);
+	}
+	cursor.expect("rparen", "')' pour fermer la liste de fields de l'index");
+
+	// `if not exists` optionnel (D3 name-only sémantique).
+	let ifNotExists = false;
+	if (peekIdent(cursor, "if")) {
+		cursor.next();
+		if (!peekKeyword(cursor, "not")) {
+			throw new SnqlError(
+				"'if' doit être suivi de 'not exists' dans un add index",
+				"parse_ddl_expected_not_after_if",
+				cursor.peek().span
+			);
+		}
+		cursor.next();
+		if (!peekKeyword(cursor, "exists")) {
+			throw new SnqlError(
+				"'if not' doit être suivi de 'exists' dans un add index",
+				"parse_ddl_expected_exists_after_not",
+				cursor.peek().span
+			);
+		}
+		cursor.next();
+		ifNotExists = true;
+	}
+
+	// Préposition unifiée `into <table>` (D6).
+	if (!peekKeyword(cursor, "into")) {
+		throw new SnqlError(
+			"'add index' attend 'into <table>' pour cibler la table",
+			"parse_ddl_add_index_missing_into",
+			cursor.peek().span
+		);
+	}
+	cursor.next();
+	const targetTok = cursor.expect("ident", "un nom de table après 'into'");
+
+	return {
+		operation: "ddl",
+		kind: unique ? "add-unique-index" : "add-index",
+		target: targetTok.value,
+		fields,
+		...(ifNotExists ? { ifNotExists } : {}),
+		span: { start: addTok.span.start, end: targetTok.span.end }
+	};
+}
+
+/**
+ * `drop index <name> from <table> [if exists]` (DDL/3). Préposition unifiée
+ * `from` (D6, aligné DML `remove from T`). Le nom est explicite — l'user
+ * passe par `list indexes` pour retrouver un auto-généré.
+ */
+function parseDropIndex(cursor: TokenCursor): DropIndexStmt {
+	const dropTok = cursor.next(); // `drop` soft-ident
+	cursor.next(); // `index` soft-ident (déjà peeked au dispatch)
+
+	const nameTok = cursor.expect("ident", "un nom d'index après 'drop index'");
+
+	// Préposition unifiée `from <table>` (D6, aligné DML remove from T).
+	if (!peekKeyword(cursor, "from")) {
+		throw new SnqlError(
+			"'drop index' attend 'from <table>' pour cibler la table",
+			"parse_ddl_drop_index_missing_from",
+			cursor.peek().span
+		);
+	}
+	cursor.next();
+	const targetTok = cursor.expect("ident", "un nom de table après 'from'");
+
+	// `if exists` optionnel (D3 name-only sémantique).
+	let ifExists = false;
+	if (peekIdent(cursor, "if")) {
+		cursor.next();
+		if (!peekKeyword(cursor, "exists")) {
+			throw new SnqlError(
+				"'if' doit être suivi de 'exists' dans un drop index",
+				"parse_ddl_expected_exists_after_if",
+				cursor.peek().span
+			);
+		}
+		const existsTok = cursor.next();
+		ifExists = true;
+		void existsTok;
+	}
+
+	return {
+		operation: "ddl",
+		kind: "drop-index",
+		target: targetTok.value,
+		name: nameTok.value,
+		...(ifExists ? { ifExists } : {}),
+		span: { start: dropTok.span.start, end: targetTok.span.end }
 	};
 }

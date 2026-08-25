@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
-import type { AddColumnPlan, CreateTablePlan } from "../ir/plan";
-import type { KvDDLAddColumnQuery, KvDDLCreateTableQuery } from "./mapper";
+import type {
+	AddColumnPlan,
+	AddIndexPlan,
+	CreateTablePlan,
+	DropIndexPlan
+} from "../ir/plan";
+import type {
+	KvDDLAddColumnQuery,
+	KvDDLAddIndexQuery,
+	KvDDLCreateTableQuery,
+	KvDDLDropIndexQuery
+} from "./mapper";
 import { mapKvDDL } from "./kv-ddl";
 
 function mapCreate(plan: CreateTablePlan): KvDDLCreateTableQuery {
@@ -15,6 +25,22 @@ function mapAdd(plan: AddColumnPlan): KvDDLAddColumnQuery {
 	const q = mapKvDDL(plan);
 	if (q.operation !== "add-column") {
 		throw new Error(`attendu add-column, got ${q.operation}`);
+	}
+	return q;
+}
+
+function mapAddIdx(plan: AddIndexPlan): KvDDLAddIndexQuery {
+	const q = mapKvDDL(plan);
+	if (q.operation !== "add-index") {
+		throw new Error(`attendu add-index, got ${q.operation}`);
+	}
+	return q;
+}
+
+function mapDropIdx(plan: DropIndexPlan): KvDDLDropIndexQuery {
+	const q = mapKvDDL(plan);
+	if (q.operation !== "drop-index") {
+		throw new Error(`attendu drop-index, got ${q.operation}`);
 	}
 	return q;
 }
@@ -295,5 +321,85 @@ describe("codegen KV — add column (ADR-029 DDL/2.5)", () => {
 			column: { name: "x", type: "int", nullable: true, unique: false }
 		});
 		expect(q.ifNotExists).toBe(true);
+	});
+});
+
+describe("codegen KV — add/drop index (ADR-029 DDL/3.5 D12 middleware SETNX)", () => {
+	it("add index non-unique → uniqueEnforcement: 'none' (no-op planner)", () => {
+		const q = mapAddIdx({
+			op: "ddl",
+			kind: "add-index",
+			target: "users",
+			fields: ["email"],
+			name: "idx_users_email",
+			ifNotExists: false
+		});
+		expect(q).toEqual({
+			engine: "kv",
+			kind: "kv-ddl",
+			operation: "add-index",
+			collection: "users",
+			ifNotExists: false,
+			name: "idx_users_email",
+			fields: ["email"],
+			unique: false,
+			uniqueEnforcement: "none"
+		});
+	});
+
+	it("add unique index → uniqueEnforcement: 'middleware-setnx' (D12)", () => {
+		const q = mapAddIdx({
+			op: "ddl",
+			kind: "add-unique-index",
+			target: "users",
+			fields: ["email"],
+			name: "unique_users_email",
+			ifNotExists: false
+		});
+		expect(q.unique).toBe(true);
+		expect(q.uniqueEnforcement).toBe("middleware-setnx");
+	});
+
+	it("compound unique → fields propagés en ordre", () => {
+		const q = mapAddIdx({
+			op: "ddl",
+			kind: "add-unique-index",
+			target: "pages",
+			fields: ["tenant_id", "slug"],
+			name: "unique_pages_tenant_id_slug",
+			ifNotExists: false
+		});
+		expect(q.fields).toEqual(["tenant_id", "slug"]);
+		expect(q.uniqueEnforcement).toBe("middleware-setnx");
+	});
+
+	it("drop index minimal", () => {
+		const q = mapDropIdx({
+			op: "ddl",
+			kind: "drop-index",
+			target: "users",
+			name: "idx_users_email",
+			ifExists: false
+		});
+		expect(q).toEqual({
+			engine: "kv",
+			kind: "kv-ddl",
+			operation: "drop-index",
+			collection: "users",
+			ifExists: false,
+			name: "idx_users_email"
+		});
+	});
+
+	it("drop index if exists (D3)", () => {
+		expect(
+			mapDropIdx({
+				op: "ddl",
+				kind: "drop-index",
+				target: "users",
+				name: "idx_users_email",
+				ifExists: true
+			}).ifExists
+		).toBe(true);
 	});
 });

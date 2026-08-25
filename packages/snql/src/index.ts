@@ -88,13 +88,17 @@ export { mongoMapper } from "./codegen/mongodb";
 export { postgresMapper } from "./codegen/postgres";
 export type {
 	KvDDLAddColumnQuery,
+	KvDDLAddIndexQuery,
 	KvDDLCreateTableQuery,
+	KvDDLDropIndexQuery,
 	KvDDLQuery,
 	KvFieldDescriptor,
 	Mapper,
 	MapperContext,
 	MongoDDLAddColumnQuery,
+	MongoDDLAddIndexQuery,
 	MongoDDLCreateCollectionQuery,
+	MongoDDLDropIndexQuery,
 	MongoDDLQuery,
 	MongoIndexSpec,
 	MongoIntrospectQuery,
@@ -120,11 +124,13 @@ export {
 export { lowerDDL } from "./ir/lower-ddl";
 export type {
 	AddColumnPlan,
+	AddIndexPlan,
 	Capability,
 	CompareOp,
 	CreateTableField,
 	CreateTablePlan,
 	DDLPlan,
+	DropIndexPlan,
 	IntrospectPlan,
 	LogicalPlan,
 	MutationPlan,

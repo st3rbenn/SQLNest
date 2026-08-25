@@ -563,10 +563,48 @@ export interface AddColumnPlan {
 }
 
 /**
- * Union des plans DDL. DDL/1 = `create-table`, DDL/2 = `add-column` ; extends
- * aux autres kinds à mesure des sprints DDL/3..DDL/4.
+ * `add index` / `add unique index` lowered (ADR-029 DDL/3). Le lower a :
+ *  - validé target + fields via IDENT_REGEX D1,
+ *  - généré un `name` auto si absent (pattern `idx_<table>_<f1_f2>` ou
+ *    `unique_<table>_<f1_f2>`) — permet aussi le drop ultérieur par nom.
+ *
+ * D11 PG : `CREATE INDEX CONCURRENTLY` par défaut (refus in-tx natif PG). D12
+ * KV : compensation via write-middleware SETNX si `unique=true` (adapter
+ * runtime KV).
  */
-export type DDLPlan = CreateTablePlan | AddColumnPlan;
+export interface AddIndexPlan {
+	readonly op: "ddl";
+	readonly kind: "add-index" | "add-unique-index";
+	readonly target: string;
+	readonly fields: readonly string[];
+	readonly name: string;
+	readonly ifNotExists: boolean;
+	readonly span?: Span;
+}
+
+/**
+ * `drop index` lowered (ADR-029 DDL/3). Le lower valide target + name via
+ * IDENT_REGEX D1. Idempotence D3 name-only via `ifExists`.
+ */
+export interface DropIndexPlan {
+	readonly op: "ddl";
+	readonly kind: "drop-index";
+	readonly target: string;
+	readonly name: string;
+	readonly ifExists: boolean;
+	readonly span?: Span;
+}
+
+/**
+ * Union des plans DDL. DDL/1 = `create-table`, DDL/2 = `add-column`,
+ * DDL/3 = `add-index` | `add-unique-index` | `drop-index` ; extends
+ * aux autres kinds à mesure du sprint DDL/4.
+ */
+export type DDLPlan =
+	| CreateTablePlan
+	| AddColumnPlan
+	| AddIndexPlan
+	| DropIndexPlan;
 
 /** Un plan complet : lecture, mutation, transaction, introspect, raw, let/CTE ou DDL Tier-2. */
 export type Plan =

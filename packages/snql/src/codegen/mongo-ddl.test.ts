@@ -1,8 +1,16 @@
 import { describe, expect, it } from "vitest";
-import type { AddColumnPlan, CreateTablePlan, DDLPlan } from "../ir/plan";
+import type {
+	AddColumnPlan,
+	AddIndexPlan,
+	CreateTablePlan,
+	DDLPlan,
+	DropIndexPlan
+} from "../ir/plan";
 import type {
 	MongoDDLAddColumnQuery,
-	MongoDDLCreateCollectionQuery
+	MongoDDLAddIndexQuery,
+	MongoDDLCreateCollectionQuery,
+	MongoDDLDropIndexQuery
 } from "./mapper";
 import { mongoMapper } from "./mongodb";
 
@@ -31,6 +39,24 @@ function mapAdd(plan: AddColumnPlan): MongoDDLAddColumnQuery {
 /** compat wrapper : les tests DDL/1 utilisent mapDDL générique. */
 function mapDDL(plan: DDLPlan): MongoDDLCreateCollectionQuery {
 	return mapCreate(plan as CreateTablePlan);
+}
+
+function mapAddIdx(plan: AddIndexPlan): MongoDDLAddIndexQuery {
+	if (mongoMapper.mapDDL === undefined) throw new Error("mapDDL manquant");
+	const q = mongoMapper.mapDDL(plan);
+	if (q.kind !== "mongo-ddl" || q.operation !== "add-index") {
+		throw new Error(`attendu add-index, got ${q.kind}`);
+	}
+	return q;
+}
+
+function mapDropIdx(plan: DropIndexPlan): MongoDDLDropIndexQuery {
+	if (mongoMapper.mapDDL === undefined) throw new Error("mapDDL manquant");
+	const q = mongoMapper.mapDDL(plan);
+	if (q.kind !== "mongo-ddl" || q.operation !== "drop-index") {
+		throw new Error(`attendu drop-index, got ${q.kind}`);
+	}
+	return q;
 }
 
 describe("codegen Mongo — create table (ADR-029 DDL/1.6)", () => {
@@ -314,5 +340,74 @@ describe("codegen Mongo — add column (ADR-029 DDL/2.4)", () => {
 			column: { name: "x", type: "int", nullable: true, unique: false }
 		});
 		expect(q.ifNotExists).toBe(true);
+	});
+});
+
+describe("codegen Mongo — add/drop index (ADR-029 DDL/3.4)", () => {
+	it("add index single-field → keys {f:1} + name auto (pas de unique)", () => {
+		const q = mapAddIdx({
+			op: "ddl",
+			kind: "add-index",
+			target: "users",
+			fields: ["email"],
+			name: "idx_users_email",
+			ifNotExists: false
+		});
+		expect(q).toEqual({
+			engine: "mongodb",
+			kind: "mongo-ddl",
+			operation: "add-index",
+			collection: "users",
+			ifNotExists: false,
+			index: {
+				keys: { email: 1 },
+				options: { name: "idx_users_email" }
+			}
+		});
+	});
+
+	it("add unique index compound → keys {a:1, b:1} + options.unique=true", () => {
+		const q = mapAddIdx({
+			op: "ddl",
+			kind: "add-unique-index",
+			target: "pages",
+			fields: ["tenant_id", "slug"],
+			name: "unique_pages_tenant_id_slug",
+			ifNotExists: true
+		});
+		expect(q.index).toEqual({
+			keys: { tenant_id: 1, slug: 1 },
+			options: { unique: true, name: "unique_pages_tenant_id_slug" }
+		});
+		expect(q.ifNotExists).toBe(true);
+	});
+
+	it("drop index minimal (D3 ifExists false)", () => {
+		const q = mapDropIdx({
+			op: "ddl",
+			kind: "drop-index",
+			target: "users",
+			name: "idx_users_email",
+			ifExists: false
+		});
+		expect(q).toEqual({
+			engine: "mongodb",
+			kind: "mongo-ddl",
+			operation: "drop-index",
+			collection: "users",
+			ifExists: false,
+			name: "idx_users_email"
+		});
+	});
+
+	it("drop index if exists → ifExists=true propagé (adapter catch IndexNotFound 27)", () => {
+		const q = mapDropIdx({
+			op: "ddl",
+			kind: "drop-index",
+			target: "users",
+			name: "idx_users_email",
+			ifExists: true
+		});
+		expect(q.ifExists).toBe(true);
 	});
 });

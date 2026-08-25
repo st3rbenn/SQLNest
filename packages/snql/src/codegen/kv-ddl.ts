@@ -11,11 +11,19 @@
  */
 
 import { SnqlError } from "../diagnostics";
-import type { AddColumnPlan, CreateTablePlan, DDLPlan } from "../ir/plan";
+import type {
+	AddColumnPlan,
+	AddIndexPlan,
+	CreateTablePlan,
+	DDLPlan,
+	DropIndexPlan
+} from "../ir/plan";
 import type { SnqlType } from "../schema/model";
 import type {
 	KvDDLAddColumnQuery,
+	KvDDLAddIndexQuery,
 	KvDDLCreateTableQuery,
+	KvDDLDropIndexQuery,
 	KvDDLQuery,
 	KvFieldDescriptor
 } from "./mapper";
@@ -50,10 +58,47 @@ const KV_META_TYPE: Readonly<Record<SnqlType, string>> = {
 export function mapKvDDL(plan: DDLPlan): KvDDLQuery {
 	if (plan.kind === "create-table") return renderKvCreateTable(plan);
 	if (plan.kind === "add-column") return renderKvAddColumn(plan);
+	if (plan.kind === "add-index" || plan.kind === "add-unique-index") {
+		return renderKvAddIndex(plan);
+	}
+	if (plan.kind === "drop-index") return renderKvDropIndex(plan);
 	throw new SnqlError(
 		`DDL kind '${(plan as { kind: string }).kind}' non supporté par le codegen KV V1`,
 		"codegen_ddl_unsupported"
 	);
+}
+
+/**
+ * Rend add [unique] index (ADR-029 DDL/3 D12). Non-unique = no-op au planner
+ * (queries retombent en scan compensé — pas d'index KV natif). Unique =
+ * `uniqueEnforcement: "middleware-setnx"` — l'adapter enregistre le middleware
+ * pré-write SETNX qui rejette au write si `SETNX namespace:_unique:<f>:<v>`
+ * échoue.
+ */
+function renderKvAddIndex(plan: AddIndexPlan): KvDDLAddIndexQuery {
+	const unique = plan.kind === "add-unique-index";
+	return {
+		engine: "kv",
+		kind: "kv-ddl",
+		operation: "add-index",
+		collection: plan.target,
+		ifNotExists: plan.ifNotExists,
+		name: plan.name,
+		fields: plan.fields,
+		unique,
+		uniqueEnforcement: unique ? "middleware-setnx" : "none"
+	};
+}
+
+function renderKvDropIndex(plan: DropIndexPlan): KvDDLDropIndexQuery {
+	return {
+		engine: "kv",
+		kind: "kv-ddl",
+		operation: "drop-index",
+		collection: plan.target,
+		ifExists: plan.ifExists,
+		name: plan.name
+	};
 }
 
 /**

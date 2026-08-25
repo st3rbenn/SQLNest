@@ -272,9 +272,40 @@ export interface MongoDDLAddColumnQuery {
 	readonly index?: MongoIndexSpec;
 }
 
+/**
+ * DDL/3 add index sur Mongo (ADR-029). Compensated via `createIndex(keys,
+ * options)` natif. L'adapter runtime :
+ *  1. `db.<collection>.createIndex(keys, options)` — idempotent nativement.
+ *  2. D3 idempotence : catch `IndexOptionsConflict` (code 85) ou
+ *     `IndexKeySpecsConflict` (code 86) si `ifNotExists=true`, sinon re-throw.
+ */
+export interface MongoDDLAddIndexQuery {
+	readonly engine: string;
+	readonly kind: "mongo-ddl";
+	readonly operation: "add-index";
+	readonly collection: string;
+	readonly ifNotExists: boolean;
+	readonly index: MongoIndexSpec;
+}
+
+/**
+ * DDL/3 drop index sur Mongo. `dropIndex(name)` natif. D3 idempotence :
+ * catch `IndexNotFound` (code 27) si `ifExists=true`.
+ */
+export interface MongoDDLDropIndexQuery {
+	readonly engine: string;
+	readonly kind: "mongo-ddl";
+	readonly operation: "drop-index";
+	readonly collection: string;
+	readonly ifExists: boolean;
+	readonly name: string;
+}
+
 export type MongoDDLQuery =
 	| MongoDDLCreateCollectionQuery
-	| MongoDDLAddColumnQuery;
+	| MongoDDLAddColumnQuery
+	| MongoDDLAddIndexQuery
+	| MongoDDLDropIndexQuery;
 
 /**
  * DDL Tier-2 sur KV (ADR-029). Entièrement compensé — KV est schema-less,
@@ -336,7 +367,55 @@ export interface KvDDLAddColumnQuery {
 	readonly preflightNotNull: boolean;
 }
 
-export type KvDDLQuery = KvDDLCreateTableQuery | KvDDLAddColumnQuery;
+/**
+ * DDL/3 add index sur KV (ADR-029 D12). Non-unique = no-op déclaré au planner
+ * (queries retombent en scan compensé, KV n'a pas d'API index natif). Unique
+ * = compensation via write-middleware pré-write SETNX : le shape porte les
+ * fields + name pour que l'adapter enregistre le middleware qui rejette au
+ * write si `SETNX namespace:_unique:<field>:<val>` échoue (violation typée
+ * `runtime_kv_unique_violation`).
+ *
+ * V1 : shape shipped + tests unit only ; wiring adapter runtime KV reste V-next
+ * (`packages/engine/src/kv/…` inexistant — adapter Redis-protocol pas encore
+ * branché).
+ */
+export interface KvDDLAddIndexQuery {
+	readonly engine: string;
+	readonly kind: "kv-ddl";
+	readonly operation: "add-index";
+	readonly collection: string;
+	readonly ifNotExists: boolean;
+	readonly name: string;
+	readonly fields: readonly string[];
+	readonly unique: boolean;
+	/**
+	 * Doctrine D12 : mode d'enforcement de l'unique côté KV. `"middleware-setnx"`
+	 * = adapter middleware pre-write SETNX ; `"none"` = index non-unique (no-op
+	 * planner, queries scan). Sérialisé dans le shape pour l'adapter et pour
+	 * l'explain UI (surface honnête).
+	 */
+	readonly uniqueEnforcement: "middleware-setnx" | "none";
+}
+
+/**
+ * DDL/3 drop index sur KV. Compensation : retire le middleware SETNX enregistré
+ * si unique, et retire le field du `_index` metadata. Idempotence via
+ * `ifExists`. V1 shape shipped, wiring V-next.
+ */
+export interface KvDDLDropIndexQuery {
+	readonly engine: string;
+	readonly kind: "kv-ddl";
+	readonly operation: "drop-index";
+	readonly collection: string;
+	readonly ifExists: boolean;
+	readonly name: string;
+}
+
+export type KvDDLQuery =
+	| KvDDLCreateTableQuery
+	| KvDDLAddColumnQuery
+	| KvDDLAddIndexQuery
+	| KvDDLDropIndexQuery;
 
 /**
  * native shape pour un `raw {...}` Mongo — command native

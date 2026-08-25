@@ -8,16 +8,20 @@
 import { SnqlError } from "../diagnostics";
 import type {
 	AddColumnStmt,
+	AddIndexStmt,
 	CreateTableStmt,
 	DDLStatement,
+	DropIndexStmt,
 	Expr
 } from "../parser/ast";
 import type { SchemaModel, SnqlType } from "../schema/model";
 import type {
 	AddColumnPlan,
+	AddIndexPlan,
 	CreateTableField,
 	CreateTablePlan,
 	DDLPlan,
+	DropIndexPlan,
 	SqlValue
 } from "./plan";
 
@@ -39,10 +43,85 @@ export function lowerDDL(
 	if (statement.kind === "add-column") {
 		return lowerAddColumn(statement);
 	}
+	if (statement.kind === "add-index" || statement.kind === "add-unique-index") {
+		return lowerAddIndex(statement);
+	}
+	if (statement.kind === "drop-index") {
+		return lowerDropIndex(statement);
+	}
 	throw new SnqlError(
 		`DDL kind '${(statement as { kind: string }).kind}' non supporté au lower`,
 		"lower_ddl_unsupported_kind"
 	);
+}
+
+/**
+ * Nom auto-généré pour un index (DDL/3). Pattern figé cross-engine :
+ *  - non-unique : `idx_<table>_<f1_f2_...>` (SQL-familier).
+ *  - unique : `unique_<table>_<f1_f2_...>` (aligné convention Mongo `unique_<f>`
+ *    de DDL/1.6 primary key compound).
+ * Le nom respecte IDENT_REGEX (chaque field passe déjà D1 au parser + assertIdent).
+ * Longueur cap : 63 chars WiredTiger — un index sur 5+ fields long-named peut
+ * dépasser. On tronque hard à 63 pour éviter un fail Mongo tardif ; l'user peut
+ * override en passant `name` explicite (v-next parser).
+ */
+function generateIndexName(
+	target: string,
+	fields: readonly string[],
+	unique: boolean
+): string {
+	const prefix = unique ? "unique" : "idx";
+	const joined = fields.join("_");
+	const full = `${prefix}_${target}_${joined}`;
+	return full.length <= 63 ? full : full.slice(0, 63);
+}
+
+function lowerAddIndex(stmt: AddIndexStmt): AddIndexPlan {
+	assertIdent(stmt.target, "target");
+	if (stmt.fields.length === 0) {
+		throw new SnqlError(
+			"'add index' attend au moins un field",
+			"lower_ddl_index_empty_fields",
+			stmt.span
+		);
+	}
+	for (const f of stmt.fields) assertIdent(f, "field");
+	// Dédup — un index sur `(email, email)` est un usage error clair.
+	const seen = new Set<string>();
+	for (const f of stmt.fields) {
+		if (seen.has(f)) {
+			throw new SnqlError(
+				`'add index' liste '${f}' plusieurs fois`,
+				"lower_ddl_index_duplicate_field",
+				stmt.span
+			);
+		}
+		seen.add(f);
+	}
+	const unique = stmt.kind === "add-unique-index";
+	const name = stmt.name ?? generateIndexName(stmt.target, stmt.fields, unique);
+	return {
+		op: "ddl",
+		kind: stmt.kind,
+		target: stmt.target,
+		fields: stmt.fields,
+		name,
+		ifNotExists: stmt.ifNotExists ?? false,
+		...(stmt.span !== undefined ? { span: stmt.span } : {})
+	};
+}
+
+function lowerDropIndex(stmt: DropIndexStmt): DropIndexPlan {
+	assertIdent(stmt.target, "target");
+	assertIdent(stmt.name, "field");
+	return {
+		op: "ddl",
+		kind: "drop-index",
+		target: stmt.target,
+		name: stmt.name,
+		ifExists: stmt.ifExists ?? false,
+		...(stmt.span !== undefined ? { span: stmt.span } : {})
+	};
 }
 
 function lowerAddColumn(stmt: AddColumnStmt): AddColumnPlan {

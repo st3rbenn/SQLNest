@@ -3,7 +3,12 @@ import { tokenize } from "../lexer/lexer";
 import type { CreateTableStmt, DDLFieldDef, DDLStatement } from "../parser/ast";
 import { parse } from "../parser/parser";
 import { lowerDDL } from "./lower-ddl";
-import type { AddColumnPlan, CreateTablePlan } from "./plan";
+import type {
+	AddColumnPlan,
+	AddIndexPlan,
+	CreateTablePlan,
+	DropIndexPlan
+} from "./plan";
 
 function lowerCreate(source: string): CreateTablePlan {
 	const parsed = parse(tokenize(source)) as DDLStatement;
@@ -238,5 +243,93 @@ describe("lower DDL — add column (ADR-029 DDL/2)", () => {
 		expect(() =>
 			lowerAdd("add column x int into 1users")
 		).toThrow();
+	});
+});
+
+function lowerIndex(source: string): AddIndexPlan {
+	const parsed = parse(tokenize(source)) as DDLStatement;
+	const plan = lowerDDL(parsed);
+	if (plan.kind !== "add-index" && plan.kind !== "add-unique-index") {
+		throw new Error(`expected add-index plan, got ${plan.kind}`);
+	}
+	return plan;
+}
+
+function lowerDrop(source: string): DropIndexPlan {
+	const parsed = parse(tokenize(source)) as DDLStatement;
+	const plan = lowerDDL(parsed);
+	if (plan.kind !== "drop-index") {
+		throw new Error(`expected drop-index plan, got ${plan.kind}`);
+	}
+	return plan;
+}
+
+describe("lower DDL — add/drop index (ADR-029 DDL/3)", () => {
+	it("abaisse un add index avec nom auto-généré (pattern idx_<t>_<f>)", () => {
+		expect(lowerIndex("add index (email) into users")).toMatchObject({
+			op: "ddl",
+			kind: "add-index",
+			target: "users",
+			fields: ["email"],
+			name: "idx_users_email",
+			ifNotExists: false
+		});
+	});
+
+	it("compound index → nom auto joined par _", () => {
+		expect(
+			lowerIndex("add index (last_name, first_name) into users")
+		).toMatchObject({
+			name: "idx_users_last_name_first_name",
+			fields: ["last_name", "first_name"]
+		});
+	});
+
+	it("unique → prefix unique_ dans le nom auto", () => {
+		expect(lowerIndex("add unique index (email) into users")).toMatchObject({
+			kind: "add-unique-index",
+			name: "unique_users_email"
+		});
+	});
+
+	it("if not exists (D3)", () => {
+		expect(
+			lowerIndex("add index (a, b) if not exists into t")
+		).toMatchObject({ ifNotExists: true });
+	});
+
+	it("nom > 63 chars tronqué (WiredTiger limit)", () => {
+		const longFields = [
+			"a".repeat(20),
+			"b".repeat(20),
+			"c".repeat(20)
+		];
+		const src = `add index (${longFields.join(", ")}) into t`;
+		const p = lowerIndex(src);
+		expect(p.name.length).toBeLessThanOrEqual(63);
+	});
+
+	it("dédup fields refusée (usage error)", () => {
+		expect(() =>
+			lowerIndex("add index (email, email) into users")
+		).toThrow(/plusieurs fois/);
+	});
+
+	it("drop index minimal", () => {
+		expect(
+			lowerDrop("drop index idx_users_email from users")
+		).toMatchObject({
+			op: "ddl",
+			kind: "drop-index",
+			target: "users",
+			name: "idx_users_email",
+			ifExists: false
+		});
+	});
+
+	it("drop index if exists (D3)", () => {
+		expect(
+			lowerDrop("drop index idx_users_email from users if exists")
+		).toMatchObject({ ifExists: true });
 	});
 });

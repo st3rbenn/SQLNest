@@ -604,11 +604,46 @@ export interface AddColumnStmt {
 }
 
 /**
- * Union des statements DDL. V1/DDL/1 = `create-table` ; V1/DDL/2 = `add-column` ;
- * extends aux autres kinds à mesure des sprints DDL/3..DDL/4 (drop-table,
- * drop-column, add/drop-index, add-unique-index).
+ * `add [unique] index (<field>[, ...]) [if not exists] into <table>` (DDL/3).
+ * Préposition unifiée `into` (D6). D11 PG : `CREATE INDEX CONCURRENTLY` par
+ * défaut (refus in-tx natif PG). D12 KV : compensation via write-middleware
+ * SETNX si `unique`. `name` est optionnel — auto-généré au lower si absent
+ * (pattern `idx_<table>_<f1_f2>` / `unique_<table>_<f1_f2>`).
  */
-export type DDLStatement = CreateTableStmt | AddColumnStmt;
+export interface AddIndexStmt {
+	readonly operation: "ddl";
+	readonly kind: "add-index" | "add-unique-index";
+	readonly target: string;
+	readonly fields: readonly string[];
+	readonly ifNotExists?: boolean;
+	readonly name?: string;
+	readonly span: Span;
+}
+
+/**
+ * `drop index <name> from <table> [if exists]` (DDL/3). Préposition unifiée
+ * `from` (D6). Le nom est explicite — l'user doit passer par `list indexes`
+ * pour retrouver un nom auto-généré si besoin.
+ */
+export interface DropIndexStmt {
+	readonly operation: "ddl";
+	readonly kind: "drop-index";
+	readonly target: string;
+	readonly name: string;
+	readonly ifExists?: boolean;
+	readonly span: Span;
+}
+
+/**
+ * Union des statements DDL. DDL/1 = `create-table` ; DDL/2 = `add-column` ;
+ * DDL/3 = `add-index` | `add-unique-index` | `drop-index` ; extends aux
+ * autres kinds à mesure du sprint DDL/4 (drop-table, drop-column).
+ */
+export type DDLStatement =
+	| CreateTableStmt
+	| AddColumnStmt
+	| AddIndexStmt
+	| DropIndexStmt;
 
 /** Racine de l'AST : lecture (`Query`), mutation, transaction, introspection, raw, let/CTE ou DDL Tier-2. */
 export type Statement =

@@ -2,10 +2,12 @@ import { SnqlError } from "../diagnostics";
 import { SNQL_FUNCTIONS } from "../functions";
 import type {
 	AddColumnPlan,
+	AddIndexPlan,
 	CastTarget,
 	CompareOp,
 	CreateTablePlan,
 	DDLPlan,
+	DropIndexPlan,
 	IntrospectPlan,
 	LetPlan,
 	LogicalPlan,
@@ -182,6 +184,10 @@ export const postgresMapper: Mapper = {
 	mapDDL(plan: DDLPlan): NativeQuery {
 		if (plan.kind === "create-table") return renderCreateTable(plan);
 		if (plan.kind === "add-column") return renderAddColumn(plan);
+		if (plan.kind === "add-index" || plan.kind === "add-unique-index") {
+			return renderAddIndex(plan);
+		}
+		if (plan.kind === "drop-index") return renderDropIndex(plan);
 		throw new SnqlError(
 			`DDL kind '${(plan as { kind: string }).kind}' non supporté par le codegen Postgres V1`,
 			"codegen_ddl_unsupported"
@@ -1051,6 +1057,48 @@ function renderAddColumn(plan: AddColumnPlan): NativeQuery {
 	}
 	const ifNotExists = plan.ifNotExists ? "IF NOT EXISTS " : "";
 	const text = `ALTER TABLE ${quoteIdent(plan.target)} ADD COLUMN ${ifNotExists}${parts.join(" ")}`;
+	return {
+		engine: "postgres",
+		kind: "sql",
+		text,
+		params: [],
+		paramSpans: []
+	};
+}
+
+/**
+ * Rend `add [unique] index (fields) into T` en `CREATE [UNIQUE] INDEX
+ * CONCURRENTLY [IF NOT EXISTS] "name" ON "T" ("f1", "f2")` (ADR-029 D11).
+ * CONCURRENTLY par défaut pour éviter les locks ACCESS EXCLUSIVE longs qui
+ * bloquent reads + writes — attention : CONCURRENTLY ne peut PAS s'exécuter
+ * dans un bloc transaction (PG remonte erreur claire, aligné avec la doctrine
+ * refus explicit du parser V1 qui refuse tout DDL dans transaction).
+ *
+ * Pas de params bindés (feedback pg-ddl-inline-defaults) — les idents sont
+ * quoted via quoteIdent.
+ */
+function renderAddIndex(plan: AddIndexPlan): NativeQuery {
+	const unique = plan.kind === "add-unique-index" ? "UNIQUE " : "";
+	const ifNotExists = plan.ifNotExists ? "IF NOT EXISTS " : "";
+	const cols = plan.fields.map(quoteIdent).join(", ");
+	const text = `CREATE ${unique}INDEX CONCURRENTLY ${ifNotExists}${quoteIdent(plan.name)} ON ${quoteIdent(plan.target)} (${cols})`;
+	return {
+		engine: "postgres",
+		kind: "sql",
+		text,
+		params: [],
+		paramSpans: []
+	};
+}
+
+/**
+ * Rend `drop index NAME from T` en `DROP INDEX [IF EXISTS] "name"` (PG le
+ * scope au schema courant — pas besoin du nom de table dans le SQL). Pas de
+ * CONCURRENTLY sur DROP INDEX v1 : l'opération est déjà rapide (~ms).
+ */
+function renderDropIndex(plan: DropIndexPlan): NativeQuery {
+	const ifExists = plan.ifExists ? "IF EXISTS " : "";
+	const text = `DROP INDEX ${ifExists}${quoteIdent(plan.name)}`;
 	return {
 		engine: "postgres",
 		kind: "sql",

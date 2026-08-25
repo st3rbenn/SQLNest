@@ -2,10 +2,12 @@ import { SnqlError } from "../diagnostics";
 import { SNQL_FUNCTIONS } from "../functions";
 import type {
 	AddColumnPlan,
+	AddIndexPlan,
 	CastTarget,
 	CompareOp,
 	CreateTablePlan,
 	DDLPlan,
+	DropIndexPlan,
 	IntrospectPlan,
 	LogicalPlan,
 	MutationPlan,
@@ -23,7 +25,9 @@ import type { SnqlType } from "../schema/model";
 import type {
 	Mapper,
 	MongoDDLAddColumnQuery,
+	MongoDDLAddIndexQuery,
 	MongoDDLCreateCollectionQuery,
+	MongoDDLDropIndexQuery,
 	MongoIndexSpec,
 	MongoQuery,
 	MongoStage,
@@ -192,6 +196,10 @@ export const mongoMapper: Mapper = {
 	mapDDL(plan: DDLPlan): NativeQuery {
 		if (plan.kind === "create-table") return renderMongoCreateTable(plan);
 		if (plan.kind === "add-column") return renderMongoAddColumn(plan);
+		if (plan.kind === "add-index" || plan.kind === "add-unique-index") {
+			return renderMongoAddIndex(plan);
+		}
+		if (plan.kind === "drop-index") return renderMongoDropIndex(plan);
 		throw new SnqlError(
 			`DDL kind '${(plan as { kind: string }).kind}' non supporté par le codegen Mongo V1`,
 			"codegen_ddl_unsupported"
@@ -2864,6 +2872,49 @@ function renderMongoCreateTable(
  * PAS refusé côté add-column — DDL/2 accepte l'unique index secondaire (D12
  * arrivera avec l'enforcement).
  */
+/**
+ * Rend `add [unique] index (fields) into T` en `MongoDDLAddIndexQuery`
+ * (ADR-029 DDL/3). L'adapter runtime execute `db.<collection>.createIndex(keys,
+ * options)` — natif Mongo, idempotent. D3 : catch `IndexOptionsConflict` (85)
+ * ou `IndexKeySpecsConflict` (86) si `ifNotExists=true`.
+ */
+function renderMongoAddIndex(plan: AddIndexPlan): MongoDDLAddIndexQuery {
+	const keys: Record<string, 1> = {};
+	for (const f of plan.fields) keys[f] = 1;
+	const unique = plan.kind === "add-unique-index";
+	const spec: MongoIndexSpec = {
+		keys,
+		options: {
+			...(unique ? { unique: true } : {}),
+			name: plan.name
+		}
+	};
+	return {
+		engine: "mongodb",
+		kind: "mongo-ddl",
+		operation: "add-index",
+		collection: plan.target,
+		ifNotExists: plan.ifNotExists,
+		index: spec
+	};
+}
+
+/**
+ * Rend `drop index NAME from T` en `MongoDDLDropIndexQuery`. L'adapter
+ * runtime execute `db.<collection>.dropIndex(name)` — natif. D3 : catch
+ * `IndexNotFound` (code 27) si `ifExists=true`.
+ */
+function renderMongoDropIndex(plan: DropIndexPlan): MongoDDLDropIndexQuery {
+	return {
+		engine: "mongodb",
+		kind: "mongo-ddl",
+		operation: "drop-index",
+		collection: plan.target,
+		ifExists: plan.ifExists,
+		name: plan.name
+	};
+}
+
 function renderMongoAddColumn(plan: AddColumnPlan): MongoDDLAddColumnQuery {
 	const f = plan.column;
 	const bson = MONGO_BSON_TYPE[f.type];

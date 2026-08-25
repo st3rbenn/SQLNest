@@ -309,3 +309,83 @@ describe("add column DDL (ADR-029 DDL/2)", () => {
 		);
 	});
 });
+
+// ─── DDL/3 — add index / add unique index / drop index (ADR-029) ───────
+describe("add/drop index DDL (ADR-029 DDL/3)", () => {
+	it("parse add index single-field", () => {
+		expect(stmt("add index (email) into users")).toMatchObject({
+			operation: "ddl",
+			kind: "add-index",
+			target: "users",
+			fields: ["email"]
+		});
+	});
+
+	it("parse add index compound", () => {
+		expect(stmt("add index (last_name, first_name) into users")).toMatchObject({
+			kind: "add-index",
+			fields: ["last_name", "first_name"]
+		});
+	});
+
+	it("parse add unique index (D12 KV middleware SETNX)", () => {
+		expect(stmt("add unique index (email) into users")).toMatchObject({
+			kind: "add-unique-index",
+			fields: ["email"]
+		});
+	});
+
+	it("parse add unique index compound", () => {
+		expect(
+			stmt("add unique index (tenant_id, slug) into pages")
+		).toMatchObject({
+			kind: "add-unique-index",
+			fields: ["tenant_id", "slug"]
+		});
+	});
+
+	it("parse if not exists (D3)", () => {
+		expect(
+			stmt("add unique index (email) if not exists into users")
+		).toMatchObject({ ifNotExists: true, kind: "add-unique-index" });
+	});
+
+	it("parse drop index minimal", () => {
+		expect(stmt("drop index idx_users_email from users")).toMatchObject({
+			operation: "ddl",
+			kind: "drop-index",
+			target: "users",
+			name: "idx_users_email"
+		});
+	});
+
+	it("parse drop index if exists (D3)", () => {
+		expect(
+			stmt("drop index idx_users_email from users if exists")
+		).toMatchObject({ ifExists: true, kind: "drop-index" });
+	});
+
+	it("refuse add index sans fields (parens vides)", () => {
+		expect(() => stmt("add index () into users")).toThrow(
+			/attend au moins un field/
+		);
+	});
+
+	it("refuse add index sans 'into'", () => {
+		expect(() => stmt("add index (email) users")).toThrow(
+			/'into <table>'/
+		);
+	});
+
+	it("refuse drop index sans 'from'", () => {
+		expect(() => stmt("drop index idx_email users")).toThrow(
+			/'from <table>'/
+		);
+	});
+
+	it("préserve `add {index: 42} into t` insert alias (dispatch soft-ident non-invasif)", () => {
+		expect(stmt("add { index: 42 } into t")).toMatchObject({
+			operation: "insert"
+		});
+	});
+});

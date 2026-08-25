@@ -8,12 +8,18 @@
 import { describe, expect, it } from "vitest";
 import type {
 	AddColumnPlan,
+	AddIndexPlan,
 	CreateTablePlan,
 	DDLStatement,
+	DropIndexPlan,
 	KvDDLAddColumnQuery,
+	KvDDLAddIndexQuery,
 	KvDDLCreateTableQuery,
+	KvDDLDropIndexQuery,
 	MongoDDLAddColumnQuery,
-	MongoDDLCreateCollectionQuery
+	MongoDDLAddIndexQuery,
+	MongoDDLCreateCollectionQuery,
+	MongoDDLDropIndexQuery
 } from "./index";
 import {
 	lowerDDL,
@@ -90,6 +96,68 @@ function kvAdd(source: string): KvDDLAddColumnQuery {
 /** legacy alias. */
 function kv(source: string): KvDDLCreateTableQuery {
 	return kvCreate(source);
+}
+
+function lowerIdx(source: string): AddIndexPlan {
+	const stmt = parse(tokenize(source)) as DDLStatement;
+	const plan = lowerDDL(stmt);
+	if (plan.kind !== "add-index" && plan.kind !== "add-unique-index") {
+		throw new Error(`expected add-index plan, got ${plan.kind}`);
+	}
+	return plan;
+}
+
+function lowerDrop(source: string): DropIndexPlan {
+	const stmt = parse(tokenize(source)) as DDLStatement;
+	const plan = lowerDDL(stmt);
+	if (plan.kind !== "drop-index") {
+		throw new Error(`expected drop-index plan, got ${plan.kind}`);
+	}
+	return plan;
+}
+
+function pgIdx(source: string) {
+	if (postgresMapper.mapDDL === undefined) throw new Error("mapDDL manquant");
+	return postgresMapper.mapDDL(lowerIdx(source));
+}
+
+function pgDrop(source: string) {
+	if (postgresMapper.mapDDL === undefined) throw new Error("mapDDL manquant");
+	return postgresMapper.mapDDL(lowerDrop(source));
+}
+
+function mongoIdx(source: string): MongoDDLAddIndexQuery {
+	if (mongoMapper.mapDDL === undefined) throw new Error("mapDDL manquant");
+	const q = mongoMapper.mapDDL(lowerIdx(source));
+	if (q.kind !== "mongo-ddl" || q.operation !== "add-index") {
+		throw new Error(`attendu mongo-ddl add-index, got ${q.kind}`);
+	}
+	return q;
+}
+
+function mongoDrop(source: string): MongoDDLDropIndexQuery {
+	if (mongoMapper.mapDDL === undefined) throw new Error("mapDDL manquant");
+	const q = mongoMapper.mapDDL(lowerDrop(source));
+	if (q.kind !== "mongo-ddl" || q.operation !== "drop-index") {
+		throw new Error(`attendu mongo-ddl drop-index, got ${q.kind}`);
+	}
+	return q;
+}
+
+function kvIdx(source: string): KvDDLAddIndexQuery {
+	const q = mapKvDDL(lowerIdx(source));
+	if (q.operation !== "add-index") {
+		throw new Error(`attendu kv-ddl add-index, got ${q.operation}`);
+	}
+	return q;
+}
+
+function kvDrop(source: string): KvDDLDropIndexQuery {
+	const q = mapKvDDL(lowerDrop(source));
+	if (q.operation !== "drop-index") {
+		throw new Error(`attendu kv-ddl drop-index, got ${q.operation}`);
+	}
+	return q;
 }
 
 describe("DDL/1 E2E — pipeline complet cross-engine (ADR-029)", () => {
@@ -473,6 +541,96 @@ describe("DDL/2 E2E — add column cross-engine (ADR-029)", () => {
 
 		it("KV : column.unique=true (adapter enregistre pour middleware SETNX D12 futur)", () => {
 			expect(kvAdd(source).column.unique).toBe(true);
+		});
+	});
+});
+
+describe("DDL/3 E2E — add/drop index cross-engine (ADR-029)", () => {
+	describe("add index single-field + name auto-gen", () => {
+		const source = "add index (email) into users";
+
+		it("PG : CREATE INDEX CONCURRENTLY natif D11", () => {
+			const q = pgIdx(source);
+			if (q.kind !== "sql") throw new Error("attendu sql");
+			expect(q.text).toBe(
+				`CREATE INDEX CONCURRENTLY "idx_users_email" ON "users" ("email")`
+			);
+		});
+
+		it("Mongo : createIndex natif (idempotent)", () => {
+			expect(mongoIdx(source).index).toEqual({
+				keys: { email: 1 },
+				options: { name: "idx_users_email" }
+			});
+		});
+
+		it("KV : add-index shape avec uniqueEnforcement='none' (no-op planner)", () => {
+			expect(kvIdx(source)).toMatchObject({
+				operation: "add-index",
+				name: "idx_users_email",
+				fields: ["email"],
+				unique: false,
+				uniqueEnforcement: "none"
+			});
+		});
+	});
+
+	describe("add unique index compound", () => {
+		const source = "add unique index (tenant_id, slug) into pages";
+
+		it("PG : CREATE UNIQUE INDEX CONCURRENTLY", () => {
+			const q = pgIdx(source);
+			if (q.kind !== "sql") throw new Error("attendu sql");
+			expect(q.text).toContain(`CREATE UNIQUE INDEX CONCURRENTLY`);
+			expect(q.text).toContain(`("tenant_id", "slug")`);
+		});
+
+		it("Mongo : createIndex compound + unique=true", () => {
+			const q = mongoIdx(source);
+			expect(q.index.keys).toEqual({ tenant_id: 1, slug: 1 });
+			expect(q.index.options.unique).toBe(true);
+		});
+
+		it("KV : uniqueEnforcement='middleware-setnx' (D12)", () => {
+			expect(kvIdx(source).uniqueEnforcement).toBe("middleware-setnx");
+		});
+	});
+
+	describe("drop index", () => {
+		const source = "drop index idx_users_email from users";
+
+		it("PG : DROP INDEX natif (pas de CONCURRENTLY sur drop V1)", () => {
+			const q = pgDrop(source);
+			if (q.kind !== "sql") throw new Error("attendu sql");
+			expect(q.text).toBe(`DROP INDEX "idx_users_email"`);
+		});
+
+		it("Mongo : dropIndex par nom", () => {
+			expect(mongoDrop(source).name).toBe("idx_users_email");
+		});
+
+		it("KV : drop-index shape (adapter retire middleware si unique)", () => {
+			expect(kvDrop(source).name).toBe("idx_users_email");
+		});
+	});
+
+	describe("D3 idempotence cross-engine", () => {
+		it("add index if not exists", () => {
+			const srcAdd = "add index (email) if not exists into users";
+			expect((pgIdx(srcAdd) as { text: string }).text).toContain(
+				`IF NOT EXISTS`
+			);
+			expect(mongoIdx(srcAdd).ifNotExists).toBe(true);
+			expect(kvIdx(srcAdd).ifNotExists).toBe(true);
+		});
+
+		it("drop index if exists", () => {
+			const srcDrop = "drop index idx_users_email from users if exists";
+			expect((pgDrop(srcDrop) as { text: string }).text).toContain(
+				`IF EXISTS`
+			);
+			expect(mongoDrop(srcDrop).ifExists).toBe(true);
+			expect(kvDrop(srcDrop).ifExists).toBe(true);
 		});
 	});
 });
