@@ -239,21 +239,13 @@ function assertIdent(name: string, kind: "target" | "field"): void {
 	}
 }
 
-/**
- * Un `default <val>` doit être un littéral scalaire — pas un call, pas un ref
- * de field, pas d'arith. Motivation triple :
- *  1. Sémantique cross-engine : PG accepte `DEFAULT now()`, Mongo `$currentDate`,
- *     KV rien — un default non-literal fuirait des divergences opaques. On
- *     tranche : DDL/1 = literals only (v-next dédié pour les defaults fn).
- *  2. Safety : refus tôt d'un `default $where` (déjà bloqué au parser par la
- *     regex ident, mais la string literal `"$where"` reste inerte ici — géré
- *     au codegen Mongo via échappement $jsonSchema).
- *  3. Simplicité : le codegen bind un `SqlValue`, pas une `PlanExpr`.
- */
+// Literals only : le codegen bind un `SqlValue`, pas une `PlanExpr`. Refuse
+// aussi tôt les calls/refs qui masqueraient des divergences cross-engine
+// (`now()` PG vs `$currentDate` Mongo vs rien KV).
 function lowerDefault(expr: Expr, fieldName: string, type: SnqlType): SqlValue {
 	if (expr.type !== "literal") {
 		throw new SnqlError(
-			`'default' de '${fieldName}' doit être un littéral scalaire (string, number, bool, null) — pas de call/field/expr (DDL/1 restreint aux literals ; les defaults dynamiques arrivent )`,
+			`'default' de '${fieldName}' doit être un littéral scalaire (string, number, bool, null)`,
 			"lower_ddl_default_not_literal",
 			expr.span
 		);
