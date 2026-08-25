@@ -15,6 +15,7 @@
 import { type OperationKind, verbOperation } from "../lexer/dictionary";
 import { tokenize } from "../lexer/lexer";
 import type { Token } from "../lexer/token";
+import { SNQL_TYPE_ALIAS } from "../parser/parser";
 import type { SchemaModel } from "../schema/model";
 
 export type SnqlCompletionType =
@@ -57,7 +58,7 @@ const PRIMARY_VERBS: readonly {
 	type?: SnqlCompletionType;
 }[] = [
 	{ label: "get", detail: "lecture" },
-	{ label: "add", detail: "insertion" },
+	{ label: "add", detail: "insertion / DDL column / DDL index" },
 	{ label: "update", detail: "mise à jour" },
 	{ label: "remove", detail: "suppression" },
 	// T3 introspection : soft-keywords, taggés `keyword` (pas verb CRUD) —
@@ -67,7 +68,50 @@ const PRIMARY_VERBS: readonly {
 	// `raw` escape hatch — dernier recours documenté.
 	{ label: "raw", detail: "escape hatch (SQL/Mongo brut)", type: "keyword" },
 	// `let` — CTE binding, préfixe une requête plus grosse.
-	{ label: "let", detail: "CTE (let x = find ...; body)", type: "keyword" }
+	{ label: "let", detail: "CTE (let x = find ...; body)", type: "keyword" },
+	// DDL Tier-2 (ADR-029 DDL/5). `create` est verb insert-alias mais utile
+	// aussi pour `create table T {...}` — le peek `table` route en DDL. `drop`
+	// reste soft-ident (peekIdent au dispatch) — head-of-statement only.
+	{ label: "create", detail: "DDL create table", type: "keyword" },
+	{ label: "drop", detail: "DDL drop table/column/index (destructif)", type: "keyword" }
+];
+
+/**
+ * Types SNQL suggestibles après `<col>: ` dans un body `create table` ou
+ * après `add column X ` (ADR-029 DDL/5). Source unique = `SNQL_TYPE_ALIAS`
+ * exporté par parser.ts — évite la dérive complete ↔ parser. Ordre : d'abord
+ * canoniques puis aliases PG paste-friendly, séparés visuellement par `detail`.
+ */
+function ddlTypeSuggestions(): readonly SnqlCompletion[] {
+	const canonicals: ReadonlySet<string> = new Set([
+		"string",
+		"int",
+		"bigint",
+		"float",
+		"decimal",
+		"bool",
+		"date",
+		"json",
+		"array",
+		"uuid",
+		"enum",
+		"unknown"
+	]);
+	return Object.keys(SNQL_TYPE_ALIAS).map((label) => ({
+		label,
+		type: "keyword" as const,
+		detail: canonicals.has(label)
+			? "type SNQL"
+			: `alias PG → ${SNQL_TYPE_ALIAS[label]}`
+	}));
+}
+
+/** Modifiers de field (create table body + add column) — ADR-029 D0. */
+const DDL_FIELD_MODIFIERS: readonly string[] = [
+	"nullable",
+	"not",
+	"default",
+	"unique"
 ];
 
 /** Sous-commandes reconnues après `list`. */
@@ -253,9 +297,17 @@ function contextOptions(
 		return setCompletions(setCtx, schema, last, insideOpenString);
 	}
 
+	// DDL/5 (ADR-029) — patterns spécifiques DDL détectés avant les cases DML
+	// génériques : le pattern matching top-level doit prendre le dessus car
+	// certains keywords partagés (`into`/`from`/`unique`) ont un sens DDL vs
+	// DML. On lookup à partir du 1er token pour discriminer.
+	const ddlOptions = ddlContextOptions(toks, schema);
+	if (ddlOptions !== null) return ddlOptions;
+
 	// +introspection verbs (soft-keyword). En tête de statement
 	// uniquement — les mots `list`/`describe` restent utilisables comme
 	// idents ailleurs (ex. `pick x as list`), donc pas de spécial-case au-delà.
+	// DDL/5 : `drop` reste soft-ident head-of-statement — propose table/column/index.
 	if (last.kind === "ident" && toks.length === 1) {
 		const lower = last.value.toLowerCase();
 		if (lower === "list") {
@@ -263,6 +315,10 @@ function contextOptions(
 		}
 		if (lower === "describe") {
 			return collections(schema);
+		}
+		if (lower === "drop") {
+			// ADR-029 D7 destructive — WriteConfirmBar D7 typing gate au run.
+			return [keyword("table"), keyword("column"), keyword("index")];
 		}
 	}
 
@@ -310,6 +366,24 @@ function contextOptions(
 	// garde, un ident nommé comme un verbe proposerait des collections.
 	if (last.kind === "verb" && toks.length === 1) {
 		const op = verbOperation(last.value);
+		const lower = last.value.toLowerCase();
+		// DDL/5 : `create` verb → propose `table` en tête (peek `table` route en
+		// parseCreateTable au parser ; sinon `create {doc} into T` reste insert
+		// alias, on garde donc aussi un doc `{` implicit — non complété ici).
+		if (lower === "create") {
+			return [keyword("table")];
+		}
+		// DDL/5 : `add` verb → étend l'insert alias avec les sub-cmds DDL/2+DDL/3
+		// (`column` / `index` / `unique index`) tout en gardant les collections
+		// cibles pour l'insert `add {...} into T` classique.
+		if (lower === "add") {
+			return [
+				keyword("column"),
+				keyword("index"),
+				keyword("unique"),
+				...collections(schema)
+			];
+		}
 		// `get <coll>` / `update <coll>` : le mot suivant est la collection cible.
 		if (op === "select" || op === "update") {
 			return collections(schema);
@@ -1325,4 +1399,234 @@ function orientRelation(
 		};
 	}
 	return undefined;
+}
+
+/**
+ * ADR-029 DDL/5 — Complétions contextuelles pour tous les DDL kinds. Détecte
+ * le kind depuis les premiers tokens (create table / add column / add index /
+ * drop table/column/index) et propose la suggestion appropriée selon la
+ * position dans le pattern.
+ *
+ * Retourne `null` si le statement n'est pas un DDL — dispatch fallthrough
+ * vers le pipeline DML classique.
+ */
+function ddlContextOptions(
+	toks: readonly Token[],
+	schema: SchemaModel
+): readonly SnqlCompletion[] | null {
+	if (toks.length === 0) return null;
+	const head = toks[0];
+	if (head === undefined) return null;
+	const headLower = head.value.toLowerCase();
+
+	// === create table === (parseCreateTable dispatch = verb create + keyword table)
+	if (head.kind === "verb" && headLower === "create" && toks.length >= 2) {
+		const t1 = toks[1];
+		if (t1 === undefined || t1.value.toLowerCase() !== "table") return null;
+		return createTableCompletions(toks);
+	}
+
+	// === add column / add index / add unique index === (verb add + soft-ident)
+	if (head.kind === "verb" && headLower === "add" && toks.length >= 2) {
+		const t1 = toks[1];
+		if (t1 === undefined) return null;
+		const t1Lower = t1.value.toLowerCase();
+		if (t1Lower === "column") return addColumnCompletions(toks, schema);
+		if (t1Lower === "index" || t1Lower === "unique") {
+			// `add unique ` (2 toks) OU `add unique index …` (3+ toks) : dispatch
+			// addIndexCompletions dans les 2 cas. Sur 2 toks il propose `index`.
+			return addIndexCompletions(toks, schema);
+		}
+		return null;
+	}
+
+	// === drop table / drop column / drop index === (soft-ident drop head)
+	if (head.kind === "ident" && headLower === "drop" && toks.length >= 2) {
+		const t1 = toks[1];
+		if (t1 === undefined) return null;
+		const t1Lower = t1.value.toLowerCase();
+		if (t1Lower === "table") return dropTableCompletions(toks, schema);
+		if (t1Lower === "column") return dropColumnCompletions(toks, schema);
+		if (t1Lower === "index") return dropIndexCompletions(toks, schema);
+		return null;
+	}
+
+	return null;
+}
+
+/** Complétions pour `create table X { … }` (DDL/1). */
+function createTableCompletions(
+	toks: readonly Token[]
+): readonly SnqlCompletion[] {
+	const last = toks[toks.length - 1];
+	if (last === undefined) return [];
+
+	// `create table |` → nom de nouvelle table (libre, pas de collections car
+	// on la crée !) — pas de suggestion précise possible.
+	if (toks.length === 2) return [];
+
+	// `create table X |` → soit `{` (body), soit `if not exists`.
+	if (toks.length === 3 && last.kind === "ident") {
+		return [keyword("if"), { label: "{", type: "keyword" }];
+	}
+
+	// Dans le body : détection contextuelle basée sur les 2 derniers tokens.
+	const inBody = toks.some((t) => t.kind === "lbrace");
+	if (!inBody) return [];
+
+	// `{ col :` → types SNQL + aliases (D6).
+	if (last.kind === "colon") return ddlTypeSuggestions();
+
+	// `{ col: uuid |` OU `{ col: uuid nullable |` → modifiers + `,` + `primary`.
+	// Détection : dernier token = ident de type, ou modifier connu.
+	if (last.kind === "ident") {
+		const prev = toks[toks.length - 2];
+		if (prev !== undefined && prev.kind === "colon") {
+			// On vient de taper le type — propose modifiers.
+			return DDL_FIELD_MODIFIERS.map(keyword);
+		}
+		if (
+			DDL_FIELD_MODIFIERS.includes(last.value.toLowerCase()) ||
+			last.value.toLowerCase() === "null" ||
+			last.value.toLowerCase() === "unique"
+		) {
+			// Après un modifier → autres modifiers restants.
+			return DDL_FIELD_MODIFIERS.map(keyword);
+		}
+	}
+
+	return [];
+}
+
+/** Complétions pour `add column X int [modifiers] into T` (DDL/2). */
+function addColumnCompletions(
+	toks: readonly Token[],
+	schema: SchemaModel
+): readonly SnqlCompletion[] {
+	const last = toks[toks.length - 1];
+	if (last === undefined) return [];
+
+	// `add column |` → nom de nouvelle col (libre).
+	if (toks.length === 2) return [];
+
+	// `add column X |` → types SNQL + aliases (D6, corpus `add column X TYPE`).
+	if (toks.length === 3 && last.kind === "ident") {
+		return ddlTypeSuggestions();
+	}
+
+	// `add column X TYPE |` → modifiers + `into`.
+	// Détecte : dernier token est un ident (probablement type) et pas de `into` vu.
+	const hasInto = toks.some(
+		(t) => t.kind === "keyword" && t.value === "into"
+	);
+	if (!hasInto) {
+		return [...DDL_FIELD_MODIFIERS.map(keyword), keyword("into")];
+	}
+
+	// `add column X TYPE into |` → collections cibles.
+	if (last.kind === "keyword" && last.value === "into") {
+		return collections(schema);
+	}
+
+	return [];
+}
+
+/** Complétions pour `add [unique] index (cols) into T` (DDL/3). */
+function addIndexCompletions(
+	toks: readonly Token[],
+	schema: SchemaModel
+): readonly SnqlCompletion[] {
+	const last = toks[toks.length - 1];
+	if (last === undefined) return [];
+
+	// `add unique |` → `index`
+	if (
+		toks.length === 2 &&
+		last.kind === "ident" &&
+		last.value.toLowerCase() === "unique"
+	) {
+		return [keyword("index")];
+	}
+
+	// `add [unique] index |` → `(`
+	if (last.kind === "ident" && last.value.toLowerCase() === "index") {
+		return [{ label: "(", type: "keyword" }];
+	}
+
+	// `add [unique] index (cols) |` OU `... into |`
+	if (last.kind === "rparen") {
+		return [keyword("into")];
+	}
+	if (last.kind === "keyword" && last.value === "into") {
+		return collections(schema);
+	}
+
+	return [];
+}
+
+/** Complétions pour `drop table T [if exists]` (DDL/4). */
+function dropTableCompletions(
+	toks: readonly Token[],
+	schema: SchemaModel
+): readonly SnqlCompletion[] {
+	const last = toks[toks.length - 1];
+	if (last === undefined) return [];
+
+	// `drop table |` → collections existantes (contrairement à create).
+	if (toks.length === 2) return collections(schema);
+
+	// `drop table X |` → `if exists`.
+	if (toks.length === 3 && last.kind === "ident") {
+		return [keyword("if")];
+	}
+
+	return [];
+}
+
+/** Complétions pour `drop column X from T [if exists]` (DDL/4). */
+function dropColumnCompletions(
+	toks: readonly Token[],
+	schema: SchemaModel
+): readonly SnqlCompletion[] {
+	const last = toks[toks.length - 1];
+	if (last === undefined) return [];
+
+	// `drop column |` → nom col (libre).
+	if (toks.length === 2) return [];
+
+	// `drop column X |` → `from`.
+	if (toks.length === 3 && last.kind === "ident") {
+		return [keyword("from")];
+	}
+
+	// `drop column X from |` → collections.
+	if (last.kind === "keyword" && last.value === "from") {
+		return collections(schema);
+	}
+
+	return [];
+}
+
+/** Complétions pour `drop index NAME from T [if exists]` (DDL/3). */
+function dropIndexCompletions(
+	toks: readonly Token[],
+	schema: SchemaModel
+): readonly SnqlCompletion[] {
+	const last = toks[toks.length - 1];
+	if (last === undefined) return [];
+
+	// `drop index |` → nom index (libre, l'user connaît son index).
+	if (toks.length === 2) return [];
+
+	// `drop index NAME |` → `from`.
+	if (toks.length === 3 && last.kind === "ident") {
+		return [keyword("from")];
+	}
+
+	// `drop index NAME from |` → collections.
+	if (last.kind === "keyword" && last.value === "from") {
+		return collections(schema);
+	}
+
+	return [];
 }

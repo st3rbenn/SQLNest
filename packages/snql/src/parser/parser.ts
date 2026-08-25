@@ -1674,8 +1674,10 @@ setSubqueryParser((cursor: TokenCursor): Query => {
 /** Alias types natifs PG paste-friendly (D6). `varchar(N)` accepté comme ident
  * bare `varchar` — le `(N)` optionnel après reste à parser v-next (ignoré au
  * lower pour l'instant, cohérent avec `text`). Tous les alias normalisent vers
- * un SnqlType canonique déjà supporté par `packages/snql/src/schema/model.ts`. */
-const SNQL_TYPE_ALIAS: Readonly<Record<string, SnqlType>> = {
+ * un SnqlType canonique déjà supporté par `packages/snql/src/schema/model.ts`.
+ * Exporté pour permettre à l'autocomplete (DDL/5) de suggérer les mêmes
+ * étiquettes que le parser accepte — source unique. */
+export const SNQL_TYPE_ALIAS: Readonly<Record<string, SnqlType>> = {
 	string: "string",
 	int: "int",
 	bigint: "bigint",

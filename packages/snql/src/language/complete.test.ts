@@ -60,7 +60,7 @@ const labels = (src: string, offset = src.length) =>
 	at(src, offset).options.map((o) => o.label);
 
 describe("completeSnql — début de requête", () => {
-	it("propose les verbes canoniques + introspection + raw + let sur une entrée vide", () => {
+	it("propose les verbes canoniques + introspection + raw + let + DDL sur une entrée vide", () => {
 		expect(labels("")).toEqual([
 			"get",
 			"add",
@@ -69,9 +69,12 @@ describe("completeSnql — début de requête", () => {
 			"list",
 			"describe",
 			"raw",
-			"let"
+			"let",
+			"create",
+			"drop"
 		]);
-		// Les CRUD sont taggés `verb` ; list/describe/raw/let sont `keyword` (soft-kw).
+		// Les CRUD sont taggés `verb` ; list/describe/raw/let/create/drop
+		// sont `keyword` (soft-kw ou verb-alias DDL — ADR-029 DDL/5).
 		const opts = at("").options;
 		expect(opts.filter((o) => o.type === "verb").map((o) => o.label)).toEqual([
 			"get",
@@ -80,7 +83,7 @@ describe("completeSnql — début de requête", () => {
 			"remove"
 		]);
 		expect(opts.filter((o) => o.type === "keyword").map((o) => o.label)).toEqual(
-			["list", "describe", "raw", "let"]
+			["list", "describe", "raw", "let", "create", "drop"]
 		);
 	});
 
@@ -483,10 +486,118 @@ describe("completeSnql — robustesse", () => {
 			"list",
 			"describe",
 			"raw",
-			"let"
+			"let",
+			"create",
+			"drop"
 		]);
 		expect(
 			completeSnql("get users ", 10, empty).options.map((o) => o.label)
 		).toContain("where");
+	});
+});
+
+describe("completeSnql — DDL/5 (ADR-029)", () => {
+	describe("top-level DDL verbs", () => {
+		it("`create ` propose `table`", () => {
+			expect(labels("create ")).toContain("table");
+		});
+
+		it("`drop ` propose `table`, `column`, `index`", () => {
+			const opts = labels("drop ");
+			expect(opts).toContain("table");
+			expect(opts).toContain("column");
+			expect(opts).toContain("index");
+		});
+
+		it("`add ` propose `column`, `index`, `unique` + collections", () => {
+			const opts = labels("add ");
+			expect(opts).toContain("column");
+			expect(opts).toContain("index");
+			expect(opts).toContain("unique");
+			expect(opts).toContain("users");
+		});
+	});
+
+	describe("create table body — types SNQL après `:`", () => {
+		it("`create table t { id: ` propose types canoniques + aliases PG", () => {
+			const opts = labels("create table t { id: ");
+			expect(opts).toContain("uuid");
+			expect(opts).toContain("string");
+			expect(opts).toContain("int");
+			expect(opts).toContain("bigint");
+			expect(opts).toContain("bool");
+			expect(opts).toContain("date");
+			expect(opts).toContain("json");
+			// Aliases PG paste-friendly (D6).
+			expect(opts).toContain("text");
+			expect(opts).toContain("varchar");
+			expect(opts).toContain("jsonb");
+			expect(opts).toContain("timestamptz");
+			expect(opts).toContain("bigserial");
+			expect(opts).toContain("boolean");
+		});
+
+		it("`create table t { id: uuid ` propose modifiers", () => {
+			const opts = labels("create table t { id: uuid ");
+			expect(opts).toContain("nullable");
+			expect(opts).toContain("not");
+			expect(opts).toContain("default");
+			expect(opts).toContain("unique");
+		});
+	});
+
+	describe("add column — types + modifiers + into", () => {
+		it("`add column age ` propose types SNQL", () => {
+			const opts = labels("add column age ");
+			expect(opts).toContain("int");
+			expect(opts).toContain("uuid");
+			expect(opts).toContain("timestamptz");
+		});
+
+		it("`add column age int ` propose modifiers + `into`", () => {
+			const opts = labels("add column age int ");
+			expect(opts).toContain("nullable");
+			expect(opts).toContain("not");
+			expect(opts).toContain("default");
+			expect(opts).toContain("unique");
+			expect(opts).toContain("into");
+		});
+
+		it("`add column age int into ` propose collections", () => {
+			const opts = labels("add column age int into ");
+			expect(opts).toContain("users");
+			expect(opts).toContain("orders");
+		});
+	});
+
+	describe("add index — flow", () => {
+		it("`add unique ` propose `index`", () => {
+			expect(labels("add unique ")).toEqual(["index"]);
+		});
+
+		it("`add index (email) ` propose `into`", () => {
+			expect(labels("add index (email) ")).toContain("into");
+		});
+
+		it("`add index (email) into ` propose collections", () => {
+			const opts = labels("add index (email) into ");
+			expect(opts).toContain("users");
+		});
+	});
+
+	describe("drop DDL — targets", () => {
+		it("`drop table ` propose collections", () => {
+			const opts = labels("drop table ");
+			expect(opts).toContain("users");
+			expect(opts).toContain("orders");
+		});
+
+		it("`drop column age from ` propose collections", () => {
+			expect(labels("drop column age from ")).toContain("users");
+		});
+
+		it("`drop index idx_x from ` propose collections", () => {
+			expect(labels("drop index idx_x from ")).toContain("users");
+		});
 	});
 });
