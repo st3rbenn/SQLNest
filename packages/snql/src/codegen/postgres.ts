@@ -943,12 +943,43 @@ const PG_DDL_TYPE: Readonly<Record<SnqlType, string>> = {
 };
 
 /**
+ * PG rejette les paramètres bindés `$N` dans les statements DDL (CREATE TABLE,
+ * ALTER TABLE) via le extended query protocol — erreur 08P01 `bind message
+ * supplies N parameters, but prepared statement "" requires 0`. Le DDL PG
+ * exige des littéraux inline. On escape proprement pour préserver la sûreté.
+ *  - string : `'…'` avec `E'…'` si backslash présent (escape strings), doublement
+ *    des simple quotes internes.
+ *  - number : text brut (raw safe car number JS).
+ *  - bigint : `123::bigint` (préserve la précision > 2^53).
+ *  - SqlDecimal : `123.456::numeric` (précision arbitraire).
+ *  - boolean : `TRUE` / `FALSE`.
+ *  - null : `NULL`.
+ */
+function pgInlineDefault(value: SqlValue): string {
+	if (value === null) return "NULL";
+	if (typeof value === "string") {
+		const escaped = value.replace(/'/g, "''");
+		if (value.includes("\\")) return `E'${escaped.replace(/\\/g, "\\\\")}'`;
+		return `'${escaped}'`;
+	}
+	if (typeof value === "number") return String(value);
+	if (typeof value === "bigint") return `${value.toString()}::bigint`;
+	if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
+	if (isSqlDecimal(value)) return `${value.raw}::numeric`;
+	throw new SnqlError(
+		`Type de default DDL non supporté par pgInlineDefault : ${typeof value}`,
+		"codegen_ddl_default_unsupported"
+	);
+}
+
+/**
  * Rend un `create table` (avec ou sans idempotence D3). Sans `if not exists`,
  * une seule SqlQuery. Avec, un SqlTransaction 2-steps où l'advisory lock
  * sérialise les créations concurrentes (drift schéma prévenu — cf. ADR-029 D3).
+ * Les defaults sont inline (voir [[pgInlineDefault]]) — PG DDL rejette les
+ * $N bindés.
  */
 function renderCreateTable(plan: CreateTablePlan): NativeQuery {
-	const createParams = new ParamList();
 	const cols: string[] = [];
 	for (const f of plan.fields) {
 		const parts: string[] = [
@@ -958,7 +989,7 @@ function renderCreateTable(plan: CreateTablePlan): NativeQuery {
 		if (!f.nullable) parts.push("NOT NULL");
 		if (f.unique) parts.push("UNIQUE");
 		if (f.defaultValue !== undefined) {
-			parts.push(`DEFAULT ${createParams.add(f.defaultValue, f.span)}`);
+			parts.push(`DEFAULT ${pgInlineDefault(f.defaultValue)}`);
 		}
 		cols.push(parts.join(" "));
 	}
@@ -973,8 +1004,8 @@ function renderCreateTable(plan: CreateTablePlan): NativeQuery {
 		engine: "postgres",
 		kind: "sql",
 		text: createText,
-		params: createParams.all(),
-		paramSpans: createParams.allSpans()
+		params: [],
+		paramSpans: []
 	};
 	if (!plan.ifNotExists) return createStep;
 	// D3 : sérialise concurrent DDL avec un advisory lock scopé transaction.
@@ -1011,13 +1042,12 @@ function renderCreateTable(plan: CreateTablePlan): NativeQuery {
  * D3, drift schéma NON détecté ; l'user peut re-check via `describe`).
  */
 function renderAddColumn(plan: AddColumnPlan): NativeQuery {
-	const params = new ParamList();
 	const f = plan.column;
 	const parts: string[] = [quoteIdent(f.name), PG_DDL_TYPE[f.type]];
 	if (!f.nullable) parts.push("NOT NULL");
 	if (f.unique) parts.push("UNIQUE");
 	if (f.defaultValue !== undefined) {
-		parts.push(`DEFAULT ${params.add(f.defaultValue, f.span)}`);
+		parts.push(`DEFAULT ${pgInlineDefault(f.defaultValue)}`);
 	}
 	const ifNotExists = plan.ifNotExists ? "IF NOT EXISTS " : "";
 	const text = `ALTER TABLE ${quoteIdent(plan.target)} ADD COLUMN ${ifNotExists}${parts.join(" ")}`;
@@ -1025,8 +1055,8 @@ function renderAddColumn(plan: AddColumnPlan): NativeQuery {
 		engine: "postgres",
 		kind: "sql",
 		text,
-		params: params.all(),
-		paramSpans: params.allSpans()
+		params: [],
+		paramSpans: []
 	};
 }
 

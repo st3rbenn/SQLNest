@@ -314,11 +314,12 @@ describe("DDL/1 E2E — pipeline complet cross-engine (ADR-029)", () => {
 		it("PG : bindés $1..$N", () => {
 			const q = pg(source);
 			if (q.kind !== "sql") throw new Error("attendu sql");
-			expect(q.text).toContain(`DEFAULT $1`);
-			expect(q.text).toContain(`DEFAULT $2`);
-			expect(q.text).toContain(`DEFAULT $3`);
-			expect(q.text).toContain(`DEFAULT $4`);
-			expect(q.params).toEqual(["free", 42, true, null]);
+			// PG DDL rejette les params bindés — defaults inline via pgInlineDefault.
+			expect(q.text).toContain(`DEFAULT 'free'`);
+			expect(q.text).toContain(`DEFAULT 42`);
+			expect(q.text).toContain(`DEFAULT TRUE`);
+			expect(q.text).toContain(`DEFAULT NULL`);
+			expect(q.params).toEqual([]);
 		});
 
 		it("KV : sérialisés dans fields.defaultValue", () => {
@@ -375,9 +376,9 @@ describe("DDL/2 E2E — add column cross-engine (ADR-029)", () => {
 			const q = pg(source);
 			if (q.kind !== "sql") throw new Error("attendu sql");
 			expect(q.text).toBe(
-				`ALTER TABLE "users" ADD COLUMN "tier" text NOT NULL DEFAULT $1`
+				`ALTER TABLE "users" ADD COLUMN "tier" text NOT NULL DEFAULT 'free'`
 			);
-			expect(q.params).toEqual(["free"]);
+			expect(q.params).toEqual([]);
 		});
 
 		it("Mongo : backfill=true + defaultValue propagé au shape (adapter runtime updateMany batched)", () => {

@@ -59,9 +59,11 @@ describe("codegen PG — create table (ADR-029 DDL/1.5)", () => {
 		});
 		if (q.kind !== "sql") throw new Error("attendu sql");
 		expect(q.text).toBe(
-			`CREATE TABLE "t" ("id" uuid NOT NULL, "age" integer, "tier" text NOT NULL DEFAULT $1, "score" integer NOT NULL DEFAULT $2)`
+			`CREATE TABLE "t" ("id" uuid NOT NULL, "age" integer, "tier" text NOT NULL DEFAULT 'free', "score" integer NOT NULL DEFAULT 42)`
 		);
-		expect(q.params).toEqual(["free", 42]);
+		// PG DDL rejette les params bindés $N (extended query protocol errors 08P01).
+		// Les defaults sont inline via pgInlineDefault — voir postgres.ts.
+		expect(q.params).toEqual([]);
 	});
 
 	it("map SnqlType → PG_DDL_TYPE (round-trip D1)", () => {
@@ -183,9 +185,9 @@ describe("codegen PG — add column (ADR-029 DDL/2.3)", () => {
 		});
 		if (q.kind !== "sql") throw new Error("attendu sql");
 		expect(q.text).toBe(
-			`ALTER TABLE "users" ADD COLUMN "tier" text NOT NULL DEFAULT $1`
+			`ALTER TABLE "users" ADD COLUMN "tier" text NOT NULL DEFAULT 'free'`
 		);
-		expect(q.params).toEqual(["free"]);
+		expect(q.params).toEqual([]);
 	});
 
 	it("nullable + unique", () => {
