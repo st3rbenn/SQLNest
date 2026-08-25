@@ -680,7 +680,74 @@ class MongoConnection implements Connection {
 		if (query.operation === "create-collection") {
 			return this.#executeDDLCreateCollection(query);
 		}
-		return this.#executeDDLAddColumn(query);
+		if (query.operation === "add-column") {
+			return this.#executeDDLAddColumn(query);
+		}
+		if (query.operation === "add-index") {
+			return this.#executeDDLAddIndex(query);
+		}
+		return this.#executeDDLDropIndex(query);
+	}
+
+	/**
+	 * DDL/3 add index Mongo. `db.<collection>.createIndex(keys, options)` natif —
+	 * idempotent : Mongo renvoie le nom sans erreur si un index identique
+	 * existe. D3 : catch `IndexOptionsConflict` (85) ou `IndexKeySpecsConflict`
+	 * (86) si `ifNotExists=true` — collision avec un index existant sous le
+	 * même nom mais options différentes, traité comme succès silencieux.
+	 */
+	async #executeDDLAddIndex(
+		query: Extract<
+			NativeQuery,
+			{ kind: "mongo-ddl"; operation: "add-index" }
+		>
+	): Promise<ResultSet> {
+		const db = this.#requireDb();
+		const col = db.collection(query.collection);
+		try {
+			const options: Record<string, unknown> = {
+				name: query.index.options.name
+			};
+			if (query.index.options.unique === true) options["unique"] = true;
+			await col.createIndex(query.index.keys, options);
+			return { columns: [], rows: [], rowCount: 0 };
+		} catch (cause) {
+			const code = (cause as { code?: unknown } | null)?.code;
+			if (query.ifNotExists && (code === 85 || code === 86)) {
+				return { columns: [], rows: [], rowCount: 0 };
+			}
+			throw new EngineExecutionError(
+				`add index MongoDB échouée sur '${query.collection}.${query.index.options.name ?? "?"}' — ${describeMongoExecutionError(cause)}`,
+				{ cause }
+			);
+		}
+	}
+
+	/**
+	 * DDL/3 drop index Mongo. `db.<collection>.dropIndex(name)` natif. D3 :
+	 * catch `IndexNotFound` (code 27) si `ifExists=true`.
+	 */
+	async #executeDDLDropIndex(
+		query: Extract<
+			NativeQuery,
+			{ kind: "mongo-ddl"; operation: "drop-index" }
+		>
+	): Promise<ResultSet> {
+		const db = this.#requireDb();
+		const col = db.collection(query.collection);
+		try {
+			await col.dropIndex(query.name);
+			return { columns: [], rows: [], rowCount: 0 };
+		} catch (cause) {
+			const code = (cause as { code?: unknown } | null)?.code;
+			if (query.ifExists && code === 27) {
+				return { columns: [], rows: [], rowCount: 0 };
+			}
+			throw new EngineExecutionError(
+				`drop index MongoDB échouée sur '${query.collection}.${query.name}' — ${describeMongoExecutionError(cause)}`,
+				{ cause }
+			);
+		}
 	}
 
 	async #executeDDLCreateCollection(
