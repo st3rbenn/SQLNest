@@ -109,7 +109,20 @@ export type PlannerErrorCode =
 	// diagnostic non-bloquant (émis comme warning structuré, pas throw).
 	// Émis par le planner pour $lookup correlated non-indexé, $expr+$convert
 	// dans predicate write, pipeline update sur join key non-indexée.
-	| "planner_mongo_perf_non_indexable";
+	| "planner_mongo_perf_non_indexable"
+	// DDL Tier-2 (ADR-029). `planner_ddl_unsupported` = capability `ddl`
+	// absente (adapter connaît AUCUN kind DDL — cas dev/tests). Un code par
+	// DDLKind (aligné DDL_ERROR_CODES) pour un refus fine grain quand
+	// l'engine supporte `ddl` mais pas ce kind précis. Miroir strict
+	// `planner_introspect_*_unsupported`.
+	| "planner_ddl_unsupported"
+	| "planner_ddl_create_table_unsupported"
+	| "planner_ddl_drop_table_unsupported"
+	| "planner_ddl_add_column_unsupported"
+	| "planner_ddl_drop_column_unsupported"
+	| "planner_ddl_add_index_unsupported"
+	| "planner_ddl_add_unique_index_unsupported"
+	| "planner_ddl_drop_index_unsupported";
 
 /**
  * Construit un `SnqlError` avec un code typé du registre. Utiliser à la place
@@ -176,5 +189,13 @@ export const PLANNER_ERROR_CODES: ReadonlySet<PlannerErrorCode> =
 		"planner_unknown_target_use_introspect",
 		"planner_mongo_json_contains_nested_unsupported",
 		"planner_mongo_version_capability_missing",
-		"planner_mongo_perf_non_indexable"
+		"planner_mongo_perf_non_indexable",
+		"planner_ddl_unsupported",
+		"planner_ddl_create_table_unsupported",
+		"planner_ddl_drop_table_unsupported",
+		"planner_ddl_add_column_unsupported",
+		"planner_ddl_drop_column_unsupported",
+		"planner_ddl_add_index_unsupported",
+		"planner_ddl_add_unique_index_unsupported",
+		"planner_ddl_drop_index_unsupported"
 	]);

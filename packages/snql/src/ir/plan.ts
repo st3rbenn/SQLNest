@@ -52,7 +52,12 @@ export type Capability =
 	// `let rec X = base union all step;` — CTE récursif. PG only
 	// (WITH RECURSIVE natif). Mongo/KV refusés au planner (pas de fallback
 	// matérialisation runtime — coûteux pour de la récursion arborescente).
-	| "cte-recursive";
+	| "cte-recursive"
+	// DDL Tier-2 (ADR-029). Grossière : l'adapter connaît AU MOINS un
+	// kind DDL. Granularité fine par (kind, engine) dans `DDL_SUPPORT` +
+	// `isDDLSupported`. Chaque cellule est native OU compensated — la doctrine
+	// Hard Version + PA/1-8 impose aucun refus « engine gap ».
+	| "ddl";
 
 /**
  * Décimal **exact** : on garde le texte brut. Les colonnes NUMERIC/DECIMAL de

@@ -73,7 +73,8 @@ export const POSTGRES_CAPABILITIES: Capabilities = caps(
 		"transaction",
 		"introspect",
 		"cte",
-		"cte-recursive"
+		"cte-recursive",
+		"ddl"
 	],
 	["int", "float", "text", "bool", "date", "timestamp", "json"],
 	{ subqueryStrategy: "native" }
@@ -107,7 +108,8 @@ export const MONGODB_CAPABILITIES: Capabilities = caps(
 		"subquery",
 		"cte",
 		"write-join",
-		"insert-select"
+		"insert-select",
+		"ddl"
 	],
 	// item #7 : 'json' ajouté aux castTargets Mongo — cast(x as json)
 	// est un no-op côté Mongo (BSON = JSON natif). squiggly INFO éditeur
@@ -130,7 +132,9 @@ export const KV_CAPABILITIES: Capabilities = caps(
 	"kv",
 	// 'aggregate' ajouté — foldAggregate implémenté dans
 	// compensate.ts (1 row output N rows avec groupKeys).
-	["scan", "filter", "mutate", "aggregate"],
+	// 'ddl' ajouté — DDL Tier-2 compensated via HSET `namespace:_schema`
+	// metadata + PK middleware (D13 ADR-029, jamais refus engine gap).
+	["scan", "filter", "mutate", "aggregate", "ddl"],
 	["int", "float", "text", "bool"]
 );
 

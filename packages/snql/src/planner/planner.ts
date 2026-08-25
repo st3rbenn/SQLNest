@@ -13,6 +13,10 @@ import { linearize, requiredCapability } from "../ir/plan";
 import type { Span } from "../lexer/token";
 import type { Capabilities } from "./capabilities";
 import {
+	DDL_ERROR_CODES,
+	isDDLSupported
+} from "./ddl/support";
+import {
 	INTROSPECT_ERROR_CODES,
 	introspectHintFor,
 	isIntrospectSupported
@@ -702,6 +706,37 @@ export function assertIntrospectSupported(
 	throw new SnqlError(
 		message,
 		INTROSPECT_ERROR_CODES[plan.kind] as import("./errors/registry").PlannerErrorCode
+	);
+}
+
+/**
+ * refuse un DDL statement si l'engine cible n'a pas le kind. Deux niveaux :
+ * (1) capability `ddl` absente = l'adapter ne connaît AUCUN kind DDL ;
+ * (2) capability présente mais matrice `DDL_SUPPORT` refuse ce kind sur cet
+ * engine. Miroir strict [[assertIntrospectSupported]] (pattern ADR-026 →
+ * réutilisé pour ADR-029 DDL).
+ *
+ * DDL_SUPPORT ne renvoie jamais `refused` sur un gap engine — chaque cellule
+ * est `native` ou `compensated` (thèse Hard Version + PA/1-8). Cet assert
+ * ne se déclenche donc en pratique que pour un adapter engine INCONNU ou
+ * pour la capability grossière `ddl` absente (cas tests/adapter fake).
+ * Les refus admis (invariance sémantique D13 Mongo PK non-id, contrainte
+ * scale D11 in-tx, etc.) sont émis par les asserts spécifiques au codegen.
+ */
+export function assertDDLSupported(
+	plan: import("../ir/plan").DDLPlan,
+	capabilities: Capabilities
+): void {
+	if (!capabilities.supports.has("ddl")) {
+		throw new SnqlError(
+			`'${plan.kind}' non supporté sur '${capabilities.engine}' — capability 'ddl' absente. Utilise \`raw "…"\` (SQL) ou \`raw {…}\` (Mongo) pour les commandes natives.`,
+			"planner_ddl_unsupported"
+		);
+	}
+	if (isDDLSupported(plan.kind, capabilities.engine)) return;
+	throw new SnqlError(
+		`'${plan.kind}' non supporté sur '${capabilities.engine}'.`,
+		DDL_ERROR_CODES[plan.kind] as import("./errors/registry").PlannerErrorCode
 	);
 }
 
