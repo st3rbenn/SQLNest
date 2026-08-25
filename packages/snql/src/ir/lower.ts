@@ -1369,7 +1369,7 @@ function validateInAggWrapperAst(
 			// Aggregate détecté. Refus si déjà dans un agg (nested).
 			if (insideAgg) {
 				throw new SnqlError(
-					`Aggregate imbriqué '${expr.name}(...)' — window functions arrivent `,
+					`Aggregate imbriqué '${expr.name}(...)' interdit`,
 					"lower_agg_nested",
 					expr.span
 				);

@@ -487,7 +487,7 @@ function parseLetRecBody(
 		extraUnion.value.toLowerCase() === "union"
 	) {
 		throw new SnqlError(
-			`'let rec ${name}' n'accepte qu'une paire base+step v1 — wrap plusieurs branches ou attends v-next.`,
+			`'let rec ${name}' n'accepte qu'une paire base+step — wrap plusieurs branches sous un seul 'union all'`,
 			"parse_let_rec_multiple_union_all",
 			extraUnion.span
 		);

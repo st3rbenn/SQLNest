@@ -266,7 +266,7 @@ export async function runQuery(
 	// n'est connectable aujourd'hui — PG/Mongo poussent le join nativement).
 	if (physical.compensation.some((op) => op.op === "join")) {
 		throw new EngineExecutionError(
-			"Compensation de join non branchée sur l'I/O (fetch du côté droit à venir)"
+			"Compensation de join non branchée sur l'I/O"
 		);
 	}
 

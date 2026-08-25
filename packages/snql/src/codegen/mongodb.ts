@@ -2804,7 +2804,7 @@ function renderMongoCreateTable(
 		primaryKeyAlias === undefined
 	) {
 		throw new SnqlError(
-			`primary key sur '${pk[0]}' non supporté sur Mongo — Mongo utilise '_id' comme PK unique. Pour un unique secondaire, utilise 'add unique index (${pk[0]}) into ${plan.target}' (DDL/3).`,
+			`primary key sur '${pk[0]}' non supporté sur Mongo — Mongo utilise '_id' comme PK unique. Pour un unique secondaire, utilise 'add unique index (${pk[0]}) into ${plan.target}'.`,
 			"codegen_mongo_primary_key_not_id"
 		);
 	}
