@@ -1,5 +1,6 @@
 import type {
 	Collection,
+	EnumTypeDef,
 	Field,
 	Relation,
 	SchemaModel,
@@ -202,10 +203,18 @@ export function buildSchemaModel(
 			: { name, fields, source: "declared" };
 	});
 
+	// enums root : dérivé du même lookup que Field.enumValues, mais indexé par
+	// nom d'enum (permet `type: role_type` cross-table via schema.enums).
+	const enumsList: EnumTypeDef[] = [];
+	for (const [name, members] of enumLabelsByType) {
+		enumsList.push({ name, members, source: "declared" });
+	}
+
 	return {
 		engine: "postgres",
 		collections,
-		relations: buildRelations(fks)
+		relations: buildRelations(fks),
+		...(enumsList.length > 0 ? { enums: enumsList } : {})
 	};
 }
 

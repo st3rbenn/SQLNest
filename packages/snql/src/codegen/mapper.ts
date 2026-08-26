@@ -260,6 +260,12 @@ export interface MongoDDLAddColumnQuery {
 		/** `required` du validator étendu (contrat cross-engine : NOT NULL). */
 		readonly required: boolean;
 		readonly defaultValue?: unknown;
+		/**
+		 * Snapshot des members enum (ADR-030 Enum/2). Présent si le field est
+		 * typé par un enum nommé. L'adapter injecte `enum: [...]` dans le
+		 * validator étendu de la property.
+		 */
+		readonly enum?: readonly string[];
 	};
 	/** true si `defaultValue !== undefined` → D10 backfill obligatoire. */
 	readonly backfill: boolean;
@@ -378,6 +384,13 @@ export interface KvFieldDescriptor {
 	readonly nullable: boolean;
 	readonly unique: boolean;
 	readonly defaultValue?: unknown;
+	/**
+	 * Snapshot enum members (ADR-030 Enum/2). Présent si `type === "enum"`.
+	 * Middleware write refuse valeur hors set (V-next avec adapter Redis).
+	 * `enumTypeName` référencable (introspection lookup `_snql_enums`).
+	 */
+	readonly enumTypeName?: string;
+	readonly enum?: readonly string[];
 }
 
 export interface KvDDLCreateTableQuery {

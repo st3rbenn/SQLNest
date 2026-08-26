@@ -525,3 +525,54 @@ describe("codegen KV — create enum (ADR-030 Enum/1.7)", () => {
 		).toBe(true);
 	});
 });
+
+describe("codegen KV — enum type dans create table + add column (Enum/2.7)", () => {
+	it("create table field enum → descriptor `{enumTypeName, enum: [...]}`", () => {
+		const q = mapCreate({
+			op: "ddl",
+			kind: "create-table",
+			target: "users",
+			ifNotExists: false,
+			fields: [
+				{ name: "id", type: "uuid", nullable: false, unique: false },
+				{
+					name: "role",
+					type: "enum",
+					enumTypeName: "role_type",
+					enumMembers: ["user", "admin"],
+					nullable: false,
+					unique: false
+				}
+			]
+		});
+		expect(q.fields[1]).toMatchObject({
+			name: "role",
+			type: "enum",
+			enumTypeName: "role_type",
+			enum: ["user", "admin"]
+		});
+	});
+
+	it("add column enum → descriptor enrichi", () => {
+		const q = mapAdd({
+			op: "ddl",
+			kind: "add-column",
+			target: "users",
+			ifNotExists: false,
+			column: {
+				name: "tier",
+				type: "enum",
+				enumTypeName: "tier_type",
+				enumMembers: ["free", "pro"],
+				nullable: false,
+				unique: false
+			}
+		});
+		expect(q.column).toMatchObject({
+			name: "tier",
+			type: "enum",
+			enumTypeName: "tier_type",
+			enum: ["free", "pro"]
+		});
+	});
+});

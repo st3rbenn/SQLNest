@@ -558,3 +558,52 @@ describe("codegen Mongo — create enum (ADR-030 Enum/1.6)", () => {
 		).toBe(true);
 	});
 });
+
+describe("codegen Mongo — enum type dans create table + add column (Enum/2.6)", () => {
+	it("create table field enum → property `{bsonType: string, enum: [...]}`", () => {
+		const q = mapCreate({
+			op: "ddl",
+			kind: "create-table",
+			target: "users",
+			ifNotExists: false,
+			fields: [
+				{ name: "id", type: "uuid", nullable: false, unique: false },
+				{
+					name: "role",
+					type: "enum",
+					enumTypeName: "role_type",
+					enumMembers: ["user", "admin"],
+					nullable: false,
+					unique: false
+				}
+			]
+		});
+		const validator = q.validator as { $jsonSchema: { properties: Record<string, unknown> } };
+		expect(validator.$jsonSchema.properties.role).toEqual({
+			bsonType: "string",
+			enum: ["user", "admin"]
+		});
+	});
+
+	it("add column enum → column.enum snapshot propagé", () => {
+		const q = mapAdd({
+			op: "ddl",
+			kind: "add-column",
+			target: "users",
+			ifNotExists: false,
+			column: {
+				name: "tier",
+				type: "enum",
+				enumTypeName: "tier_type",
+				enumMembers: ["free", "pro"],
+				nullable: false,
+				unique: false
+			}
+		});
+		expect(q.column).toMatchObject({
+			name: "tier",
+			bsonType: "string",
+			enum: ["free", "pro"]
+		});
+	});
+});

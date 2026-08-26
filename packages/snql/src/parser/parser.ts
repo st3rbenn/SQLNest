@@ -9,6 +9,7 @@ import type {
 	CreateEnumStmt,
 	CreateTableStmt,
 	DDLFieldDef,
+	DDLFieldTypeRef,
 	DeleteStatement,
 	DropColumnStmt,
 	DropIndexStmt,
@@ -1717,16 +1718,18 @@ export const SNQL_TYPE_ALIAS: Readonly<Record<string, SnqlType>> = {
 	boolean: "bool"
 };
 
-function normalizeSnqlType(raw: string, span: Span): SnqlType {
+/**
+ * Résout un ident type en `DDLFieldTypeRef` — soit builtin (matched dans
+ * SNQL_TYPE_ALIAS), soit enum-ref laissé au lower pour lookup via
+ * `schema.enums` (ADR-030 Enum/2). Le parser ne throw plus sur type inconnu :
+ * le lower décide.
+ */
+function parseFieldTypeRef(raw: string): DDLFieldTypeRef {
 	const t = SNQL_TYPE_ALIAS[raw.toLowerCase()];
-	if (t === undefined) {
-		throw new SnqlError(
-			`Type inconnu '${raw}' — types portables : uuid, string(text), int, bigint, decimal(numeric), float, bool, date(timestamp/timestamptz), json(jsonb), array, enum. Alias PG : varchar, int4, int8, jsonb, timestamptz, bigserial, ...`,
-			"parse_ddl_unknown_type",
-			span
-		);
-	}
-	return t;
+	if (t !== undefined) return { kind: "builtin", type: t };
+	// Case-preserving pour enum-ref : `Role` != `role` côté PG (bien que PG
+	// downcase par défaut ; le lower/codegen quote pour préserver).
+	return { kind: "enum-ref", name: raw };
 }
 
 function parseCreateTable(cursor: TokenCursor): CreateTableStmt {
@@ -1837,9 +1840,9 @@ function parseCreateTableField(cursor: TokenCursor): DDLFieldDef {
 	cursor.expect("colon", "':' entre le nom du field et son type");
 	const typeTok = cursor.expect(
 		"ident",
-		"un type SNQL (uuid/string/int/...) ou alias PG (varchar/jsonb/...)"
+		"un type SNQL (uuid/string/int/...), alias PG (varchar/jsonb/...) ou nom d'enum"
 	);
-	const type = normalizeSnqlType(typeTok.value, typeTok.span);
+	const type = parseFieldTypeRef(typeTok.value);
 
 	// Modifiers optionnels : `nullable` | `not null` | `default <expr>` | `unique`
 	let nullable: boolean | undefined;
@@ -1887,6 +1890,7 @@ function parseCreateTableField(cursor: TokenCursor): DDLFieldDef {
 	return {
 		name: nameTok.value,
 		type,
+		typeSpan: typeTok.span,
 		...(nullable !== undefined ? { nullable } : {}),
 		...(defaultExpr !== undefined ? { defaultExpr } : {}),
 		...(unique ? { unique } : {}),
@@ -1968,9 +1972,9 @@ function parseAddColumn(cursor: TokenCursor): AddColumnStmt {
 	const nameTok = cursor.expect("ident", "un nom de colonne après 'add column'");
 	const typeTok = cursor.expect(
 		"ident",
-		"un type SNQL (uuid/string/int/...) ou alias PG (varchar/jsonb/...)"
+		"un type SNQL (uuid/string/int/...), alias PG (varchar/jsonb/...) ou nom d'enum"
 	);
-	const type = normalizeSnqlType(typeTok.value, typeTok.span);
+	const type = parseFieldTypeRef(typeTok.value);
 
 	// Modifiers optionnels — même dispatch que parseCreateTableField.
 	// `unique` sur `add column` = équivaut à créer un UNIQUE INDEX secondaire ;
@@ -2058,6 +2062,7 @@ function parseAddColumn(cursor: TokenCursor): AddColumnStmt {
 	const column: DDLFieldDef = {
 		name: nameTok.value,
 		type,
+		typeSpan: typeTok.span,
 		...(nullable !== undefined ? { nullable } : {}),
 		...(defaultExpr !== undefined ? { defaultExpr } : {}),
 		...(unique ? { unique } : {}),

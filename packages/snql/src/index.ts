@@ -252,6 +252,7 @@ export { inferResultColumns } from "./runtime/infer-column-types";
 export type { ResultColumn, ResultSet } from "./runtime/result";
 export type {
 	Collection,
+	EnumTypeDef,
 	Field,
 	FieldRef,
 	Relation,
@@ -261,3 +262,4 @@ export type {
 	SchemaSource,
 	SnqlType
 } from "./schema/model";
+export { getEnum } from "./schema/model";

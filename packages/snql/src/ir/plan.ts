@@ -550,6 +550,12 @@ export interface CreateTableField {
 	readonly nullable: boolean;
 	readonly unique: boolean;
 	readonly defaultValue?: DdlDefault;
+	// Enum info — présent uniquement si `type === "enum"` résolu depuis
+	// `schema.enums[]` (ADR-030 Enum/2). Snapshot des members au moment du
+	// lower : PG codegen émet `enumTypeName` unquoted, Mongo codegen inline
+	// `{enum: enumMembers}` dans le $jsonSchema, KV enrichit le middleware.
+	readonly enumTypeName?: string;
+	readonly enumMembers?: readonly string[];
 	readonly span?: Span;
 }
 

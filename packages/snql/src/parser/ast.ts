@@ -557,14 +557,24 @@ export type DDLKind =
 	| "create-enum";
 
 /**
+ * Un type de field dans un body `create table` ou dans `add column`. Soit un
+ * builtin `SnqlType`, soit une référence à un enum nommé (ADR-030) — le
+ * parser produit ce shape sans lookup schema ; le lower résout `enum-ref`
+ * via `schema.enums`.
+ */
+export type DDLFieldTypeRef =
+	| { readonly kind: "builtin"; readonly type: import("../schema/model").SnqlType }
+	| { readonly kind: "enum-ref"; readonly name: string };
+
+/**
  * Field d'un `create table` — le body `{ field: type [nullable] [default v] [unique], ... }`
- * (exception D0 ADR-029 à Grammar v2). Le type reste `SnqlType` unifié
- * (`packages/snql/src/schema/model.ts`) — les alias natifs PG (`varchar(N)`,
- * `jsonb`, `timestamptz`, `bigserial`, ...) sont normalisés au lower via D6.
+ * (exception D0 ADR-029 à Grammar v2). Type builtin ou enum-ref
+ * (ADR-030) — la résolution se fait au lower via `schema.enums`.
  */
 export interface DDLFieldDef {
 	readonly name: string;
-	readonly type: import("../schema/model").SnqlType;
+	readonly type: DDLFieldTypeRef;
+	readonly typeSpan: Span;
 	readonly nullable?: boolean;
 	readonly defaultExpr?: Expr;
 	readonly unique?: boolean;

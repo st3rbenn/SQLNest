@@ -173,6 +173,12 @@ function renderKvAddColumn(plan: AddColumnPlan): KvDDLAddColumnQuery {
 		unique: f.unique,
 		...(f.defaultValue !== undefined
 			? { defaultValue: serializeDefault(f.defaultValue) }
+			: {}),
+		...(f.type === "enum" && f.enumTypeName !== undefined
+			? { enumTypeName: f.enumTypeName }
+			: {}),
+		...(f.type === "enum" && f.enumMembers !== undefined
+			? { enum: f.enumMembers }
 			: {})
 	};
 	const backfill = f.defaultValue !== undefined;
@@ -197,7 +203,13 @@ function renderKvCreateTable(plan: CreateTablePlan): KvDDLCreateTableQuery {
 			name: f.name,
 			type: KV_META_TYPE[f.type],
 			nullable: f.nullable,
-			unique: f.unique
+			unique: f.unique,
+			...(f.type === "enum" && f.enumTypeName !== undefined
+				? { enumTypeName: f.enumTypeName }
+				: {}),
+			...(f.type === "enum" && f.enumMembers !== undefined
+				? { enum: f.enumMembers }
+				: {})
 		};
 		return f.defaultValue !== undefined
 			? { ...base, defaultValue: serializeDefault(f.defaultValue) }

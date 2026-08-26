@@ -477,3 +477,57 @@ describe("lower DDL — create enum (ADR-030 Enum/1)", () => {
 		});
 	});
 });
+
+describe("lower DDL — resolve type field via schema.enums (Enum/2)", () => {
+	const schemaWithEnum: import("../schema/model").SchemaModel = {
+		engine: "postgres",
+		collections: [],
+		relations: [],
+		enums: [{ name: "role_type", members: ["user", "admin"], source: "declared" }]
+	};
+
+	function lowerWithSchema(source: string): CreateTablePlan {
+		const parsed = parse(tokenize(source)) as DDLStatement;
+		const plan = lowerDDL(parsed, schemaWithEnum);
+		if (plan.kind !== "create-table") {
+			throw new Error(`expected create-table plan, got ${plan.kind}`);
+		}
+		return plan;
+	}
+
+	it("resolve `type: role_type` → SnqlType enum + enumTypeName + enumMembers", () => {
+		const plan = lowerWithSchema(
+			"create table users { id: uuid, role: role_type }"
+		);
+		expect(plan.fields[1]).toMatchObject({
+			name: "role",
+			type: "enum",
+			enumTypeName: "role_type",
+			enumMembers: ["user", "admin"]
+		});
+	});
+
+	it("refuse `type: unknown_enum` avec liste enums en scope", () => {
+		expect(() =>
+			lowerWithSchema("create table t { role: unknown_enum }")
+		).toThrow(/inconnu.*Enums disponibles.*role_type/);
+	});
+
+	it("builtin passe-plat inchangé quand schema.enums peuplé", () => {
+		const plan = lowerWithSchema("create table t { name: text }");
+		expect(plan.fields[0]).toMatchObject({ name: "name", type: "string" });
+		expect(plan.fields[0]?.enumTypeName).toBeUndefined();
+	});
+
+	it("add column enum-ref → resolved dans le CreateTableField", () => {
+		const parsed = parse(tokenize("add column role role_type into users")) as DDLStatement;
+		const plan = lowerDDL(parsed, schemaWithEnum);
+		if (plan.kind !== "add-column") throw new Error("expected add-column");
+		expect(plan.column).toMatchObject({
+			name: "role",
+			type: "enum",
+			enumTypeName: "role_type",
+			enumMembers: ["user", "admin"]
+		});
+	});
+});

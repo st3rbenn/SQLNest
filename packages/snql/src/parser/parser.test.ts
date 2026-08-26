@@ -143,8 +143,8 @@ describe("create table DDL (ADR-029)", () => {
 			target: "users",
 			ifNotExists: false,
 			fields: [
-				{ name: "id", type: "uuid" },
-				{ name: "email", type: "string" }
+				{ name: "id", type: { kind: "builtin", type: "uuid" } },
+				{ name: "email", type: { kind: "builtin", type: "string" } }
 			]
 		});
 	});
@@ -181,25 +181,27 @@ describe("create table DDL (ADR-029)", () => {
 			}`
 		);
 		expect((s as { fields: unknown[] }).fields).toMatchObject([
-			{ name: "id", type: "uuid", unique: true },
-			{ name: "email", type: "string", nullable: false },
-			{ name: "age", type: "int", nullable: true },
-			{ name: "tier", type: "string" }
+			{ name: "id", type: { kind: "builtin", type: "uuid" }, unique: true },
+			{ name: "email", type: { kind: "builtin", type: "string" }, nullable: false },
+			{ name: "age", type: { kind: "builtin", type: "int" }, nullable: true },
+			{ name: "tier", type: { kind: "builtin", type: "string" } }
 		]);
 	});
 
 	it("parse alias types PG paste-friendly (D6)", () => {
 		const s = stmt(
 			"create table t { a: varchar, b: jsonb, c: timestamptz, d: bigserial, e: int8, f: boolean }"
-		) as { fields: readonly { type: string }[] };
-		expect(s.fields.map((f) => f.type)).toEqual([
-			"string",
-			"json",
-			"date",
-			"bigint",
-			"bigint",
-			"bool"
-		]);
+		) as { fields: readonly { type: { kind: "builtin"; type: string } | { kind: "enum-ref"; name: string } }[] };
+		expect(
+			s.fields.map((f) => (f.type.kind === "builtin" ? f.type.type : null))
+		).toEqual(["string", "json", "date", "bigint", "bigint", "bool"]);
+	});
+
+	it("Enum/2 : type non-builtin devient enum-ref (le lower valide)", () => {
+		const s = stmt("create table t { role: role_type }") as {
+			fields: readonly { type: unknown }[];
+		};
+		expect(s.fields[0]?.type).toEqual({ kind: "enum-ref", name: "role_type" });
 	});
 
 	it("préserve `create { ... } into t` insert alias (dispatch DDL non-invasif)", () => {
@@ -209,10 +211,10 @@ describe("create table DDL (ADR-029)", () => {
 		});
 	});
 
-	it("refuse type inconnu", () => {
-		expect(() => stmt("create table t { a: fakeType }")).toThrow(
-			/parse_ddl_unknown_type|Type inconnu/
-		);
+	it("Enum/2 : type inconnu accepté au parser (le lower décide builtin/enum)", () => {
+		// Le parser laisse passer tout ident lowercase — le refus final vient
+		// du lower quand aucun enum match dans schema.enums (voir lower-ddl.test).
+		expect(() => stmt("create table t { a: fakeType }")).not.toThrow();
 	});
 
 	it("refuse 'primary' sans 'key'", () => {
@@ -314,7 +316,7 @@ describe("add column DDL (ADR-029 DDL/2)", () => {
 			operation: "ddl",
 			kind: "add-column",
 			target: "users",
-			column: { name: "age", type: "int" }
+			column: { name: "age", type: { kind: "builtin", type: "int" } }
 		});
 	});
 
@@ -326,7 +328,7 @@ describe("add column DDL (ADR-029 DDL/2)", () => {
 			target: "users",
 			column: {
 				name: "tier",
-				type: "string",
+				type: { kind: "builtin", type: "string" },
 				nullable: false
 			}
 		});
@@ -349,7 +351,13 @@ describe("add column DDL (ADR-029 DDL/2)", () => {
 
 	it("parse alias types PG paste-friendly (D6) sur add column", () => {
 		expect(stmt("add column at timestamptz into users")).toMatchObject({
-			column: { name: "at", type: "date" }
+			column: { name: "at", type: { kind: "builtin", type: "date" } }
+		});
+	});
+
+	it("Enum/2 : add column type enum-ref", () => {
+		expect(stmt("add column role role_type into users")).toMatchObject({
+			column: { name: "role", type: { kind: "enum-ref", name: "role_type" } }
 		});
 	});
 
@@ -366,10 +374,8 @@ describe("add column DDL (ADR-029 DDL/2)", () => {
 		});
 	});
 
-	it("refuse type inconnu", () => {
-		expect(() => stmt("add column x fakeType into t")).toThrow(
-			/parse_ddl_unknown_type|Type inconnu/
-		);
+	it("Enum/2 : add column type inconnu accepté au parser (lower décide)", () => {
+		expect(() => stmt("add column x fakeType into t")).not.toThrow();
 	});
 
 	it("refuse missing 'into'", () => {

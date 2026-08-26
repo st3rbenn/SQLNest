@@ -43,13 +43,13 @@ const IDENT_REGEX = /^[A-Za-z_][A-Za-z0-9_]{0,62}$/;
 
 export function lowerDDL(
 	statement: DDLStatement,
-	_schema?: SchemaModel
+	schema?: SchemaModel
 ): DDLPlan {
 	if (statement.kind === "create-table") {
-		return lowerCreateTable(statement);
+		return lowerCreateTable(statement, schema);
 	}
 	if (statement.kind === "add-column") {
-		return lowerAddColumn(statement);
+		return lowerAddColumn(statement, schema);
 	}
 	if (statement.kind === "add-index" || statement.kind === "add-unique-index") {
 		return lowerAddIndex(statement);
@@ -199,16 +199,31 @@ function lowerDropIndex(stmt: DropIndexStmt): DropIndexPlan {
 	};
 }
 
-function lowerAddColumn(stmt: AddColumnStmt): AddColumnPlan {
+function lowerAddColumn(
+	stmt: AddColumnStmt,
+	schema?: SchemaModel
+): AddColumnPlan {
 	assertIdent(stmt.target, "target");
 	assertIdent(stmt.column.name, "field");
+	const resolved = resolveFieldType(
+		stmt.column.type,
+		stmt.column.name,
+		schema,
+		stmt.column.typeSpan
+	);
 	const nullable = stmt.column.nullable ?? false;
 	const unique = stmt.column.unique ?? false;
 	const base: CreateTableField = {
 		name: stmt.column.name,
-		type: stmt.column.type,
+		type: resolved.type,
 		nullable,
 		unique,
+		...(resolved.enumTypeName !== undefined
+			? { enumTypeName: resolved.enumTypeName }
+			: {}),
+		...(resolved.enumMembers !== undefined
+			? { enumMembers: resolved.enumMembers }
+			: {}),
 		...(stmt.column.span !== undefined ? { span: stmt.column.span } : {})
 	};
 	const column: CreateTableField =
@@ -218,7 +233,7 @@ function lowerAddColumn(stmt: AddColumnStmt): AddColumnPlan {
 					defaultValue: lowerDefault(
 						stmt.column.defaultExpr,
 						stmt.column.name,
-						stmt.column.type
+						resolved.type
 					)
 				}
 			: base;
@@ -232,7 +247,10 @@ function lowerAddColumn(stmt: AddColumnStmt): AddColumnPlan {
 	};
 }
 
-function lowerCreateTable(stmt: CreateTableStmt): CreateTablePlan {
+function lowerCreateTable(
+	stmt: CreateTableStmt,
+	schema?: SchemaModel
+): CreateTablePlan {
 	assertIdent(stmt.target, "target");
 	if (stmt.fields.length === 0) {
 		throw new SnqlError(
@@ -243,17 +261,24 @@ function lowerCreateTable(stmt: CreateTableStmt): CreateTablePlan {
 	}
 	const fields: CreateTableField[] = stmt.fields.map((f) => {
 		assertIdent(f.name, "field");
+		const resolved = resolveFieldType(f.type, f.name, schema, f.typeSpan);
 		const nullable = f.nullable ?? false;
 		const unique = f.unique ?? false;
 		const base: CreateTableField = {
 			name: f.name,
-			type: f.type,
+			type: resolved.type,
 			nullable,
 			unique,
+			...(resolved.enumTypeName !== undefined
+				? { enumTypeName: resolved.enumTypeName }
+				: {}),
+			...(resolved.enumMembers !== undefined
+				? { enumMembers: resolved.enumMembers }
+				: {}),
 			...(f.span !== undefined ? { span: f.span } : {})
 		};
 		if (f.defaultExpr === undefined) return base;
-		const value = lowerDefault(f.defaultExpr, f.name, f.type);
+		const value = lowerDefault(f.defaultExpr, f.name, resolved.type);
 		return { ...base, defaultValue: value };
 	});
 	if (stmt.primaryKey !== undefined) {
@@ -269,6 +294,40 @@ function lowerCreateTable(stmt: CreateTableStmt): CreateTablePlan {
 		...(stmt.span !== undefined ? { span: stmt.span } : {})
 	};
 	return plan;
+}
+
+/**
+ * Résout un `DDLFieldTypeRef` (parser output) vers le shape enrichi du plan.
+ * Builtin → passe-plat SnqlType. Enum-ref → lookup `schema.enums[name]` :
+ * trouvé → SnqlType `enum` + snapshot enumTypeName + enumMembers. Absent →
+ * refus typé avec liste des enums en scope (aide user).
+ */
+function resolveFieldType(
+	ref: import("../parser/ast").DDLFieldTypeRef,
+	fieldName: string,
+	schema: SchemaModel | undefined,
+	typeSpan: import("../lexer/token").Span
+): {
+	type: SnqlType;
+	enumTypeName?: string;
+	enumMembers?: readonly string[];
+} {
+	if (ref.kind === "builtin") return { type: ref.type };
+	assertIdent(ref.name, "enum name");
+	const enumDef = schema?.enums?.find((e) => e.name === ref.name);
+	if (enumDef === undefined) {
+		const available = schema?.enums?.map((e) => e.name).join(", ") ?? "(aucun)";
+		throw new SnqlError(
+			`Type '${ref.name}' du field '${fieldName}' inconnu — pas un builtin SNQL et aucun enum '${ref.name}' n'existe dans le schema. Enums disponibles : ${available}`,
+			"lower_ddl_unknown_type",
+			typeSpan
+		);
+	}
+	return {
+		type: "enum",
+		enumTypeName: enumDef.name,
+		enumMembers: enumDef.members
+	};
 }
 
 function assertIdent(

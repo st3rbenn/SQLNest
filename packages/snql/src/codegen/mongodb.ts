@@ -6,6 +6,7 @@ import type {
 	CastTarget,
 	CompareOp,
 	CreateEnumPlan,
+	CreateTableField,
 	CreateTablePlan,
 	DDLPlan,
 	DropColumnPlan,
@@ -2779,6 +2780,23 @@ const MONGO_BSON_TYPE: Readonly<Record<SnqlType, string | null>> = {
 };
 
 /**
+ * Rend une property $jsonSchema pour un field du plan. Type builtin →
+ * `{bsonType}`, enum (ADR-030 Enum/2) → `{bsonType: "string", enum: [...]}`
+ * — Mongo enforce nativement le enum dans le validator.
+ */
+function buildMongoFieldProperty(
+	f: CreateTableField
+): Record<string, unknown> {
+	const bson = MONGO_BSON_TYPE[f.type];
+	const property: Record<string, unknown> = {};
+	if (bson !== null) property.bsonType = bson;
+	if (f.type === "enum" && f.enumMembers !== undefined) {
+		property.enum = f.enumMembers;
+	}
+	return property;
+}
+
+/**
  * Rend un `create table` en `MongoDDLQuery` (ADR-029 D13 + validator BSON).
  * L'adapter runtime :
  *  1. `db.createCollection(collection, { validator: {$jsonSchema} })` (D3 catch
@@ -2818,10 +2836,7 @@ function renderMongoCreateTable(
 	const required: string[] = [];
 	for (const f of plan.fields) {
 		if (primaryKeyAlias !== undefined && f.name === primaryKeyAlias) continue;
-		const bson = MONGO_BSON_TYPE[f.type];
-		const property: Record<string, unknown> = {};
-		if (bson !== null) property.bsonType = bson;
-		properties[f.name] = property;
+		properties[f.name] = buildMongoFieldProperty(f);
 		if (!f.nullable) required.push(f.name);
 	}
 	const jsonSchema: Record<string, unknown> = {
@@ -2998,7 +3013,10 @@ function renderMongoAddColumn(plan: AddColumnPlan): MongoDDLAddColumnQuery {
 		name: f.name,
 		bsonType: bson,
 		required,
-		...(f.defaultValue !== undefined ? { defaultValue: nativeDefault } : {})
+		...(f.defaultValue !== undefined ? { defaultValue: nativeDefault } : {}),
+		...(f.type === "enum" && f.enumMembers !== undefined
+			? { enum: f.enumMembers }
+			: {})
 	};
 	const index: MongoIndexSpec | undefined = f.unique
 		? { keys: { [f.name]: 1 }, options: { unique: true, name: `unique_${f.name}` } }

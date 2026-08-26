@@ -951,9 +951,23 @@ const PG_DDL_TYPE: Readonly<Record<SnqlType, string>> = {
 	json: "jsonb",
 	array: "jsonb",
 	uuid: "uuid",
+	// Fallback si `type: "enum"` sans `enumTypeName` (ne devrait pas arriver
+	// depuis le lower Enum/2, mais garde-fou). Le vrai enum-ref émet
+	// `quoteIdent(enumTypeName)` via pgFieldTypeSql().
 	enum: "text",
 	unknown: "text"
 };
+
+/**
+ * Rend le SQL type d'un `CreateTableField`. Pour un enum (ADR-030 Enum/2),
+ * émet l'enum name quoted (ex : `"role_type"`), sinon lookup PG_DDL_TYPE.
+ */
+function pgFieldTypeSql(f: import("../ir/plan").CreateTableField): string {
+	if (f.type === "enum" && f.enumTypeName !== undefined) {
+		return quoteIdent(f.enumTypeName);
+	}
+	return PG_DDL_TYPE[f.type];
+}
 
 /**
  * PG rejette les paramètres bindés `$N` dans les statements DDL (CREATE TABLE,
@@ -999,10 +1013,7 @@ function pgInlineDefault(value: DdlDefault): string {
 function renderCreateTable(plan: CreateTablePlan): NativeQuery {
 	const cols: string[] = [];
 	for (const f of plan.fields) {
-		const parts: string[] = [
-			quoteIdent(f.name),
-			PG_DDL_TYPE[f.type]
-		];
+		const parts: string[] = [quoteIdent(f.name), pgFieldTypeSql(f)];
 		if (!f.nullable) parts.push("NOT NULL");
 		if (f.unique) parts.push("UNIQUE");
 		if (f.defaultValue !== undefined) {
@@ -1060,7 +1071,7 @@ function renderCreateTable(plan: CreateTablePlan): NativeQuery {
  */
 function renderAddColumn(plan: AddColumnPlan): NativeQuery {
 	const f = plan.column;
-	const parts: string[] = [quoteIdent(f.name), PG_DDL_TYPE[f.type]];
+	const parts: string[] = [quoteIdent(f.name), pgFieldTypeSql(f)];
 	if (!f.nullable) parts.push("NOT NULL");
 	if (f.unique) parts.push("UNIQUE");
 	if (f.defaultValue !== undefined) {

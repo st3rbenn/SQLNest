@@ -427,3 +427,50 @@ describe("codegen PG — create enum (ADR-030 Enum/1.5)", () => {
 		);
 	});
 });
+
+describe("codegen PG — enum type dans create table + add column (Enum/2.5)", () => {
+	it("create table avec field enum → column type = enum name quoted", () => {
+		const q = mapDDL({
+			op: "ddl",
+			kind: "create-table",
+			target: "users",
+			ifNotExists: false,
+			fields: [
+				{ name: "id", type: "uuid", nullable: false, unique: false },
+				{
+					name: "role",
+					type: "enum",
+					enumTypeName: "role_type",
+					enumMembers: ["user", "admin"],
+					nullable: false,
+					unique: false
+				}
+			]
+		});
+		if (q.kind !== "sql") throw new Error("attendu sql");
+		expect(q.text).toBe(
+			`CREATE TABLE "users" ("id" uuid NOT NULL, "role" "role_type" NOT NULL)`
+		);
+	});
+
+	it("add column enum → ALTER ADD COLUMN avec type enum name", () => {
+		const q = mapDDL({
+			op: "ddl",
+			kind: "add-column",
+			target: "users",
+			ifNotExists: false,
+			column: {
+				name: "tier",
+				type: "enum",
+				enumTypeName: "tier_type",
+				enumMembers: ["free", "pro"],
+				nullable: true,
+				unique: false
+			}
+		});
+		if (q.kind !== "sql") throw new Error("attendu sql");
+		expect(q.text).toBe(
+			`ALTER TABLE "users" ADD COLUMN "tier" "tier_type"`
+		);
+	});
+});

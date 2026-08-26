@@ -1,5 +1,6 @@
 import type {
 	Collection,
+	EnumTypeDef,
 	Field,
 	Relation,
 	SchemaModel,
@@ -189,7 +190,10 @@ export async function introspectMongo(
 		const infos = await db.listCollections({}, { nameOnly: true }).toArray();
 		const names = infos
 			.map((info) => info.name)
-			.filter((name) => !name.startsWith("system."));
+			// `system.*` = Mongo internal ; `_snql_enums` = metadata SQLNest
+			// (introspecté séparément vers `schema.enums`, jamais comme collection
+			// user).
+			.filter((name) => !name.startsWith("system.") && name !== "_snql_enums");
 
 		const collections = await Promise.all(
 			names.map(async (name) => {
@@ -201,10 +205,35 @@ export async function introspectMongo(
 			})
 		);
 
+		// Enums stockés dans metadata `_snql_enums` (ADR-030 Enum/1). Best-effort :
+		// collection absente = enums vide ; permission denied = enums vide (le user
+		// n'a peut-être pas les droits sur _snql_enums mais tout le reste marche).
+		const enumsList: EnumTypeDef[] = [];
+		try {
+			const docs = await db
+				.collection<{ _id: string; members: readonly string[] }>(
+					"_snql_enums"
+				)
+				.find({})
+				.toArray();
+			for (const doc of docs) {
+				if (typeof doc._id === "string" && Array.isArray(doc.members)) {
+					enumsList.push({
+						name: doc._id,
+						members: doc.members,
+						source: "declared"
+					});
+				}
+			}
+		} catch {
+			// silence — enums restent vide
+		}
+
 		return {
 			engine: "mongodb",
 			collections,
-			relations: inferRelations(collections)
+			relations: inferRelations(collections),
+			...(enumsList.length > 0 ? { enums: enumsList } : {})
 		};
 	} catch (cause) {
 		throw new EngineIntrospectionError("Introspection MongoDB échouée", {
