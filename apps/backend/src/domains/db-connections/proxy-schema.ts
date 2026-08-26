@@ -80,6 +80,7 @@ export const SnqlColumnType = z.enum([
 	"json",
 	"array",
 	"uuid",
+	"enum",
 	"unknown"
 ]);
 
