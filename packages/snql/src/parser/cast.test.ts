@@ -192,16 +192,20 @@ describe("parser cast — erreurs typées", () => {
 		fails("get t pick cast(x as 42) as y", "parse_cast_target_expected");
 	});
 
-	it("cast(x as decimal) → parse_cast_target_unknown", () => {
-		fails("get t pick cast(x as decimal) as y", "parse_cast_target_unknown");
+	// Enum/2b : le parser accepte tout ident lowercase comme target — le lower
+	// tranche (builtin CAST_TARGETS ou enum-ref via schema.enums). Ces alias
+	// SQL non-canoniques (decimal/integer/string) sont refusés au lower, pas
+	// au parser. Tests migrés dans lower.test.ts au niveau `lower_cast_unknown_target`.
+	it("cast(x as decimal) est accepté au parser (lower décide)", () => {
+		expect(() => ast("get t pick cast(x as decimal) as y")).not.toThrow();
 	});
 
-	it("cast(x as integer) → parse_cast_target_unknown (alias SQL refusé)", () => {
-		fails("get t pick cast(x as integer) as y", "parse_cast_target_unknown");
+	it("cast(x as integer) est accepté au parser (lower décide)", () => {
+		expect(() => ast("get t pick cast(x as integer) as y")).not.toThrow();
 	});
 
-	it("cast(x as string) → parse_cast_target_unknown (alias SQL refusé)", () => {
-		fails("get t pick cast(x as string) as y", "parse_cast_target_unknown");
+	it("cast(x as string) est accepté au parser (lower décide)", () => {
+		expect(() => ast("get t pick cast(x as string) as y")).not.toThrow();
 	});
 
 	it("cast(x as int, y) → parse_cast_extra_args", () => {

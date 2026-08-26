@@ -634,4 +634,52 @@ describe("completeSnql — DDL/5 (ADR-029)", () => {
 			expect(labels("drop index idx_x from ")).toContain("users");
 		});
 	});
+
+	describe("Enum/2b — autocomplete type propose enums en scope (ADR-030)", () => {
+		const schemaWithEnums: SchemaModel = {
+			engine: "postgres",
+			collections: [
+				{ name: "users", fields: [], source: "declared" }
+			],
+			relations: [],
+			enums: [
+				{ name: "role_type", members: ["user", "admin"], source: "declared" },
+				{ name: "status_type", members: ["active", "archived"], source: "declared" }
+			]
+		};
+
+		function labelsWith(src: string): string[] {
+			return completeSnql(src, src.length, schemaWithEnums).options.map(
+				(o) => o.label
+			);
+		}
+
+		it("`create table t { role: ` propose builtins + enums", () => {
+			const opts = labelsWith("create table t { role: ");
+			// Builtins encore présents
+			expect(opts).toContain("uuid");
+			expect(opts).toContain("text");
+			// Enums en scope
+			expect(opts).toContain("role_type");
+			expect(opts).toContain("status_type");
+		});
+
+		it("`add column role ` propose builtins + enums", () => {
+			const opts = labelsWith("add column role ");
+			expect(opts).toContain("uuid");
+			expect(opts).toContain("role_type");
+			expect(opts).toContain("status_type");
+		});
+
+		it("enum a type: 'type' pour differencier visuellement des builtins", () => {
+			const result = completeSnql(
+				"create table t { role: ",
+				"create table t { role: ".length,
+				schemaWithEnums
+			);
+			const roleType = result.options.find((o) => o.label === "role_type");
+			expect(roleType?.type).toBe("type");
+			expect(roleType?.detail).toBe("enum (2 members)");
+		});
+	});
 });

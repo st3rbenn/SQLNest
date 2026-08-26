@@ -24,7 +24,8 @@ export type SnqlCompletionType =
 	| "collection"
 	| "field"
 	| "relation"
-	| "alias";
+	| "alias"
+	| "type";
 
 export interface SnqlCompletion {
 	/** Ce qui s'affiche dans la liste. */
@@ -82,7 +83,9 @@ const PRIMARY_VERBS: readonly {
  * exporté par parser.ts — évite la dérive complete ↔ parser. Ordre : d'abord
  * canoniques puis aliases PG paste-friendly, séparés visuellement par `detail`.
  */
-function ddlTypeSuggestions(): readonly SnqlCompletion[] {
+function ddlTypeSuggestions(
+	schema?: SchemaModel
+): readonly SnqlCompletion[] {
 	const canonicals: ReadonlySet<string> = new Set([
 		"string",
 		"int",
@@ -97,13 +100,24 @@ function ddlTypeSuggestions(): readonly SnqlCompletion[] {
 		"enum",
 		"unknown"
 	]);
-	return Object.keys(SNQL_TYPE_ALIAS).map((label) => ({
-		label,
-		type: "keyword" as const,
-		detail: canonicals.has(label)
-			? "type SNQL"
-			: `alias PG → ${SNQL_TYPE_ALIAS[label]}`
-	}));
+	const builtins: SnqlCompletion[] = Object.keys(SNQL_TYPE_ALIAS).map(
+		(label) => ({
+			label,
+			type: "keyword" as const,
+			detail: canonicals.has(label)
+				? "type SNQL"
+				: `alias PG → ${SNQL_TYPE_ALIAS[label]}`
+		})
+	);
+	// Enums en scope (ADR-030 Enum/2b) — proposés en plus des builtins.
+	// `type: "type"` pour distinguer visuellement d'un keyword.
+	const enums: SnqlCompletion[] =
+		schema?.enums?.map((e) => ({
+			label: e.name,
+			type: "type" as const,
+			detail: `enum (${e.members.length} members)`
+		})) ?? [];
+	return [...builtins, ...enums];
 }
 
 /** Modifiers de field (create table body + add column) — ADR-029 D0. */
@@ -1423,7 +1437,7 @@ function ddlContextOptions(
 	if (head.kind === "verb" && headLower === "create" && toks.length >= 2) {
 		const t1 = toks[1];
 		if (t1 === undefined || t1.value.toLowerCase() !== "table") return null;
-		return createTableCompletions(toks);
+		return createTableCompletions(toks, schema);
 	}
 
 	// === add column / add index / add unique index === (verb add + soft-ident)
@@ -1456,7 +1470,8 @@ function ddlContextOptions(
 
 /** Complétions pour `create table X { … }` (DDL/1). */
 function createTableCompletions(
-	toks: readonly Token[]
+	toks: readonly Token[],
+	schema: SchemaModel
 ): readonly SnqlCompletion[] {
 	const last = toks[toks.length - 1];
 	if (last === undefined) return [];
@@ -1490,8 +1505,8 @@ function createTableCompletions(
 		return [keyword("primary")];
 	}
 
-	// `{ col :` → types SNQL + aliases (D6).
-	if (last.kind === "colon") return ddlTypeSuggestions();
+	// `{ col :` → types SNQL + aliases (D6) + enums en scope (ADR-030 Enum/2b).
+	if (last.kind === "colon") return ddlTypeSuggestions(schema);
 
 	// `{ col: uuid |` OU `{ col: uuid nullable |` → modifiers + `,` + `primary`.
 	// Détection : dernier token = ident de type, ou modifier connu.
@@ -1596,9 +1611,9 @@ function addColumnCompletions(
 	// `add column |` → nom de nouvelle col (libre).
 	if (toks.length === 2) return [];
 
-	// `add column X |` → types SNQL + aliases (D6, corpus `add column X TYPE`).
+	// `add column X |` → types SNQL + aliases (D6) + enums en scope (Enum/2b).
 	if (toks.length === 3 && last.kind === "ident") {
-		return ddlTypeSuggestions();
+		return ddlTypeSuggestions(schema);
 	}
 
 	// `add column X TYPE |` → modifiers + `into`.

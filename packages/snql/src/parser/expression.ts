@@ -560,14 +560,13 @@ function parseCastBody(cursor: TokenCursor, nameSpan: Span): Expr {
 		);
 	}
 	cursor.next();
-	const targetName = targetTok.value.toLowerCase();
-	if (!CAST_TARGETS.has(targetName as CastTarget)) {
-		throw new SnqlError(
-			`Type '${targetTok.value}' inconnu — canoniques: int, float, text, bool, date, timestamp, json`,
-			"parse_cast_target_unknown",
-			targetTok.span
-		);
-	}
+	// Case preservation : builtins CAST_TARGETS sont lowercase, un enum name
+	// peut être arbitraire (PascalCase/snake_case, ADR-030 Q1 tranché libre).
+	// Le lower dispatche builtin vs enum-ref via `CAST_TARGETS.has(target)`.
+	const rawTarget = targetTok.value;
+	const targetName = CAST_TARGETS.has(rawTarget.toLowerCase() as CastTarget)
+		? rawTarget.toLowerCase()
+		: rawTarget;
 	const afterTarget = cursor.peek();
 	if (afterTarget.kind === "comma") {
 		throw new SnqlError(

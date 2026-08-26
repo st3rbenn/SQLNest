@@ -2734,15 +2734,40 @@ function lowerExpr(expr: Expr): PlanExpr {
 			return { kind: "exists", subplan: subPlan, span: expr.span };
 		}
 		case "cast": {
-			// Défense-en-profondeur : le parser filtre déjà via CAST_TARGETS, mais un
-			// PlanExpr construit à la main (tests, futur workflow) pourrait passer un
-			// target invalide.
-			if (!CAST_TARGETS.has(expr.target)) {
-				throw new SnqlError(
-					`Type de cast '${expr.target}' hors canoniques (int, float, text, bool, date, timestamp, json)`,
-					"lower_cast_unknown_target",
-					expr.targetSpan
-				);
+			// Le parser accepte tout ident lowercase — le lower dispatche
+			// builtin (CAST_TARGETS) vs enum-ref (via schema.enums, ADR-030
+			// Enum/2b). Refuse typé si ni builtin ni enum connu.
+			const target = expr.target;
+			if (!CAST_TARGETS.has(target as CastTarget)) {
+				const enumDef = moduleSchema?.enums?.find((e) => e.name === target);
+				if (enumDef === undefined) {
+					const enumsAvail =
+						moduleSchema?.enums?.map((e) => e.name).join(", ") ?? "(aucun)";
+					throw new SnqlError(
+						`Type de cast '${target}' inconnu — canoniques builtins (int, float, text, bool, date, timestamp, json) ou enums en scope (${enumsAvail})`,
+						"lower_cast_unknown_target",
+						expr.targetSpan
+					);
+				}
+				// Cast vers enum — valide member si operand est un string literal.
+				const operand = lowerExpr(expr.operand);
+				if (
+					operand.kind === "literal" &&
+					typeof operand.value === "string" &&
+					!enumDef.members.includes(operand.value)
+				) {
+					throw new SnqlError(
+						`'${operand.value}' n'est pas un member de l'enum '${enumDef.name}' — valid : ${enumDef.members.join(", ")}`,
+						"lower_cast_enum_invalid_member",
+						operand.span ?? expr.span
+					);
+				}
+				return {
+					kind: "cast",
+					target: target as CastTarget,
+					operand,
+					span: operand.span ?? expr.span
+				};
 			}
 			const operand = lowerExpr(expr.operand);
 			// cast(<string literal> as json) : parse au lower

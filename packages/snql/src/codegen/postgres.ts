@@ -1255,10 +1255,16 @@ function renderExpr(expr: PlanExpr, params: ParamList): string {
 					: {})
 			}) as string;
 		}
-		case "cast":
+		case "cast": {
 			// SQL standard : `CAST(x AS T)` — préféré à `x::T` pour la lisibilité
-			// (idiome portable, aligné avec la surface SNQL).
-			return `CAST(${renderExpr(expr.operand, params)} AS ${PG_CAST_TYPE[expr.target]})`;
+			// (idiome portable, aligné avec la surface SNQL). Enum-ref (ADR-030
+			// Enum/2b) : target absent des builtins → assume enum, émettre
+			// `CAST(x AS "enum_name")` quoted pour préserver casing (PG catalog
+			// downcase par défaut ; quoted force le lookup exact).
+			const pgType = PG_CAST_TYPE[expr.target];
+			const targetSql = pgType ?? quoteIdent(expr.target);
+			return `CAST(${renderExpr(expr.operand, params)} AS ${targetSql})`;
+		}
 		case "object": {
 			// jsonb_build_object($1::text, $2::TYPE, $3::text, $4::TYPE, ...) —
 			// clés ET valeurs bindées (anti-injection sur clés user-controlled type

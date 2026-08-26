@@ -2651,6 +2651,12 @@ export function mongoRenderCast(
 	operandIsField: boolean
 ): unknown {
 	if (target === "json") return inputExpr;
+	// Enum-ref (ADR-030 Enum/2b) — Mongo n'a pas de type cast SQL, la
+	// validation member est faite au lower + le validator $jsonSchema enum
+	// des colonnes typées enum enforce à l'insert. Passe-plat côté agrégation.
+	if (MONGO_CAST_TYPE[target as Exclude<CastTarget, "json">] === undefined) {
+		return inputExpr;
+	}
 	const wrapped = operandIsField ? { $ifNull: [inputExpr, null] } : inputExpr;
 	if (target === "date") {
 		return {

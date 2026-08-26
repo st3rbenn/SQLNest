@@ -157,3 +157,47 @@ describe("lower cast — insert values restent literal-only", () => {
 		expect(() => lowerMutation(stmt)).toThrow(/literal|littéral/i);
 	});
 });
+
+describe("lower cast — enum target (ADR-030 Enum/2b)", () => {
+	const schemaWithEnum: import("../schema/model").SchemaModel = {
+		engine: "postgres",
+		collections: [{ name: "t", fields: [{ name: "x", type: "string", nullable: false, source: "declared" }], source: "declared" }],
+		relations: [],
+		enums: [{ name: "role_type", members: ["user", "admin"], source: "declared" }]
+	};
+
+	it("cast(\"user\" as role_type) — accepté, member valide", () => {
+		const stmt = parse(tokenize('get t pick cast("user" as role_type) as r'));
+		expect(() => lower(stmt, schemaWithEnum)).not.toThrow();
+	});
+
+	it("cast(\"wrong\" as role_type) — refusé, member invalide", () => {
+		const stmt = parse(tokenize('get t pick cast("wrong" as role_type) as r'));
+		try {
+			lower(stmt, schemaWithEnum);
+			throw new Error("SnqlError attendu");
+		} catch (e) {
+			if (!(e instanceof SnqlError)) throw e;
+			expect(e.code).toBe("lower_cast_enum_invalid_member");
+			expect(e.message).toContain("wrong");
+			expect(e.message).toContain("role_type");
+		}
+	});
+
+	it("cast(field_ref as role_type) — accepté sans validation lower-time", () => {
+		const stmt = parse(tokenize("get t pick cast(x as role_type) as r"));
+		expect(() => lower(stmt, schemaWithEnum)).not.toThrow();
+	});
+
+	it("cast(x as unknown_enum) — refusé, enum inconnu", () => {
+		const stmt = parse(tokenize("get t pick cast(x as unknown_enum) as r"));
+		try {
+			lower(stmt, schemaWithEnum);
+			throw new Error("SnqlError attendu");
+		} catch (e) {
+			if (!(e instanceof SnqlError)) throw e;
+			expect(e.code).toBe("lower_cast_unknown_target");
+			expect(e.message).toMatch(/unknown_enum.*role_type/);
+		}
+	});
+});
