@@ -198,10 +198,13 @@ function resolveProjectField(
 	// on mappe vers SnqlType plutôt que de perdre l'info en 'unknown'. Un cast
 	// est non-null par contrat sauf si son operand est NULL — au niveau colonne,
 	// on marque nullable=true pour ne pas mentir (l'operand peut être NULL).
+	// Enum-ref (ADR-030 Enum/2b) : target hors 7 builtins → SnqlType "enum"
+	// (l'introspection propage le enumTypeName séparément si besoin).
 	if (field.expr?.kind === "cast") {
+		const inferred = CAST_TO_SNQL_TYPE[field.expr.target] ?? "enum";
 		return {
 			name: outputName,
-			type: CAST_TO_SNQL_TYPE[field.expr.target],
+			type: inferred,
 			nullable: true,
 			collection: ""
 		};
