@@ -9,7 +9,7 @@ import type {
 	PlanProjectField,
 	PlanSortKey
 } from "../ir/plan";
-import { linearize, requiredCapability } from "../ir/plan";
+import { CAST_TARGETS, linearize, requiredCapability } from "../ir/plan";
 import type { Span } from "../lexer/token";
 import type { Capabilities } from "./capabilities";
 import {
@@ -296,6 +296,10 @@ function assertCastTargetsSupported(
 ): void {
 	const unsupported = new Map<CastTarget, Span | undefined>();
 	visitPlanCasts(plan, (target, span) => {
+		// Enum-ref (ADR-030 Enum/2b) — target hors CAST_TARGETS builtins :
+		// assume enum, supporté sur tous les engines (PG natif CAST AS "e",
+		// Mongo/KV passe-plat car validator $jsonSchema enforce à l'insert).
+		if (!CAST_TARGETS.has(target)) return;
 		if (!capabilities.castTargets.has(target) && !unsupported.has(target)) {
 			unsupported.set(target, span);
 		}
@@ -412,6 +416,8 @@ export function assertMutationCastTargetsSupported(
 ): void {
 	const unsupported = new Map<CastTarget, Span | undefined>();
 	const visitor = (target: CastTarget, span: Span | undefined): void => {
+		// Enum-ref (ADR-030 Enum/2b) — skip check pour target hors builtins.
+		if (!CAST_TARGETS.has(target)) return;
 		if (!capabilities.castTargets.has(target) && !unsupported.has(target)) {
 			unsupported.set(target, span);
 		}
