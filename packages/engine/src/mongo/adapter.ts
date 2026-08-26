@@ -949,6 +949,19 @@ class MongoConnection implements Connection {
 				});
 			}
 			await enumsCol.deleteOne({ _id: query.name });
+			// Auto-cleanup : si `_snql_enums` ne contient plus aucun enum SNQL,
+			// drop la collection entière pour ne laisser aucun artefact SQLNest
+			// dans le dump Mongo. Meta présente ssi ≥1 enum existe.
+			const remaining = await enumsCol.countDocuments({});
+			if (remaining === 0) {
+				try {
+					await enumsCol.drop();
+				} catch (cleanupCause) {
+					const code = (cleanupCause as { code?: unknown } | null)?.code;
+					// NamespaceNotFound = déjà purgée par un autre process — safe.
+					if (code !== 26) throw cleanupCause;
+				}
+			}
 			return { columns: [], rows: [], rowCount: 0 };
 		} catch (cause) {
 			if (cause instanceof EngineExecutionError) throw cause;
