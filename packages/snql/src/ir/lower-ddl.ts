@@ -292,11 +292,24 @@ function lowerAddColumn(
 	);
 	const nullable = stmt.column.nullable ?? false;
 	const unique = stmt.column.unique ?? false;
+	const ref =
+		stmt.column.ref !== undefined
+			? resolveFieldRef(
+					stmt.column.ref,
+					stmt.target,
+					stmt.column.name,
+					resolved.type,
+					nullable,
+					schema,
+					[{ name: stmt.column.name, type: resolved.type }]
+				)
+			: undefined;
 	const base: CreateTableField = {
 		name: stmt.column.name,
 		type: resolved.type,
 		nullable,
 		unique,
+		...(ref !== undefined ? { ref } : {}),
 		...(resolved.enumTypeName !== undefined
 			? { enumTypeName: resolved.enumTypeName }
 			: {}),
@@ -338,28 +351,52 @@ function lowerCreateTable(
 			stmt.span
 		);
 	}
-	const fields: CreateTableField[] = stmt.fields.map((f) => {
+	// Pass 1 : résout les types (nécessaire avant les refs pour que le self-ref
+	// voie les types de toutes les colonnes déclarées).
+	const resolvedFields = stmt.fields.map((f) => {
 		assertIdent(f.name, "field");
 		const resolved = resolveFieldType(f.type, f.name, schema, f.typeSpan);
-		const nullable = f.nullable ?? false;
-		const unique = f.unique ?? false;
-		const base: CreateTableField = {
-			name: f.name,
-			type: resolved.type,
-			nullable,
-			unique,
-			...(resolved.enumTypeName !== undefined
-				? { enumTypeName: resolved.enumTypeName }
-				: {}),
-			...(resolved.enumMembers !== undefined
-				? { enumMembers: resolved.enumMembers }
-				: {}),
-			...(f.span !== undefined ? { span: f.span } : {})
-		};
-		if (f.defaultExpr === undefined) return base;
-		const value = lowerDefault(f.defaultExpr, f.name, resolved.type);
-		return { ...base, defaultValue: value };
+		return { f, type: resolved.type, resolved, nullable: f.nullable ?? false };
 	});
+	const currentFieldTypes = resolvedFields.map((r) => ({
+		name: r.f.name,
+		type: r.type
+	}));
+	// Pass 2 : construit les CreateTableField + attache defaults + refs.
+	const fields: CreateTableField[] = resolvedFields.map(
+		({ f, type, resolved, nullable }) => {
+			const unique = f.unique ?? false;
+			const ref =
+				f.ref !== undefined
+					? resolveFieldRef(
+							f.ref,
+							stmt.target,
+							f.name,
+							type,
+							nullable,
+							schema,
+							currentFieldTypes
+						)
+					: undefined;
+			const base: CreateTableField = {
+				name: f.name,
+				type,
+				nullable,
+				unique,
+				...(resolved.enumTypeName !== undefined
+					? { enumTypeName: resolved.enumTypeName }
+					: {}),
+				...(resolved.enumMembers !== undefined
+					? { enumMembers: resolved.enumMembers }
+					: {}),
+				...(ref !== undefined ? { ref } : {}),
+				...(f.span !== undefined ? { span: f.span } : {})
+			};
+			if (f.defaultExpr === undefined) return base;
+			const value = lowerDefault(f.defaultExpr, f.name, type);
+			return { ...base, defaultValue: value };
+		}
+	);
 	if (stmt.primaryKey !== undefined) {
 		assertPrimaryKey(stmt.primaryKey, fields, stmt.span);
 	}
@@ -373,6 +410,129 @@ function lowerCreateTable(
 		...(stmt.span !== undefined ? { span: stmt.span } : {})
 	};
 	return plan;
+}
+
+/**
+ * Nom auto-généré d'une FK (ADR-031 D4). Pattern `fk_<table>_<col>_<target>`,
+ * tronqué à 63 chars (PG NAMEDATALEN + WiredTiger). Override via `as`.
+ */
+function generateRefName(
+	fromCollection: string,
+	fromColumn: string,
+	targetCollection: string
+): string {
+	const full = `fk_${fromCollection}_${fromColumn}_${targetCollection}`;
+	return full.length <= 63 ? full : full.slice(0, 63);
+}
+
+/**
+ * Résout + valide un modifier `ref t.c [on delete ...]` (ADR-031 FK/1).
+ *  - `self` cible → normalisé sur la table courante (self-reference D3).
+ *  - Si `schema` fourni : la collection cible doit exister (sauf self-ref sur
+ *    la table en cours de création, validée contre `currentFields`), la
+ *    colonne cible doit exister, et le type doit être compatible (léger : même
+ *    SnqlType, ou les deux entiers-like uuid/int/bigint).
+ *  - `on delete set null` exige que la colonne portante soit nullable.
+ *  - Défaut D2 : `restrict` sur delete ET update.
+ */
+function resolveFieldRef(
+	mod: import("../parser/ast").FieldRefModifier,
+	fromCollection: string,
+	fromColumn: string,
+	fromType: SnqlType,
+	fromNullable: boolean,
+	schema: SchemaModel | undefined,
+	currentFields: readonly { name: string; type: SnqlType }[]
+): import("./plan").FieldRefPlan {
+	const targetCollection =
+		mod.targetCollection === "self" ? fromCollection : mod.targetCollection;
+	assertIdent(targetCollection, "target");
+	assertIdent(mod.targetColumn, "field");
+	if (mod.name !== undefined) assertIdent(mod.name, "field");
+
+	const onDelete = mod.onDelete ?? "restrict";
+	const onUpdate = mod.onUpdate ?? "restrict";
+
+	if (onDelete === "set-null" && !fromNullable) {
+		throw new SnqlError(
+			`'ref ${targetCollection}.${mod.targetColumn} on delete set null' exige que '${fromColumn}' soit nullable`,
+			"lower_ddl_ref_set_null_not_nullable",
+			mod.span
+		);
+	}
+
+	if (schema !== undefined) {
+		const isSelf = targetCollection === fromCollection;
+		let targetType: SnqlType | undefined;
+		if (isSelf) {
+			const targetField = currentFields.find((f) => f.name === mod.targetColumn);
+			if (targetField === undefined) {
+				throw new SnqlError(
+					`'ref self.${mod.targetColumn}' : la colonne '${mod.targetColumn}' n'est pas déclarée dans '${fromCollection}'`,
+					"lower_ddl_ref_unknown_target_column",
+					mod.span
+				);
+			}
+			targetType = targetField.type;
+		} else {
+			const targetColl = schema.collections.find(
+				(c) => c.name === targetCollection
+			);
+			if (targetColl === undefined) {
+				const available =
+					schema.collections.map((c) => c.name).join(", ") || "(aucune)";
+				throw new SnqlError(
+					`'ref ${targetCollection}.${mod.targetColumn}' : table cible '${targetCollection}' inconnue — tables : ${available}`,
+					"lower_ddl_ref_unknown_target_collection",
+					mod.span
+				);
+			}
+			const targetCol = targetColl.fields.find(
+				(f) => f.name === mod.targetColumn
+			);
+			if (targetCol === undefined) {
+				const available =
+					targetColl.fields.map((f) => f.name).join(", ") || "(aucune)";
+				throw new SnqlError(
+					`'ref ${targetCollection}.${mod.targetColumn}' : colonne '${mod.targetColumn}' inconnue dans '${targetCollection}' — colonnes : ${available}`,
+					"lower_ddl_ref_unknown_target_column",
+					mod.span
+				);
+			}
+			targetType = targetCol.type;
+		}
+		if (targetType !== undefined && !refTypesCompatible(fromType, targetType)) {
+			throw new SnqlError(
+				`'ref ${targetCollection}.${mod.targetColumn}' : type '${fromType}' de '${fromColumn}' incompatible avec '${targetType}' de la cible`,
+				"lower_ddl_ref_type_mismatch",
+				mod.span
+			);
+		}
+	}
+
+	return {
+		name:
+			mod.name ??
+			generateRefName(fromCollection, fromColumn, targetCollection),
+		fromColumn,
+		targetCollection,
+		targetColumn: mod.targetColumn,
+		onDelete,
+		onUpdate
+	};
+}
+
+/**
+ * Compatibilité de type FK (ADR-031, léger) : identiques, ou tous deux dans la
+ * famille entière-like (uuid/int/bigint) — une FK uuid→uuid ou int→bigint est
+ * courante. `unknown` (Mongo inféré) passe (best-effort). Refuse les mismatches
+ * flagrants (string→int) tôt.
+ */
+function refTypesCompatible(a: SnqlType, b: SnqlType): boolean {
+	if (a === b) return true;
+	if (a === "unknown" || b === "unknown") return true;
+	const intLike = new Set<SnqlType>(["uuid", "int", "bigint"]);
+	return intLike.has(a) && intLike.has(b);
 }
 
 /**

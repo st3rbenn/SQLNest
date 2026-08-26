@@ -544,6 +544,23 @@ export interface LetPlan {
  * KV compensated via `HSET namespace:_schema`) se fait au planner + codegen ;
  * ici le plan reste engine-agnostique.
  */
+/**
+ * FK résolue au lower (ADR-031 FK/1). Le lower a validé que la cible existe
+ * (collection + colonne), généré le nom de contrainte si absent, et normalisé
+ * les règles cascade (défaut `restrict`). Snapshot consommé par le codegen :
+ * PG émet `REFERENCES <target>(<col>) ON DELETE ...` inline, Mongo/KV stockent
+ * `_snql_refs` + middleware pré-write.
+ */
+export interface FieldRefPlan {
+	readonly name: string;
+	/** Colonne portante (le côté « many »). */
+	readonly fromColumn: string;
+	readonly targetCollection: string;
+	readonly targetColumn: string;
+	readonly onDelete: import("../schema/model").OnDeleteRule;
+	readonly onUpdate: import("../schema/model").OnUpdateRule;
+}
+
 export interface CreateTableField {
 	readonly name: string;
 	readonly type: import("../schema/model").SnqlType;
@@ -556,6 +573,9 @@ export interface CreateTableField {
 	// `{enum: enumMembers}` dans le $jsonSchema, KV enrichit le middleware.
 	readonly enumTypeName?: string;
 	readonly enumMembers?: readonly string[];
+	// FK info — présent uniquement si le field a un modifier `ref` (ADR-031).
+	// Résolu + validé au lower depuis `schema.collections`.
+	readonly ref?: FieldRefPlan;
 	readonly span?: Span;
 }
 

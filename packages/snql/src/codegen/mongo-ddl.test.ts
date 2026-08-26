@@ -695,3 +695,71 @@ describe("codegen Mongo — drop enum (ADR-030 Enum/3.5 D8)", () => {
 		expect(q.cascade).toBe(true);
 	});
 });
+
+describe("codegen Mongo — ref FK modifier (ADR-031 FK/1a)", () => {
+	it("create table avec ref → refs[] snapshot _snql_refs", () => {
+		const q = mapCreate({
+			op: "ddl",
+			kind: "create-table",
+			target: "orders",
+			ifNotExists: false,
+			fields: [
+				{ name: "id", type: "uuid", nullable: false, unique: false },
+				{
+					name: "user_id",
+					type: "uuid",
+					nullable: false,
+					unique: false,
+					ref: {
+						name: "fk_orders_user_id_users",
+						fromColumn: "user_id",
+						targetCollection: "users",
+						targetColumn: "id",
+						onDelete: "cascade",
+						onUpdate: "restrict"
+					}
+				}
+			]
+		});
+		expect(q.refs).toEqual([
+			{
+				name: "fk_orders_user_id_users",
+				fromCollection: "orders",
+				fromColumn: "user_id",
+				toCollection: "users",
+				toColumn: "id",
+				onDelete: "cascade",
+				onUpdate: "restrict"
+			}
+		]);
+	});
+
+	it("add column avec ref → column.ref snapshot", () => {
+		const q = mapAdd({
+			op: "ddl",
+			kind: "add-column",
+			target: "posts",
+			ifNotExists: false,
+			column: {
+				name: "author_id",
+				type: "uuid",
+				nullable: false,
+				unique: false,
+				ref: {
+					name: "fk_posts_author_id_users",
+					fromColumn: "author_id",
+					targetCollection: "users",
+					targetColumn: "id",
+					onDelete: "restrict",
+					onUpdate: "restrict"
+				}
+			}
+		});
+		expect(q.column.ref).toMatchObject({
+			name: "fk_posts_author_id_users",
+			fromCollection: "posts",
+			toCollection: "users",
+			onDelete: "restrict"
+		});
+	});
+});

@@ -212,6 +212,24 @@ export interface MongoIndexSpec {
 	};
 }
 
+/**
+ * FK déclarée à stocker dans la collection metadata `_snql_refs` (ADR-031
+ * FK/1). L'adapter runtime `insertOne({_id: name, from, fromColumn, to,
+ * toColumn, onDelete, onUpdate})`. **FK/1a = stockage déclaration seulement** —
+ * l'enforcement (write-precheck + cascade transactionnelle) arrive en FK/1b
+ * (asymétrie transitoire assumée : PG applique nativement, Mongo enregistre
+ * mais n'enforce pas encore).
+ */
+export interface MongoRefSpec {
+	readonly name: string;
+	readonly fromCollection: string;
+	readonly fromColumn: string;
+	readonly toCollection: string;
+	readonly toColumn: string;
+	readonly onDelete: string;
+	readonly onUpdate: string;
+}
+
 export interface MongoDDLCreateCollectionQuery {
 	readonly engine: string;
 	readonly kind: "mongo-ddl";
@@ -226,6 +244,8 @@ export interface MongoDDLCreateCollectionQuery {
 	 * SNQL côté user.
 	 */
 	readonly primaryKeyAlias?: string;
+	/** FK déclarées sur les colonnes (ADR-031 FK/1a) — stockées `_snql_refs`. */
+	readonly refs?: readonly MongoRefSpec[];
 }
 
 /**
@@ -266,6 +286,8 @@ export interface MongoDDLAddColumnQuery {
 		 * validator étendu de la property.
 		 */
 		readonly enum?: readonly string[];
+		/** FK déclarée sur la colonne (ADR-031 FK/1a) — stockée `_snql_refs`. */
+		readonly ref?: MongoRefSpec;
 	};
 	/** true si `defaultValue !== undefined` → D10 backfill obligatoire. */
 	readonly backfill: boolean;
@@ -438,6 +460,18 @@ export interface KvFieldDescriptor {
 	 */
 	readonly enumTypeName?: string;
 	readonly enum?: readonly string[];
+	/**
+	 * FK déclarée (ADR-031 FK/1a). Snapshot du référent + règles cascade,
+	 * stocké dans `_snql_refs` (shape V1 ; enforcement middleware = FK/1b avec
+	 * l'adapter Redis).
+	 */
+	readonly ref?: {
+		readonly name: string;
+		readonly toCollection: string;
+		readonly toColumn: string;
+		readonly onDelete: string;
+		readonly onUpdate: string;
+	};
 }
 
 export interface KvDDLCreateTableQuery {

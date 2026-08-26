@@ -40,6 +40,7 @@ import type {
 	MongoDDLDropEnumQuery,
 	MongoDDLDropIndexQuery,
 	MongoIndexSpec,
+	MongoRefSpec,
 	MongoQuery,
 	MongoStage,
 	MongoTransaction,
@@ -2878,6 +2879,13 @@ function renderMongoCreateTable(
 		});
 	}
 
+	// FK déclarées (ADR-031 FK/1a) → snapshot _snql_refs (déclaration seulement,
+	// enforcement = FK/1b).
+	const refs: MongoRefSpec[] = [];
+	for (const f of plan.fields) {
+		if (f.ref !== undefined) refs.push(mongoRefSpec(f.ref, plan.target));
+	}
+
 	const ddl: MongoDDLCreateCollectionQuery = {
 		engine: "mongodb",
 		kind: "mongo-ddl",
@@ -2886,9 +2894,26 @@ function renderMongoCreateTable(
 		ifNotExists: plan.ifNotExists,
 		validator,
 		...(indexes.length > 0 ? { indexes } : {}),
-		...(primaryKeyAlias !== undefined ? { primaryKeyAlias } : {})
+		...(primaryKeyAlias !== undefined ? { primaryKeyAlias } : {}),
+		...(refs.length > 0 ? { refs } : {})
 	};
 	return ddl;
+}
+
+/** Traduit un `FieldRefPlan` en `MongoRefSpec` (metadata _snql_refs). */
+function mongoRefSpec(
+	ref: import("../ir/plan").FieldRefPlan,
+	fromCollection: string
+): MongoRefSpec {
+	return {
+		name: ref.name,
+		fromCollection,
+		fromColumn: ref.fromColumn,
+		toCollection: ref.targetCollection,
+		toColumn: ref.targetColumn,
+		onDelete: ref.onDelete,
+		onUpdate: ref.onUpdate
+	};
 }
 
 /**
@@ -3064,6 +3089,9 @@ function renderMongoAddColumn(plan: AddColumnPlan): MongoDDLAddColumnQuery {
 		...(f.defaultValue !== undefined ? { defaultValue: nativeDefault } : {}),
 		...(f.type === "enum" && f.enumMembers !== undefined
 			? { enum: f.enumMembers }
+			: {}),
+		...(f.ref !== undefined
+			? { ref: mongoRefSpec(f.ref, plan.target) }
 			: {})
 	};
 	const index: MongoIndexSpec | undefined = f.unique

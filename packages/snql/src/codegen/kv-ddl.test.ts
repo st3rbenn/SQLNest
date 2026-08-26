@@ -662,3 +662,38 @@ describe("codegen KV — drop enum (ADR-030 Enum/3.6 D8)", () => {
 		expect(q.cascade).toBe(true);
 	});
 });
+
+describe("codegen KV — ref FK modifier (ADR-031 FK/1a)", () => {
+	it("create table avec ref → descriptor.ref snapshot", () => {
+		const q = mapCreate({
+			op: "ddl",
+			kind: "create-table",
+			target: "orders",
+			ifNotExists: false,
+			fields: [
+				{ name: "id", type: "uuid", nullable: false, unique: false },
+				{
+					name: "user_id",
+					type: "uuid",
+					nullable: false,
+					unique: false,
+					ref: {
+						name: "fk_orders_user_id_users",
+						fromColumn: "user_id",
+						targetCollection: "users",
+						targetColumn: "id",
+						onDelete: "cascade",
+						onUpdate: "restrict"
+					}
+				}
+			]
+		});
+		expect(q.fields[1]?.ref).toEqual({
+			name: "fk_orders_user_id_users",
+			toCollection: "users",
+			toColumn: "id",
+			onDelete: "cascade",
+			onUpdate: "restrict"
+		});
+	});
+});

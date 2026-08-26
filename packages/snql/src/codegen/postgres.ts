@@ -973,6 +973,30 @@ function pgFieldTypeSql(f: import("../ir/plan").CreateTableField): string {
 	return PG_DDL_TYPE[f.type];
 }
 
+/** Traduit une règle de cascade SNQL en clause SQL PG. */
+const PG_REF_ACTION: Readonly<
+	Record<import("../schema/model").OnDeleteRule, string>
+> = {
+	restrict: "RESTRICT",
+	cascade: "CASCADE",
+	"set-null": "SET NULL"
+};
+
+/**
+ * Clause FK column-level PG (ADR-031 FK/1) : `CONSTRAINT "fk_name" REFERENCES
+ * "target" ("col") ON DELETE <action> ON UPDATE <action>`. Émise inline dans
+ * la définition de colonne (create table + add column). PG natif — pas de
+ * compensation.
+ */
+function pgRefClause(ref: import("../ir/plan").FieldRefPlan): string {
+	return (
+		`CONSTRAINT ${quoteIdent(ref.name)} REFERENCES ` +
+		`${quoteIdent(ref.targetCollection)} (${quoteIdent(ref.targetColumn)}) ` +
+		`ON DELETE ${PG_REF_ACTION[ref.onDelete]} ` +
+		`ON UPDATE ${PG_REF_ACTION[ref.onUpdate]}`
+	);
+}
+
 /**
  * PG rejette les paramètres bindés `$N` dans les statements DDL (CREATE TABLE,
  * ALTER TABLE) via le extended query protocol — erreur 08P01 `bind message
@@ -1023,6 +1047,7 @@ function renderCreateTable(plan: CreateTablePlan): NativeQuery {
 		if (f.defaultValue !== undefined) {
 			parts.push(`DEFAULT ${pgInlineDefault(f.defaultValue)}`);
 		}
+		if (f.ref !== undefined) parts.push(pgRefClause(f.ref));
 		cols.push(parts.join(" "));
 	}
 	if (plan.primaryKey !== undefined && plan.primaryKey.length > 0) {
@@ -1081,6 +1106,7 @@ function renderAddColumn(plan: AddColumnPlan): NativeQuery {
 	if (f.defaultValue !== undefined) {
 		parts.push(`DEFAULT ${pgInlineDefault(f.defaultValue)}`);
 	}
+	if (f.ref !== undefined) parts.push(pgRefClause(f.ref));
 	const ifNotExists = plan.ifNotExists ? "IF NOT EXISTS " : "";
 	const text = `ALTER TABLE ${quoteIdent(plan.target)} ADD COLUMN ${ifNotExists}${parts.join(" ")}`;
 	return {

@@ -584,3 +584,84 @@ describe("drop table / drop column DDL (ADR-029 DDL/4)", () => {
 		});
 	});
 });
+
+// ─── FK/1 — ref modifier (ADR-031) ──────────────────────────────────
+describe("ref modifier field-level (ADR-031 FK/1)", () => {
+	it("parse ref minimal dans create table body", () => {
+		const s = stmt("create table orders { id: uuid, user_id: uuid ref users.id }");
+		if (s.operation !== "ddl" || s.kind !== "create-table") throw new Error("bad");
+		expect(s.fields[1]).toMatchObject({
+			name: "user_id",
+			ref: { targetCollection: "users", targetColumn: "id" }
+		});
+	});
+
+	it("parse ref avec on delete cascade", () => {
+		const s = stmt(
+			"create table orders { user_id: uuid ref users.id on delete cascade }"
+		);
+		if (s.operation !== "ddl" || s.kind !== "create-table") throw new Error("bad");
+		expect(s.fields[0]?.ref).toMatchObject({
+			targetCollection: "users",
+			targetColumn: "id",
+			onDelete: "cascade"
+		});
+	});
+
+	it("parse ref on delete set null (deux tokens → set-null)", () => {
+		const s = stmt(
+			"create table orders { user_id: uuid nullable ref users.id on delete set null }"
+		);
+		if (s.operation !== "ddl" || s.kind !== "create-table") throw new Error("bad");
+		expect(s.fields[0]?.ref?.onDelete).toBe("set-null");
+	});
+
+	it("parse ref on delete + on update", () => {
+		const s = stmt(
+			"create table orders { user_id: uuid ref users.id on delete cascade on update restrict }"
+		);
+		if (s.operation !== "ddl" || s.kind !== "create-table") throw new Error("bad");
+		expect(s.fields[0]?.ref).toMatchObject({
+			onDelete: "cascade",
+			onUpdate: "restrict"
+		});
+	});
+
+	it("parse ref avec nom explicite `as`", () => {
+		const s = stmt(
+			"create table orders { user_id: uuid ref users.id as my_fk }"
+		);
+		if (s.operation !== "ddl" || s.kind !== "create-table") throw new Error("bad");
+		expect(s.fields[0]?.ref?.name).toBe("my_fk");
+	});
+
+	it("parse ref self-reference", () => {
+		const s = stmt(
+			"create table categories { id: uuid, parent_id: uuid ref self.id }"
+		);
+		if (s.operation !== "ddl" || s.kind !== "create-table") throw new Error("bad");
+		expect(s.fields[1]?.ref?.targetCollection).toBe("self");
+	});
+
+	it("parse ref dans add column", () => {
+		const s = stmt("add column author_id uuid ref users.id on delete cascade into posts");
+		if (s.operation !== "ddl" || s.kind !== "add-column") throw new Error("bad");
+		expect(s.column.ref).toMatchObject({
+			targetCollection: "users",
+			targetColumn: "id",
+			onDelete: "cascade"
+		});
+	});
+
+	it("refuse ref sans dot (ref users)", () => {
+		expect(() =>
+			stmt("create table orders { user_id: uuid ref users }")
+		).toThrow(/'<collection>\.<colonne>'/);
+	});
+
+	it("refuse règle de cascade invalide", () => {
+		expect(() =>
+			stmt("create table orders { user_id: uuid ref users.id on delete nuke }")
+		).toThrow(/cascade.*restrict.*set null/);
+	});
+});

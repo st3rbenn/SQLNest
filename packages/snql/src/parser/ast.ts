@@ -569,9 +569,31 @@ export type DDLFieldTypeRef =
 	| { readonly kind: "enum-ref"; readonly name: string };
 
 /**
- * Field d'un `create table` — le body `{ field: type [nullable] [default v] [unique], ... }`
+ * Règle `on delete` / `on update` d'une FK (ADR-031). Surface : `cascade` |
+ * `restrict` | `set null` (deux tokens, normalisé `set-null` au lower).
+ */
+export type FieldRefRule = "cascade" | "restrict" | "set-null";
+
+/**
+ * Modifier field-level `ref <target>.<col> [on delete <rule>] [on update <rule>]
+ * [as <name>]` (ADR-031 FK/1). Déclare une foreign-key sur la colonne. Le lower
+ * valide que `target.col` existe + type compatible ; le codegen émet PG
+ * `REFERENCES` natif ou Mongo/KV metadata `_snql_refs` + middleware.
+ */
+export interface FieldRefModifier {
+	readonly targetCollection: string;
+	readonly targetColumn: string;
+	readonly onDelete?: FieldRefRule;
+	readonly onUpdate?: FieldRefRule;
+	readonly name?: string;
+	readonly span: Span;
+}
+
+/**
+ * Field d'un `create table` — le body `{ field: type [nullable] [default v] [unique] [ref t.c ...], ... }`
  * (exception D0 ADR-029 à Grammar v2). Type builtin ou enum-ref
- * (ADR-030) — la résolution se fait au lower via `schema.enums`.
+ * (ADR-030) — la résolution se fait au lower via `schema.enums`. `ref`
+ * modifier (ADR-031) déclare une FK — résolu au lower via `schema.collections`.
  */
 export interface DDLFieldDef {
 	readonly name: string;
@@ -580,6 +602,7 @@ export interface DDLFieldDef {
 	readonly nullable?: boolean;
 	readonly defaultExpr?: Expr;
 	readonly unique?: boolean;
+	readonly ref?: FieldRefModifier;
 	readonly span: Span;
 }
 

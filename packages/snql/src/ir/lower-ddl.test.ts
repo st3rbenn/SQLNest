@@ -637,3 +637,126 @@ describe("lower DDL — drop enum (ADR-030 Enum/3 D8)", () => {
 		expect(() => lowerDropEnum("drop enum 1bad")).toThrow();
 	});
 });
+
+describe("lower DDL — ref modifier FK (ADR-031 FK/1)", () => {
+	const schemaWithUsers: import("../schema/model").SchemaModel = {
+		engine: "postgres",
+		collections: [
+			{
+				name: "users",
+				source: "declared",
+				primaryKey: ["id"],
+				fields: [
+					{ name: "id", type: "uuid", nullable: false, source: "declared" },
+					{ name: "email", type: "string", nullable: false, source: "declared" }
+				]
+			}
+		],
+		relations: []
+	};
+
+	function lowerRefTable(
+		source: string,
+		schema?: import("../schema/model").SchemaModel
+	): CreateTablePlan {
+		const parsed = parse(tokenize(source)) as DDLStatement;
+		const plan = lowerDDL(parsed, schema);
+		if (plan.kind !== "create-table") {
+			throw new Error(`expected create-table plan, got ${plan.kind}`);
+		}
+		return plan;
+	}
+
+	it("résout ref + auto-gen name + défaut restrict", () => {
+		const plan = lowerRefTable(
+			"create table orders { id: uuid, user_id: uuid ref users.id }",
+			schemaWithUsers
+		);
+		expect(plan.fields[1]?.ref).toEqual({
+			name: "fk_orders_user_id_users",
+			fromColumn: "user_id",
+			targetCollection: "users",
+			targetColumn: "id",
+			onDelete: "restrict",
+			onUpdate: "restrict"
+		});
+	});
+
+	it("propage on delete cascade", () => {
+		const plan = lowerRefTable(
+			"create table orders { user_id: uuid ref users.id on delete cascade }",
+			schemaWithUsers
+		);
+		expect(plan.fields[0]?.ref?.onDelete).toBe("cascade");
+	});
+
+	it("nom explicite `as` respecté", () => {
+		const plan = lowerRefTable(
+			"create table orders { user_id: uuid ref users.id as my_fk }",
+			schemaWithUsers
+		);
+		expect(plan.fields[0]?.ref?.name).toBe("my_fk");
+	});
+
+	it("refuse table cible inconnue", () => {
+		expect(() =>
+			lowerRefTable(
+				"create table orders { user_id: uuid ref ghosts.id }",
+				schemaWithUsers
+			)
+		).toThrow(/table cible 'ghosts' inconnue/);
+	});
+
+	it("refuse colonne cible inconnue", () => {
+		expect(() =>
+			lowerRefTable(
+				"create table orders { user_id: uuid ref users.nope }",
+				schemaWithUsers
+			)
+		).toThrow(/colonne 'nope' inconnue/);
+	});
+
+	it("refuse type incompatible (string → uuid)", () => {
+		expect(() =>
+			lowerRefTable(
+				"create table orders { user_ref: string ref users.id }",
+				schemaWithUsers
+			)
+		).toThrow(/incompatible/);
+	});
+
+	it("refuse on delete set null sur colonne non-nullable", () => {
+		expect(() =>
+			lowerRefTable(
+				"create table orders { user_id: uuid ref users.id on delete set null }",
+				schemaWithUsers
+			)
+		).toThrow(/nullable/);
+	});
+
+	it("accepte set null si colonne nullable", () => {
+		const plan = lowerRefTable(
+			"create table orders { user_id: uuid nullable ref users.id on delete set null }",
+			schemaWithUsers
+		);
+		expect(plan.fields[0]?.ref?.onDelete).toBe("set-null");
+	});
+
+	it("self-ref résolu contre les fields en cours de création", () => {
+		const plan = lowerRefTable(
+			"create table categories { id: uuid, parent_id: uuid ref self.id }",
+			schemaWithUsers
+		);
+		expect(plan.fields[1]?.ref?.targetCollection).toBe("categories");
+	});
+
+	it("sans schema (offline) : pass-through avec name + défauts", () => {
+		const plan = lowerRefTable(
+			"create table orders { user_id: uuid ref users.id }"
+		);
+		expect(plan.fields[0]?.ref).toMatchObject({
+			targetCollection: "users",
+			onDelete: "restrict"
+		});
+	});
+});

@@ -17,6 +17,8 @@ import type {
 	DropIndexStmt,
 	DropTableStmt,
 	Expr,
+	FieldRefModifier,
+	FieldRefRule,
 	FieldSelection,
 	GroupKey,
 	InsertField,
@@ -1868,10 +1870,11 @@ function parseCreateTableField(cursor: TokenCursor): DDLFieldDef {
 	);
 	const type = parseFieldTypeRef(typeTok.value);
 
-	// Modifiers optionnels : `nullable` | `not null` | `default <expr>` | `unique`
+	// Modifiers optionnels : `nullable` | `not null` | `default <expr>` | `unique` | `ref t.c ...`
 	let nullable: boolean | undefined;
 	let defaultExpr: Expr | undefined;
 	let unique = false;
+	let ref: FieldRefModifier | undefined;
 	let endSpan: Span = typeTok.span;
 
 	for (;;) {
@@ -1906,6 +1909,9 @@ function parseCreateTableField(cursor: TokenCursor): DDLFieldDef {
 			cursor.next();
 			unique = true;
 			endSpan = nxt.span;
+		} else if (nxt.kind === "ident" && v === "ref") {
+			ref = parseFieldRefModifier(cursor);
+			endSpan = ref.span;
 		} else {
 			break;
 		}
@@ -1918,8 +1924,136 @@ function parseCreateTableField(cursor: TokenCursor): DDLFieldDef {
 		...(nullable !== undefined ? { nullable } : {}),
 		...(defaultExpr !== undefined ? { defaultExpr } : {}),
 		...(unique ? { unique } : {}),
+		...(ref !== undefined ? { ref } : {}),
 		span: { start: nameTok.span.start, end: endSpan.end }
 	};
+}
+
+/**
+ * `ref <target>.<col> [on delete <rule>] [on update <rule>] [as <name>]`
+ * (ADR-031 FK/1). `ref` est déjà peeked (soft-ident). Parse la cible
+ * `collection.column`, puis les clauses optionnelles `on delete/update`
+ * (rule ∈ cascade|restrict|set null) dans n'importe quel ordre, puis `as`.
+ */
+function parseFieldRefModifier(cursor: TokenCursor): FieldRefModifier {
+	const refTok = cursor.next(); // `ref` soft-ident
+	const targetTok = cursor.expect(
+		"ident",
+		"une collection cible après 'ref' (ex. ref users.id)"
+	);
+	if (cursor.peek().kind !== "dot") {
+		throw new SnqlError(
+			"'ref' attend '<collection>.<colonne>' (ex. ref users.id)",
+			"parse_ddl_ref_missing_dot",
+			cursor.peek().span
+		);
+	}
+	cursor.next(); // dot
+	const colTok = cursor.expect(
+		"ident",
+		"une colonne cible après '.' (ex. ref users.id)"
+	);
+
+	let onDelete: FieldRefRule | undefined;
+	let onUpdate: FieldRefRule | undefined;
+	let name: string | undefined;
+	let endSpan: Span = colTok.span;
+
+	for (;;) {
+		if (peekKeyword(cursor, "on")) {
+			cursor.next();
+			const which = cursor.peek();
+			const whichLower = which.value.toLowerCase();
+			// `delete` / `update` sont des verbs/idents — matché par valeur.
+			if (whichLower !== "delete" && whichLower !== "update") {
+				throw new SnqlError(
+					"'on' doit être suivi de 'delete' ou 'update' dans une clause ref",
+					"parse_ddl_ref_expected_delete_or_update",
+					which.span
+				);
+			}
+			cursor.next();
+			const rule = parseRefRule(cursor);
+			if (whichLower === "delete") {
+				if (onDelete !== undefined) {
+					throw new SnqlError(
+						"'on delete' déclaré deux fois dans la même ref",
+						"parse_ddl_ref_duplicate_on_delete",
+						which.span
+					);
+				}
+				onDelete = rule.rule;
+			} else {
+				if (onUpdate !== undefined) {
+					throw new SnqlError(
+						"'on update' déclaré deux fois dans la même ref",
+						"parse_ddl_ref_duplicate_on_update",
+						which.span
+					);
+				}
+				onUpdate = rule.rule;
+			}
+			endSpan = rule.span;
+		} else if (peekKeyword(cursor, "as")) {
+			cursor.next();
+			const nameTok = cursor.expect(
+				"ident",
+				"un nom de contrainte après 'as'"
+			);
+			name = nameTok.value;
+			endSpan = nameTok.span;
+		} else {
+			break;
+		}
+	}
+
+	return {
+		targetCollection: targetTok.value,
+		targetColumn: colTok.value,
+		...(onDelete !== undefined ? { onDelete } : {}),
+		...(onUpdate !== undefined ? { onUpdate } : {}),
+		...(name !== undefined ? { name } : {}),
+		span: { start: refTok.span.start, end: endSpan.end }
+	};
+}
+
+/**
+ * Parse une règle de cascade : `cascade` | `restrict` | `set null` (deux
+ * tokens → `set-null`). Retourne la rule normalisée + le span de fin.
+ */
+function parseRefRule(cursor: TokenCursor): { rule: FieldRefRule; span: Span } {
+	const tok = cursor.peek();
+	const v = tok.value.toLowerCase();
+	if (v === "cascade") {
+		cursor.next();
+		return { rule: "cascade", span: tok.span };
+	}
+	if (v === "restrict") {
+		cursor.next();
+		return { rule: "restrict", span: tok.span };
+	}
+	// `set null` : `set` est keyword, `null` est literal token.
+	if (tok.kind === "keyword" && v === "set") {
+		cursor.next();
+		const nullTok = cursor.peek();
+		const isNull =
+			nullTok.kind === "null" ||
+			(nullTok.kind === "ident" && nullTok.value.toLowerCase() === "null");
+		if (!isNull) {
+			throw new SnqlError(
+				"'set' doit être suivi de 'null' dans une règle de cascade",
+				"parse_ddl_ref_expected_null_after_set",
+				nullTok.span
+			);
+		}
+		cursor.next();
+		return { rule: "set-null", span: nullTok.span };
+	}
+	throw new SnqlError(
+		"règle de cascade attendue : 'cascade', 'restrict' ou 'set null'",
+		"parse_ddl_ref_invalid_rule",
+		tok.span
+	);
 }
 
 function parsePrimaryKeyClause(cursor: TokenCursor): readonly string[] {
@@ -2008,6 +2142,7 @@ function parseAddColumn(cursor: TokenCursor): AddColumnStmt {
 	let nullable: boolean | undefined;
 	let defaultExpr: Expr | undefined;
 	let unique = false;
+	let ref: FieldRefModifier | undefined;
 	let endSpan: Span = typeTok.span;
 	for (;;) {
 		const nxt = cursor.peek();
@@ -2040,6 +2175,9 @@ function parseAddColumn(cursor: TokenCursor): AddColumnStmt {
 			cursor.next();
 			unique = true;
 			endSpan = nxt.span;
+		} else if (nxt.kind === "ident" && v === "ref") {
+			ref = parseFieldRefModifier(cursor);
+			endSpan = ref.span;
 		} else {
 			break;
 		}
@@ -2090,6 +2228,7 @@ function parseAddColumn(cursor: TokenCursor): AddColumnStmt {
 		...(nullable !== undefined ? { nullable } : {}),
 		...(defaultExpr !== undefined ? { defaultExpr } : {}),
 		...(unique ? { unique } : {}),
+		...(ref !== undefined ? { ref } : {}),
 		span: { start: nameTok.span.start, end: endSpan.end }
 	};
 	return {

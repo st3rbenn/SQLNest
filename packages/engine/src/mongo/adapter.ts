@@ -1189,11 +1189,52 @@ class MongoConnection implements Connection {
 				if (spec.options.name !== undefined) options["name"] = spec.options.name;
 				await db.collection(query.collection).createIndex(spec.keys, options);
 			}
+			// FK déclarées (ADR-031 FK/1a) → stockage `_snql_refs`. Déclaration
+			// seulement — l'enforcement (write-precheck + cascade) = FK/1b.
+			if (query.refs !== undefined && query.refs.length > 0) {
+				await this.#storeRefs(query.refs);
+			}
 			return { columns: [], rows: [], rowCount: 0 };
 		} catch (cause) {
 			throw new EngineExecutionError(
 				`DDL MongoDB échouée sur '${query.collection}' — ${describeMongoExecutionError(cause)}`,
 				{ cause }
+			);
+		}
+	}
+
+	/**
+	 * Stocke des FK déclarées dans la collection metadata `_snql_refs`
+	 * (ADR-031 FK/1a). `_id` = nom de contrainte (idempotent : upsert pour
+	 * qu'un re-run create-table `if not exists` ne double pas). Déclaration
+	 * seulement à ce stade — l'enforcement runtime arrive en FK/1b.
+	 */
+	async #storeRefs(
+		refs: readonly {
+			name: string;
+			fromCollection: string;
+			fromColumn: string;
+			toCollection: string;
+			toColumn: string;
+			onDelete: string;
+			onUpdate: string;
+		}[]
+	): Promise<void> {
+		const col = this.#requireDb().collection("_snql_refs");
+		for (const r of refs) {
+			await col.updateOne(
+				{ _id: r.name as unknown as import("mongodb").ObjectId },
+				{
+					$set: {
+						fromCollection: r.fromCollection,
+						fromColumn: r.fromColumn,
+						toCollection: r.toCollection,
+						toColumn: r.toColumn,
+						onDelete: r.onDelete,
+						onUpdate: r.onUpdate
+					}
+				},
+				{ upsert: true }
 			);
 		}
 	}
@@ -1328,6 +1369,11 @@ class MongoConnection implements Connection {
 				if (query.index.options.name !== undefined)
 					options["name"] = query.index.options.name;
 				await col.createIndex(query.index.keys, options);
+			}
+
+			// FK déclarée sur la colonne (ADR-031 FK/1a) → `_snql_refs`.
+			if (query.column.ref !== undefined) {
+				await this.#storeRefs([query.column.ref]);
 			}
 
 			return { columns: [], rows: [], rowCount: 0 };

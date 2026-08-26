@@ -543,3 +543,91 @@ describe("codegen PG — enum type dans create table + add column (Enum/2.5)", (
 		);
 	});
 });
+
+describe("codegen PG — ref FK modifier (ADR-031 FK/1)", () => {
+	it("émet REFERENCES ... ON DELETE ... ON UPDATE inline dans create table", () => {
+		const q = mapDDL({
+			op: "ddl",
+			kind: "create-table",
+			target: "orders",
+			ifNotExists: false,
+			fields: [
+				{ name: "id", type: "uuid", nullable: false, unique: false },
+				{
+					name: "user_id",
+					type: "uuid",
+					nullable: false,
+					unique: false,
+					ref: {
+						name: "fk_orders_user_id_users",
+						fromColumn: "user_id",
+						targetCollection: "users",
+						targetColumn: "id",
+						onDelete: "cascade",
+						onUpdate: "restrict"
+					}
+				}
+			]
+		});
+		if (q.kind !== "sql") throw new Error("attendu sql");
+		expect(q.text).toBe(
+			`CREATE TABLE "orders" ("id" uuid NOT NULL, "user_id" uuid NOT NULL ` +
+				`CONSTRAINT "fk_orders_user_id_users" REFERENCES "users" ("id") ` +
+				`ON DELETE CASCADE ON UPDATE RESTRICT)`
+		);
+	});
+
+	it("émet SET NULL pour on delete set-null", () => {
+		const q = mapDDL({
+			op: "ddl",
+			kind: "create-table",
+			target: "orders",
+			ifNotExists: false,
+			fields: [
+				{
+					name: "user_id",
+					type: "uuid",
+					nullable: true,
+					unique: false,
+					ref: {
+						name: "fk_x",
+						fromColumn: "user_id",
+						targetCollection: "users",
+						targetColumn: "id",
+						onDelete: "set-null",
+						onUpdate: "restrict"
+					}
+				}
+			]
+		});
+		if (q.kind !== "sql") throw new Error("attendu sql");
+		expect(q.text).toContain("ON DELETE SET NULL");
+	});
+
+	it("add column avec ref → ALTER TABLE ADD COLUMN ... REFERENCES", () => {
+		const q = mapDDL({
+			op: "ddl",
+			kind: "add-column",
+			target: "posts",
+			ifNotExists: false,
+			column: {
+				name: "author_id",
+				type: "uuid",
+				nullable: false,
+				unique: false,
+				ref: {
+					name: "fk_posts_author_id_users",
+					fromColumn: "author_id",
+					targetCollection: "users",
+					targetColumn: "id",
+					onDelete: "restrict",
+					onUpdate: "restrict"
+				}
+			}
+		});
+		if (q.kind !== "sql") throw new Error("attendu sql");
+		expect(q.text).toContain(
+			`CONSTRAINT "fk_posts_author_id_users" REFERENCES "users" ("id")`
+		);
+	});
+});

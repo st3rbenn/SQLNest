@@ -248,6 +248,17 @@ function renderKvCreateTable(plan: CreateTablePlan): KvDDLCreateTableQuery {
 				: {}),
 			...(f.type === "enum" && f.enumMembers !== undefined
 				? { enum: f.enumMembers }
+				: {}),
+			...(f.ref !== undefined
+				? {
+						ref: {
+							name: f.ref.name,
+							toCollection: f.ref.targetCollection,
+							toColumn: f.ref.targetColumn,
+							onDelete: f.ref.onDelete,
+							onUpdate: f.ref.onUpdate
+						}
+					}
 				: {})
 		};
 		return f.defaultValue !== undefined

@@ -95,12 +95,50 @@ export interface EnumTypeDef {
 	readonly source: SchemaSource;
 }
 
+/**
+ * Règle appliquée quand la ligne référencée est supprimée (ADR-031 D2).
+ * `restrict` = refus si des lignes dépendent (défaut défensif). `cascade` =
+ * supprime les dépendants. `set-null` = met le champ référençant à NULL
+ * (requiert que la colonne soit nullable).
+ */
+export type OnDeleteRule = "restrict" | "cascade" | "set-null";
+
+/** Règle sur update de la clé référencée (ADR-031). `cascade` propage la
+ * nouvelle valeur ; `restrict` refuse. `set-null` rare (souvent inutile sur PK
+ * immutable) mais admis pour symétrie. */
+export type OnUpdateRule = "restrict" | "cascade" | "set-null";
+
+/**
+ * Foreign-key déclarée via SNQL DDL (`ref users.id [on delete ...]`, ADR-031).
+ * Distincte de `Relation` (résultat introspection/inférence) : `RefDef` porte
+ * les règles cascade + le nom de contrainte que le codegen a besoin d'émettre
+ * et que l'adapter runtime consomme pour la compensation Mongo/KV. Après un
+ * cycle d'introspection, un `RefDef` PG apparaît aussi comme un `Relation`
+ * `origin: "foreign-key"` — les deux coexistent (rules ici, graphe là).
+ */
+export interface RefDef {
+	/** Nom de contrainte (auto-généré `fk_<table>_<col>_<target>` ou `as`). */
+	readonly name: string;
+	/** Collection + colonne portant la FK (le côté « many »). */
+	readonly fromCollection: string;
+	readonly fromColumn: string;
+	/** Collection + colonne référencée (le côté « one », typiquement une PK). */
+	readonly toCollection: string;
+	readonly toColumn: string;
+	readonly onDelete: OnDeleteRule;
+	readonly onUpdate: OnUpdateRule;
+	readonly source: SchemaSource;
+}
+
 /** Structure complète d'une base pour un moteur donné. */
 export interface SchemaModel {
 	readonly engine: string;
 	readonly collections: readonly Collection[];
 	readonly relations: readonly Relation[];
 	readonly enums?: readonly EnumTypeDef[];
+	/** FK déclarées (ADR-031). Introspection PG `pg_constraint` ; Mongo/KV
+	 * lisent `_snql_refs`. Absent = aucune FK déclarée. */
+	readonly refs?: readonly RefDef[];
 }
 
 /** Retourne le `EnumTypeDef` du schema par nom, ou `undefined` si absent. */
@@ -109,4 +147,21 @@ export function getEnum(
 	name: string
 ): EnumTypeDef | undefined {
 	return schema.enums?.find((e) => e.name === name);
+}
+
+/** FK sortantes d'une collection (le côté référençant `many`). */
+export function getOutgoingRefs(
+	schema: SchemaModel,
+	collection: string
+): readonly RefDef[] {
+	return schema.refs?.filter((r) => r.fromCollection === collection) ?? [];
+}
+
+/** FK entrantes vers une collection (le côté référencé `one`) — base du
+ * reverse-nav `find users pick orders.count` (ADR-031 D7, FK/2). */
+export function getIncomingRefs(
+	schema: SchemaModel,
+	collection: string
+): readonly RefDef[] {
+	return schema.refs?.filter((r) => r.toCollection === collection) ?? [];
 }

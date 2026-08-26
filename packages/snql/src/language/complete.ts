@@ -1519,21 +1519,26 @@ function createTableCompletions(
 	// `{ col :` → types SNQL + aliases (D6) + enums en scope (ADR-030 Enum/2b).
 	if (last.kind === "colon") return ddlTypeSuggestions(schema);
 
+	// Modifier `ref t.c [on delete ...]` (ADR-031 FK/1). Détecté tôt car les
+	// tails (`ref`, `X.`, `on delete`) recoupent le case modifier générique.
+	const refCtx = refClauseCompletions(toks, schema);
+	if (refCtx !== null) return refCtx;
+
 	// `{ col: uuid |` OU `{ col: uuid nullable |` → modifiers + `,` + `primary`.
 	// Détection : dernier token = ident de type, ou modifier connu.
 	if (last.kind === "ident") {
 		const prev = toks[toks.length - 2];
 		if (prev !== undefined && prev.kind === "colon") {
 			// On vient de taper le type — propose modifiers.
-			return DDL_FIELD_MODIFIERS.map(keyword);
+			return [...DDL_FIELD_MODIFIERS.map(keyword), keyword("ref")];
 		}
 		if (
 			DDL_FIELD_MODIFIERS.includes(last.value.toLowerCase()) ||
 			last.value.toLowerCase() === "null" ||
 			last.value.toLowerCase() === "unique"
 		) {
-			// Après un modifier → autres modifiers restants.
-			return DDL_FIELD_MODIFIERS.map(keyword);
+			// Après un modifier → autres modifiers restants + ref.
+			return [...DDL_FIELD_MODIFIERS.map(keyword), keyword("ref")];
 		}
 	}
 
@@ -1548,6 +1553,100 @@ function createTableCompletions(
 	}
 
 	return [];
+}
+
+/**
+ * Complétions dans un modifier `ref <target>.<col> [on delete/update <rule>]
+ * [as <name>]` (ADR-031 FK/1). Retourne `null` si le tail n'est pas dans une
+ * clause ref (dispatch fallthrough vers les modifiers génériques). Détection
+ * purement par tail de tokens :
+ *  - `ref |`               → collections cibles
+ *  - `ref X.|`             → colonnes de X (PK/unique d'abord serait idéal ;
+ *                            V1 = toutes les colonnes)
+ *  - `ref X.y |`           → `on` / `as`
+ *  - `on |` (en clause ref)→ `delete` / `update`
+ *  - `on delete |`         → `cascade` / `restrict` / `set null`
+ */
+function refClauseCompletions(
+	toks: readonly Token[],
+	schema: SchemaModel
+): readonly SnqlCompletion[] | null {
+	const n = toks.length;
+	const last = toks[n - 1];
+	if (last === undefined) return null;
+	const at = (i: number): Token | undefined => toks[i];
+	const isRef = (t: Token | undefined): boolean =>
+		t !== undefined && t.kind === "ident" && t.value.toLowerCase() === "ref";
+
+	// `ref |` → collections cibles.
+	if (isRef(last)) return collections(schema);
+
+	// `ref X.|` → colonnes de X.
+	if (last.kind === "dot" && at(n - 2)?.kind === "ident" && isRef(at(n - 3))) {
+		const targetColl = at(n - 2)!.value;
+		return refTargetColumns(schema, targetColl);
+	}
+
+	// `ref X.y |` (ident après `X.`) → `on` / `as`.
+	if (
+		last.kind === "ident" &&
+		at(n - 2)?.kind === "dot" &&
+		at(n - 3)?.kind === "ident" &&
+		isRef(at(n - 4))
+	) {
+		return [keyword("on"), keyword("as")];
+	}
+
+	// `on delete |` / `on update |` → règles de cascade (seulement si un `ref`
+	// précède dans la clause courante — sinon `on` est un join `on`).
+	const prev = at(n - 2);
+	if (
+		(last.kind === "ident" || last.kind === "verb") &&
+		(last.value.toLowerCase() === "delete" ||
+			last.value.toLowerCase() === "update") &&
+		prev?.kind === "keyword" &&
+		prev.value === "on" &&
+		refPrecedesInField(toks)
+	) {
+		return [keyword("cascade"), keyword("restrict"), keyword("set null")];
+	}
+
+	// `ref X.y on |` → `delete` / `update`.
+	if (
+		last.kind === "keyword" &&
+		last.value === "on" &&
+		refPrecedesInField(toks)
+	) {
+		return [keyword("delete"), keyword("update")];
+	}
+
+	return null;
+}
+
+/** Colonnes de la collection cible d'une ref (V1 = toutes). */
+function refTargetColumns(
+	schema: SchemaModel,
+	collection: string
+): readonly SnqlCompletion[] {
+	const coll = schema.collections.find((c) => c.name === collection);
+	if (coll === undefined) return [];
+	return coll.fields.map((f) => ({
+		label: f.name,
+		type: "field" as const,
+		detail: f.type
+	}));
+}
+
+/** Vrai si un `ref` apparaît dans le field courant (depuis le dernier `{`,
+ * `,` ou début). Évite de confondre un `on delete` de ref avec un join `on`. */
+function refPrecedesInField(toks: readonly Token[]): boolean {
+	for (let i = toks.length - 1; i >= 0; i--) {
+		const t = toks[i];
+		if (t === undefined) return false;
+		if (t.kind === "lbrace" || t.kind === "comma") return false;
+		if (t.kind === "ident" && t.value.toLowerCase() === "ref") return true;
+	}
+	return false;
 }
 
 function isInsidePrimaryKeyParens(toks: readonly Token[]): boolean {
