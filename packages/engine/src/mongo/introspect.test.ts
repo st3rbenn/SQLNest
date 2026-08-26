@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { inferCollection, inferRelations, snqlTypeOf } from "./introspect";
+import { inferCollection, inferRelations, mergeValidatorFields, snqlTypeOf } from "./introspect";
 
 describe("snqlTypeOf", () => {
 	it("mappe les types JS/BSON vers SnqlType", () => {
@@ -91,5 +91,58 @@ describe("inferRelations (heuristique de nommage)", () => {
 	it("ignore le champ _id lui-même", () => {
 		const items = inferCollection("items", [{ _id: 1 }]);
 		expect(inferRelations([items])).toEqual([]);
+	});
+});
+
+describe("mergeValidatorFields (ADR-031 — colonnes déclarées du validator)", () => {
+	const emptyCol = { name: "orders", fields: [], source: "inferred" as const };
+
+	it("ajoute les colonnes déclarées d'une collection vide (sampling 0 doc)", () => {
+		const merged = mergeValidatorFields(emptyCol, {
+			$jsonSchema: {
+				bsonType: "object",
+				properties: {
+					id: { bsonType: "binData" },
+					user_id: { bsonType: "binData" },
+					total: { bsonType: "decimal" }
+				},
+				required: ["id", "user_id"]
+			}
+		});
+		expect(merged.fields).toEqual([
+			{ name: "id", type: "uuid", nullable: false, source: "declared" },
+			{ name: "user_id", type: "uuid", nullable: false, source: "declared" },
+			{ name: "total", type: "decimal", nullable: true, source: "declared" }
+		]);
+	});
+
+	it("ne double pas une colonne déjà inférée par sampling", () => {
+		const sampled = {
+			name: "orders",
+			fields: [
+				{ name: "id", type: "uuid" as const, nullable: false, source: "inferred" as const, confidence: 1 }
+			],
+			source: "inferred" as const
+		};
+		const merged = mergeValidatorFields(sampled, {
+			$jsonSchema: {
+				bsonType: "object",
+				properties: { id: { bsonType: "binData" }, note: { bsonType: "string" } }
+			}
+		});
+		expect(merged.fields.map((f) => f.name)).toEqual(["id", "note"]);
+		// `id` garde sa source inférée (sampling), pas écrasée.
+		expect(merged.fields[0]?.source).toBe("inferred");
+	});
+
+	it("pass-through si pas de validator", () => {
+		expect(mergeValidatorFields(emptyCol, undefined)).toBe(emptyCol);
+	});
+
+	it("bsonType inconnu → unknown", () => {
+		const merged = mergeValidatorFields(emptyCol, {
+			$jsonSchema: { properties: { weird: { bsonType: "javascript" } } }
+		});
+		expect(merged.fields[0]).toMatchObject({ name: "weird", type: "unknown" });
 	});
 });

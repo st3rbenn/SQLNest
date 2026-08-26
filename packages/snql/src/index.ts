@@ -255,6 +255,9 @@ export type {
 	EnumTypeDef,
 	Field,
 	FieldRef,
+	OnDeleteRule,
+	OnUpdateRule,
+	RefDef,
 	Relation,
 	RelationKind,
 	RelationOrigin,
@@ -262,4 +265,4 @@ export type {
 	SchemaSource,
 	SnqlType
 } from "./schema/model";
-export { getEnum } from "./schema/model";
+export { getEnum, getIncomingRefs, getOutgoingRefs } from "./schema/model";

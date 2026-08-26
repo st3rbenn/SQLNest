@@ -2,12 +2,31 @@ import type {
 	Collection,
 	EnumTypeDef,
 	Field,
+	RefDef,
 	Relation,
 	SchemaModel,
 	SnqlType
 } from "@sqlnest/snql";
 import type { Db } from "mongodb";
 import { EngineIntrospectionError } from "../errors";
+
+/**
+ * bsonType du validator `$jsonSchema` → `SnqlType`. Inverse de `MONGO_BSON_TYPE`
+ * du codegen. Permet de lire les colonnes **déclarées** d'une collection (via
+ * son validator) même quand elle est vide — le sampling seul ne verrait rien.
+ */
+const BSON_TYPE_TO_SNQL: Readonly<Record<string, SnqlType>> = {
+	string: "string",
+	int: "int",
+	long: "bigint",
+	double: "float",
+	decimal: "decimal",
+	bool: "bool",
+	date: "date",
+	object: "json",
+	array: "array",
+	binData: "uuid"
+};
 
 /** Un document échantillonné, réduit à ses paires clé/valeur. */
 export type SampledDoc = Record<string, unknown>;
@@ -187,13 +206,30 @@ export async function introspectMongo(
 	sampleSize: number
 ): Promise<SchemaModel> {
 	try {
-		const infos = await db.listCollections({}, { nameOnly: true }).toArray();
-		const names = infos
-			.map((info) => info.name)
-			// `system.*` = Mongo internal ; `_snql_enums` = metadata SQLNest
-			// (introspecté séparément vers `schema.enums`, jamais comme collection
-			// user).
-			.filter((name) => !name.startsWith("system.") && name !== "_snql_enums");
+		// nameOnly:false → on récupère aussi `options.validator` pour lire les
+		// colonnes DÉCLARÉES (une collection créée via `create table` mais vide
+		// n'a rien à échantillonner ; ses colonnes vivent dans le $jsonSchema).
+		const infos = await db.listCollections({}, { nameOnly: false }).toArray();
+		const validatorByName = new Map<string, Record<string, unknown>>();
+		const names: string[] = [];
+		for (const info of infos) {
+			const name = (info as { name?: unknown }).name;
+			if (typeof name !== "string") continue;
+			// `system.*` = Mongo internal ; `_snql_enums` / `_snql_refs` = metadata
+			// SQLNest (introspectés séparément, jamais comme collection user).
+			if (
+				name.startsWith("system.") ||
+				name === "_snql_enums" ||
+				name === "_snql_refs"
+			) {
+				continue;
+			}
+			names.push(name);
+			const validator = (
+				info as { options?: { validator?: Record<string, unknown> } }
+			).options?.validator;
+			if (validator !== undefined) validatorByName.set(name, validator);
+		}
 
 		const collections = await Promise.all(
 			names.map(async (name) => {
@@ -201,7 +237,8 @@ export async function introspectMongo(
 					.collection(name)
 					.aggregate([{ $sample: { size: sampleSize } }])
 					.toArray();
-				return inferCollection(name, docs as SampledDoc[]);
+				const inferred = inferCollection(name, docs as SampledDoc[]);
+				return mergeValidatorFields(inferred, validatorByName.get(name));
 			})
 		);
 
@@ -229,15 +266,99 @@ export async function introspectMongo(
 			// silence — enums restent vide
 		}
 
+		// FK déclarées stockées dans `_snql_refs` (ADR-031 FK/1a). Best-effort
+		// comme les enums (collection absente / permission = refs vide).
+		const refsList: RefDef[] = [];
+		try {
+			const docs = await db.collection("_snql_refs").find({}).toArray();
+			for (const doc of docs) {
+				const d = doc as Record<string, unknown>;
+				if (
+					typeof d._id === "string" &&
+					typeof d.fromCollection === "string" &&
+					typeof d.fromColumn === "string" &&
+					typeof d.toCollection === "string" &&
+					typeof d.toColumn === "string"
+				) {
+					refsList.push({
+						name: d._id,
+						fromCollection: d.fromCollection,
+						fromColumn: d.fromColumn,
+						toCollection: d.toCollection,
+						toColumn: d.toColumn,
+						onDelete: normalizeRefRule(d.onDelete, "restrict"),
+						onUpdate: normalizeRefRule(d.onUpdate, "restrict"),
+						source: "declared"
+					});
+				}
+			}
+		} catch {
+			// silence — refs restent vide
+		}
+
 		return {
 			engine: "mongodb",
 			collections,
 			relations: inferRelations(collections),
-			...(enumsList.length > 0 ? { enums: enumsList } : {})
+			...(enumsList.length > 0 ? { enums: enumsList } : {}),
+			...(refsList.length > 0 ? { refs: refsList } : {})
 		};
 	} catch (cause) {
 		throw new EngineIntrospectionError("Introspection MongoDB échouée", {
 			cause
 		});
 	}
+}
+
+/**
+ * Fusionne les colonnes DÉCLARÉES du validator `$jsonSchema` dans une
+ * collection inférée par sampling (ADR-031, fix flow DDL Mongo). Une colonne
+ * présente dans le validator mais absente du sampling (collection vide ou
+ * valeur toujours absente) est ajoutée `source: "declared"`. Une colonne déjà
+ * inférée garde ses stats de sampling (confidence). Nécessaire pour que
+ * `create table` → `describe`/FK-target voie les colonnes avant tout insert.
+ */
+export function mergeValidatorFields(
+	inferred: Collection,
+	validator: Record<string, unknown> | undefined
+): Collection {
+	if (validator === undefined) return inferred;
+	const jsonSchema = (validator as { $jsonSchema?: Record<string, unknown> })
+		.$jsonSchema;
+	const properties = (
+		jsonSchema as { properties?: Record<string, unknown> } | undefined
+	)?.properties;
+	if (properties === undefined) return inferred;
+	const required = new Set(
+		((jsonSchema as { required?: unknown }).required as string[] | undefined) ??
+			[]
+	);
+	const known = new Set(inferred.fields.map((f) => f.name));
+	const declared: Field[] = [];
+	for (const [propName, propRaw] of Object.entries(properties)) {
+		if (known.has(propName)) continue;
+		const bsonType = (propRaw as { bsonType?: unknown }).bsonType;
+		const type =
+			typeof bsonType === "string"
+				? (BSON_TYPE_TO_SNQL[bsonType] ?? "unknown")
+				: "unknown";
+		declared.push({
+			name: propName,
+			type,
+			nullable: !required.has(propName),
+			source: "declared"
+		});
+	}
+	if (declared.length === 0) return inferred;
+	return { ...inferred, fields: [...inferred.fields, ...declared] };
+}
+
+/** Normalise une règle de cascade lue du metadata (`set null` alias). */
+function normalizeRefRule(
+	raw: unknown,
+	fallback: "restrict" | "cascade" | "set-null"
+): "restrict" | "cascade" | "set-null" {
+	if (raw === "cascade" || raw === "restrict" || raw === "set-null") return raw;
+	if (raw === "set null" || raw === "setnull") return "set-null";
+	return fallback;
 }
