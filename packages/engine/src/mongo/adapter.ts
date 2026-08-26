@@ -158,6 +158,74 @@ function writeErrorMessage(op: string, cause: unknown): string {
 	return `Écriture MongoDB échouée — ${detail}`;
 }
 
+/** FK chargée depuis `_snql_refs` pour l'enforcement runtime (ADR-031 FK/1b). */
+interface RefMeta {
+	readonly name: string;
+	readonly fromCollection: string;
+	readonly fromColumn: string;
+	readonly toCollection: string;
+	readonly toColumn: string;
+	readonly onDelete: string;
+}
+
+/**
+ * Extrait les champs settés par un update pour le write-precheck FK. Gère le
+ * `$set` classique (`{$set: {...}}`) ET la forme pipeline (`[{$set: {...}}]`).
+ * Un champ setté à une expression non-littérale (`"$autre"`) est ignoré du
+ * precheck (on ne peut pas connaître sa valeur statiquement — best-effort).
+ */
+export function extractSetFields(
+	update: Document | readonly Document[]
+): Record<string, unknown> {
+	const stages = Array.isArray(update) ? update : [update];
+	const out: Record<string, unknown> = {};
+	for (const stage of stages) {
+		const set = (stage as { $set?: unknown }).$set;
+		if (set !== null && typeof set === "object") {
+			for (const [k, v] of Object.entries(set as Record<string, unknown>)) {
+				out[k] = v;
+			}
+		}
+	}
+	return out;
+}
+
+/** Valeurs distinctes non-null/undefined (clés référencées pour la cascade). */
+export function uniqueDefined(values: readonly unknown[]): unknown[] {
+	const seen = new Set<string>();
+	const out: unknown[] = [];
+	for (const v of values) {
+		if (v === null || v === undefined) continue;
+		const key = typeof v === "object" ? JSON.stringify(v) : `${typeof v}:${String(v)}`;
+		if (seen.has(key)) continue;
+		seen.add(key);
+		out.push(v);
+	}
+	return out;
+}
+
+/**
+ * Enrobe une erreur d'enforcement FK transactionnel. Un
+ * `TransactionNotSupported` (code 20) = mongod standalone → message guidant
+ * (réconciliation doctrine : cascade atomique exige un replica set, comme
+ * l'infra de référence SQLNest `mongod --replSet rs0`). Une `EngineExecutionError`
+ * (refus FK typé) passe telle quelle.
+ */
+function fkTransactionError(collection: string, cause: unknown): Error {
+	if (cause instanceof EngineExecutionError) return cause;
+	const code = (cause as { code?: unknown } | null)?.code;
+	if (code === 20 || code === 263) {
+		return new EngineExecutionError(
+			`L'enforcement FK sur '${collection}' exige des transactions Mongo — active un replica set (même single-node : \`mongod --replSet rs0\` + rs.initiate(), cf. l'infra de référence SQLNest). ${describeMongoExecutionError(cause)}`,
+			{ cause }
+		);
+	}
+	return new EngineExecutionError(
+		`Enforcement FK MongoDB échoué sur '${collection}' — ${describeMongoExecutionError(cause)}`,
+		{ cause }
+	);
+}
+
 /**
  * Compose un message utilisable côté UI à partir d'une erreur du driver Mongo.
  * On garde le message natif (ex. `no such collection`, `unknown top-level operator`)
@@ -418,7 +486,30 @@ class MongoConnection implements Connection {
 	 * Les valeurs sont hydratées en BSON ({@link hydrateBson}) : décimal exact,
 	 * int64, et ObjectId pour un filtre sur `_id`.
 	 */
+	/**
+	 * Dispatch write FK-aware (ADR-031 FK/1b). Charge les FK pertinentes depuis
+	 * `_snql_refs` et, si la collection en a, exécute le write dans une
+	 * transaction avec enforcement (write-precheck insert/update, cascade delete).
+	 * Sans FK → fast path direct (pas d'overhead transaction).
+	 */
 	async #executeWrite(
+		query: Extract<NativeQuery, { kind: "mongo-write" }>
+	): Promise<ResultSet> {
+		if (query.op === "insert" || query.op === "update") {
+			const outgoing = await this.#loadRefs("fromCollection", query.collection);
+			if (outgoing.length > 0) {
+				return this.#executeWriteFKChecked(query, outgoing);
+			}
+		} else if (query.op === "delete") {
+			const incoming = await this.#loadRefs("toCollection", query.collection);
+			if (incoming.length > 0) {
+				return this.#executeDeleteCascade(query);
+			}
+		}
+		return this.#executeWritePlain(query);
+	}
+
+	async #executeWritePlain(
 		query: Extract<NativeQuery, { kind: "mongo-write" }>
 	): Promise<ResultSet> {
 		const collection = this.#requireDb().collection(query.collection);
@@ -510,6 +601,238 @@ class MongoConnection implements Connection {
 			throw new EngineExecutionError(writeErrorMessage(query.op, cause), {
 				cause
 			});
+		}
+	}
+
+	/**
+	 * Charge les FK depuis `_snql_refs` (ADR-031 FK/1b) filtrées par un champ
+	 * (`fromCollection` pour les FK sortantes = write-precheck, `toCollection`
+	 * pour les entrantes = cascade). Best-effort : `_snql_refs` absent → [].
+	 */
+	async #loadRefs(
+		field: "fromCollection" | "toCollection",
+		collection: string
+	): Promise<readonly RefMeta[]> {
+		try {
+			const docs = await this.#requireDb()
+				.collection("_snql_refs")
+				.find({ [field]: collection })
+				.toArray();
+			const out: RefMeta[] = [];
+			for (const d of docs) {
+				const r = d as Record<string, unknown>;
+				if (
+					typeof r._id === "string" &&
+					typeof r.fromCollection === "string" &&
+					typeof r.fromColumn === "string" &&
+					typeof r.toCollection === "string" &&
+					typeof r.toColumn === "string"
+				) {
+					out.push({
+						name: r._id,
+						fromCollection: r.fromCollection,
+						fromColumn: r.fromColumn,
+						toCollection: r.toCollection,
+						toColumn: r.toColumn,
+						onDelete: typeof r.onDelete === "string" ? r.onDelete : "restrict"
+					});
+				}
+			}
+			return out;
+		} catch {
+			return [];
+		}
+	}
+
+	/**
+	 * Vrai ssi une valeur référencée existe dans la collection cible (ADR-031
+	 * FK/1b write-precheck). Gère l'alias `id`→`_id` (D13) : quand `toColumn`
+	 * est `id`, on cherche aussi sous `_id`. La valeur est hydratée (24-hex →
+	 * ObjectId sous `_id`) cohéremment avec le stockage.
+	 */
+	async #refTargetExists(
+		toCollection: string,
+		toColumn: string,
+		value: unknown,
+		session: ClientSession
+	): Promise<boolean> {
+		const col = this.#requireDb().collection(toCollection);
+		const or: Document[] = [
+			{ [toColumn]: hydrateBson(value, false) }
+		];
+		if (toColumn === "id") {
+			or.push({ _id: hydrateBson(value, true) });
+		}
+		const cnt = await col.countDocuments(
+			{ $or: or },
+			{ session, limit: 1 }
+		);
+		return cnt > 0;
+	}
+
+	/**
+	 * Write insert/update avec write-precheck FK (ADR-031 FK/1b) dans une
+	 * transaction. Pour chaque FK sortante, la valeur écrite doit référencer une
+	 * ligne existante (sauf NULL — FK nullable). `withTransaction` retry les
+	 * erreurs transientes ; sur mongod standalone, `startSession`/tx lève
+	 * TransactionNotSupported (20) → message guidant (RS requis).
+	 */
+	async #executeWriteFKChecked(
+		query: Extract<NativeQuery, { kind: "mongo-write"; op: "insert" | "update" }>,
+		outgoing: readonly RefMeta[]
+	): Promise<ResultSet> {
+		const session = this.#requireClient().startSession();
+		try {
+			let result: ResultSet = { columns: [], rows: [], rowCount: 0 };
+			await session.withTransaction(async () => {
+				if (query.op === "insert") {
+					for (const doc of query.documents) {
+						for (const ref of outgoing) {
+							const val = (doc as Record<string, unknown>)[ref.fromColumn];
+							if (val === null || val === undefined) continue;
+							const ok = await this.#refTargetExists(
+								ref.toCollection,
+								ref.toColumn,
+								val,
+								session
+							);
+							if (!ok) {
+								throw new EngineExecutionError(
+									`insert dans '${query.collection}' viole la foreign key '${ref.name}' : '${ref.fromColumn}' = ${JSON.stringify(val)} ne référence aucune ligne de ${ref.toCollection}.${ref.toColumn}`
+								);
+							}
+						}
+					}
+				} else {
+					// update : precheck des FK dont la colonne est settée à une valeur.
+					const setDoc = extractSetFields(query.update);
+					for (const ref of outgoing) {
+						if (!(ref.fromColumn in setDoc)) continue;
+						const val = setDoc[ref.fromColumn];
+						if (val === null || val === undefined) continue;
+						const ok = await this.#refTargetExists(
+							ref.toCollection,
+							ref.toColumn,
+							val,
+							session
+						);
+						if (!ok) {
+							throw new EngineExecutionError(
+								`update de '${query.collection}' viole la foreign key '${ref.name}' : '${ref.fromColumn}' = ${JSON.stringify(val)} ne référence aucune ligne de ${ref.toCollection}.${ref.toColumn}`
+							);
+						}
+					}
+				}
+				result = await this.#executeWriteInSession(query, session);
+			});
+			return result;
+		} catch (cause) {
+			throw fkTransactionError(query.collection, cause);
+		} finally {
+			await session.endSession();
+		}
+	}
+
+	/**
+	 * Delete avec cascade FK (ADR-031 FK/1b) dans une transaction. Trouve les
+	 * lignes supprimées, applique `on delete` (restrict/cascade/set-null) aux
+	 * collections dépendantes récursivement (multi-niveau + garde de cycle),
+	 * puis supprime les lignes cibles. Tout ou rien via `withTransaction`.
+	 */
+	async #executeDeleteCascade(
+		query: Extract<NativeQuery, { kind: "mongo-write"; op: "delete" }>
+	): Promise<ResultSet> {
+		const session = this.#requireClient().startSession();
+		try {
+			let deletedCount = 0;
+			await session.withTransaction(async () => {
+				const db = this.#requireDb();
+				const filter = hydrateBson(query.filter, true) as Document;
+				const targetColl = db.collection(query.collection);
+				const docs = await targetColl.find(filter, { session }).toArray();
+				if (docs.length === 0) {
+					deletedCount = 0;
+					return;
+				}
+				const visited = new Set<string>();
+				await this.#cascadeChildren(query.collection, docs, session, visited);
+				const ids = docs.map(
+					(d) => (d as { _id: unknown })._id
+				) as unknown as ObjectId[];
+				const res = await targetColl.deleteMany(
+					{ _id: { $in: ids } },
+					{ session }
+				);
+				deletedCount = res.deletedCount;
+			});
+			return { columns: [], rows: [], rowCount: deletedCount };
+		} catch (cause) {
+			throw fkTransactionError(query.collection, cause);
+		} finally {
+			await session.endSession();
+		}
+	}
+
+	/**
+	 * Applique les règles `on delete` aux enfants de `docs` (lignes en cours de
+	 * suppression dans `collection`), récursivement. `restrict` refuse si un
+	 * enfant existe ; `set-null` met la FK à NULL ; `cascade` supprime les
+	 * enfants (après avoir cascadé leurs propres enfants). Garde de cycle via
+	 * `visited` (paires `collection:_id`).
+	 */
+	async #cascadeChildren(
+		collection: string,
+		docs: readonly Document[],
+		session: ClientSession,
+		visited: Set<string>
+	): Promise<void> {
+		const db = this.#requireDb();
+		const incoming = await this.#loadRefs("toCollection", collection);
+		for (const ref of incoming) {
+			// Valeurs de clé référencées par les enfants (côté `toColumn`).
+			const keyVals = uniqueDefined(
+				docs.map((d) => (d as Record<string, unknown>)[ref.toColumn])
+			);
+			if (keyVals.length === 0) continue;
+			const childColl = db.collection(ref.fromCollection);
+			const childFilter = {
+				[ref.fromColumn]: { $in: keyVals.map((v) => hydrateBson(v, false)) }
+			} as Document;
+			if (ref.onDelete === "restrict") {
+				const cnt = await childColl.countDocuments(childFilter, {
+					session,
+					limit: 1
+				});
+				if (cnt > 0) {
+					throw new EngineExecutionError(
+						`delete de '${collection}' viole la foreign key '${ref.name}' (RESTRICT) : ${ref.fromCollection} référence encore ces lignes via '${ref.fromColumn}'. Supprime d'abord les dépendants ou déclare 'on delete cascade'.`
+					);
+				}
+			} else if (ref.onDelete === "set-null") {
+				await childColl.updateMany(
+					childFilter,
+					{ $set: { [ref.fromColumn]: null } },
+					{ session }
+				);
+			} else {
+				// cascade : récurse puis supprime les enfants (bottom-up).
+				const children = await childColl.find(childFilter, { session }).toArray();
+				const fresh = children.filter((c) => {
+					const key = `${ref.fromCollection}:${String((c as { _id: unknown })._id)}`;
+					if (visited.has(key)) return false;
+					visited.add(key);
+					return true;
+				});
+				if (fresh.length === 0) continue;
+				await this.#cascadeChildren(ref.fromCollection, fresh, session, visited);
+				const childIds = fresh.map(
+					(c) => (c as { _id: unknown })._id
+				) as unknown as ObjectId[];
+				await childColl.deleteMany(
+					{ _id: { $in: childIds } },
+					{ session }
+				);
+			}
 		}
 	}
 
@@ -985,6 +1308,19 @@ class MongoConnection implements Connection {
 		const db = this.#requireDb();
 		try {
 			await db.collection(query.collection).drop();
+			// Purge les FK impliquant cette collection (ADR-031 FK/1b) — sortantes
+			// (from) ET entrantes (to) : la table disparue, ses contraintes n'ont
+			// plus de sens. Best-effort (pas de `drop ref` natif encore = FK/3).
+			try {
+				await db.collection("_snql_refs").deleteMany({
+					$or: [
+						{ fromCollection: query.collection },
+						{ toCollection: query.collection }
+					]
+				});
+			} catch {
+				// silence — _snql_refs absent
+			}
 			return { columns: [], rows: [], rowCount: 0 };
 		} catch (cause) {
 			const code = (cause as { code?: unknown } | null)?.code;
