@@ -332,7 +332,13 @@ function contextOptions(
 		}
 		if (lower === "drop") {
 			// ADR-029 D7 destructive — WriteConfirmBar D7 typing gate au run.
-			return [keyword("table"), keyword("column"), keyword("index")];
+			// Enum/3 ajoute `enum` (D8 destructive gate).
+			return [
+				keyword("table"),
+				keyword("column"),
+				keyword("index"),
+				keyword("enum")
+			];
 		}
 	}
 
@@ -395,6 +401,7 @@ function contextOptions(
 				keyword("column"),
 				keyword("index"),
 				keyword("unique"),
+				keyword("enum"),
 				...collections(schema)
 			];
 		}
@@ -1440,7 +1447,8 @@ function ddlContextOptions(
 		return createTableCompletions(toks, schema);
 	}
 
-	// === add column / add index / add unique index === (verb add + soft-ident)
+	// === add column / add index / add unique index / add enum member ===
+	// (verb add + soft-ident) — Enum/3 étend ce dispatch.
 	if (head.kind === "verb" && headLower === "add" && toks.length >= 2) {
 		const t1 = toks[1];
 		if (t1 === undefined) return null;
@@ -1451,10 +1459,12 @@ function ddlContextOptions(
 			// addIndexCompletions dans les 2 cas. Sur 2 toks il propose `index`.
 			return addIndexCompletions(toks, schema);
 		}
+		if (t1Lower === "enum") return addEnumMemberCompletions(toks, schema);
 		return null;
 	}
 
-	// === drop table / drop column / drop index === (soft-ident drop head)
+	// === drop table / drop column / drop index / drop enum ===
+	// (soft-ident drop head) — Enum/3 étend ce dispatch.
 	if (head.kind === "ident" && headLower === "drop" && toks.length >= 2) {
 		const t1 = toks[1];
 		if (t1 === undefined) return null;
@@ -1462,6 +1472,7 @@ function ddlContextOptions(
 		if (t1Lower === "table") return dropTableCompletions(toks, schema);
 		if (t1Lower === "column") return dropColumnCompletions(toks, schema);
 		if (t1Lower === "index") return dropIndexCompletions(toks, schema);
+		if (t1Lower === "enum") return dropEnumCompletions(toks, schema);
 		return null;
 	}
 
@@ -1728,6 +1739,123 @@ function dropIndexCompletions(
 	// `drop index NAME from |` → collections.
 	if (last.kind === "keyword" && last.value === "from") {
 		return collections(schema);
+	}
+
+	return [];
+}
+
+/**
+ * Enums en scope suggérés — miroir de `collections()`, distinct visuellement
+ * par `type: "type"` + `detail: enum (N members)`.
+ */
+function enumSuggestions(schema: SchemaModel): readonly SnqlCompletion[] {
+	return (
+		schema.enums?.map((e) => ({
+			label: e.name,
+			type: "type" as const,
+			detail: `enum (${e.members.length} members)`
+		})) ?? []
+	);
+}
+
+/**
+ * Complétions pour `add enum member <Name> "m" [if not exists]` (Enum/3).
+ * Positions :
+ *  - `add |` : proposé au dispatch DML top-level (add {...}).
+ *  - `add enum |` : `member`.
+ *  - `add enum member |` : enums en scope.
+ *  - `add enum member Name |` : rien (member string libre).
+ *  - `add enum member Name "m" |` : `if`.
+ *  - `add enum member Name "m" if |` : `not`.
+ *  - `add enum member Name "m" if not |` : `exists`.
+ */
+function addEnumMemberCompletions(
+	toks: readonly Token[],
+	schema: SchemaModel
+): readonly SnqlCompletion[] {
+	const last = toks[toks.length - 1];
+	if (last === undefined) return [];
+
+	// `add enum |` → `member`.
+	if (toks.length === 2) {
+		return [keyword("member")];
+	}
+
+	// `add enum member |` → enums en scope.
+	if (toks.length === 3 && last.kind === "ident") {
+		return enumSuggestions(schema);
+	}
+
+	// `add enum member NAME |` → member string libre — rien à proposer.
+	if (toks.length === 4 && last.kind === "ident") {
+		return [];
+	}
+
+	// `add enum member NAME "m" |` → `if`.
+	if (toks.length === 5 && last.kind === "string") {
+		return [keyword("if")];
+	}
+
+	// `add enum member NAME "m" if |` → `not`.
+	if (
+		toks.length === 6 &&
+		last.kind === "ident" &&
+		last.value.toLowerCase() === "if"
+	) {
+		return [keyword("not")];
+	}
+
+	// `add enum member NAME "m" if not |` → `exists`.
+	if (
+		toks.length === 7 &&
+		last.kind === "keyword" &&
+		last.value === "not"
+	) {
+		return [keyword("exists")];
+	}
+
+	return [];
+}
+
+/**
+ * Complétions pour `drop enum <name> [if exists] [cascade]` (Enum/3 D8).
+ * Positions :
+ *  - `drop enum |` : enums en scope.
+ *  - `drop enum NAME |` : `if` + `cascade`.
+ *  - `drop enum NAME if |` : `exists`.
+ *  - `drop enum NAME if exists |` : `cascade`.
+ */
+function dropEnumCompletions(
+	toks: readonly Token[],
+	schema: SchemaModel
+): readonly SnqlCompletion[] {
+	const last = toks[toks.length - 1];
+	if (last === undefined) return [];
+
+	// `drop enum |` → enums en scope.
+	if (toks.length === 2) return enumSuggestions(schema);
+
+	// `drop enum NAME |` → `if` + `cascade`.
+	if (toks.length === 3 && last.kind === "ident") {
+		return [keyword("if"), keyword("cascade")];
+	}
+
+	// `drop enum NAME if |` → `exists`.
+	if (
+		toks.length === 4 &&
+		last.kind === "ident" &&
+		last.value.toLowerCase() === "if"
+	) {
+		return [keyword("exists")];
+	}
+
+	// `drop enum NAME if exists |` → `cascade`.
+	if (
+		toks.length === 5 &&
+		last.kind === "keyword" &&
+		last.value === "exists"
+	) {
+		return [keyword("cascade")];
 	}
 
 	return [];

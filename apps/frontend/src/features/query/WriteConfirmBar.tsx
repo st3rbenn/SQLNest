@@ -68,9 +68,9 @@ export function expectedFor(finding: UnfilteredFinding): string {
 		case "raw_opaque":
 			return "RAW";
 		case "destructive_drop":
-			// ADR-029 D7 typing UI gate destructive : "DROP <target>". Target
-			// = table name pour drop-table/drop-column, index name pour
-			// drop-index — cohérent avec ce que l'user voit dans son SNQL.
+			// ADR-029 D7 + ADR-030 Enum/3 D8 typing UI gate destructive :
+			// "DROP <target>". Target = table pour drop-table/drop-column,
+			// name pour drop-index/drop-enum — cohérent avec le SNQL source.
 			return `DROP ${finding.target}`;
 	}
 }

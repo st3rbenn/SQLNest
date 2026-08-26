@@ -428,6 +428,75 @@ describe("codegen PG — create enum (ADR-030 Enum/1.5)", () => {
 	});
 });
 
+describe("codegen PG — add enum member (ADR-030 Enum/3.4)", () => {
+	it("émet ALTER TYPE ADD VALUE IF NOT EXISTS inline", () => {
+		const q = mapDDL({
+			op: "ddl",
+			kind: "add-enum-member",
+			name: "role_type",
+			member: "guest",
+			ifNotExists: false
+		});
+		if (q.kind !== "sql") throw new Error("attendu sql");
+		expect(q.text).toBe(
+			`ALTER TYPE "role_type" ADD VALUE IF NOT EXISTS 'guest'`
+		);
+		expect(q.params).toEqual([]);
+	});
+
+	it("escape single-quote dans le member", () => {
+		const q = mapDDL({
+			op: "ddl",
+			kind: "add-enum-member",
+			name: "quotes",
+			member: "o'brien",
+			ifNotExists: false
+		});
+		if (q.kind !== "sql") throw new Error("attendu sql");
+		expect(q.text).toBe(
+			`ALTER TYPE "quotes" ADD VALUE IF NOT EXISTS 'o''brien'`
+		);
+	});
+});
+
+describe("codegen PG — drop enum (ADR-030 Enum/3.4 D8)", () => {
+	it("RESTRICT par défaut", () => {
+		const q = mapDDL({
+			op: "ddl",
+			kind: "drop-enum",
+			name: "role_type",
+			ifExists: false,
+			cascade: false
+		});
+		if (q.kind !== "sql") throw new Error("attendu sql");
+		expect(q.text).toBe(`DROP TYPE "role_type" RESTRICT`);
+	});
+
+	it("cascade explicite → CASCADE", () => {
+		const q = mapDDL({
+			op: "ddl",
+			kind: "drop-enum",
+			name: "role_type",
+			ifExists: false,
+			cascade: true
+		});
+		if (q.kind !== "sql") throw new Error("attendu sql");
+		expect(q.text).toBe(`DROP TYPE "role_type" CASCADE`);
+	});
+
+	it("if exists + cascade → DROP TYPE IF EXISTS ... CASCADE", () => {
+		const q = mapDDL({
+			op: "ddl",
+			kind: "drop-enum",
+			name: "role_type",
+			ifExists: true,
+			cascade: true
+		});
+		if (q.kind !== "sql") throw new Error("attendu sql");
+		expect(q.text).toBe(`DROP TYPE IF EXISTS "role_type" CASCADE`);
+	});
+});
+
 describe("codegen PG — enum type dans create table + add column (Enum/2.5)", () => {
 	it("create table avec field enum → column type = enum name quoted", () => {
 		const q = mapDDL({

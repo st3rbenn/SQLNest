@@ -1,21 +1,25 @@
 import { describe, expect, it } from "vitest";
 import type {
 	AddColumnPlan,
+	AddEnumMemberPlan,
 	AddIndexPlan,
 	CreateEnumPlan,
 	CreateTablePlan,
 	DDLPlan,
 	DropColumnPlan,
+	DropEnumPlan,
 	DropIndexPlan,
 	DropTablePlan
 } from "../ir/plan";
 import type {
 	MongoDDLAddColumnQuery,
+	MongoDDLAddEnumMemberQuery,
 	MongoDDLAddIndexQuery,
 	MongoDDLCreateCollectionQuery,
 	MongoDDLCreateEnumQuery,
 	MongoDDLDropCollectionQuery,
 	MongoDDLDropColumnQuery,
+	MongoDDLDropEnumQuery,
 	MongoDDLDropIndexQuery
 } from "./mapper";
 import { mongoMapper } from "./mongodb";
@@ -605,5 +609,89 @@ describe("codegen Mongo — enum type dans create table + add column (Enum/2.6)"
 			bsonType: "string",
 			enum: ["free", "pro"]
 		});
+	});
+});
+
+describe("codegen Mongo — add enum member (ADR-030 Enum/3.5)", () => {
+	function mapAddMember(plan: AddEnumMemberPlan): MongoDDLAddEnumMemberQuery {
+		if (mongoMapper.mapDDL === undefined) throw new Error("mapDDL manquant");
+		const q = mongoMapper.mapDDL(plan);
+		if (q.kind !== "mongo-ddl" || q.operation !== "add-enum-member") {
+			throw new Error(`attendu mongo-ddl add-enum-member, got ${q.kind}`);
+		}
+		return q;
+	}
+
+	it("émet shape add-enum-member avec name + member", () => {
+		expect(
+			mapAddMember({
+				op: "ddl",
+				kind: "add-enum-member",
+				name: "role_type",
+				member: "guest",
+				ifNotExists: false
+			})
+		).toEqual({
+			engine: "mongodb",
+			kind: "mongo-ddl",
+			operation: "add-enum-member",
+			name: "role_type",
+			member: "guest",
+			ifNotExists: false
+		});
+	});
+
+	it("propage ifNotExists", () => {
+		expect(
+			mapAddMember({
+				op: "ddl",
+				kind: "add-enum-member",
+				name: "s",
+				member: "m",
+				ifNotExists: true
+			}).ifNotExists
+		).toBe(true);
+	});
+});
+
+describe("codegen Mongo — drop enum (ADR-030 Enum/3.5 D8)", () => {
+	function mapDropEnum(plan: DropEnumPlan): MongoDDLDropEnumQuery {
+		if (mongoMapper.mapDDL === undefined) throw new Error("mapDDL manquant");
+		const q = mongoMapper.mapDDL(plan);
+		if (q.kind !== "mongo-ddl" || q.operation !== "drop-enum") {
+			throw new Error(`attendu mongo-ddl drop-enum, got ${q.kind}`);
+		}
+		return q;
+	}
+
+	it("émet shape drop-enum RESTRICT + ifExists=false par défaut", () => {
+		expect(
+			mapDropEnum({
+				op: "ddl",
+				kind: "drop-enum",
+				name: "role_type",
+				ifExists: false,
+				cascade: false
+			})
+		).toEqual({
+			engine: "mongodb",
+			kind: "mongo-ddl",
+			operation: "drop-enum",
+			name: "role_type",
+			ifExists: false,
+			cascade: false
+		});
+	});
+
+	it("propage cascade + ifExists", () => {
+		const q = mapDropEnum({
+			op: "ddl",
+			kind: "drop-enum",
+			name: "s",
+			ifExists: true,
+			cascade: true
+		});
+		expect(q.ifExists).toBe(true);
+		expect(q.cascade).toBe(true);
 	});
 });

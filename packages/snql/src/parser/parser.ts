@@ -4,6 +4,7 @@ import type { Span, Token } from "../lexer/token";
 import type { SnqlType } from "../schema/model";
 import type {
 	AddColumnStmt,
+	AddEnumMemberStmt,
 	AddIndexStmt,
 	Assignment,
 	CreateEnumStmt,
@@ -12,6 +13,7 @@ import type {
 	DDLFieldTypeRef,
 	DeleteStatement,
 	DropColumnStmt,
+	DropEnumStmt,
 	DropIndexStmt,
 	DropTableStmt,
 	Expr,
@@ -150,6 +152,18 @@ function parseStatement(cursor: TokenCursor): Statement {
 	) {
 		return parseAddColumn(cursor);
 	}
+	// Enum/3 : `add enum member <Name> "m" [if not exists]`. Dispatch avant
+	// `add column`/`add index` — `enum` + `member` sont soft-idents. Peek 2
+	// ahead sur `member` pour discriminer avec `add enum {...}` (aucun sens
+	// V1 mais garde-fou surface DML `add {enum: "x"} into t` insert alias).
+	if (
+		first.kind === "verb" &&
+		first.value.toLowerCase() === "add" &&
+		peekIdent(cursor, "enum", 1) &&
+		peekIdent(cursor, "member", 2)
+	) {
+		return parseAddEnumMember(cursor);
+	}
 	// DDL/3 : `add index (fields) into <table>` ou `add unique index (fields) into <table>`.
 	// `index` reste soft-ident (une col nommée `index` reste valide). Peek à 1
 	// ahead : `add index` direct, OU `add unique index` (peek 2 ahead sur `index`
@@ -189,6 +203,16 @@ function parseStatement(cursor: TokenCursor): Statement {
 		peekIdent(cursor, "column", 1)
 	) {
 		return parseDropColumn(cursor);
+	}
+	// Enum/3 : `drop enum <name> [if exists] [cascade]`. Destructive — D7 UI
+	// (typing gate). `enum` reste soft-ident. RESTRICT natif PG par défaut ;
+	// CASCADE explicite drop les colonnes utilisatrices.
+	if (
+		first.kind === "ident" &&
+		first.value.toLowerCase() === "drop" &&
+		peekIdent(cursor, "enum", 1)
+	) {
+		return parseDropEnum(cursor);
 	}
 	const verbTok = first;
 	if (verbTok.kind !== "verb") {
@@ -2339,6 +2363,110 @@ function parseCreateEnum(cursor: TokenCursor): CreateEnumStmt {
 		members,
 		...(ifNotExists ? { ifNotExists } : {}),
 		span: { start: createTok.span.start, end: closeBrace.span.end }
+	};
+}
+
+/**
+ * `add enum member <Name> "member" [if not exists]` (ADR-030 Enum/3). Append-only
+ * safe cross-engine. `if not exists` optionnel — sans le modifier, dedup silence
+ * au lower (D3 pattern miroir create-table).
+ */
+function parseAddEnumMember(cursor: TokenCursor): AddEnumMemberStmt {
+	const addTok = cursor.next(); // `add` verb
+	cursor.next(); // `enum` ident (peeked)
+	cursor.next(); // `member` ident (peeked)
+
+	const nameTok = cursor.expect(
+		"ident",
+		"un nom d'enum après 'add enum member'"
+	);
+
+	const memberTok = cursor.peek();
+	if (memberTok.kind !== "string") {
+		throw new SnqlError(
+			'Un member d\'enum doit être un string literal — ex : "user"',
+			"parse_ddl_enum_member_not_string",
+			memberTok.span
+		);
+	}
+	cursor.next();
+
+	let ifNotExists = false;
+	let endSpan = memberTok.span;
+	if (peekIdent(cursor, "if")) {
+		cursor.next();
+		if (!peekKeyword(cursor, "not")) {
+			throw new SnqlError(
+				"'if' doit être suivi de 'not exists' dans un add enum member",
+				"parse_ddl_expected_not_after_if",
+				cursor.peek().span
+			);
+		}
+		cursor.next();
+		if (!peekKeyword(cursor, "exists")) {
+			throw new SnqlError(
+				"'if not' doit être suivi de 'exists' dans un add enum member",
+				"parse_ddl_expected_exists_after_not",
+				cursor.peek().span
+			);
+		}
+		endSpan = cursor.next().span;
+		ifNotExists = true;
+	}
+
+	return {
+		operation: "ddl",
+		kind: "add-enum-member",
+		name: nameTok.value,
+		member: memberTok.value,
+		memberSpan: memberTok.span,
+		...(ifNotExists ? { ifNotExists } : {}),
+		span: { start: addTok.span.start, end: endSpan.end }
+	};
+}
+
+/**
+ * `drop enum <name> [if exists] [cascade]` (ADR-030 Enum/3 D8). Destructive —
+ * D7 typing gate frontend. RESTRICT natif PG par défaut (refuse si enum
+ * utilisé) ; CASCADE explicite drop les colonnes utilisatrices.
+ */
+function parseDropEnum(cursor: TokenCursor): DropEnumStmt {
+	const dropTok = cursor.next(); // `drop` soft-ident
+	cursor.next(); // `enum` soft-ident (peeked)
+	const nameTok = cursor.expect(
+		"ident",
+		"un nom d'enum après 'drop enum'"
+	);
+
+	let ifExists = false;
+	let cascade = false;
+	let endSpan = nameTok.span;
+
+	if (peekIdent(cursor, "if")) {
+		cursor.next();
+		if (!peekKeyword(cursor, "exists")) {
+			throw new SnqlError(
+				"'if' doit être suivi de 'exists' dans un drop enum",
+				"parse_ddl_expected_exists_after_if",
+				cursor.peek().span
+			);
+		}
+		endSpan = cursor.next().span;
+		ifExists = true;
+	}
+
+	if (peekIdent(cursor, "cascade")) {
+		endSpan = cursor.next().span;
+		cascade = true;
+	}
+
+	return {
+		operation: "ddl",
+		kind: "drop-enum",
+		name: nameTok.value,
+		...(ifExists ? { ifExists } : {}),
+		...(cascade ? { cascade } : {}),
+		span: { start: dropTok.span.start, end: endSpan.end }
 	};
 }
 

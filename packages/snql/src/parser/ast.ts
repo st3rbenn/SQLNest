@@ -554,7 +554,9 @@ export type DDLKind =
 	| "add-index"
 	| "add-unique-index"
 	| "drop-index"
-	| "create-enum";
+	| "create-enum"
+	| "add-enum-member"
+	| "drop-enum";
 
 /**
  * Un type de field dans un body `create table` ou dans `add column`. Soit un
@@ -691,8 +693,43 @@ export interface CreateEnumStmt {
 }
 
 /**
+ * `add enum member <Name> "member" [if not exists]` (ADR-030 Enum/3). Append-only
+ * safe cross-engine — PG `ALTER TYPE ADD VALUE IF NOT EXISTS` natif, Mongo
+ * patch `_snql_enums` + collMod batched sur les collections utilisatrices,
+ * KV patch `_snql_enums`. `ifNotExists` implicite (D3 idempotent silence
+ * si member déjà présent — même comportement sans le modifier).
+ */
+export interface AddEnumMemberStmt {
+	readonly operation: "ddl";
+	readonly kind: "add-enum-member";
+	readonly name: string;
+	readonly member: string;
+	readonly memberSpan: Span;
+	readonly ifNotExists?: boolean;
+	readonly span: Span;
+}
+
+/**
+ * `drop enum <name> [if exists] [cascade]` (ADR-030 Enum/3, D8). Destructif —
+ * D7 typing UI gate frontend (`WriteConfirmBar` « tape DROP <name> pour
+ * confirmer »). RESTRICT par défaut (PG natif) — refuse si l'enum est utilisé
+ * par ≥1 table. CASCADE explicite drop les colonnes dépendantes (équivalent
+ * SQL standard). Mongo compense (delete metadata + rollback validators sur
+ * collections utilisatrices), KV `HDEL _snql_enums`.
+ */
+export interface DropEnumStmt {
+	readonly operation: "ddl";
+	readonly kind: "drop-enum";
+	readonly name: string;
+	readonly ifExists?: boolean;
+	readonly cascade?: boolean;
+	readonly span: Span;
+}
+
+/**
  * Union des statements DDL. Corpus Tier-2 (create-table/add-column/[add-|
- * drop-]index/drop-table/drop-column) + Enum Tier-3+ (create-enum).
+ * drop-]index/drop-table/drop-column) + Enum Tier-3+ (create-enum/
+ * add-enum-member/drop-enum).
  */
 export type DDLStatement =
 	| CreateTableStmt
@@ -701,7 +738,9 @@ export type DDLStatement =
 	| DropIndexStmt
 	| DropTableStmt
 	| DropColumnStmt
-	| CreateEnumStmt;
+	| CreateEnumStmt
+	| AddEnumMemberStmt
+	| DropEnumStmt;
 
 /** Racine de l'AST : lecture (`Query`), mutation, transaction, introspection, raw, let/CTE ou DDL Tier-2. */
 export type Statement =

@@ -2,6 +2,7 @@ import { SnqlError } from "../diagnostics";
 import { SNQL_FUNCTIONS } from "../functions";
 import type {
 	AddColumnPlan,
+	AddEnumMemberPlan,
 	AddIndexPlan,
 	CastTarget,
 	CompareOp,
@@ -9,6 +10,7 @@ import type {
 	CreateTablePlan,
 	DDLPlan,
 	DropColumnPlan,
+	DropEnumPlan,
 	DropIndexPlan,
 	DropTablePlan,
 	IntrospectPlan,
@@ -195,6 +197,8 @@ export const postgresMapper: Mapper = {
 		if (plan.kind === "drop-table") return renderDropTable(plan);
 		if (plan.kind === "drop-column") return renderDropColumn(plan);
 		if (plan.kind === "create-enum") return renderCreateEnum(plan);
+		if (plan.kind === "add-enum-member") return renderAddEnumMember(plan);
+		if (plan.kind === "drop-enum") return renderDropEnum(plan);
 		throw new SnqlError(
 			`DDL kind '${(plan as { kind: string }).kind}' non supporté par le codegen Postgres V1`,
 			"codegen_ddl_unsupported"
@@ -1180,6 +1184,48 @@ function renderCreateEnum(plan: CreateEnumPlan): NativeQuery {
 	const text = plan.ifNotExists
 		? `DO $$ BEGIN ${createStmt}; EXCEPTION WHEN duplicate_object THEN NULL; END $$`
 		: createStmt;
+	return {
+		engine: "postgres",
+		kind: "sql",
+		text,
+		params: [],
+		paramSpans: []
+	};
+}
+
+/**
+ * Rend `add enum member <Name> "m"` en `ALTER TYPE "<Name>" ADD VALUE IF NOT
+ * EXISTS 'm'` (ADR-030 Enum/3). PG DDL rejette les $N bindés (08P01) — le
+ * member est inline via `pgInlineDefault`.
+ *
+ * `IF NOT EXISTS` natif PG = dedup silence. `ifNotExists` du plan est
+ * ignoré (implicite au niveau engine) — présent seulement pour tracer
+ * l'intention user au niveau source.
+ */
+function renderAddEnumMember(plan: AddEnumMemberPlan): NativeQuery {
+	const memberSql = pgInlineDefault(plan.member);
+	const text = `ALTER TYPE ${quoteIdent(plan.name)} ADD VALUE IF NOT EXISTS ${memberSql}`;
+	return {
+		engine: "postgres",
+		kind: "sql",
+		text,
+		params: [],
+		paramSpans: []
+	};
+}
+
+/**
+ * Rend `drop enum NAME [if exists] [cascade]` en `DROP TYPE [IF EXISTS] "NAME"
+ * [RESTRICT|CASCADE]` (ADR-030 Enum/3 D8). RESTRICT par défaut (PG refuse via
+ * SQLSTATE 2BP01 si l'enum est utilisé par ≥1 colonne — safe vs drop
+ * silencieux des colonnes). CASCADE explicite pour drop les colonnes
+ * utilisatrices. Le frontend applique D7 typing UI gate WriteConfirmBar avant
+ * Execute pour prévenir l'accident.
+ */
+function renderDropEnum(plan: DropEnumPlan): NativeQuery {
+	const ifExists = plan.ifExists ? "IF EXISTS " : "";
+	const mode = plan.cascade ? "CASCADE" : "RESTRICT";
+	const text = `DROP TYPE ${ifExists}${quoteIdent(plan.name)} ${mode}`;
 	return {
 		engine: "postgres",
 		kind: "sql",

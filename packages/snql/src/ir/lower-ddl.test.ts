@@ -5,10 +5,12 @@ import { parse } from "../parser/parser";
 import { lowerDDL } from "./lower-ddl";
 import type {
 	AddColumnPlan,
+	AddEnumMemberPlan,
 	AddIndexPlan,
 	CreateEnumPlan,
 	CreateTablePlan,
 	DropColumnPlan,
+	DropEnumPlan,
 	DropIndexPlan,
 	DropTablePlan
 } from "./plan";
@@ -529,5 +531,109 @@ describe("lower DDL — resolve type field via schema.enums (Enum/2)", () => {
 			enumTypeName: "role_type",
 			enumMembers: ["user", "admin"]
 		});
+	});
+});
+
+describe("lower DDL — add enum member (ADR-030 Enum/3)", () => {
+	const schemaWithEnum: import("../schema/model").SchemaModel = {
+		engine: "postgres",
+		collections: [],
+		relations: [],
+		enums: [{ name: "role_type", members: ["user", "admin"], source: "declared" }]
+	};
+
+	function lowerAddMember(
+		source: string,
+		schema?: import("../schema/model").SchemaModel
+	): AddEnumMemberPlan {
+		const parsed = parse(tokenize(source)) as DDLStatement;
+		const plan = lowerDDL(parsed, schema);
+		if (plan.kind !== "add-enum-member") {
+			throw new Error(`expected add-enum-member plan, got ${plan.kind}`);
+		}
+		return plan;
+	}
+
+	it("abaisse minimal (sans schema — analyse offline)", () => {
+		expect(
+			lowerAddMember('add enum member role_type "guest"')
+		).toMatchObject({
+			op: "ddl",
+			kind: "add-enum-member",
+			name: "role_type",
+			member: "guest",
+			ifNotExists: false
+		});
+	});
+
+	it("propage ifNotExists", () => {
+		expect(
+			lowerAddMember('add enum member role_type "guest" if not exists')
+		).toMatchObject({ ifNotExists: true });
+	});
+
+	it("valide que l'enum existe si schema fourni", () => {
+		expect(() =>
+			lowerAddMember('add enum member unknown_enum "x"', schemaWithEnum)
+		).toThrow(/inconnu.*role_type/);
+	});
+
+	it("D1 : refuse enum name commençant par un chiffre", () => {
+		expect(() =>
+			lowerAddMember('add enum member 1bad "x"')
+		).toThrow();
+	});
+});
+
+describe("lower DDL — drop enum (ADR-030 Enum/3 D8)", () => {
+	const schemaWithEnum: import("../schema/model").SchemaModel = {
+		engine: "postgres",
+		collections: [],
+		relations: [],
+		enums: [{ name: "role_type", members: ["user", "admin"], source: "declared" }]
+	};
+
+	function lowerDropEnum(
+		source: string,
+		schema?: import("../schema/model").SchemaModel
+	): DropEnumPlan {
+		const parsed = parse(tokenize(source)) as DDLStatement;
+		const plan = lowerDDL(parsed, schema);
+		if (plan.kind !== "drop-enum") {
+			throw new Error(`expected drop-enum plan, got ${plan.kind}`);
+		}
+		return plan;
+	}
+
+	it("abaisse minimal", () => {
+		expect(lowerDropEnum("drop enum role_type")).toMatchObject({
+			op: "ddl",
+			kind: "drop-enum",
+			name: "role_type",
+			ifExists: false,
+			cascade: false
+		});
+	});
+
+	it("propage if exists + cascade", () => {
+		expect(
+			lowerDropEnum("drop enum role_type if exists cascade")
+		).toMatchObject({ ifExists: true, cascade: true });
+	});
+
+	it("refuse enum inconnu sans ifExists (schema fourni)", () => {
+		expect(() =>
+			lowerDropEnum("drop enum unknown_enum", schemaWithEnum)
+		).toThrow(/inconnu/);
+	});
+
+	it("ifExists → pas de refus si enum inconnu (silence D3 pattern)", () => {
+		expect(() =>
+			lowerDropEnum("drop enum unknown_enum if exists", schemaWithEnum)
+		).not.toThrow();
+	});
+
+	it("D1 : refuse enum name commençant par un chiffre", () => {
+		expect(() => lowerDropEnum("drop enum 1bad")).toThrow();
 	});
 });

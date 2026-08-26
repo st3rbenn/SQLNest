@@ -1,19 +1,23 @@
 import { describe, expect, it } from "vitest";
 import type {
 	AddColumnPlan,
+	AddEnumMemberPlan,
 	AddIndexPlan,
 	CreateEnumPlan,
 	CreateTablePlan,
 	DropColumnPlan,
+	DropEnumPlan,
 	DropIndexPlan,
 	DropTablePlan
 } from "../ir/plan";
 import type {
 	KvDDLAddColumnQuery,
+	KvDDLAddEnumMemberQuery,
 	KvDDLAddIndexQuery,
 	KvDDLCreateEnumQuery,
 	KvDDLCreateTableQuery,
 	KvDDLDropColumnQuery,
+	KvDDLDropEnumQuery,
 	KvDDLDropIndexQuery,
 	KvDDLDropTableQuery
 } from "./mapper";
@@ -574,5 +578,87 @@ describe("codegen KV — enum type dans create table + add column (Enum/2.7)", (
 			enumTypeName: "tier_type",
 			enum: ["free", "pro"]
 		});
+	});
+});
+
+describe("codegen KV — add enum member (ADR-030 Enum/3.6)", () => {
+	function mapAddMember(plan: AddEnumMemberPlan): KvDDLAddEnumMemberQuery {
+		const q = mapKvDDL(plan);
+		if (q.operation !== "add-enum-member") {
+			throw new Error(`attendu add-enum-member, got ${q.operation}`);
+		}
+		return q;
+	}
+
+	it("émet shape add-enum-member avec name + member", () => {
+		expect(
+			mapAddMember({
+				op: "ddl",
+				kind: "add-enum-member",
+				name: "role_type",
+				member: "guest",
+				ifNotExists: false
+			})
+		).toEqual({
+			engine: "kv",
+			kind: "kv-ddl",
+			operation: "add-enum-member",
+			name: "role_type",
+			member: "guest",
+			ifNotExists: false
+		});
+	});
+
+	it("propage ifNotExists (idempotent silence)", () => {
+		expect(
+			mapAddMember({
+				op: "ddl",
+				kind: "add-enum-member",
+				name: "role_type",
+				member: "guest",
+				ifNotExists: true
+			}).ifNotExists
+		).toBe(true);
+	});
+});
+
+describe("codegen KV — drop enum (ADR-030 Enum/3.6 D8)", () => {
+	function mapDropEnum(plan: DropEnumPlan): KvDDLDropEnumQuery {
+		const q = mapKvDDL(plan);
+		if (q.operation !== "drop-enum") {
+			throw new Error(`attendu drop-enum, got ${q.operation}`);
+		}
+		return q;
+	}
+
+	it("émet shape drop-enum RESTRICT par défaut", () => {
+		expect(
+			mapDropEnum({
+				op: "ddl",
+				kind: "drop-enum",
+				name: "role_type",
+				ifExists: false,
+				cascade: false
+			})
+		).toEqual({
+			engine: "kv",
+			kind: "kv-ddl",
+			operation: "drop-enum",
+			name: "role_type",
+			ifExists: false,
+			cascade: false
+		});
+	});
+
+	it("propage cascade + ifExists", () => {
+		const q = mapDropEnum({
+			op: "ddl",
+			kind: "drop-enum",
+			name: "role_type",
+			ifExists: true,
+			cascade: true
+		});
+		expect(q.ifExists).toBe(true);
+		expect(q.cascade).toBe(true);
 	});
 });

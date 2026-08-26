@@ -2,6 +2,7 @@ import { SnqlError } from "../diagnostics";
 import { SNQL_FUNCTIONS } from "../functions";
 import type {
 	AddColumnPlan,
+	AddEnumMemberPlan,
 	AddIndexPlan,
 	CastTarget,
 	CompareOp,
@@ -10,6 +11,7 @@ import type {
 	CreateTablePlan,
 	DDLPlan,
 	DropColumnPlan,
+	DropEnumPlan,
 	DropIndexPlan,
 	DropTablePlan,
 	IntrospectPlan,
@@ -29,11 +31,13 @@ import type { SnqlType } from "../schema/model";
 import type {
 	Mapper,
 	MongoDDLAddColumnQuery,
+	MongoDDLAddEnumMemberQuery,
 	MongoDDLAddIndexQuery,
 	MongoDDLCreateCollectionQuery,
 	MongoDDLCreateEnumQuery,
 	MongoDDLDropCollectionQuery,
 	MongoDDLDropColumnQuery,
+	MongoDDLDropEnumQuery,
 	MongoDDLDropIndexQuery,
 	MongoIndexSpec,
 	MongoQuery,
@@ -210,6 +214,8 @@ export const mongoMapper: Mapper = {
 		if (plan.kind === "drop-table") return renderMongoDropCollection(plan);
 		if (plan.kind === "drop-column") return renderMongoDropColumn(plan);
 		if (plan.kind === "create-enum") return renderMongoCreateEnum(plan);
+		if (plan.kind === "add-enum-member") return renderMongoAddEnumMember(plan);
+		if (plan.kind === "drop-enum") return renderMongoDropEnum(plan);
 		throw new SnqlError(
 			`DDL kind '${(plan as { kind: string }).kind}' non supporté par le codegen Mongo V1`,
 			"codegen_ddl_unsupported"
@@ -2999,6 +3005,42 @@ function renderMongoCreateEnum(plan: CreateEnumPlan): MongoDDLCreateEnumQuery {
 		name: plan.name,
 		members: plan.members,
 		ifNotExists: plan.ifNotExists
+	};
+}
+
+/**
+ * Rend `add enum member NAME "m"` en `MongoDDLAddEnumMemberQuery` (ADR-030
+ * Enum/3). Compensation runtime : l'adapter updateOne `_snql_enums`
+ * `{$addToSet: {members: value}}` (idempotent — dedup naturel Set), puis
+ * `collMod` batché sur chaque collection utilisatrice pour patcher
+ * `$jsonSchema.properties.<col>.enum` avec le nouveau tableau.
+ */
+function renderMongoAddEnumMember(plan: AddEnumMemberPlan): MongoDDLAddEnumMemberQuery {
+	return {
+		engine: "mongodb",
+		kind: "mongo-ddl",
+		operation: "add-enum-member",
+		name: plan.name,
+		member: plan.member,
+		ifNotExists: plan.ifNotExists
+	};
+}
+
+/**
+ * Rend `drop enum NAME [if exists] [cascade]` en `MongoDDLDropEnumQuery`
+ * (ADR-030 Enum/3 D8). Compensation runtime : l'adapter deleteOne
+ * `_snql_enums`, puis rollback des validators via `collMod` batché sur les
+ * collections utilisatrices. RESTRICT (cascade=false) : refus runtime si
+ * ≥1 collection utilise l'enum ; CASCADE : applique le rollback sans check.
+ */
+function renderMongoDropEnum(plan: DropEnumPlan): MongoDDLDropEnumQuery {
+	return {
+		engine: "mongodb",
+		kind: "mongo-ddl",
+		operation: "drop-enum",
+		name: plan.name,
+		ifExists: plan.ifExists,
+		cascade: plan.cascade
 	};
 }
 

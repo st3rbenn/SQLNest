@@ -13,21 +13,25 @@
 import { SnqlError } from "../diagnostics";
 import type {
 	AddColumnPlan,
+	AddEnumMemberPlan,
 	AddIndexPlan,
 	CreateEnumPlan,
 	CreateTablePlan,
 	DDLPlan,
 	DropColumnPlan,
+	DropEnumPlan,
 	DropIndexPlan,
 	DropTablePlan
 } from "../ir/plan";
 import type { SnqlType } from "../schema/model";
 import type {
 	KvDDLAddColumnQuery,
+	KvDDLAddEnumMemberQuery,
 	KvDDLAddIndexQuery,
 	KvDDLCreateEnumQuery,
 	KvDDLCreateTableQuery,
 	KvDDLDropColumnQuery,
+	KvDDLDropEnumQuery,
 	KvDDLDropIndexQuery,
 	KvDDLDropTableQuery,
 	KvDDLQuery,
@@ -71,6 +75,8 @@ export function mapKvDDL(plan: DDLPlan): KvDDLQuery {
 	if (plan.kind === "drop-table") return renderKvDropTable(plan);
 	if (plan.kind === "drop-column") return renderKvDropColumn(plan);
 	if (plan.kind === "create-enum") return renderKvCreateEnum(plan);
+	if (plan.kind === "add-enum-member") return renderKvAddEnumMember(plan);
+	if (plan.kind === "drop-enum") return renderKvDropEnum(plan);
 	throw new SnqlError(
 		`DDL kind '${(plan as { kind: string }).kind}' non supporté par le codegen KV V1`,
 		"codegen_ddl_unsupported"
@@ -90,6 +96,39 @@ function renderKvCreateEnum(plan: CreateEnumPlan): KvDDLCreateEnumQuery {
 		name: plan.name,
 		members: plan.members,
 		ifNotExists: plan.ifNotExists
+	};
+}
+
+/**
+ * Rend `add enum member NAME "m"` en `KvDDLAddEnumMemberQuery` (ADR-030
+ * Enum/3). L'adapter runtime KV lit `HGET _snql_enums <name>`, ajoute la
+ * value au tableau si absente, réécrit via HSET. Shape V1 uniquement,
+ * wiring adapter Redis V-next.
+ */
+function renderKvAddEnumMember(plan: AddEnumMemberPlan): KvDDLAddEnumMemberQuery {
+	return {
+		engine: "kv",
+		kind: "kv-ddl",
+		operation: "add-enum-member",
+		name: plan.name,
+		member: plan.member,
+		ifNotExists: plan.ifNotExists
+	};
+}
+
+/**
+ * Rend `drop enum NAME [if exists] [cascade]` en `KvDDLDropEnumQuery`
+ * (ADR-030 Enum/3 D8). L'adapter runtime `HDEL _snql_enums <name>` +
+ * rollback middleware. Shape V1 uniquement.
+ */
+function renderKvDropEnum(plan: DropEnumPlan): KvDDLDropEnumQuery {
+	return {
+		engine: "kv",
+		kind: "kv-ddl",
+		operation: "drop-enum",
+		name: plan.name,
+		ifExists: plan.ifExists,
+		cascade: plan.cascade
 	};
 }
 

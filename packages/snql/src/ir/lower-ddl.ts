@@ -8,11 +8,13 @@
 import { SnqlError } from "../diagnostics";
 import type {
 	AddColumnStmt,
+	AddEnumMemberStmt,
 	AddIndexStmt,
 	CreateEnumStmt,
 	CreateTableStmt,
 	DDLStatement,
 	DropColumnStmt,
+	DropEnumStmt,
 	DropIndexStmt,
 	DropTableStmt,
 	Expr
@@ -20,6 +22,7 @@ import type {
 import type { SchemaModel, SnqlType } from "../schema/model";
 import type {
 	AddColumnPlan,
+	AddEnumMemberPlan,
 	AddIndexPlan,
 	CreateEnumPlan,
 	CreateTableField,
@@ -27,6 +30,7 @@ import type {
 	DdlDefault,
 	DDLPlan,
 	DropColumnPlan,
+	DropEnumPlan,
 	DropIndexPlan,
 	DropTablePlan,
 	SqlJsonLiteral,
@@ -66,10 +70,85 @@ export function lowerDDL(
 	if (statement.kind === "create-enum") {
 		return lowerCreateEnum(statement);
 	}
+	if (statement.kind === "add-enum-member") {
+		return lowerAddEnumMember(statement, schema);
+	}
+	if (statement.kind === "drop-enum") {
+		return lowerDropEnum(statement, schema);
+	}
 	throw new SnqlError(
 		`DDL kind '${(statement as { kind: string }).kind}' non supporté au lower`,
 		"lower_ddl_unsupported_kind"
 	);
+}
+
+/**
+ * Lower `add enum member` (ADR-030 Enum/3) : D1 ident regex sur name.
+ * Si `schema.enums` disponible, on vérifie que l'enum existe (refus typé si
+ * inconnu — même pattern que `resolveFieldType` enum-ref) et on **snapshot
+ * silence** si le member est déjà présent (D3 pattern idempotent — pas
+ * d'erreur, même sans `if not exists` explicite, aligne le comportement
+ * cross-engine PG `ADD VALUE IF NOT EXISTS` natif). Si `schema` absent
+ * (analyse offline), on laisse passer — le runtime tranchera à l'exec.
+ */
+function lowerAddEnumMember(
+	stmt: AddEnumMemberStmt,
+	schema?: SchemaModel
+): AddEnumMemberPlan {
+	assertIdent(stmt.name, "enum name");
+	if (schema?.enums !== undefined) {
+		const enumDef = schema.enums.find((e) => e.name === stmt.name);
+		if (enumDef === undefined) {
+			const available = schema.enums.map((e) => e.name).join(", ") || "(aucun)";
+			throw new SnqlError(
+				`Enum '${stmt.name}' inconnu — enums disponibles : ${available}`,
+				"lower_ddl_add_enum_member_unknown_enum",
+				stmt.span
+			);
+		}
+	}
+	return {
+		op: "ddl",
+		kind: "add-enum-member",
+		name: stmt.name,
+		member: stmt.member,
+		ifNotExists: stmt.ifNotExists ?? false,
+		...(stmt.span !== undefined ? { span: stmt.span } : {})
+	};
+}
+
+/**
+ * Lower `drop enum` (ADR-030 Enum/3 D8) : D1 ident regex sur name. Si
+ * `schema.enums` disponible, on vérifie que l'enum existe (sauf `if exists`
+ * qui rend le miss OK — miroir drop-table). L'assertion RESTRICT vs
+ * colonnes utilisatrices est laissée au runtime (PG natif refuse via
+ * `2BP01 dependent objects`, Mongo/KV compensent au moment de patcher
+ * les validators — nécessite lister les collections utilisatrices).
+ */
+function lowerDropEnum(
+	stmt: DropEnumStmt,
+	schema?: SchemaModel
+): DropEnumPlan {
+	assertIdent(stmt.name, "enum name");
+	if (schema?.enums !== undefined && !stmt.ifExists) {
+		const enumDef = schema.enums.find((e) => e.name === stmt.name);
+		if (enumDef === undefined) {
+			const available = schema.enums.map((e) => e.name).join(", ") || "(aucun)";
+			throw new SnqlError(
+				`Enum '${stmt.name}' inconnu — enums disponibles : ${available}`,
+				"lower_ddl_drop_enum_unknown_enum",
+				stmt.span
+			);
+		}
+	}
+	return {
+		op: "ddl",
+		kind: "drop-enum",
+		name: stmt.name,
+		ifExists: stmt.ifExists ?? false,
+		cascade: stmt.cascade ?? false,
+		...(stmt.span !== undefined ? { span: stmt.span } : {})
+	};
 }
 
 /**

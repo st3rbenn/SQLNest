@@ -353,6 +353,51 @@ export interface MongoDDLCreateEnumQuery {
 	readonly ifNotExists: boolean;
 }
 
+/**
+ * Enum/3 add-enum-member sur Mongo. Compensation runtime en 2 étapes :
+ *  1. `_snql_enums.updateOne({_id: name}, {$addToSet: {members: value}})` —
+ *     dedup naturel par `$addToSet` (idempotent silence si déjà présent, D3
+ *     pattern).
+ *  2. Pour chaque collection utilisatrice (lister via `listCollections` avec
+ *     validator `$jsonSchema.properties.<col>.enum = [members-before]`),
+ *     appliquer `collMod` batché avec le nouveau tableau `enum: [...members,
+ *     value]`. L'adapter fait le scan + apply.
+ *
+ * Si `ifNotExists=true` et l'enum est inconnu, l'adapter silence (aligne
+ * `IF NOT EXISTS` PG). Si absent et pas de modifier, refuse au runtime.
+ */
+export interface MongoDDLAddEnumMemberQuery {
+	readonly engine: string;
+	readonly kind: "mongo-ddl";
+	readonly operation: "add-enum-member";
+	readonly name: string;
+	readonly member: string;
+	readonly ifNotExists: boolean;
+}
+
+/**
+ * Enum/3 drop-enum sur Mongo. Compensation runtime en 2 étapes :
+ *  1. `_snql_enums.deleteOne({_id: name})` (si `ifExists=true` : silence si
+ *     absent ; sinon refus typé).
+ *  2. Rollback des validators : pour chaque collection utilisatrice, `collMod`
+ *     batché qui retire `bsonType: "string", enum: [...]` sur la propriété
+ *     concernée (laisse le validator existant sur les autres props intact).
+ *     Les rows existantes gardent leur valeur — sans validator, la contrainte
+ *     n'est plus enforcée mais rien n'est perdu.
+ *
+ * `cascade` = false (RESTRICT) : refus runtime si l'enum est utilisé par ≥1
+ * collection (miroir PG `2BP01 dependent objects`). `cascade` = true :
+ * applique le rollback sans check préalable.
+ */
+export interface MongoDDLDropEnumQuery {
+	readonly engine: string;
+	readonly kind: "mongo-ddl";
+	readonly operation: "drop-enum";
+	readonly name: string;
+	readonly ifExists: boolean;
+	readonly cascade: boolean;
+}
+
 export type MongoDDLQuery =
 	| MongoDDLCreateCollectionQuery
 	| MongoDDLAddColumnQuery
@@ -360,7 +405,9 @@ export type MongoDDLQuery =
 	| MongoDDLDropIndexQuery
 	| MongoDDLDropCollectionQuery
 	| MongoDDLDropColumnQuery
-	| MongoDDLCreateEnumQuery;
+	| MongoDDLCreateEnumQuery
+	| MongoDDLAddEnumMemberQuery
+	| MongoDDLDropEnumQuery;
 
 /**
  * DDL Tier-2 sur KV (ADR-029). Entièrement compensé — KV est schema-less,
@@ -518,6 +565,37 @@ export interface KvDDLCreateEnumQuery {
 	readonly ifNotExists: boolean;
 }
 
+/**
+ * Enum/3 add-enum-member sur KV. Compensation runtime : lit
+ * `HGET _snql_enums <name>`, ajoute `value` au tableau JSON si absent
+ * (dedup naturel), `HSET _snql_enums <name> <json>`. Idempotent silence si
+ * déjà présent (D3 pattern). Rien à backfill — les valeurs existantes ne
+ * violent pas le nouveau set.
+ */
+export interface KvDDLAddEnumMemberQuery {
+	readonly engine: string;
+	readonly kind: "kv-ddl";
+	readonly operation: "add-enum-member";
+	readonly name: string;
+	readonly member: string;
+	readonly ifNotExists: boolean;
+}
+
+/**
+ * Enum/3 drop-enum sur KV. Compensation runtime : `HDEL _snql_enums <name>` +
+ * rollback middleware (retire le refus enum sur les tables utilisatrices).
+ * RESTRICT (cascade=false) refuse si ≥1 table utilise l'enum ; CASCADE
+ * applique le rollback sans check. `ifExists=true` silence si absent.
+ */
+export interface KvDDLDropEnumQuery {
+	readonly engine: string;
+	readonly kind: "kv-ddl";
+	readonly operation: "drop-enum";
+	readonly name: string;
+	readonly ifExists: boolean;
+	readonly cascade: boolean;
+}
+
 export type KvDDLQuery =
 	| KvDDLCreateTableQuery
 	| KvDDLAddColumnQuery
@@ -525,7 +603,9 @@ export type KvDDLQuery =
 	| KvDDLDropIndexQuery
 	| KvDDLDropTableQuery
 	| KvDDLDropColumnQuery
-	| KvDDLCreateEnumQuery;
+	| KvDDLCreateEnumQuery
+	| KvDDLAddEnumMemberQuery
+	| KvDDLDropEnumQuery;
 
 /**
  * native shape pour un `raw {...}` Mongo — command native

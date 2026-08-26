@@ -129,20 +129,23 @@ function walk(stmt: Statement, out: UnfilteredFinding[]): void {
 			return;
 		case "ddl":
 			// DDL Tier-2 (ADR-029). `create-table` / `add-column` /
-			// `add-index` / `add-unique-index` = non-destructifs (pass-through
-			// V1). `drop-table` / `drop-column` / `drop-index` = destructifs
-			// D7 → typing UI gate WriteConfirmBar "Tape DROP <target> pour
-			// confirmer".
+			// `add-index` / `add-unique-index` / `create-enum` /
+			// `add-enum-member` = non-destructifs (pass-through V1).
+			// `drop-table` / `drop-column` / `drop-index` / `drop-enum` (ADR-030
+			// Enum/3 D8) = destructifs D7 → typing UI gate WriteConfirmBar "Tape
+			// DROP <target> pour confirmer".
 			if (
 				stmt.kind === "drop-table" ||
 				stmt.kind === "drop-column" ||
-				stmt.kind === "drop-index"
+				stmt.kind === "drop-index" ||
+				stmt.kind === "drop-enum"
 			) {
 				// target = table pour drop-table/drop-column, name pour drop-index
-				// (l'user retape ce qu'il voit dans son SNQL — l'index a un nom
-				// distinct, une table/col a un nom de table).
+				// et drop-enum (l'user retape ce qu'il voit dans son SNQL).
 				const dropTarget =
-					stmt.kind === "drop-index" ? stmt.name : stmt.target;
+					stmt.kind === "drop-index" || stmt.kind === "drop-enum"
+						? stmt.name
+						: stmt.target;
 				out.push({
 					span: stmt.span,
 					kind: "destructive_drop",

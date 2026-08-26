@@ -309,6 +309,80 @@ describe("create enum DDL (ADR-030 Enum/1)", () => {
 	});
 });
 
+// ─── Enum/3 — add enum member + drop enum (ADR-030 D8) ────────────
+describe("add enum member DDL (ADR-030 Enum/3)", () => {
+	it("parse minimal add enum member", () => {
+		expect(stmt('add enum member role_type "guest"')).toMatchObject({
+			operation: "ddl",
+			kind: "add-enum-member",
+			name: "role_type",
+			member: "guest"
+		});
+	});
+
+	it("parse if not exists", () => {
+		expect(
+			stmt('add enum member role_type "guest" if not exists')
+		).toMatchObject({
+			kind: "add-enum-member",
+			ifNotExists: true,
+			member: "guest"
+		});
+	});
+
+	it("préserve `add {enum: \"x\"} into t` insert alias (dispatch enum non-invasif)", () => {
+		expect(stmt('add { enum: "x" } into t')).toMatchObject({
+			operation: "insert",
+			verb: "add"
+		});
+	});
+
+	it("refuse member non-string", () => {
+		expect(() => stmt("add enum member role_type user")).toThrow(
+			/doit être un string literal/
+		);
+	});
+
+	it("refuse if sans not exists", () => {
+		expect(() =>
+			stmt('add enum member role_type "guest" if exists')
+		).toThrow(/'not exists'/);
+	});
+});
+
+describe("drop enum DDL (ADR-030 Enum/3 D8)", () => {
+	it("parse minimal drop enum", () => {
+		expect(stmt("drop enum role_type")).toMatchObject({
+			operation: "ddl",
+			kind: "drop-enum",
+			name: "role_type"
+		});
+	});
+
+	it("parse drop enum if exists", () => {
+		expect(stmt("drop enum role_type if exists")).toMatchObject({
+			kind: "drop-enum",
+			name: "role_type",
+			ifExists: true
+		});
+	});
+
+	it("parse drop enum cascade", () => {
+		expect(stmt("drop enum role_type cascade")).toMatchObject({
+			kind: "drop-enum",
+			cascade: true
+		});
+	});
+
+	it("parse drop enum if exists cascade", () => {
+		expect(stmt("drop enum role_type if exists cascade")).toMatchObject({
+			kind: "drop-enum",
+			ifExists: true,
+			cascade: true
+		});
+	});
+});
+
 // ─── DDL/2 — add column (ADR-029) ───────────────────────────────────
 describe("add column DDL (ADR-029 DDL/2)", () => {
 	it("parse minimal add column", () => {

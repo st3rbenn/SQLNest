@@ -667,8 +667,41 @@ export interface CreateEnumPlan {
 }
 
 /**
+ * `add enum member` lowered (ADR-030 Enum/3). Append-only safe. Le lower a
+ * validé D1 ident regex sur `name` + validé que `member` est un string. La
+ * dedup silence si déjà présent est déléguée au runtime (PG `IF NOT EXISTS`
+ * natif, Mongo `$addToSet`, KV set). `ifNotExists` implicite au niveau
+ * planner — présent explicitement pour tracer l'intention user.
+ */
+export interface AddEnumMemberPlan {
+	readonly op: "ddl";
+	readonly kind: "add-enum-member";
+	readonly name: string;
+	readonly member: string;
+	readonly ifNotExists: boolean;
+	readonly span?: Span;
+}
+
+/**
+ * `drop enum` lowered (ADR-030 Enum/3 D8). Destructive — D7 typing gate.
+ * RESTRICT par défaut : refus si l'enum est utilisé par ≥1 colonne. CASCADE
+ * explicite drop les colonnes utilisatrices (PG natif ; Mongo compense en
+ * retirant `bsonType: string, enum: [...]` des validators + laisse les rows
+ * intactes — le validator ne rejette plus les valeurs).
+ */
+export interface DropEnumPlan {
+	readonly op: "ddl";
+	readonly kind: "drop-enum";
+	readonly name: string;
+	readonly ifExists: boolean;
+	readonly cascade: boolean;
+	readonly span?: Span;
+}
+
+/**
  * Union des plans DDL. Corpus Tier-2 (create-table/add-column/[add-|drop-]
- * index/drop-table/drop-column) + Enum Tier-3+ (create-enum).
+ * index/drop-table/drop-column) + Enum Tier-3+ (create-enum/add-enum-member/
+ * drop-enum).
  */
 export type DDLPlan =
 	| CreateTablePlan
@@ -677,7 +710,9 @@ export type DDLPlan =
 	| DropIndexPlan
 	| DropTablePlan
 	| DropColumnPlan
-	| CreateEnumPlan;
+	| CreateEnumPlan
+	| AddEnumMemberPlan
+	| DropEnumPlan;
 
 /** Un plan complet : lecture, mutation, transaction, introspect, raw, let/CTE ou DDL Tier-2. */
 export type Plan =
