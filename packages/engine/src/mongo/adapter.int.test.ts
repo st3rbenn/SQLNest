@@ -285,13 +285,14 @@ describe.skipIf(!hasMongo)("mongodb — mutations : corrections review", () => {
 			const targetId = ins.rows[0]?._id as string;
 			expect(typeof targetId).toBe("string");
 
+			// Filtre both-forms (#7) : `_id = "hex"` matche l'ObjectId auto-généré.
 			const match = await runQuery(
 				conn,
 				`get ${PROBE} where _id = "${targetId}" pick sku`
 			);
 			expect(match.rows.map((r) => r.sku)).toEqual(["x"]);
 
-			// Sans réhydratation, `_id != "hex"` matcherait TOUT → collection vidée.
+			// Sans both-forms, `_id != "hex"` matcherait TOUT → collection vidée.
 			const removed = await runQuery(
 				conn,
 				`remove from ${PROBE} where _id != "${targetId}"`
@@ -327,7 +328,7 @@ describe.skipIf(!hasMongo)("mongodb — mutations : corrections review", () => {
 		}
 	}, 20_000);
 
-	it("_id 24-hex fourni à l'insert est adressable par un filtre `_id` (round-trip cohérent)", async () => {
+	it("_id 24-hex custom : stocké STRING (fidélité #7), adressable via both-forms", async () => {
 		const conn = await mongoAdapter.connect(loadConfig());
 		const hex = "507f1f77bcf86cd799439011";
 		try {
@@ -335,13 +336,15 @@ describe.skipIf(!hasMongo)("mongodb — mutations : corrections review", () => {
 			await runQuery(conn, `add {_id: "${hex}", sku: "keep"} into ${PROBE}`);
 			await runQuery(conn, `add {sku: "other"} into ${PROBE}`);
 
-			// Insert et filtre coercent tous deux la chaîne 24-hex → ObjectId : le
-			// document est retrouvé (sinon il serait « inadressable » par son _id).
+			// Fidélité #7 : l'insert stocke `_id` TEL QUEL (string), pas un ObjectId
+			// deviné. Le filtre both-forms le retrouve quand même.
 			const found = await runQuery(
 				conn,
-				`get ${PROBE} where _id = "${hex}" pick sku`
+				`get ${PROBE} where _id = "${hex}" pick _id, sku`
 			);
 			expect(found.rows.map((r) => r.sku)).toEqual(["keep"]);
+			// _id rendu = la string custom (pas normalisé depuis un ObjectId).
+			expect(found.rows[0]?._id).toBe(hex);
 		} finally {
 			await wipe(conn);
 			await conn.close();

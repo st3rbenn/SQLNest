@@ -104,9 +104,10 @@ const OBJECT_ID_HEX = /^[0-9a-fA-F]{24}$/;
  *    matcherait jamais, et `where _id != "…"` matcherait TOUT (→ collection vidée).
  *
  * `inId` suit la position sous une clé `_id` : hérité par les opérateurs
- * (`$eq`/`$in`/`$nin`…), réinitialisé par tout autre champ. `filter` active la
- * coercion `_id` — passé `true` pour les filtres ET les documents insérés (round-trip
- * cohérent : ce qu'on stocke sous `_id` est ce qu'un filtre `_id` retrouvera).
+ * (`$eq`/`$in`/`$nin`…), réinitialisé par tout autre champ. `filter=true` = filtre
+ * (expansion both-forms sur `_id` via {@link expandIdFilter}) ; `filter=false` =
+ * document inséré / valeur de set / clé de join → AUCUNE coercion `_id` (fidélité
+ * BSON #7 : on stocke la valeur telle quelle, le filtre both-forms la retrouve).
  */
 export function hydrateBson(
 	value: unknown,
@@ -132,11 +133,57 @@ export function hydrateBson(
 	}
 	const out: Record<string, unknown> = {};
 	for (const [key, child] of Object.entries(value)) {
-		const childInId =
-			key === "_id" ? filter : key.startsWith("$") ? inId : false;
+		if (key === "_id" && filter) {
+			// Filtre sur `_id` : matche ObjectId ET string (both-forms, ADR-032/
+			// fidélité #7), sans deviner le type stocké. L'expansion gère la coercion.
+			out[key] = expandIdFilter(child);
+			continue;
+		}
+		const childInId = key.startsWith("$") ? inId : false;
 		out[key] = hydrateBson(child, filter, childInId);
 	}
 	return out;
+}
+
+/** Les deux formes d'une valeur `_id` 24-hex : ObjectId + string brute. */
+function idBothForms(hex: string): unknown[] {
+	return [new ObjectId(hex), hex];
+}
+
+/**
+ * Expansion both-forms d'un filtre sur `_id` (fidélité BSON, lean-robuste #7).
+ * Une valeur 24-hex matche ObjectId OU string via `$in`/`$nin` — robuste que le
+ * `_id` soit auto-généré (ObjectId) ou custom (string), sans schema ni thread.
+ * `$eq`/`$ne` réécrits en `$in`/`$nin` both-forms ; ranges (`$gt`/`$lt`…) gardent
+ * la coercion ObjectId simple ; le reste retombe sur l'hydratation normale.
+ */
+function expandIdFilter(child: unknown): unknown {
+	if (typeof child === "string" && OBJECT_ID_HEX.test(child)) {
+		return { $in: idBothForms(child) };
+	}
+	if (child === null || typeof child !== "object" || Array.isArray(child)) {
+		return hydrateBson(child, true, true);
+	}
+	const entries = Object.entries(child as Record<string, unknown>);
+	if (entries.length === 1) {
+		const [op, v] = entries[0]!;
+		if (op === "$eq" && typeof v === "string" && OBJECT_ID_HEX.test(v)) {
+			return { $in: idBothForms(v) };
+		}
+		if (op === "$ne" && typeof v === "string" && OBJECT_ID_HEX.test(v)) {
+			return { $nin: idBothForms(v) };
+		}
+		if ((op === "$in" || op === "$nin") && Array.isArray(v)) {
+			const expanded = v.flatMap((x) =>
+				typeof x === "string" && OBJECT_ID_HEX.test(x)
+					? idBothForms(x)
+					: [hydrateBson(x, true, true)]
+			);
+			return { [op]: expanded };
+		}
+	}
+	// ranges + autres opérateurs : coercion ObjectId simple (comportement historique).
+	return hydrateBson(child, true, true);
 }
 
 /**
@@ -515,13 +562,12 @@ class MongoConnection implements Connection {
 		const collection = this.#requireDb().collection(query.collection);
 		try {
 			if (query.op === "insert") {
-				// `filter: true` → un `_id` fourni en chaîne 24-hex est coercé en
-				// ObjectId, de façon COHÉRENTE avec les filtres : sinon `add {_id:"…"}`
-				// stockerait une chaîne qu'un `where _id = "…"` (qui, lui, coerce) ne
-				// retrouverait jamais. (Renoncer à un _id string 24-hex est un compromis
-				// assumé — cas extrême — au profit d'un round-trip cohérent.)
+				// `filter: false` → fidélité BSON #7 : un `_id` fourni en chaîne 24-hex
+				// est stocké TEL QUEL (string), pas coercé en ObjectId. Le filtre
+				// both-forms (expandIdFilter) retrouve la valeur que `_id` soit string
+				// OU ObjectId, donc plus besoin de deviner à l'insert.
 				const documents = query.documents.map(
-					(doc) => hydrateBson(doc, true) as Document
+					(doc) => hydrateBson(doc, false) as Document
 				);
 				const result = await collection.insertMany(documents);
 				// Les documents insérés portent maintenant leur `_id` (le driver le
@@ -1821,7 +1867,7 @@ class MongoConnection implements Connection {
 		try {
 			if (query.op === "insert") {
 				const documents = query.documents.map(
-					(doc) => hydrateBson(doc, true) as Document
+					(doc) => hydrateBson(doc, false) as Document
 				);
 				const result = await collection.insertMany(documents, { session });
 				const rows = documents.map((doc) => normalizeBson(doc) as Row);
@@ -1873,6 +1919,8 @@ class MongoConnection implements Connection {
 				if (docsRaw.length === 0) {
 					return { columns: [], rows: [], rowCount: 0 };
 				}
+				// insert-select : `_id` source (normalisé ObjectId→string) re-coercé
+				// pour préserver le type à la copie (pas une saisie user → hors #7).
 				const docsToInsert = docsRaw.map(
 					(d) => hydrateBson(d, true) as Document
 				);
@@ -2004,7 +2052,7 @@ class MongoConnection implements Connection {
 		const collection = this.#requireDb().collection(query.collection);
 		if (query.op === "insert") {
 			const documents = query.documents.map(
-				(doc) => hydrateBson(doc, true) as Document
+				(doc) => hydrateBson(doc, false) as Document
 			);
 			const insertResult = await collection.insertMany(documents, {
 				session
