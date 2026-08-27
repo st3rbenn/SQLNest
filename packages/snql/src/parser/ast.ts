@@ -266,6 +266,13 @@ export type Stage =
 			 * Sert d'escape hatch quand l'inférence rate ou n'a pas de schéma.
 			 */
 			readonly multiplicity?: "one" | "many";
+			/**
+			 * Reverse-nav agrégé (ADR-031 D7, FK/2b) : `count` = le join produit un
+			 * SCALAIRE (count des lignes droites matchées par ligne gauche) au lieu
+			 * d'un array/row. Injecté par le desugar reverse-nav (`pick orders.count`),
+			 * jamais écrit directement V1. Force `kind: "count"` au lower.
+			 */
+			readonly aggregate?: "count";
 			readonly span: Span;
 	  }
 	| {

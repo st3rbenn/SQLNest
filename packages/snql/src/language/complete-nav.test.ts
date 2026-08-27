@@ -81,3 +81,19 @@ describe("forward-nav autocomplete (ADR-031 D6)", () => {
 		expect(ls).toEqual(expect.arrayContaining(["name", "email"]));
 	});
 });
+
+describe("reverse-nav autocomplete (ADR-031 D7, FK/2b)", () => {
+	it("`find users pick |` propose la collection référençante `orders`", () => {
+		// users est référencé par orders.user_id → reverse-nav `orders`.
+		expect(labels("find users pick ")).toContain("orders");
+	});
+
+	it("le reverse-nav a `apply: orders.`", () => {
+		const rev = at("find users pick ").options.find((o) => o.label === "orders");
+		expect(rev?.apply).toBe("orders.");
+	});
+
+	it("`find users pick orders.|` propose `count`", () => {
+		expect(labels("find users pick orders.")).toEqual(["count"]);
+	});
+});

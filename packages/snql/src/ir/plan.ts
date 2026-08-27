@@ -319,6 +319,10 @@ export type LogicalPlan =
 	//    directes. Adapté aux relations many-to-one / one-to-one.
 	// Choisi au lower : mot-clé user (`with one`/`with many`) prioritaire, sinon
 	// inférence via SchemaModel, sinon fallback `embed`.
+	//  - `count` : reverse-nav agrégé (ADR-031 D7) — `alias` = scalaire = count
+	//    des lignes droites matchées par ligne gauche. PG : sous-requête corrélée
+	//    `(SELECT count(*) …)`. Mongo : `$lookup` + `$size`. Adapté au reverse-nav
+	//    `find users pick orders.count`.
 	| {
 			readonly op: "join";
 			readonly input: LogicalPlan;
@@ -326,7 +330,7 @@ export type LogicalPlan =
 			readonly as: string;
 			readonly localField: readonly string[];
 			readonly foreignField: readonly string[];
-			readonly kind: "embed" | "join";
+			readonly kind: "embed" | "join" | "count";
 	  }
 	// agrégation scalaire fold — `pick count(*)`, `pick sum(x)`.
 	// `groupKeys` toujours undefined en (fold sur toute la collection,

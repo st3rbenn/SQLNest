@@ -16,7 +16,11 @@ import { type OperationKind, verbOperation } from "../lexer/dictionary";
 import { tokenize } from "../lexer/lexer";
 import type { Token } from "../lexer/token";
 import { SNQL_TYPE_ALIAS } from "../parser/parser";
-import { getOutgoingRefs, type SchemaModel } from "../schema/model";
+import {
+	getIncomingRefs,
+	getOutgoingRefs,
+	type SchemaModel
+} from "../schema/model";
 
 export type SnqlCompletionType =
 	| "verb"
@@ -496,7 +500,19 @@ function dottedPathOptions(
 	if (operation !== "select") return [];
 	const scope = extractScope(toks, operation);
 	const target = resolveDotTarget(head.value, schema, scope);
-	return target !== undefined ? fieldsOf(schema, target) : [];
+	if (target !== undefined) return fieldsOf(schema, target);
+	// Reverse-nav drill-in (ADR-031 D7) : `orders.|` où orders référence la
+	// source → propose `count` (seul agrégat reverse-nav V1).
+	if (scope.source !== undefined) {
+		for (const ref of getIncomingRefs(schema, scope.source)) {
+			if (ref.fromCollection === head.value) {
+				return [
+					{ label: "count", type: "field", detail: `count des ${head.value}` }
+				];
+			}
+		}
+	}
+	return [];
 }
 
 /**
@@ -1415,6 +1431,20 @@ function navSuggestions(
 			type: "relation",
 			detail: `→ ${ref.toCollection} (nav via ${ref.fromColumn})`,
 			apply: `${nav}.`
+		});
+	}
+	// Reverse-nav (ADR-031 D7, FK/2b) : les collections référençant la source
+	// → `orders.count`. Label = fromCollection, apply `orders.` (le drill-in
+	// propose `count`).
+	for (const ref of getIncomingRefs(schema, scope.source)) {
+		const rev = ref.fromCollection;
+		if (localNames.has(rev) || joinAliases.has(rev) || seen.has(rev)) continue;
+		seen.add(rev);
+		out.push({
+			label: rev,
+			type: "relation",
+			detail: `← ${rev}.count (reverse-nav via ${ref.fromColumn})`,
+			apply: `${rev}.`
 		});
 	}
 	return out;

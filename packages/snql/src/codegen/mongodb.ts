@@ -823,6 +823,12 @@ function appendStage(
 						preserveNullAndEmptyArrays: true
 					}
 				});
+			} else if (op.kind === "count") {
+				// Reverse-nav (ADR-031 D7) : remplace l'array du $lookup par sa taille
+				// (count corrélé scalaire sous le même champ `as`).
+				pipeline.push({
+					$addFields: { [op.as]: { $size: `$${op.as}` } }
+				});
 			}
 			return;
 	}

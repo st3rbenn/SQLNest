@@ -8,8 +8,13 @@
  * déclaré. Aucune sémantique nouvelle côté codegen — tout retombe sur le join.
  */
 
-import type { Expr, Query, Stage } from "../parser/ast";
-import { getOutgoingRefs, type RefDef, type SchemaModel } from "../schema/model";
+import type { Expr, FieldSelection, Query, Stage } from "../parser/ast";
+import {
+	getIncomingRefs,
+	getOutgoingRefs,
+	type RefDef,
+	type SchemaModel
+} from "../schema/model";
 
 /** Nom de nav d'une FK sortante : `user_id` → `user`, `parent_id` → `parent`. */
 function navNameOf(ref: RefDef): string {
@@ -147,4 +152,66 @@ export function desugarForwardNav(query: Query, schema?: SchemaModel): Query {
 		});
 	}
 	return { ...query, stages: [...injected, ...query.stages] };
+}
+
+/**
+ * Reverse-nav agrégé (ADR-031 D7, FK/2b) : `find users pick orders.count`
+ * désugarise en un join `aggregate: count` corrélé (count des lignes de la
+ * collection référençante par ligne source) + réécrit le pick vers l'alias
+ * scalaire `<coll>_count`. `orders` = fromCollection d'une FK ENTRANTE vers la
+ * source (orders.user_id → users). V1 = suffixe `.count` uniquement.
+ */
+export function desugarReverseNav(query: Query, schema?: SchemaModel): Query {
+	if (schema === undefined) return query;
+	const incoming = getIncomingRefs(schema, query.source.collection);
+	if (incoming.length === 0) return query;
+
+	// Nom reverse (fromCollection) → ref entrante. Premier match gagne.
+	const revMap = new Map<string, RefDef>();
+	for (const ref of incoming) {
+		if (!revMap.has(ref.fromCollection)) revMap.set(ref.fromCollection, ref);
+	}
+
+	const injected = new Map<string, Stage>();
+	let touched = false;
+	const stages: Stage[] = query.stages.map((st) => {
+		if (st.type !== "pick") return st;
+		const fields: FieldSelection[] = st.fields.map((f) => {
+			// `orders.count` : path length 2, head = reverse-coll, tail = "count".
+			if (
+				f.expr === undefined &&
+				f.path.length === 2 &&
+				f.path[1] === "count"
+			) {
+				const revColl = f.path[0]!;
+				const ref = revMap.get(revColl);
+				if (ref !== undefined) {
+					const alias = `${revColl}_count`;
+					if (!injected.has(alias)) {
+						injected.set(alias, {
+							type: "with",
+							collection: ref.fromCollection,
+							alias,
+							// source (users) ← count des orders : local = toColumn (id),
+							// foreign = fromColumn (user_id).
+							localField: [ref.toColumn],
+							foreignField: [ref.fromColumn],
+							aggregate: "count",
+							span: f.span
+						});
+					}
+					touched = true;
+					return {
+						path: [alias],
+						alias: f.alias ?? alias,
+						span: f.span
+					};
+				}
+			}
+			return f;
+		});
+		return { ...st, fields };
+	});
+	if (!touched) return query;
+	return { ...query, stages: [...injected.values(), ...stages] };
 }

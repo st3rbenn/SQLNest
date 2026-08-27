@@ -109,3 +109,32 @@ describe("FK/2a forward-nav (ADR-031 D6)", () => {
 		expect(sql.match(/JOIN/g)?.length ?? 0).toBe(1);
 	});
 });
+
+describe("FK/2b reverse-nav (ADR-031 D7)", () => {
+	it("PG : `pick orders.count` → sous-requête count corrélée", () => {
+		expect(pg("find users pick id, orders.count")).toBe(
+			`SELECT "id", (SELECT count(*) FROM "orders" WHERE "orders"."user_id" = "users"."id") AS "orders_count" FROM "users"`
+		);
+	});
+
+	it("Mongo : `pick orders.count` → $lookup + $addFields $size", () => {
+		const pipeline = mongo("find users pick id, orders.count");
+		expect(pipeline).toContainEqual({
+			$lookup: {
+				from: "orders",
+				localField: "id",
+				foreignField: "user_id",
+				as: "orders_count"
+			}
+		});
+		expect(pipeline).toContainEqual({
+			$addFields: { orders_count: { $size: "$orders_count" } }
+		});
+	});
+
+	it("pas de reverse-nav si pas de FK entrante", () => {
+		// depuis orders (aucune FK entrante dans ce schéma) → `x.count` inchangé.
+		const sql = pg("find orders pick total");
+		expect(sql).not.toContain("count(*)");
+	});
+});

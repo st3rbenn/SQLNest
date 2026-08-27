@@ -46,8 +46,9 @@ export type CompensationOp =
 			readonly foreignField: readonly string[];
 			// sémantique cross-engine préservée : "join" =
 			// LEFT JOIN unwind (many-to-one/one-to-one), "embed" = 1-to-many array
-			// non aplati. Défaut "embed" pour compat historique quand omis.
-			readonly kind?: "join" | "embed";
+			// non aplati, "count" = reverse-nav agrégé scalaire (ADR-031 D7).
+			// Défaut "embed" pour compat historique quand omis.
+			readonly kind?: "join" | "embed" | "count";
 	  }
 	// agrégation scalaire fold. Runtime KV implémente via
 	// foldAggregate (1 row output). groupKeys undefined = fold sur

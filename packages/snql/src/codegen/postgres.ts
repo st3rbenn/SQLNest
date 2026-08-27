@@ -595,8 +595,10 @@ interface JoinSpec {
 	 * `join` : LEFT JOIN classique — l'alias est une vraie source SQL, ses colonnes
 	 *   sont projetables et filtrables. `pick alias` seul rend un objet unique via
 	 *   `row_to_json(alias)`.
+	 * `count` : reverse-nav agrégé (ADR-031 D7) — l'alias est un SCALAIRE = count
+	 *   corrélé des lignes droites, via `(SELECT count(*) …)`.
 	 */
-	readonly kind: "embed" | "join";
+	readonly kind: "embed" | "join" | "count";
 }
 
 interface Select {
@@ -842,8 +844,24 @@ function renderJoinAliasSource(join: JoinSpec, base: string): string {
 	if (join.kind === "embed") {
 		return renderEmbedSubquery(join, base);
 	}
+	if (join.kind === "count") {
+		return renderCountSubquery(join, base);
+	}
 	// LEFT JOIN déjà émis dans le FROM — on projette juste l'objet.
 	return `row_to_json(${quoteIdent(join.as)})`;
+}
+
+/** Reverse-nav (ADR-031 D7) : count corrélé des lignes droites matchées. */
+function renderCountSubquery(join: JoinSpec, base: string): string {
+	const selfJoin = join.collection === base;
+	const innerRef = selfJoin ? join.innerAlias : join.collection;
+	const inner = quoteIdent(innerRef);
+	const fromClause = selfJoin
+		? `${quoteIdent(join.collection)} AS ${inner}`
+		: inner;
+	const foreign = qualify(innerRef, join.foreignField);
+	const local = qualify(base, join.localField);
+	return `(SELECT count(*) FROM ${fromClause} WHERE ${foreign} = ${local})`;
 }
 
 function renderEmbedSubquery(join: JoinSpec, base: string): string {

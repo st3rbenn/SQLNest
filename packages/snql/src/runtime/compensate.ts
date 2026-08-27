@@ -86,7 +86,7 @@ interface JoinOp {
 	readonly as: string;
 	readonly localField: readonly string[];
 	readonly foreignField: readonly string[];
-	readonly kind?: "join" | "embed";
+	readonly kind?: "join" | "embed" | "count";
 }
 
 /**
@@ -131,6 +131,14 @@ function joinRows(
 				return [{ ...row, [op.as]: undefined }];
 			}
 			return matched.map((rightRow) => ({ ...row, [op.as]: rightRow }));
+		});
+	}
+	if (op.kind === "count") {
+		// Reverse-nav (ADR-031 D7) : `as` = count scalaire des lignes droites.
+		return left.map((row) => {
+			const key = joinKey(getPath(row, op.localField));
+			const matched = key !== null ? (index.get(key) ?? []) : [];
+			return { ...row, [op.as]: matched.length };
 		});
 	}
 	return left.map((row) => {

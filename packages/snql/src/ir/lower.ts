@@ -27,7 +27,7 @@ import type {
 	SchemaModel,
 	SnqlType
 } from "../schema/model";
-import { desugarForwardNav } from "./forward-nav";
+import { desugarForwardNav, desugarReverseNav } from "./forward-nav";
 import type {
 	CompareOp,
 	LogicalPlan,
@@ -132,6 +132,9 @@ function lowerInternal(query: Query, schema?: SchemaModel): LogicalPlan {
 	// on user_id = id as user` implicite AVANT tout le reste (typecheck + résolution
 	// d'alias voient alors le join). No-op sans schéma / sans FK sortante référencée.
 	query = desugarForwardNav(query, schema);
+	// FK/2b reverse-nav (ADR-031 D7) : `pick orders.count` → join `aggregate:count`
+	// corrélé + réécriture du pick vers l'alias scalaire. No-op sans FK entrante.
+	query = desugarReverseNav(query, schema);
 	// typecheck cross-type predicates si schema dispo.
 	// Fire-early : messages actionnables avant PG remonte du 42883 cryptique.
 	typecheckQuery(query, schema);
@@ -2470,14 +2473,19 @@ function lowerStage(
 				stage.foreignField,
 				stage.alias ?? stage.collection
 			);
-			const kind = resolveJoinKind(
-				sourceCollection,
-				stage.collection,
-				localField,
-				foreignField,
-				stage.multiplicity,
-				schema
-			);
+			// Reverse-nav agrégé (FK/2b) : `aggregate: count` force le kind scalaire,
+			// court-circuite l'inférence embed/join.
+			const kind =
+				stage.aggregate === "count"
+					? ("count" as const)
+					: resolveJoinKind(
+							sourceCollection,
+							stage.collection,
+							localField,
+							foreignField,
+							stage.multiplicity,
+							schema
+						);
 			return {
 				op: "join",
 				input,
