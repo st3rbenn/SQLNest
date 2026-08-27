@@ -1646,7 +1646,12 @@ class MongoConnection implements Connection {
 			// `required` si NOT NULL. Préserve les autres contraintes existantes.
 			const newProperty: Record<string, unknown> = {};
 			if (query.column.bsonType !== null) {
-				newProperty["bsonType"] = query.column.bsonType;
+				// Nullable (= non required) → autorise `null` dans le validator,
+				// sinon `add {col: null}` + `on delete set null` FK échouent
+				// « Document failed validation » (ADR-031, miroir buildMongoFieldProperty).
+				newProperty["bsonType"] = query.column.required
+					? query.column.bsonType
+					: [query.column.bsonType, "null"];
 			}
 			const newProperties = {
 				...existingProperties,

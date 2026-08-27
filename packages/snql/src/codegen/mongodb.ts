@@ -2796,15 +2796,23 @@ const MONGO_BSON_TYPE: Readonly<Record<SnqlType, string | null>> = {
  * Rend une property $jsonSchema pour un field du plan. Type builtin →
  * `{bsonType}`, enum (ADR-030 Enum/2) → `{bsonType: "string", enum: [...]}`
  * — Mongo enforce nativement le enum dans le validator.
+ *
+ * Un field **nullable** émet `bsonType: [<type>, "null"]` (sinon le validator
+ * `$jsonSchema` refuse la valeur `null` — null n'est pas un `string` en BSON,
+ * ce qui casse `add {col: null}` ET le `on delete set null` d'une FK, ADR-031).
+ * Un enum nullable ajoute `null` à la liste `enum` (le keyword enum exige la
+ * valeur dans la liste, indépendamment de bsonType).
  */
 function buildMongoFieldProperty(
 	f: CreateTableField
 ): Record<string, unknown> {
 	const bson = MONGO_BSON_TYPE[f.type];
 	const property: Record<string, unknown> = {};
-	if (bson !== null) property.bsonType = bson;
+	if (bson !== null) {
+		property.bsonType = f.nullable ? [bson, "null"] : bson;
+	}
 	if (f.type === "enum" && f.enumMembers !== undefined) {
-		property.enum = f.enumMembers;
+		property.enum = f.nullable ? [...f.enumMembers, null] : f.enumMembers;
 	}
 	return property;
 }

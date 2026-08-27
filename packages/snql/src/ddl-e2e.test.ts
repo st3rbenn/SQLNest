@@ -248,7 +248,7 @@ describe("DDL/1 E2E — pipeline complet cross-engine (ADR-029)", () => {
 					properties: {
 						id: { bsonType: "binData" },
 						email: { bsonType: "string" },
-						age: { bsonType: "int" }
+						age: { bsonType: ["int", "null"] }
 					},
 					required: ["id", "email"]
 				}

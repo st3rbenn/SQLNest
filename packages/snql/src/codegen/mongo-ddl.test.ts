@@ -123,18 +123,18 @@ describe("codegen Mongo — create table (ADR-029 DDL/1.6)", () => {
 			target: "matrix",
 			ifNotExists: false,
 			fields: [
-				{ name: "s", type: "string", nullable: true, unique: false },
-				{ name: "i", type: "int", nullable: true, unique: false },
-				{ name: "bi", type: "bigint", nullable: true, unique: false },
-				{ name: "f", type: "float", nullable: true, unique: false },
-				{ name: "d", type: "decimal", nullable: true, unique: false },
-				{ name: "b", type: "bool", nullable: true, unique: false },
-				{ name: "dt", type: "date", nullable: true, unique: false },
-				{ name: "j", type: "json", nullable: true, unique: false },
-				{ name: "a", type: "array", nullable: true, unique: false },
-				{ name: "u", type: "uuid", nullable: true, unique: false },
-				{ name: "e", type: "enum", nullable: true, unique: false },
-				{ name: "un", type: "unknown", nullable: true, unique: false }
+				{ name: "s", type: "string", nullable: false, unique: false },
+				{ name: "i", type: "int", nullable: false, unique: false },
+				{ name: "bi", type: "bigint", nullable: false, unique: false },
+				{ name: "f", type: "float", nullable: false, unique: false },
+				{ name: "d", type: "decimal", nullable: false, unique: false },
+				{ name: "b", type: "bool", nullable: false, unique: false },
+				{ name: "dt", type: "date", nullable: false, unique: false },
+				{ name: "j", type: "json", nullable: false, unique: false },
+				{ name: "a", type: "array", nullable: false, unique: false },
+				{ name: "u", type: "uuid", nullable: false, unique: false },
+				{ name: "e", type: "enum", nullable: false, unique: false },
+				{ name: "un", type: "unknown", nullable: false, unique: false }
 			]
 		});
 		const props = (
@@ -153,6 +153,45 @@ describe("codegen Mongo — create table (ADR-029 DDL/1.6)", () => {
 		expect(props.u?.bsonType).toBe("binData");
 		expect(props.e?.bsonType).toBe("string");
 		expect(props.un?.bsonType).toBeUndefined(); // unknown → pas de contrainte
+	});
+
+	it("nullable → bsonType [type, null] (autorise null, ADR-031 set-null)", () => {
+		const q = mapDDL({
+			op: "ddl",
+			kind: "create-table",
+			target: "t",
+			ifNotExists: false,
+			fields: [
+				{ name: "ref_id", type: "string", nullable: true, unique: false }
+			]
+		});
+		const props = (
+			q.validator as { $jsonSchema: { properties: Record<string, { bsonType?: unknown }> } }
+		).$jsonSchema.properties;
+		expect(props.ref_id?.bsonType).toEqual(["string", "null"]);
+	});
+
+	it("enum nullable → enum inclut null", () => {
+		const q = mapDDL({
+			op: "ddl",
+			kind: "create-table",
+			target: "t",
+			ifNotExists: false,
+			fields: [
+				{
+					name: "role",
+					type: "enum",
+					enumTypeName: "role_type",
+					enumMembers: ["user", "admin"],
+					nullable: true,
+					unique: false
+				}
+			]
+		});
+		const props = (
+			q.validator as { $jsonSchema: { properties: Record<string, { enum?: unknown[] }> } }
+		).$jsonSchema.properties;
+		expect(props.role?.enum).toEqual(["user", "admin", null]);
 	});
 
 	it("D13 : primary key (id) single-field UUID → alias _id, id skip du validator", () => {
