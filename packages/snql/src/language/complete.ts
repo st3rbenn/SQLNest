@@ -16,7 +16,7 @@ import { type OperationKind, verbOperation } from "../lexer/dictionary";
 import { tokenize } from "../lexer/lexer";
 import type { Token } from "../lexer/token";
 import { SNQL_TYPE_ALIAS } from "../parser/parser";
-import type { SchemaModel } from "../schema/model";
+import { getOutgoingRefs, type SchemaModel } from "../schema/model";
 
 export type SnqlCompletionType =
 	| "verb"
@@ -199,9 +199,11 @@ export function completeSnql(
 	const word = TRAILING_WORD.exec(prefix)?.[0] ?? "";
 	const from = at - word.length;
 
-	// Chemin pointé (`alias.` / `col.`) : pas de complétion de champ imbriqué en v1.
+	// Chemin pointé (`head.` ). Forward-nav / join drill-in (ADR-031 D6, FK/2b) :
+	// `pick user.|` / `pick u.|` → colonnes de la collection cible. Autres chemins
+	// (accès JSON `meta.x`) → pas de complétion de champ imbriqué en v1.
 	if (from > 0 && source[from - 1] === ".") {
-		return { from, options: [] };
+		return { from, options: dottedPathOptions(source.slice(0, from - 1), schema) };
 	}
 
 	// le smart-apply insère `col: "|"` avec curseur entre
@@ -470,6 +472,53 @@ function contextOptions(
 	}
 
 	return [];
+}
+
+/**
+ * Complétion d'un chemin pointé `head.|` (ADR-031 D6 drill-in). `prefixBeforeDot`
+ * = source jusqu'AVANT le `.`. Tokenise, extrait le head (dernier ident),
+ * résout via nav/join et propose les colonnes de la cible. Select uniquement
+ * (le `ref X.|` DDL a son propre chemin). Non résolu (accès JSON) → [].
+ */
+function dottedPathOptions(
+	prefixBeforeDot: string,
+	schema: SchemaModel
+): readonly SnqlCompletion[] {
+	let toks: Token[];
+	try {
+		toks = tokenize(prefixBeforeDot).filter((t) => t.kind !== "eof");
+	} catch {
+		return [];
+	}
+	const head = toks[toks.length - 1];
+	if (head?.kind !== "ident") return [];
+	const operation = operationOf(toks);
+	if (operation !== "select") return [];
+	const scope = extractScope(toks, operation);
+	const target = resolveDotTarget(head.value, schema, scope);
+	return target !== undefined ? fieldsOf(schema, target) : [];
+}
+
+/**
+ * Résout le membre gauche d'un `head.field` vers une collection cible : alias de
+ * join explicite (scope.joins) ou nom de nav d'une FK sortante (`user` →
+ * `users` via `user_id`, ADR-031 D6). Renvoie undefined si `head` n'est ni l'un
+ * ni l'autre (accès JSON sur une colonne document, hors complétion schema).
+ */
+function resolveDotTarget(
+	head: string,
+	schema: SchemaModel,
+	scope: Scope
+): string | undefined {
+	for (const j of scope.joins) {
+		if ((j.alias ?? j.collection) === head) return j.collection;
+	}
+	if (scope.source !== undefined) {
+		for (const ref of getOutgoingRefs(schema, scope.source)) {
+			if (ref.fromColumn.replace(/_id$/, "") === head) return ref.toCollection;
+		}
+	}
+	return undefined;
 }
 
 /** Contexte introspect détecté (kind + optionnellement la table cible). */
@@ -848,10 +897,21 @@ function extractScope(
 	const joins: { collection: string; alias?: string }[] = [];
 	for (let i = 0; i < toks.length; i += 1) {
 		if (toks[i]?.kind === "keyword" && toks[i]?.value === "with") {
-			const coll = toks[i + 1];
+			// `with [one|many] <coll> [as <alias>]` — skip la multiplicité optionnelle
+			// (`one`/`many` sont des keywords lexés).
+			let collIdx = i + 1;
+			const mult = toks[collIdx];
+			if (
+				mult !== undefined &&
+				(mult.value.toLowerCase() === "one" ||
+					mult.value.toLowerCase() === "many")
+			) {
+				collIdx += 1;
+			}
+			const coll = toks[collIdx];
 			if (coll?.kind === "ident") {
-				const asKw = toks[i + 2];
-				const aliasTok = toks[i + 3];
+				const asKw = toks[collIdx + 1];
+				const aliasTok = toks[collIdx + 2];
 				if (
 					asKw?.kind === "keyword" &&
 					asKw.value === "as" &&
@@ -1323,6 +1383,39 @@ function fields(
 				detail: `→ ${join.collection}`
 			});
 		}
+	}
+	out.push(...navSuggestions(schema, scope));
+	return out;
+}
+
+/**
+ * Forward-nav (ADR-031 D6, FK/2a) : propose les noms de nav des FK sortantes de
+ * la source (`user_id` → `user`) avec `apply: "user."` prêt à driller vers la
+ * colonne cible. Exclut les navs qui shadowent une colonne locale ou un alias
+ * `with` déjà écrit. Le lower injecte le join implicite au `pick user.name`.
+ */
+function navSuggestions(
+	schema: SchemaModel,
+	scope: Scope
+): readonly SnqlCompletion[] {
+	if (scope.source === undefined) return [];
+	const sourceColl = schema.collections.find((c) => c.name === scope.source);
+	const localNames = new Set(sourceColl?.fields.map((f) => f.name) ?? []);
+	const joinAliases = new Set(
+		scope.joins.map((j) => j.alias ?? j.collection)
+	);
+	const out: SnqlCompletion[] = [];
+	const seen = new Set<string>();
+	for (const ref of getOutgoingRefs(schema, scope.source)) {
+		const nav = ref.fromColumn.replace(/_id$/, "");
+		if (localNames.has(nav) || joinAliases.has(nav) || seen.has(nav)) continue;
+		seen.add(nav);
+		out.push({
+			label: nav,
+			type: "relation",
+			detail: `→ ${ref.toCollection} (nav via ${ref.fromColumn})`,
+			apply: `${nav}.`
+		});
 	}
 	return out;
 }
