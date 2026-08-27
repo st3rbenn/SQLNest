@@ -141,6 +141,84 @@ describe("buildSchemaModel", () => {
 		expect(model.relations[0]?.to.fields).toEqual(["y1", "y2"]);
 	});
 
+	it("peuple schema.refs (RefDef) depuis pg_constraint — base forward-nav FK/2a", () => {
+		const model = buildSchemaModel(
+			["orders", "users"],
+			[],
+			[],
+			[
+				{
+					constraint_oid: "40001",
+					constraint_name: "fk_orders_user",
+					from_table: "orders",
+					from_column: "user_id",
+					to_table: "users",
+					to_column: "id",
+					on_delete: "c", // cascade
+					on_update: "a" // no action → restrict
+				}
+			]
+		);
+		expect(model.refs).toEqual([
+			{
+				name: "fk_orders_user",
+				fromCollection: "orders",
+				fromColumn: "user_id",
+				toCollection: "users",
+				toColumn: "id",
+				onDelete: "cascade",
+				onUpdate: "restrict",
+				source: "declared"
+			}
+		]);
+	});
+
+	it("confdeltype `n` → set-null ; composite FK skippée dans refs", () => {
+		const model = buildSchemaModel(
+			["a", "b"],
+			[],
+			[],
+			[
+				{
+					constraint_oid: "40002",
+					constraint_name: "fk_a_single",
+					from_table: "a",
+					from_column: "b_id",
+					to_table: "b",
+					to_column: "id",
+					on_delete: "n",
+					on_update: "r"
+				},
+				// composite (2 colonnes, même OID) → hors scope refs V1
+				{
+					constraint_oid: "40003",
+					constraint_name: "fk_a_composite",
+					from_table: "a",
+					from_column: "x1",
+					to_table: "b",
+					to_column: "y1",
+					on_delete: "c",
+					on_update: "a"
+				},
+				{
+					constraint_oid: "40003",
+					constraint_name: "fk_a_composite",
+					from_table: "a",
+					from_column: "x2",
+					to_table: "b",
+					to_column: "y2",
+					on_delete: "c",
+					on_update: "a"
+				}
+			]
+		);
+		expect(model.refs).toHaveLength(1);
+		expect(model.refs?.[0]).toMatchObject({
+			name: "fk_a_single",
+			onDelete: "set-null"
+		});
+	});
+
 	it("FK homonymes de tables différentes → relations distinctes (OID)", () => {
 		// Deux FK au même nom (légal : unique par table, pas par schéma) mais OID
 		// différents ne doivent PAS fusionner.

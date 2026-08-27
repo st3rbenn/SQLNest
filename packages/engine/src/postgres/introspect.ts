@@ -2,6 +2,9 @@ import type {
 	Collection,
 	EnumTypeDef,
 	Field,
+	OnDeleteRule,
+	OnUpdateRule,
+	RefDef,
 	Relation,
 	SchemaModel,
 	SnqlType
@@ -37,10 +40,15 @@ interface FkRow {
 	// Identité STABLE de la contrainte : les noms (conname) ne sont uniques que
 	// par table, pas par schéma — grouper par nom fusionnerait des FK homonymes.
 	readonly constraint_oid: string;
+	readonly constraint_name: string;
 	readonly from_table: string;
 	readonly from_column: string;
 	readonly to_table: string;
 	readonly to_column: string;
+	// confdeltype / confupdtype : char pg_constraint (c=cascade, n=set null,
+	// a=no action, r=restrict, d=set default). Reconstruit RefDef.onDelete/onUpdate.
+	readonly on_delete: string;
+	readonly on_update: string;
 }
 
 // Le schéma cible est un paramètre bindé ($1) — jamais interpolé. Introspection
@@ -90,6 +98,9 @@ const PK_SQL = `
 const FK_SQL = `
 	SELECT
 		con.oid::text AS constraint_oid,
+		con.conname AS constraint_name,
+		con.confdeltype AS on_delete,
+		con.confupdtype AS on_update,
 		fromtbl.relname AS from_table,
 		fromcol.attname AS from_column,
 		totbl.relname AS to_table,
@@ -210,12 +221,54 @@ export function buildSchemaModel(
 		enumsList.push({ name, members, source: "declared" });
 	}
 
+	const refs = buildRefs(fks);
 	return {
 		engine: "postgres",
 		collections,
 		relations: buildRelations(fks),
-		...(enumsList.length > 0 ? { enums: enumsList } : {})
+		...(enumsList.length > 0 ? { enums: enumsList } : {}),
+		...(refs.length > 0 ? { refs } : {})
 	};
+}
+
+/** char pg_constraint confdeltype/confupdtype → règle SNQL. `c`=cascade,
+ * `n`=set null ; tout le reste (`a` no action, `r` restrict, `d` set default)
+ * → restrict (comportement défensif, défaut ADR-031 D2). */
+function pgRefRule(ch: string): OnDeleteRule & OnUpdateRule {
+	if (ch === "c") return "cascade";
+	if (ch === "n") return "set-null";
+	return "restrict";
+}
+
+/**
+ * Reconstruit les `RefDef` (ADR-031 FK/1a) depuis pg_constraint — symétrique de
+ * la lecture `_snql_refs` côté Mongo, pour peupler `schema.refs` cross-engine
+ * (base du forward-nav FK/2a). Composite FK (> 1 colonne) skippée V1 : `RefDef`
+ * est single-column ; le forward-nav ne cible pas les FK composites (ADR D5).
+ */
+function buildRefs(fks: readonly FkRow[]): RefDef[] {
+	const byConstraint = new Map<string, FkRow[]>();
+	for (const fk of fks) {
+		const arr = byConstraint.get(fk.constraint_oid) ?? [];
+		arr.push(fk);
+		byConstraint.set(fk.constraint_oid, arr);
+	}
+	const refs: RefDef[] = [];
+	for (const rows of byConstraint.values()) {
+		if (rows.length !== 1) continue; // composite FK → hors scope nav V1
+		const fk = rows[0]!;
+		refs.push({
+			name: fk.constraint_name,
+			fromCollection: fk.from_table,
+			fromColumn: fk.from_column,
+			toCollection: fk.to_table,
+			toColumn: fk.to_column,
+			onDelete: pgRefRule(fk.on_delete),
+			onUpdate: pgRefRule(fk.on_update),
+			source: "declared"
+		});
+	}
+	return refs;
 }
 
 /** Groupe les lignes FK par OID de contrainte (préserve l'ordre des colonnes composites). */

@@ -27,6 +27,7 @@ import type {
 	SchemaModel,
 	SnqlType
 } from "../schema/model";
+import { desugarForwardNav } from "./forward-nav";
 import type {
 	CompareOp,
 	LogicalPlan,
@@ -127,6 +128,10 @@ function lowerInternal(query: Query, schema?: SchemaModel): LogicalPlan {
 	// contre alias transparent — un scan de table système via `find` cache la
 	// vraie source d'exécution (backend SQLNest) derrière un verbe de query.
 	assertNotReservedSystemTarget(query.source.collection, query.source.span);
+	// FK/2a forward-nav (ADR-031 D6) : `pick user.name` → injecte le `with users
+	// on user_id = id as user` implicite AVANT tout le reste (typecheck + résolution
+	// d'alias voient alors le join). No-op sans schéma / sans FK sortante référencée.
+	query = desugarForwardNav(query, schema);
 	// typecheck cross-type predicates si schema dispo.
 	// Fire-early : messages actionnables avant PG remonte du 42883 cryptique.
 	typecheckQuery(query, schema);
