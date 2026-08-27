@@ -253,24 +253,32 @@ describe("codegen Mongo", () => {
 		});
 	});
 
-	it("sort par alias du pick → $sort APRÈS $project (pas de reorder)", () => {
-		// L'alias `n` est défini par le $project ; $sort doit venir après.
+	it("sort par alias du pick → bloc sort APRÈS $project (pas de reorder)", () => {
+		// L'alias `n` est défini par le $project ; le bloc sort doit venir après.
+		// Sans schema, `n` (agrégat, nullable en PG ex. sum vide) → null-rank de
+		// parité (ADR-032). [$group, $project, $addFields, $sort, $unset, $limit].
 		const pipeline = mongoPipeline(
 			"find t group by x pick x, count(*) as n sort n desc limit 10"
 		);
-		// [$group, $project, $sort, $limit]
-		expect(pipeline.length).toBe(4);
-		expect(pipeline[2]).toEqual({ $sort: { n: -1 } });
-		expect(pipeline[3]).toEqual({ $limit: 10 });
+		expect(pipeline.length).toBe(6);
+		expect(pipeline[2]).toEqual({
+			$addFields: { __nr_0: { $cond: [{ $eq: ["$n", null] }, 1, 0] } }
+		});
+		expect(pipeline[3]).toEqual({ $sort: { __nr_0: -1, n: -1 } });
+		expect(pipeline[4]).toEqual({ $unset: ["__nr_0"] });
+		expect(pipeline[5]).toEqual({ $limit: 10 });
 	});
 
-	it("sort par source col droppée par pick (non-agg) → $sort AVANT $project", () => {
+	it("sort par source col droppée par pick (non-agg) → bloc sort AVANT $project", () => {
 		// created_at n'est PAS dans pick → auto-reorder pour préserver l'accès.
+		// Null-rank de parité 3VL préfixé (ADR-032, pas de schema → conservateur).
 		const pipeline = mongoPipeline(
 			"find users pick name, email sort created_at desc"
 		);
 		expect(pipeline).toEqual([
-			{ $sort: { created_at: -1 } },
+			{ $addFields: { __nr_0: { $cond: [{ $eq: ["$created_at", null] }, 1, 0] } } },
+			{ $sort: { __nr_0: -1, created_at: -1 } },
+			{ $unset: ["__nr_0"] },
 			{ $project: { name: 1, email: 1, _id: 0 } }
 		]);
 	});

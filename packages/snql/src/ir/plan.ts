@@ -273,6 +273,14 @@ export interface PlanProjectField {
 export interface PlanSortKey {
 	readonly path: readonly string[];
 	readonly direction: "asc" | "desc";
+	/**
+	 * Vrai ssi le schema déclare cette clé `nullable: false` (ADR-032). Permet au
+	 * codegen Mongo d'émettre un `$sort` plat (index préservé) au lieu du null-rank
+	 * de parité 3VL — sans null possible, l'ordre natif Mongo = ordre PG. Absent /
+	 * false = nullable, computed, joint, ou schema inconnu → null-rank émis (défaut
+	 * sûr = parité garantie).
+	 */
+	readonly provablyNotNull?: boolean;
 }
 
 export type LogicalPlan =

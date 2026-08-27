@@ -20,11 +20,15 @@ describe("codegen mongodb — pipeline de base", () => {
 			`get users where age > 30 and status = "active" pick name, email sort created_at desc limit 10 offset 20`
 		);
 		expect(collection).toBe("users");
+		// Sans schema, `created_at` n'est pas prouvé not-null → null-rank de parité
+		// 3VL (ADR-032) préfixé au $sort, inséré avant $project (col droppée).
 		expect(pipeline).toEqual([
 			{
 				$match: { $and: [{ age: { $gt: 30 } }, { status: { $eq: "active" } }] }
 			},
-			{ $sort: { created_at: -1 } },
+			{ $addFields: { __nr_0: { $cond: [{ $eq: ["$created_at", null] }, 1, 0] } } },
+			{ $sort: { __nr_0: -1, created_at: -1 } },
+			{ $unset: ["__nr_0"] },
 			{ $project: { name: 1, email: 1, _id: 0 } },
 			{ $skip: 20 },
 			{ $limit: 10 }
@@ -35,9 +39,18 @@ describe("codegen mongodb — pipeline de base", () => {
 		expect(mongo("get users").pipeline).toEqual([]);
 	});
 
-	it("tri multi-clés", () => {
+	it("tri multi-clés (null-rank par clé, ADR-032)", () => {
+		// Sans schema → chaque clé reçoit son rang, trié dans la même direction
+		// (parité PG : ASC nulls last, DESC nulls first).
 		expect(mongo("get users sort created_at desc, name asc").pipeline).toEqual([
-			{ $sort: { created_at: -1, name: 1 } }
+			{
+				$addFields: {
+					__nr_0: { $cond: [{ $eq: ["$created_at", null] }, 1, 0] },
+					__nr_1: { $cond: [{ $eq: ["$name", null] }, 1, 0] }
+				}
+			},
+			{ $sort: { __nr_0: -1, created_at: -1, __nr_1: 1, name: 1 } },
+			{ $unset: ["__nr_0", "__nr_1"] }
 		]);
 	});
 
@@ -94,9 +107,11 @@ describe("codegen mongodb — expressions", () => {
 		]);
 	});
 
-	it("not / nor", () => {
+	it("not existence-aware (ADR-032 parité 3VL read)", () => {
+		// `not(status = "x")` = `status != "x"` en 3VL SQL : exclut aussi
+		// l'absent/null (avant : `$nor` matchait null → divergence vs PG).
 		expect(mongo(`get users where not status = "x"`).pipeline).toEqual([
-			{ $match: { $nor: [{ status: { $eq: "x" } }] } }
+			{ $match: { status: { $nin: ["x", null] } } }
 		]);
 	});
 
@@ -106,9 +121,22 @@ describe("codegen mongodb — expressions", () => {
 		]);
 	});
 
-	it("champ ↔ champ → repli $expr", () => {
+	it("champ ↔ champ → $expr gardé existence (ADR-032 1b)", () => {
+		// Parité 3VL : `age < max_age` exclut les lignes où l'un des deux est
+		// absent/null (prédicat UNKNOWN), comme PG. Sans gardes, `$lt` en agrégation
+		// comparerait null (BSON ordering) → divergence.
 		expect(mongo("get users where age < max_age").pipeline).toEqual([
-			{ $match: { $expr: { $lt: ["$age", "$max_age"] } } }
+			{
+				$match: {
+					$expr: {
+						$and: [
+							{ $ne: ["$age", null] },
+							{ $ne: ["$max_age", null] },
+							{ $lt: ["$age", "$max_age"] }
+						]
+					}
+				}
+			}
 		]);
 	});
 
@@ -117,7 +145,13 @@ describe("codegen mongodb — expressions", () => {
 		expect(mongo('get users where "$name" = "$name"').pipeline).toEqual([
 			{
 				$match: {
-					$expr: { $eq: [{ $literal: "$name" }, { $literal: "$name" }] }
+					$expr: {
+						$and: [
+							{ $ne: [{ $literal: "$name" }, null] },
+							{ $ne: [{ $literal: "$name" }, null] },
+							{ $eq: [{ $literal: "$name" }, { $literal: "$name" }] }
+						]
+					}
 				}
 			}
 		]);

@@ -137,14 +137,20 @@ describe("codegen mongodb — cast ()", () => {
 		});
 	});
 
-	it("cast en WHERE (READ) — passe par $expr", () => {
+	it("cast en WHERE (READ) — $expr gardé existence (ADR-032 1b)", () => {
 		const { pipeline } = mongo("get t where cast(x as int) > 30");
+		const castExpr = {
+			$convert: { input: { $ifNull: ["$x", null] }, to: "long" }
+		};
+		// Parité 3VL : si le cast rend null (x absent/null) → prédicat UNKNOWN →
+		// ligne exclue, comme PG. Les gardes d'existence enveloppent la comparaison.
 		expect(pipeline[0]).toEqual({
 			$match: {
 				$expr: {
-					$gt: [
-						{ $convert: { input: { $ifNull: ["$x", null] }, to: "long" } },
-						30
+					$and: [
+						{ $ne: [castExpr, null] },
+						{ $ne: [30, null] },
+						{ $gt: [castExpr, 30] }
 					]
 				}
 			}

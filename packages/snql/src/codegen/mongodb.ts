@@ -768,11 +768,11 @@ function appendStage(
 		case "sort": {
 			// $sort après $project doit référencer les champs projetés.
 			// Si une sort key référence un field DROPPÉ par le project précédent, on
-			// insère $sort AVANT $project — sort opère alors sur les docs sources
-			// qui contiennent encore le field (aligné SQL ORDER BY sur FROM col).
+			// insère le bloc sort AVANT $project — sort opère alors sur les docs
+			// sources qui contiennent encore le field (aligné SQL ORDER BY sur FROM col).
 			// Cas group/aggregate : jamais reorder ($group détruit les rows sources,
 			// sort DOIT rester après).
-			const sortStage: MongoStage = { $sort: renderSort(op.keys, alias) };
+			const sortStages = buildSortStages(op.keys, alias);
 			const prev = pipeline[pipeline.length - 1];
 			if (prev !== undefined && "$project" in prev) {
 				const projectOut = prev.$project as Record<string, unknown>;
@@ -787,12 +787,12 @@ function appendStage(
 					return !projectedFields.has(head);
 				});
 				if (sortRefsMissing) {
-					// Insérer $sort avant $project (à la position du $project).
-					pipeline.splice(pipeline.length - 1, 0, sortStage);
+					// Insérer le bloc sort avant $project (à la position du $project).
+					pipeline.splice(pipeline.length - 1, 0, ...sortStages);
 					return;
 				}
 			}
-			pipeline.push(sortStage);
+			pipeline.push(...sortStages);
 			return;
 		}
 		case "limit":
@@ -2028,15 +2028,41 @@ function extractWindowCallsToSlots(
 	return { stages, slotByKey };
 }
 
-function renderSort(
+/**
+ * Bloc de stages pour un `sort`, avec parité null-ordering 3VL (ADR-032). PG
+ * default = ASC nulls last / DESC nulls first ; Mongo `$sort` natif fait
+ * l'inverse. Pour chaque clé NON prouvée `not null`, on préfixe un rang
+ * `$cond[key == null → 1 : 0]` trié dans la MÊME direction (ASC : 0<1 = nulls
+ * last ✓ ; DESC : 1 avant 0 = nulls first ✓). Les clés `not null` restent en
+ * `$sort` plat → l'index Mongo reste utilisable (pas de tri en mémoire).
+ * Aucun rang requis → un seul `$sort` (chemin historique).
+ */
+function buildSortStages(
 	keys: readonly PlanSortKey[],
 	alias: string | undefined
-): Record<string, 1 | -1> {
-	const out: Record<string, 1 | -1> = {};
-	for (const key of keys) {
-		out[mongoField(key.path, alias)] = key.direction === "desc" ? -1 : 1;
+): MongoStage[] {
+	const rankFields: Record<string, unknown> = {};
+	const sortDoc: Record<string, 1 | -1> = {};
+	const rankSlots: string[] = [];
+	keys.forEach((key, i) => {
+		const field = mongoField(key.path, alias);
+		const dir: 1 | -1 = key.direction === "desc" ? -1 : 1;
+		if (key.provablyNotNull !== true) {
+			const slot = `__nr_${i}`;
+			rankFields[slot] = { $cond: [{ $eq: [`$${field}`, null] }, 1, 0] };
+			sortDoc[slot] = dir;
+			rankSlots.push(slot);
+		}
+		sortDoc[field] = dir;
+	});
+	if (rankSlots.length === 0) {
+		return [{ $sort: sortDoc }];
 	}
-	return out;
+	return [
+		{ $addFields: rankFields },
+		{ $sort: sortDoc },
+		{ $unset: rankSlots }
+	];
 }
 
 /**
@@ -2069,11 +2095,10 @@ function renderMatch(
 				]
 			};
 		case "not":
-			// En écriture, on pousse la négation aux feuilles (De Morgan) avec des
-			// gardes d'existence ; `$nor` (lecture) matcherait aussi l'absent/null.
-			return mode === "write"
-				? negateMatch(expr.operand, alias)
-				: { $nor: [renderMatch(expr.operand, alias, mode)] };
+			// Négation existence-aware dans les DEUX modes (ADR-032) : on pousse la
+			// négation aux feuilles (De Morgan) avec gardes d'existence. L'ancien
+			// `$nor` en lecture matchait l'absent/null → divergence 3VL vs PG.
+			return negateMatch(expr.operand, alias, mode);
 		case "isNull": {
 			// is null sur un call JSON hoistable → `{path: {$exists: bool}}`.
 			// `where json_get(doc, 'k') is null` équivaut à `not $exists` (missing key).
@@ -2184,20 +2209,27 @@ function renderMatch(
  */
 function negateMatch(
 	expr: PlanExpr,
-	alias: string | undefined
+	alias: string | undefined,
+	mode: MatchMode
 ): Record<string, unknown> {
 	switch (expr.kind) {
 		case "and":
 			return {
-				$or: [negateMatch(expr.left, alias), negateMatch(expr.right, alias)]
+				$or: [
+					negateMatch(expr.left, alias, mode),
+					negateMatch(expr.right, alias, mode)
+				]
 			};
 		case "or":
 			return {
-				$and: [negateMatch(expr.left, alias), negateMatch(expr.right, alias)]
+				$and: [
+					negateMatch(expr.left, alias, mode),
+					negateMatch(expr.right, alias, mode)
+				]
 			};
 		case "not":
-			// Double négation : on revient au prédicat positif (mode écriture).
-			return renderMatch(expr.operand, alias, "write");
+			// Double négation : on revient au prédicat positif.
+			return renderMatch(expr.operand, alias, mode);
 		case "isNull": {
 			if (expr.operand.kind !== "field") {
 				throw new SnqlError(
@@ -2224,7 +2256,7 @@ function negateMatch(
 			};
 		}
 		case "compare":
-			return negateCompare(expr.op, expr.left, expr.right, alias);
+			return negateCompare(expr.op, expr.left, expr.right, alias, mode);
 		case "cast": {
 			const hint =
 				expr.target === "bool"
@@ -2309,14 +2341,15 @@ function negateCompare(
 	op: CompareOp,
 	left: PlanExpr,
 	right: PlanExpr,
-	alias: string | undefined
+	alias: string | undefined,
+	mode: MatchMode
 ): Record<string, unknown> {
 	// Mirror hoist JSON dans la négation. `not (json_get(x,'k')='v')`
 	// et `not (json_has_key(x,'k')=true)` doivent produire l'inverse hoisté
 	// natif (sinon fallback $expr non-indexable via composition not/$eq).
 	const negatedOp = NEGATED_HOIST_OP[op];
 	if (negatedOp !== undefined) {
-		const hoisted = tryMongoMatchHoist(negatedOp, left, right, alias, "write");
+		const hoisted = tryMongoMatchHoist(negatedOp, left, right, alias, mode);
 		if (hoisted !== null) return hoisted;
 	}
 	// Cas idiomatique `champ op littéral` : on inverse l'opérateur.
@@ -2345,8 +2378,12 @@ function negateCompare(
 		// lt/le/gt/ge : les opérateurs de comparaison Mongo excluent déjà l'absent/null.
 		return { [field]: { [NEGATED_COMPARE[op]]: value } };
 	}
-	// champ↔champ : `renderCompare` en mode écriture refuse (3VL ambiguë).
-	return renderCompare(op, left, right, alias, "write");
+	// champ↔champ / fonction. Écriture : `renderCompare` refuse (3VL ambiguë).
+	// Lecture (ADR-032 1b) : `$expr` gardé, comparaison négée — parité PG (les
+	// deux opérandes doivent être non-null, sinon UNKNOWN → exclu).
+	return mode === "write"
+		? renderCompare(op, left, right, alias, "write")
+		: guardedExpr(op, left, right, alias, true);
 }
 
 const MONGO_OP: Readonly<Record<CompareOp, string>> = {
@@ -2392,10 +2429,11 @@ function renderCompare(
 	// Forme idiomatique : `{ champ: { $op: valeur } }`.
 	if (left.kind === "field" && right.kind === "literal") {
 		const field = mongoField(left.path, alias);
-		// `!=` en écriture : `$ne` matcherait aussi l'absent/null → perte de données
-		// sur un `remove`/`update`. `$nin: [v, null]` exclut la valeur ET l'absent/null,
-		// comme `<>` en SQL (3VL). En lecture, sémantique Mongo native conservée.
-		if (op === "ne" && mode === "write") {
+		// `!=` : `$ne` matcherait aussi l'absent/null. En écriture = perte de données
+		// (`remove`/`update`) ; en lecture = divergence 3VL vs PG (ADR-032). `$nin:
+		// [v, null]` exclut la valeur ET l'absent/null, comme `<>` en SQL — parité
+		// dans les DEUX modes.
+		if (op === "ne") {
 			return { [field]: { $nin: [bsonValue(right.value), null] } };
 		}
 		return { [field]: { [MONGO_OP[op]]: bsonValue(right.value) } };
@@ -2427,9 +2465,32 @@ function renderCompare(
 			"codegen_mongo_write_field_compare"
 		);
 	}
+	// Read : `$expr` champ↔champ / fonction, avec gardes d'existence 3VL (ADR-032
+	// 1b) — un opérande null/absent → prédicat UNKNOWN → ligne exclue (parité PG).
+	// Sans les gardes, `a = b` avec les deux null matcherait (`$eq:[null,null]`→true).
+	return guardedExpr(op, left, right, alias, false);
+}
+
+/**
+ * `$expr` avec gardes d'existence 3VL (ADR-032 1b). La ligne n'est incluse que
+ * si les DEUX opérandes sont non-null (sinon prédicat UNKNOWN → exclu, parité
+ * SQL), puis la comparaison (ou sa négation). `$ne: [x, null]` capture missing
+ * ET null (en agrégation, un field absent s'évalue à null). Read only — le
+ * write refuse déjà champ↔champ en amont.
+ */
+function guardedExpr(
+	op: CompareOp,
+	left: PlanExpr,
+	right: PlanExpr,
+	alias: string | undefined,
+	negate: boolean
+): Record<string, unknown> {
+	const a = toExprOperand(left, alias);
+	const b = toExprOperand(right, alias);
+	const cmp = { [MONGO_OP[op]]: [a, b] };
 	return {
 		$expr: {
-			[MONGO_OP[op]]: [toExprOperand(left, alias), toExprOperand(right, alias)]
+			$and: [{ $ne: [a, null] }, { $ne: [b, null] }, negate ? { $not: [cmp] } : cmp]
 		}
 	};
 }

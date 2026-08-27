@@ -2461,7 +2461,13 @@ function lowerStage(
 			};
 		}
 		case "sort":
-			return { op: "sort", input, keys: stage.keys.map(lowerSortKey) };
+			return {
+				op: "sort",
+				input,
+				keys: stage.keys.map((k) =>
+					lowerSortKey(k, sourceCollection, sourceAlias, schema)
+				)
+			};
 		case "limit":
 			return stage.offset !== undefined
 				? { op: "limit", input, count: stage.count, offset: stage.offset }
@@ -2628,8 +2634,47 @@ function assertUniqueProjectionKeys(fields: readonly PlanProjectField[]): void {
 	}
 }
 
-function lowerSortKey(key: SortKey): PlanSortKey {
-	return { path: key.path, direction: key.direction };
+function lowerSortKey(
+	key: SortKey,
+	sourceCollection: string,
+	sourceAlias: string | undefined,
+	schema: SchemaModel | undefined
+): PlanSortKey {
+	const provablyNotNull = sortKeyProvablyNotNull(
+		key.path,
+		sourceCollection,
+		sourceAlias,
+		schema
+	);
+	return {
+		path: key.path,
+		direction: key.direction,
+		...(provablyNotNull ? { provablyNotNull: true } : {})
+	};
+}
+
+/**
+ * Vrai ssi la clé de tri est une colonne SIMPLE de la source déclarée
+ * `nullable: false` (ADR-032). Conservateur : path imbriqué, alias joint,
+ * computed alias, ou schema absent → false (→ le codegen émet le null-rank de
+ * parité). On strip un préfixe = alias de la source (`sort u.x` où la source
+ * est `... as u`).
+ */
+function sortKeyProvablyNotNull(
+	path: readonly string[],
+	sourceCollection: string,
+	sourceAlias: string | undefined,
+	schema: SchemaModel | undefined
+): boolean {
+	if (schema === undefined) return false;
+	let segs = path;
+	if (sourceAlias !== undefined && segs.length > 1 && segs[0] === sourceAlias) {
+		segs = segs.slice(1);
+	}
+	if (segs.length !== 1) return false; // imbriqué / joint → inconnu
+	const coll = schema.collections.find((c) => c.name === sourceCollection);
+	const field = coll?.fields.find((f) => f.name === segs[0]);
+	return field?.nullable === false;
 }
 
 // Indice de flottant : présence d'un point décimal ou d'un exposant.
