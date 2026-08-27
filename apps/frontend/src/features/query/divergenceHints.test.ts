@@ -38,10 +38,11 @@ describe("collectDivergenceHints — patterns divergents PG↔Mongo", () => {
 		expect(hints[0]?.code).toBe("cast_date_timestamp_collapse");
 	});
 
-	it("!= dans un compare → hint not_equal_null_aware", () => {
+	it("!= dans un compare → aucun hint (parité 3VL ADR-032)", () => {
+		// ADR-032 : read Mongo existence-aware comme PG, `!=` n'est plus une
+		// divergence. Le walker traverse le compare mais n'émet rien.
 		const hints = hintsFor(`remove from users where email != "spam"`);
-		expect(hints).toHaveLength(1);
-		expect(hints[0]?.code).toBe("not_equal_null_aware");
+		expect(hints).toHaveLength(0);
 	});
 
 	it("json_contains(a, b) → hint json_contains_nested", () => {
@@ -63,32 +64,32 @@ describe("collectDivergenceHints — patterns divergents PG↔Mongo", () => {
 
 	it("plusieurs patterns : chaque construct produit son hint (ordre AST)", () => {
 		const hints = hintsFor(
-			`find users where email != "x" pick concat(first_name, " ", last_name) as full`
+			`find users where cast(active as bool) = true pick concat(first_name, " ", last_name) as full`
 		);
 		expect(hints.length).toBeGreaterThanOrEqual(2);
 		const codes = hints.map((h) => h.code);
-		expect(codes).toContain("not_equal_null_aware");
+		expect(codes).toContain("cast_bool_truthy");
 		expect(codes).toContain("concat_null_parity");
 	});
 
 	it("walker traverse le body transaction", () => {
 		const hints = hintsFor(
-			`transaction { update users where email != "x" set active = false }`
+			`transaction { update users where concat(first_name, last_name) = "x" set active = false }`
 		);
-		expect(hints.some((h) => h.code === "not_equal_null_aware")).toBe(true);
+		expect(hints.some((h) => h.code === "concat_null_parity")).toBe(true);
 	});
 
 	it("walker traverse le body savepoint", () => {
 		const hints = hintsFor(
-			`transaction { savepoint sp1 { update users where email != "x" set active = false } }`
+			`transaction { savepoint sp1 { update users where concat(first_name, last_name) = "x" set active = false } }`
 		);
-		expect(hints.some((h) => h.code === "not_equal_null_aware")).toBe(true);
+		expect(hints.some((h) => h.code === "concat_null_parity")).toBe(true);
 	});
 
 	it("walker traverse les bindings let", () => {
 		const hints = hintsFor(
-			`let active = find users where email != "x" pick id; find active pick id`
+			`let active = find users where concat(first_name, last_name) = "x" pick id; find active pick id`
 		);
-		expect(hints.some((h) => h.code === "not_equal_null_aware")).toBe(true);
+		expect(hints.some((h) => h.code === "concat_null_parity")).toBe(true);
 	});
 });

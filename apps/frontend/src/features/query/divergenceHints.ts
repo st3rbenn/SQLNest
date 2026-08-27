@@ -14,7 +14,6 @@
  *  - `json_contains(…)` — call name === "json_contains"
  *  - `cast(_ as bool)` — cast target === "bool"
  *  - `cast(_ as date)` — cast target === "date"
- *  - `!=` — compare operator === "!="
  */
 
 import type {
@@ -159,11 +158,10 @@ function walkExpr(expr: Expr, out: DivergenceHint[]): void {
 			return;
 		}
 		case "compare":
-			// `!=` sur write context peut data-loss (3VL). MVP émet sur tout compare
-			// != (walker context-libre — le hint dit "sur write" dans hintMessage).
-			if (expr.operator === "!=") {
-				emitFor("!=", expr.span, out);
-			}
+			// `!=` était surfacé (data-loss 3VL en write) — résolu par ADR-032 : le
+			// read Mongo est existence-aware comme PG (`$nin:[v,null]`), plus aucune
+			// divergence à signaler. On traverse quand même les operands pour les
+			// constructs imbriqués (concat, cast, …).
 			walkExpr(expr.left, out);
 			walkExpr(expr.right, out);
 			return;

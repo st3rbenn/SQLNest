@@ -77,13 +77,18 @@ export const DIVERGENCES: readonly DivergenceEntry[] = [
 		hintMessage: "BSON Date = timestamp UTC — pas de date-only comme PG. Trunc côté application si besoin"
 	},
 	{
+		// Résolu par ADR-032 (parité 3VL read + write). Le read Mongo est désormais
+		// existence-aware comme le write l'était déjà → `!=` exclut v ET null,
+		// exactement comme la 3VL de PG. Plus AUCUN squiggly sur `!=` (pas de
+		// userFacingHint) : la parité est totale et automatique, l'annoter serait du
+		// bruit. Entrée conservée en `shim` pour la gouvernance/release notes.
 		code: "not_equal_null_aware",
-		title: "#16 — != / not(x=v) write Mongo",
-		pgBehavior: "SQL 3VL — != v exclut v et null (potentiel data-loss delete)",
-		mongoBehavior: "Mongo write existence-aware $nin:[v,null] — exclut aussi les null (par design)",
-		mitigation: "warn",
-		userFacingHint: "!=",
-		hintMessage: "Mongo NULL-aware sur write — ajoute `or x is null` pour parité PG stricte"
+		title: "#16 — != / not(x=v) — parité 3VL read+write (ADR-032)",
+		pgBehavior: "SQL 3VL — != v exclut v ET null",
+		mongoBehavior: "$nin:[v,null] en read ET write — exclut v ET null, identique à PG (ADR-032)",
+		mitigation: "shim",
+		hintMessage:
+			"Parité livrée (ADR-032) : `!=` est 3VL-strict en read comme en write, exclut null comme PG — rien à faire"
 	},
 	// 4 divergences supplémentaires surfacées par l'adversarial
 	// (invisibles avant port des 4 blockers, silent-corruption).
