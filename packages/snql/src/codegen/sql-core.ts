@@ -4,14 +4,16 @@ import type {
 	CastTarget,
 	CompareOp,
 	LogicalPlan,
+	MutationPlan,
 	PlanExpr,
 	PlanProjectField,
 	PlanSortKey,
-	SqlValue
+	SqlValue,
+	TransactionPlanItem
 } from "../ir/plan";
 import { isSqlDecimal, linearize } from "../ir/plan";
 import type { Span } from "../lexer/token";
-import type { SerializedSpan } from "./mapper";
+import type { SerializedSpan, SqlQuery, SqlTransactionStep } from "./mapper";
 
 /**
  * Noyau de codegen SQL partagé — la mécanique commune aux mappers SQL
@@ -173,6 +175,37 @@ interface Select {
 	limit: number | null;
 	offset: number | null;
 	maxPhase: number;
+}
+
+/**
+ * Aplatis un body de TransactionPlan en steps SqlTransaction (statements
+ * pré-rendus + directives savepoint). Partagé PG/MSSQL — chaque dialecte
+ * fournit ses renderers read/write (chaque statement porte sa propre
+ * ParamList, les placeholders sont scopés au statement).
+ */
+export function buildSqlTransactionSteps(
+	body: readonly TransactionPlanItem[],
+	render: {
+		readonly renderRead: (plan: LogicalPlan) => SqlQuery;
+		readonly renderWrite: (plan: MutationPlan) => SqlQuery;
+	}
+): SqlTransactionStep[] {
+	const out: SqlTransactionStep[] = [];
+	const walk = (items: readonly TransactionPlanItem[]): void => {
+		for (const item of items) {
+			if (item.kind === "read") {
+				out.push({ kind: "statement", query: render.renderRead(item.plan) });
+			} else if (item.kind === "write") {
+				out.push({ kind: "statement", query: render.renderWrite(item.plan) });
+			} else {
+				out.push({ kind: "savepoint-begin", name: item.name });
+				walk(item.body);
+				out.push({ kind: "savepoint-release", name: item.name });
+			}
+		}
+	};
+	walk(body);
+	return out;
 }
 
 /** Liste de paramètres positionnels — la forme du placeholder vient du dialecte. */

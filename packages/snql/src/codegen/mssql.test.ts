@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { compile, getMapper } from "../index";
-import { lowerMutation, lowerRaw } from "../ir/lower";
+import { lowerMutation, lowerRaw, lowerTransaction } from "../ir/lower";
 import { parse } from "../parser/parser";
 import { tokenize } from "../lexer/lexer";
 
@@ -237,12 +237,118 @@ describe("codegen mssql — raw", () => {
 	});
 });
 
-describe("codegen mssql — slices pas encore câblées (refus typés)", () => {
-	it("mapMutation → erreur typée M/4 (defense-in-depth sous le gate planner)", () => {
-		const stmt = parse(tokenize(`edit users where id = 1 set name = "x"`));
-		if (stmt.operation !== "update") throw new Error("update attendu");
-		expect(() =>
-			getMapper("mssql").mapMutation(lowerMutation(stmt))
-		).toThrow(/M\/4/);
+// ─── M/4 — mutations ─────────────────────────────────────────
+
+function mutationSql(source: string): {
+	text: string;
+	params: readonly unknown[];
+} {
+	const stmt = parse(tokenize(source));
+	if (
+		stmt.operation !== "insert" &&
+		stmt.operation !== "update" &&
+		stmt.operation !== "delete"
+	) {
+		throw new Error(`mutation attendue, reçu '${stmt.operation}'`);
+	}
+	const native = getMapper("mssql").mapMutation(lowerMutation(stmt));
+	if (native.kind !== "sql") throw new Error("attendu du SQL");
+	return { text: native.text, params: native.params };
+}
+
+describe("codegen mssql — mutations (M/4)", () => {
+	it("insert multi-rows → OUTPUT INSERTED.* AVANT VALUES", () => {
+		const { text, params } = mutationSql(
+			`add [{ name: "a", age: 1 }, { name: "b", age: 2 }] into users`
+		);
+		expect(text).toBe(
+			`INSERT INTO [users] ([name], [age]) OUTPUT INSERTED.* VALUES (@p1, @p2), (@p3, @p4)`
+		);
+		expect(params).toEqual(["a", 1, "b", 2]);
+	});
+
+	it("insert avec NULL inline", () => {
+		const { text, params } = mutationSql(
+			`add { name: "a", nick: null } into users`
+		);
+		expect(text).toBe(
+			`INSERT INTO [users] ([name], [nick]) OUTPUT INSERTED.* VALUES (@p1, NULL)`
+		);
+		expect(params).toEqual(["a"]);
+	});
+
+	it("update simple → SET puis OUTPUT puis WHERE", () => {
+		const { text, params } = mutationSql(
+			`edit users where id = 1 set name = "x"`
+		);
+		expect(text).toBe(
+			`UPDATE [users] SET [name] = @p1 OUTPUT INSERTED.* WHERE [id] = @p2`
+		);
+		expect(params).toEqual(["x", 1]);
+	});
+
+	it("delete → OUTPUT DELETED.*", () => {
+		const { text, params } = mutationSql(`remove from users where id = 9`);
+		expect(text).toBe(
+			`DELETE FROM [users] OUTPUT DELETED.* WHERE [id] = @p1`
+		);
+		expect(params).toEqual([9]);
+	});
+
+	it("upsert ignore → MERGE HOLDLOCK sans WHEN MATCHED, `;` terminal", () => {
+		const { text, params } = mutationSql(
+			`add { id: 1, name: "a" } into users on conflict (id) ignore`
+		);
+		expect(text).toBe(
+			`MERGE INTO [users] WITH (HOLDLOCK) AS [__sqlnest_t] ` +
+			`USING (VALUES (@p1, @p2)) AS [__sqlnest_s] ([id], [name]) ` +
+			`ON [__sqlnest_t].[id] = [__sqlnest_s].[id] ` +
+			`WHEN NOT MATCHED THEN INSERT ([id], [name]) VALUES ([__sqlnest_s].[id], [__sqlnest_s].[name]) ` +
+			`OUTPUT INSERTED.*;`
+		);
+		expect(params).toEqual([1, "a"]);
+	});
+
+	it("upsert edit set new.<col> → WHEN MATCHED UPDATE, refs qualifiées", () => {
+		const { text, params } = mutationSql(
+			`add { id: 1, hits: 1 } into counters on conflict (id) edit set hits = hits + new.hits`
+		);
+		expect(text).toBe(
+			`MERGE INTO [counters] WITH (HOLDLOCK) AS [__sqlnest_t] ` +
+			`USING (VALUES (@p1, @p2)) AS [__sqlnest_s] ([id], [hits]) ` +
+			`ON [__sqlnest_t].[id] = [__sqlnest_s].[id] ` +
+			`WHEN MATCHED THEN UPDATE SET [hits] = ([__sqlnest_t].[hits] + [__sqlnest_s].[hits]) ` +
+			`WHEN NOT MATCHED THEN INSERT ([id], [hits]) VALUES ([__sqlnest_s].[id], [__sqlnest_s].[hits]) ` +
+			`OUTPUT INSERTED.*;`
+		);
+		expect(params).toEqual([1, 1]);
+	});
+});
+
+describe("codegen mssql — transaction (M/4)", () => {
+	it("steps pré-rendus + savepoints, engine mssql", () => {
+		const stmt = parse(
+			tokenize(
+				`transaction { add { id: 7 } into t; savepoint sp1 { remove from t where id = 7 } }`
+			)
+		);
+		if (stmt.operation !== "transaction") throw new Error();
+		const native = getMapper("mssql").mapTransaction!(
+			lowerTransaction(stmt)
+		);
+		expect(native.kind).toBe("transaction");
+		if (native.kind !== "transaction") throw new Error();
+		expect(native.engine).toBe("mssql");
+		expect(native.steps.map((s) => s.kind)).toEqual([
+			"statement",
+			"savepoint-begin",
+			"statement",
+			"savepoint-release"
+		]);
+		const first = native.steps[0];
+		if (first?.kind !== "statement") throw new Error();
+		expect(first.query.text).toBe(
+			`INSERT INTO [t] ([id]) OUTPUT INSERTED.* VALUES (@p1)`
+		);
 	});
 });

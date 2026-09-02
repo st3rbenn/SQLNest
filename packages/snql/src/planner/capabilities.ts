@@ -139,12 +139,14 @@ export const KV_CAPABILITIES: Capabilities = caps(
 );
 
 /**
- * Relationnel T-SQL — chantier M/3 : LECTURE complète en pushdown natif
- * (scan/filter/project/join/aggregate/sort/paginate + sub-queries SELECT
- * imbriqués). Les slices suivantes ouvrent le reste : mutate/upsert/
- * write-join/insert-select/transaction (M/4), introspect + cte/cte-recursive
- * (M/5), ddl (M/6) — capacité absente = refus planner typé, l'état du
- * chantier reste visible (jamais un silence).
+ * Relationnel T-SQL — chantiers M/3 (lecture) + M/4 (CRUD) : pushdown natif
+ * scan/filter/project/join/aggregate/sort/paginate + sub-queries SELECT
+ * imbriqués + écritures complètes ('mutate' via OUTPUT ≈ RETURNING, 'upsert'
+ * via MERGE WITH (HOLDLOCK), 'write-join' via UPDATE…FROM, 'insert-select',
+ * 'transaction' via BEGIN/SAVE TRANSACTION/COMMIT natifs). Les slices
+ * suivantes ouvrent le reste : introspect + cte/cte-recursive (M/5), ddl
+ * (M/6) — capacité absente = refus planner typé, l'état du chantier reste
+ * visible (jamais un silence).
  * `castTargets` sans `json` : T-SQL n'a pas de type json (nvarchar porteur) —
  * un `cast(x as json)` n'aurait pas la sémantique validation/parse PG.
  */
@@ -158,7 +160,12 @@ export const MSSQL_CAPABILITIES: Capabilities = caps(
 		"aggregate",
 		"sort",
 		"paginate",
-		"subquery"
+		"subquery",
+		"mutate",
+		"upsert",
+		"write-join",
+		"insert-select",
+		"transaction"
 	],
 	["int", "float", "text", "bool", "date", "timestamp"],
 	{ subqueryStrategy: "native" }

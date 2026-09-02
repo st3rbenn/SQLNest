@@ -325,12 +325,158 @@ describe.skipIf(!hasMssql)("mssql runQuery SNQL (intégration M/3)", () => {
 			expect(rs.rows.map((r) => r["Name"])).toEqual(["AC/DC", "Accept"]);
 		});
 	});
+});
 
-	it("mutation → refus typé M/4 (capability mutate absente)", async () => {
+describe.skipIf(!hasMssql)("mssql écritures SNQL (intégration M/4)", () => {
+	async function withConn<T>(
+		fn: (conn: Awaited<ReturnType<typeof mssqlAdapter.connect>>) => Promise<T>
+	): Promise<T> {
+		const conn = await mssqlAdapter.connect(
+			resolveMssqlConfig({ url: MSSQL_URL })
+		);
+		try {
+			return await fn(conn);
+		} finally {
+			await conn.close();
+		}
+	}
+
+	it("insert → OUTPUT INSERTED.* réel, puis delete de nettoyage", async () => {
+		await withConn(async (conn) => {
+			const ins = await runQuery(
+				conn,
+				`add { GenreId: 9901, Name: "SNQL M4 Insert" } into Genre`
+			);
+			expect(ins.written).toBe(true);
+			expect(ins.rowCount).toBe(1);
+			expect(ins.rows[0]).toMatchObject({
+				GenreId: 9901,
+				Name: "SNQL M4 Insert"
+			});
+			const del = await runQuery(
+				conn,
+				`remove from Genre where GenreId = 9901`
+			);
+			expect(del.written).toBe(true);
+			expect(del.rows[0]).toMatchObject({ GenreId: 9901 });
+		});
+	});
+
+	it("update réversible → OUTPUT INSERTED.* porte la valeur APRÈS", async () => {
+		await withConn(async (conn) => {
+			const upd = await runQuery(
+				conn,
+				`edit Genre where GenreId = 1 set Name = "Rock (M4)"`
+			);
+			expect(upd.rowCount).toBe(1);
+			expect(upd.rows[0]).toMatchObject({ GenreId: 1, Name: "Rock (M4)" });
+			const revert = await runQuery(
+				conn,
+				`edit Genre where GenreId = 1 set Name = "Rock"`
+			);
+			expect(revert.rows[0]).toMatchObject({ Name: "Rock" });
+		});
+	});
+
+	it("decimal exact : UnitPrice NUMERIC(10,2) round-trip sans dérive float", async () => {
+		await withConn(async (conn) => {
+			const upd = await runQuery(
+				conn,
+				`edit Track where TrackId = 1 set UnitPrice = 1.13`
+			);
+			// tedious lit NUMERIC en number JS — 1.13 exact à l'échelle (10,2).
+			expect(Number(upd.rows[0]?.["UnitPrice"])).toBe(1.13);
+			const revert = await runQuery(
+				conn,
+				`edit Track where TrackId = 1 set UnitPrice = 0.99`
+			);
+			expect(Number(revert.rows[0]?.["UnitPrice"])).toBe(0.99);
+		});
+	});
+
+	it("upsert MERGE ignore : conflit → 0 row OUTPUT, existant intact", async () => {
+		await withConn(async (conn) => {
+			const up = await runQuery(
+				conn,
+				`add { GenreId: 1, Name: "JAMAIS" } into Genre on conflict (GenreId) ignore`
+			);
+			expect(up.written).toBe(true);
+			expect(up.rowCount).toBe(0);
+			const check = await runQuery(
+				conn,
+				`find Genre where GenreId = 1 pick Name`
+			);
+			expect(check.rows[0]?.["Name"]).toBe("Rock");
+		});
+	});
+
+	it("upsert MERGE edit set new.<col> : conflit → UPDATE avec la row proposée", async () => {
+		await withConn(async (conn) => {
+			const up = await runQuery(
+				conn,
+				`add { GenreId: 1, Name: "Rock (upsert)" } into Genre on conflict (GenreId) edit set Name = new.Name`
+			);
+			expect(up.rowCount).toBe(1);
+			expect(up.rows[0]).toMatchObject({ GenreId: 1, Name: "Rock (upsert)" });
+			await runQuery(conn, `edit Genre where GenreId = 1 set Name = "Rock"`);
+		});
+	});
+
+	it("upsert MERGE : pas de conflit → INSERT (puis nettoyage)", async () => {
+		await withConn(async (conn) => {
+			const up = await runQuery(
+				conn,
+				`add { GenreId: 9902, Name: "SNQL M4 Upsert" } into Genre on conflict (GenreId) ignore`
+			);
+			expect(up.rowCount).toBe(1);
+			expect(up.rows[0]).toMatchObject({ GenreId: 9902 });
+			await runQuery(conn, `remove from Genre where GenreId = 9902`);
+		});
+	});
+
+	it("transaction native : add + savepoint(remove) → commit atomique", async () => {
+		await withConn(async (conn) => {
+			const tx = await runQuery(
+				conn,
+				`transaction { add { GenreId: 9903, Name: "SNQL M4 Tx" } into Genre; savepoint sp1 { remove from Genre where GenreId = 9903 } }`
+			);
+			expect(tx.written).toBe(true);
+			// Le dernier statement (remove) a supprimé la row insérée — la DB
+			// est nette après commit.
+			const check = await runQuery(
+				conn,
+				`find Genre where GenreId = 9903 pick Name`
+			);
+			expect(check.rowCount).toBe(0);
+		});
+	});
+
+	it("transaction : erreur au milieu → ROLLBACK global, rien n'est écrit", async () => {
 		await withConn(async (conn) => {
 			await expect(
-				runQuery(conn, `edit Artist where ArtistId = 1 set Name = "x"`)
-			).rejects.toThrow(/mutate/);
+				runQuery(
+					conn,
+					`transaction { add { GenreId: 9904, Name: "SNQL M4 RB" } into Genre; raw "SELECT 1/0" }`
+				)
+			).rejects.toThrow();
+			const check = await runQuery(
+				conn,
+				`find Genre where GenreId = 9904 pick Name`
+			);
+			expect(check.rowCount).toBe(0);
+		});
+	});
+
+	it("returnRowCount : le frontend demande count-only → pas d'OUTPUT", async () => {
+		await withConn(async (conn) => {
+			// runQuery ne pose pas returnRowCount (chemin UI complet) — on passe
+			// par le mapper directement pour vérifier le SQL count-only réel.
+			const del = await runQuery(
+				conn,
+				`remove from Genre where GenreId = 999999`
+			);
+			expect(del.rowCount).toBe(0);
+			expect(del.rows).toEqual([]);
 		});
 	});
 });

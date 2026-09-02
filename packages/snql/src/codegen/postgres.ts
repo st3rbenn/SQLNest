@@ -21,8 +21,7 @@ import type {
 	PlanProjectField,
 	PlanRowValue,
 	RawPlan,
-	TransactionPlan,
-	TransactionPlanItem
+	TransactionPlan
 } from "../ir/plan";
 import { isSqlDecimal, isSqlJsonLiteral } from "../ir/plan";
 import type { SnqlType } from "../schema/model";
@@ -31,10 +30,10 @@ import type {
 	NativeQuery,
 	SerializedSpan,
 	SqlQuery,
-	SqlTransaction,
-	SqlTransactionStep
+	SqlTransaction
 } from "./mapper";
 import {
+	buildSqlTransactionSteps,
 	createSqlRenderer,
 	type ParamList,
 	type SqlDialect,
@@ -153,8 +152,10 @@ export const postgresMapper: Mapper = {
 	 * scopés au statement — l'engine bind par statement).
 	 */
 	mapTransaction(plan: TransactionPlan): SqlTransaction {
-		const steps: SqlTransactionStep[] = [];
-		flattenTransactionBody(plan.body, steps);
+		const steps = buildSqlTransactionSteps(plan.body, {
+			renderRead: renderReadAsSqlQuery,
+			renderWrite: renderWriteAsSqlQuery
+		});
 		return plan.isolation !== undefined
 			? { engine: "postgres", kind: "transaction", isolation: plan.isolation, steps }
 			: { engine: "postgres", kind: "transaction", steps };
@@ -347,24 +348,6 @@ export const postgresMapper: Mapper = {
 		};
 	}
 };
-
-function flattenTransactionBody(
-	body: readonly TransactionPlanItem[],
-	out: SqlTransactionStep[]
-): void {
-	for (const item of body) {
-		if (item.kind === "read") {
-			out.push({ kind: "statement", query: renderReadAsSqlQuery(item.plan) });
-		} else if (item.kind === "write") {
-			out.push({ kind: "statement", query: renderWriteAsSqlQuery(item.plan) });
-		} else {
-			// savepoint
-			out.push({ kind: "savepoint-begin", name: item.name });
-			flattenTransactionBody(item.body, out);
-			out.push({ kind: "savepoint-release", name: item.name });
-		}
-	}
-}
 
 function renderReadAsSqlQuery(plan: LogicalPlan): SqlQuery {
 	const params = newParams();

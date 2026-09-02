@@ -1,11 +1,18 @@
 import {
 	DISTINCT_ON_RN_COLUMN,
+	type IsolationLevel,
 	type NativeQuery,
 	type ResultSet,
-	type SchemaModel
+	type SchemaModel,
+	type SqlTransaction
 } from "@sqlnest/snql";
 import type { ConnectionConfiguration } from "tedious";
-import { Connection as TediousConnection, Request, TYPES } from "tedious";
+import {
+	Connection as TediousConnection,
+	ISOLATION_LEVEL,
+	Request,
+	TYPES
+} from "tedious";
 import type {
 	Connection,
 	EngineAdapter,
@@ -105,75 +112,157 @@ class MssqlConnection implements Connection {
 		return this.#conn;
 	}
 
+	/**
+	 * Exécution DIRECTE d'un batch T-SQL paramétré — sans passer par la
+	 * queue. Réservé aux appels déjà sérialisés : le corps de `#run` et les
+	 * steps de `#executeTransaction` (qui occupe la queue comme UNE unité —
+	 * une requête concurrente qui s'intercalerait entre BEGIN et COMMIT
+	 * rejoindrait silencieusement la transaction).
+	 */
+	#runDirect(
+		text: string,
+		params: readonly unknown[] = []
+	): Promise<ResultSet> {
+		return new Promise<ResultSet>((resolve, reject) => {
+			const conn = (() => {
+				try {
+					return this.#requireConn();
+				} catch (e) {
+					reject(e);
+					return null;
+				}
+			})();
+			if (conn === null) return;
+
+			const rows: MssqlRow[] = [];
+			let columns: ResultSet["columns"] = [];
+
+			const request = new Request(text, (err, rowCount) => {
+				if (err) {
+					reject(
+						new EngineExecutionError(
+							`Requête MSSQL échouée — ${describeTediousError(err)}`,
+							{ cause: err }
+						)
+					);
+					return;
+				}
+				resolve({
+					columns,
+					rows: rows as ResultSet["rows"],
+					rowCount: rows.length > 0 ? rows.length : (rowCount ?? 0)
+				});
+			});
+
+			request.on("columnMetadata", (meta) => {
+				// tedious livre un array OU un record selon `useColumnNames`.
+				const list = Array.isArray(meta) ? meta : Object.values(meta);
+				columns = list.map((m) => ({
+					name: m.colName,
+					// Fallback safe identique à PG : le type riche vient de
+					// `inferResultColumns(schema)` dans run.ts, pas du driver.
+					type: "unknown",
+					nullable: true
+				}));
+			});
+
+			request.on("row", (cols) => {
+				const row: Record<string, unknown> = {};
+				for (const col of cols) {
+					row[col.metadata.colName] = col.value;
+				}
+				rows.push(row);
+			});
+
+			for (const [i, value] of params.entries()) {
+				request.addParameter(
+					`p${i + 1}`,
+					tediousTypeFor(value),
+					tediousValueFor(value)
+				);
+			}
+
+			conn.execSql(request);
+		});
+	}
+
 	/** Exécute un batch T-SQL paramétré, sérialisé derrière les requêtes en
 	 * cours. Les erreurs serveur sont enveloppées en EngineExecutionError. */
 	#run(text: string, params: readonly unknown[] = []): Promise<ResultSet> {
-		const task = this.#queue.then(
-			() =>
-				new Promise<ResultSet>((resolve, reject) => {
-					const conn = (() => {
-						try {
-							return this.#requireConn();
-						} catch (e) {
-							reject(e);
-							return null;
-						}
-					})();
-					if (conn === null) return;
-
-					const rows: MssqlRow[] = [];
-					let columns: ResultSet["columns"] = [];
-
-					const request = new Request(text, (err, rowCount) => {
-						if (err) {
-							reject(
-								new EngineExecutionError(
-									`Requête MSSQL échouée — ${describeTediousError(err)}`,
-									{ cause: err }
-								)
-							);
-							return;
-						}
-						resolve({
-							columns,
-							rows: rows as ResultSet["rows"],
-							rowCount: rows.length > 0 ? rows.length : (rowCount ?? 0)
-						});
-					});
-
-					request.on("columnMetadata", (meta) => {
-						// tedious livre un array OU un record selon `useColumnNames`.
-						const list = Array.isArray(meta) ? meta : Object.values(meta);
-						columns = list.map((m) => ({
-							name: m.colName,
-							// Fallback safe identique à PG : le type riche vient de
-							// `inferResultColumns(schema)` dans run.ts, pas du driver.
-							type: "unknown",
-							nullable: true
-						}));
-					});
-
-					request.on("row", (cols) => {
-						const row: Record<string, unknown> = {};
-						for (const col of cols) {
-							row[col.metadata.colName] = col.value;
-						}
-						rows.push(row);
-					});
-
-					for (const [i, value] of params.entries()) {
-						request.addParameter(
-							`p${i + 1}`,
-							tediousTypeFor(value),
-							tediousValueFor(value)
-						);
-					}
-
-					conn.execSql(request);
-				})
-		);
+		const task = this.#queue.then(() => this.#runDirect(text, params));
 		// La queue avale l'erreur (sinon toute la chaîne resterait rejetée) —
 		// l'appelant, lui, la reçoit via `task`.
+		this.#queue = task.catch(() => undefined);
+		return task;
+	}
+
+	/**
+	 * Exécute un SqlTransaction (M/4) — la transaction ENTIÈRE occupe la
+	 * queue comme une seule tâche (l'entrelacement d'une autre requête entre
+	 * BEGIN et COMMIT la ferait participer à la transaction).
+	 *
+	 * ⚠ API tedious NATIVE obligatoire (`beginTransaction`/`saveTransaction`/
+	 * `commitTransaction`) : un `BEGIN TRANSACTION` en SQL texte ouvre bien la
+	 * transaction côté serveur mais tedious ne met PAS à jour le descripteur
+	 * de transaction TDS envoyé dans l'en-tête des requêtes suivantes — les
+	 * `sp_executesql` paramétrés tournent alors hors transaction et le serveur
+	 * refuse (« Transaction count after EXECUTE indicates a mismatching
+	 * number of BEGIN and COMMIT statements »).
+	 *
+	 * Sémantique alignée PG : begin [isolation], steps linéaires, commit ;
+	 * rollback global best-effort sur toute erreur. Savepoints :
+	 * `saveTransaction` natif ; release = no-op (T-SQL n'a pas de RELEASE
+	 * SAVEPOINT, le point expire au COMMIT). Renvoie le résultat du dernier
+	 * statement (cohérence UI — l'user voit ce qu'il a écrit en dernier).
+	 */
+	#executeTransaction(query: SqlTransaction): Promise<ResultSet> {
+		const task = this.#queue.then(async (): Promise<ResultSet> => {
+			const conn = this.#requireConn();
+			await new Promise<void>((resolve, reject) => {
+				conn.beginTransaction(
+					(err) => (err ? reject(wrapTxError("BEGIN", err)) : resolve()),
+					"",
+					mssqlIsolationLevel(query.isolation)
+				);
+			});
+			let lastResult: ResultSet = { columns: [], rows: [], rowCount: 0 };
+			try {
+				for (const step of query.steps) {
+					if (step.kind === "savepoint-begin") {
+						await new Promise<void>((resolve, reject) => {
+							conn.saveTransaction(
+								(err) =>
+									err ? reject(wrapTxError("SAVE", err)) : resolve(),
+								assertSavepointName(step.name)
+							);
+						});
+					} else if (step.kind === "savepoint-release") {
+						// Pas de RELEASE SAVEPOINT en T-SQL — no-op délibéré.
+					} else {
+						lastResult = postProcessResult(
+							await this.#runDirect(
+								step.query.text,
+								step.query.params
+							),
+							step.query.jsonColumns
+						);
+					}
+				}
+				await new Promise<void>((resolve, reject) => {
+					conn.commitTransaction((err) =>
+						err ? reject(wrapTxError("COMMIT", err)) : resolve()
+					);
+				});
+				return lastResult;
+			} catch (cause) {
+				// ROLLBACK best-effort — si le rollback échoue (connexion morte),
+				// on surface l'erreur d'origine, plus utile pour l'user.
+				await new Promise<void>((resolve) => {
+					conn.rollbackTransaction(() => resolve());
+				}).catch(() => undefined);
+				throw cause;
+			}
+		});
 		this.#queue = task.catch(() => undefined);
 		return task;
 	}
@@ -219,14 +308,17 @@ class MssqlConnection implements Connection {
 	}
 
 	async execute(query: NativeQuery): Promise<ResultSet> {
-		if (query.kind !== "sql") {
-			throw new EngineExecutionError(
-				`L'adapter MSSQL n'exécute que des SqlQuery — reçu '${query.kind}' (transactions/writes : slice M/4)`
-			);
-		}
 		if (query.engine !== "mssql") {
 			throw new EngineExecutionError(
 				`Requête pour l'engine '${query.engine}' envoyée à l'adapter MSSQL`
+			);
+		}
+		if (query.kind === "transaction") {
+			return this.#executeTransaction(query);
+		}
+		if (query.kind !== "sql") {
+			throw new EngineExecutionError(
+				`L'adapter MSSQL n'exécute que des SqlQuery/SqlTransaction — reçu '${query.kind}'`
 			);
 		}
 		const result = await this.#run(query.text, query.params ?? []);
@@ -242,6 +334,43 @@ class MssqlConnection implements Connection {
 			conn.close();
 		});
 	}
+}
+
+/**
+ * Mapping IsolationLevel SNQL → enum tedious (l'API native beginTransaction
+ * pilote le SET ISOLATION LEVEL via le protocole). `undefined` = niveau par
+ * défaut de la connexion (READ COMMITTED).
+ */
+function mssqlIsolationLevel(
+	level: IsolationLevel | undefined
+): number | undefined {
+	if (level === undefined) return undefined;
+	switch (level) {
+		case "read_committed":
+			return ISOLATION_LEVEL.READ_COMMITTED;
+		case "repeatable_read":
+			return ISOLATION_LEVEL.REPEATABLE_READ;
+		case "serializable":
+			return ISOLATION_LEVEL.SERIALIZABLE;
+	}
+}
+
+const SAVEPOINT_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/** Nom de savepoint validé — l'API tedious saveTransaction prend le nom NU
+ *  (defense-in-depth avant de le laisser partir dans le protocole). */
+function assertSavepointName(name: string): string {
+	if (!SAVEPOINT_NAME_RE.test(name)) {
+		throw new EngineExecutionError(`Nom de savepoint invalide '${name}'`);
+	}
+	return name;
+}
+
+function wrapTxError(phase: string, cause: Error): EngineExecutionError {
+	return new EngineExecutionError(
+		`Transaction MSSQL (${phase}) échouée — ${describeTediousError(cause)}`,
+		{ cause }
+	);
 }
 
 /**
