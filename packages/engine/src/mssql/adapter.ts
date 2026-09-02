@@ -1,4 +1,9 @@
-import type { NativeQuery, ResultSet, SchemaModel } from "@sqlnest/snql";
+import {
+	DISTINCT_ON_RN_COLUMN,
+	type NativeQuery,
+	type ResultSet,
+	type SchemaModel
+} from "@sqlnest/snql";
 import type { ConnectionConfiguration } from "tedious";
 import { Connection as TediousConnection, Request, TYPES } from "tedious";
 import type {
@@ -216,7 +221,7 @@ class MssqlConnection implements Connection {
 	async execute(query: NativeQuery): Promise<ResultSet> {
 		if (query.kind !== "sql") {
 			throw new EngineExecutionError(
-				`L'adapter MSSQL M/1 n'exécute que des SqlQuery — reçu '${query.kind}' (codegen T-SQL : slice M/3)`
+				`L'adapter MSSQL n'exécute que des SqlQuery — reçu '${query.kind}' (transactions/writes : slice M/4)`
 			);
 		}
 		if (query.engine !== "mssql") {
@@ -224,7 +229,8 @@ class MssqlConnection implements Connection {
 				`Requête pour l'engine '${query.engine}' envoyée à l'adapter MSSQL`
 			);
 		}
-		return this.#run(query.text, query.params ?? []);
+		const result = await this.#run(query.text, query.params ?? []);
+		return postProcessResult(result, query.jsonColumns);
 	}
 
 	async close(): Promise<void> {
@@ -236,6 +242,48 @@ class MssqlConnection implements Connection {
 			conn.close();
 		});
 	}
+}
+
+/**
+ * Post-traitement du ResultSet MSSQL (M/3) :
+ *  - `jsonColumns` (colonnes embed/objet de row jointe émises en
+ *    `FOR JSON …`) : T-SQL n'a pas de type json, les valeurs arrivent en
+ *    STRING nvarchar — on les parse pour la parité de shape avec PG (le
+ *    driver pg parse json/jsonb nativement). Une valeur non-parsable reste
+ *    telle quelle (defensif — ne jamais perdre la donnée).
+ *  - `__sqlnest_rn` : colonne technique du wrap DISTINCT ON (stratégie
+ *    ROW_NUMBER du codegen) — retirée des rows ET des columns.
+ */
+function postProcessResult(
+	result: ResultSet,
+	jsonColumns: readonly string[] | undefined
+): ResultSet {
+	const hasRn = result.columns.some((c) => c.name === DISTINCT_ON_RN_COLUMN);
+	const hasJson = jsonColumns !== undefined && jsonColumns.length > 0;
+	if (!hasRn && !hasJson) return result;
+
+	const jsonSet = new Set(jsonColumns ?? []);
+	const rows = result.rows.map((row) => {
+		const out: Record<string, unknown> = {};
+		for (const [key, value] of Object.entries(row)) {
+			if (key === DISTINCT_ON_RN_COLUMN) continue;
+			if (jsonSet.has(key) && typeof value === "string") {
+				try {
+					out[key] = JSON.parse(value);
+				} catch {
+					out[key] = value;
+				}
+			} else {
+				out[key] = value;
+			}
+		}
+		return out;
+	});
+	return {
+		columns: result.columns.filter((c) => c.name !== DISTINCT_ON_RN_COLUMN),
+		rows: rows as ResultSet["rows"],
+		rowCount: result.rowCount
+	};
 }
 
 function buildTediousConfig(

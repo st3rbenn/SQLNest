@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { EngineExecutionError } from "../errors";
+import { runQuery } from "../run";
 import { mssqlAdapter } from "./adapter";
 import { resolveMssqlConfig } from "./config";
 
 /**
- * Tests d'intégration MSSQL (M/1 connect + M/2 introspection) — gatés par
+ * Tests d'intégration MSSQL (M/1 connect + M/2 introspection + M/3 runQuery
+ * SNQL complet) — gatés par
  * `SNQL_TEST_MSSQL_URL=mssql://sa:SqlNest!Dev2022@localhost:1433/Chinook?trustServerCertificate=true`
  * (docker `sqlnest-mssql` + `pnpm db:seed:chinook:mssql`).
  */
@@ -184,5 +186,151 @@ describe.skipIf(!hasMssql)("mssql adapter (intégration M/1)", () => {
 		} finally {
 			await conn.close();
 		}
+	});
+});
+
+describe.skipIf(!hasMssql)("mssql runQuery SNQL (intégration M/3)", () => {
+	async function withConn<T>(
+		fn: (conn: Awaited<ReturnType<typeof mssqlAdapter.connect>>) => Promise<T>
+	): Promise<T> {
+		const conn = await mssqlAdapter.connect(
+			resolveMssqlConfig({ url: MSSQL_URL })
+		);
+		try {
+			return await fn(conn);
+		} finally {
+			await conn.close();
+		}
+	}
+
+	it("find where/pick/sort/limit → TOP réel sur Artist", async () => {
+		await withConn(async (conn) => {
+			const rs = await runQuery(
+				conn,
+				`find Artist where ArtistId <= 5 pick Name sort Name limit 3`
+			);
+			expect(rs.written).toBe(false);
+			expect(rs.rowCount).toBe(3);
+			expect(rs.rows.map((r) => r["Name"])).toEqual([
+				"AC/DC",
+				"Accept",
+				"Aerosmith"
+			]);
+		});
+	});
+
+	it("limit + offset → OFFSET-FETCH réel (pagination stable)", async () => {
+		await withConn(async (conn) => {
+			const page1 = await runQuery(
+				conn,
+				`find Artist pick ArtistId, Name sort ArtistId limit 2`
+			);
+			const page2 = await runQuery(
+				conn,
+				`find Artist pick ArtistId, Name sort ArtistId limit 2 offset 2`
+			);
+			expect(page1.rows.map((r) => r["ArtistId"])).toEqual([1, 2]);
+			expect(page2.rows.map((r) => r["ArtistId"])).toEqual([3, 4]);
+		});
+	});
+
+	it("group by + having + count(*) → agrégat réel sur Invoice", async () => {
+		await withConn(async (conn) => {
+			const rs = await runQuery(
+				conn,
+				`find Invoice group by BillingCountry having count(*) > 30 pick BillingCountry, count(*) as n sort BillingCountry`
+			);
+			// Chinook : USA (91), Canada (56), France (35), Brazil (35),
+			// Germany (28 → exclu par > 30).
+			const countries = rs.rows.map((r) => r["BillingCountry"]);
+			expect(countries).toContain("USA");
+			expect(countries).toContain("Canada");
+			expect(countries).not.toContain("Germany");
+			// COUNT_BIG → bigint TDS, tedious le lit en string : cohérent avec
+			// le driver pg (bigint sérialisé string).
+			const usa = rs.rows.find((r) => r["BillingCountry"] === "USA");
+			expect(Number(usa?.["n"])).toBe(91);
+		});
+	});
+
+	it("embed one-to-many FOR JSON → array PARSÉ (jsonColumns adapter)", async () => {
+		await withConn(async (conn) => {
+			const rs = await runQuery(
+				conn,
+				`find Artist with Album on ArtistId = ArtistId where ArtistId = 1`
+			);
+			expect(rs.rowCount).toBe(1);
+			const albums = rs.rows[0]?.["Album"];
+			expect(Array.isArray(albums)).toBe(true);
+			const titles = (albums as { Title: string }[]).map((a) => a.Title);
+			// AC/DC a 2 albums dans Chinook.
+			expect(titles).toContain("For Those About To Rock We Salute You");
+			expect(titles).toContain("Let There Be Rock");
+		});
+	});
+
+	it("fonctions T-SQL réelles : upper, length, strpos (CHARINDEX inversé)", async () => {
+		await withConn(async (conn) => {
+			const rs = await runQuery(
+				conn,
+				`find Artist where ArtistId = 1 pick upper(Name) as u, length(Name) as l, strpos(Name, "/") as p`
+			);
+			expect(rs.rows[0]).toMatchObject({ u: "AC/DC", l: 5, p: 3 });
+		});
+	});
+
+	it("avg cast float — AVG int T-SQL aurait tronqué", async () => {
+		await withConn(async (conn) => {
+			const rs = await runQuery(
+				conn,
+				`find Track pick avg(Milliseconds) as a`
+			);
+			const avg = rs.rows[0]?.["a"];
+			expect(typeof avg).toBe("number");
+			// Moyenne réelle Chinook ≈ 393599.21 — un AVG int aurait donné un entier.
+			expect(Number.isInteger(avg)).toBe(false);
+		});
+	});
+
+	it("pick unique on (keys) → wrap ROW_NUMBER, __sqlnest_rn strippé", async () => {
+		await withConn(async (conn) => {
+			const rs = await runQuery(
+				conn,
+				`find Invoice pick unique on (BillingCountry) BillingCountry, Total sort BillingCountry, Total desc limit 5`
+			);
+			expect(rs.rowCount).toBe(5);
+			expect(rs.columns.map((c) => c.name)).not.toContain("__sqlnest_rn");
+			expect(Object.keys(rs.rows[0] ?? {})).toEqual([
+				"BillingCountry",
+				"Total"
+			]);
+		});
+	});
+
+	it("subquery in (find …) native", async () => {
+		await withConn(async (conn) => {
+			const rs = await runQuery(
+				conn,
+				`find Album where ArtistId in (find Artist where Name = "Aerosmith" pick ArtistId) pick Title`
+			);
+			expect(rs.rows.map((r) => r["Title"])).toEqual([
+				"Big Ones"
+			]);
+		});
+	});
+
+	it("raw \"SELECT TOP …\" passthrough", async () => {
+		await withConn(async (conn) => {
+			const rs = await runQuery(conn, `raw "SELECT TOP 2 Name FROM Artist ORDER BY ArtistId"`);
+			expect(rs.rows.map((r) => r["Name"])).toEqual(["AC/DC", "Accept"]);
+		});
+	});
+
+	it("mutation → refus typé M/4 (capability mutate absente)", async () => {
+		await withConn(async (conn) => {
+			await expect(
+				runQuery(conn, `edit Artist where ArtistId = 1 set Name = "x"`)
+			).rejects.toThrow(/mutate/);
+		});
 	});
 });

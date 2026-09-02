@@ -89,6 +89,7 @@ export { mapKvDDL } from "./codegen/kv-ddl";
 export { mongoMapper } from "./codegen/mongodb";
 export { mssqlMapper } from "./codegen/mssql";
 export { postgresMapper } from "./codegen/postgres";
+export { DISTINCT_ON_RN_COLUMN } from "./codegen/sql-core";
 export type {
 	KvDDLAddColumnQuery,
 	KvDDLAddIndexQuery,
