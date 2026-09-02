@@ -1,5 +1,6 @@
 import type {
 	Collection,
+	EnumTypeDef,
 	Field,
 	OnDeleteRule,
 	OnUpdateRule,
@@ -39,6 +40,12 @@ interface MssqlPkRow {
 	readonly column_name: string;
 }
 
+interface MssqlEnumRow {
+	readonly name: string;
+	/** JSON array string (`["a","b"]`) — shape écrit par le DDL create-enum. */
+	readonly members: string;
+}
+
 interface MssqlFkRow {
 	/** object_id de sys.foreign_keys — identité STABLE (les noms de
 	 * contraintes ne sont uniques que par schéma+table parent). */
@@ -56,10 +63,14 @@ interface MssqlFkRow {
 
 // Le schéma cible est un paramètre bindé (@p1) — jamais interpolé. Même
 // contrat que PG : ce que l'exécution résout est ce qui est introspecté.
+// Les tables metadata SQLNest (préfixe `_snql_`) sont EXCLUES : ce sont des
+// compensations internes (enums M/6), jamais des tables user — un node
+// `_snql_enums` sur le canvas serait un leak d'implémentation.
 const TABLES_SQL = `
 	SELECT TABLE_NAME AS table_name
 	FROM INFORMATION_SCHEMA.TABLES
 	WHERE TABLE_SCHEMA = @p1 AND TABLE_TYPE = 'BASE TABLE'
+		AND TABLE_NAME NOT LIKE '\\_snql\\_%' ESCAPE '\\'
 	ORDER BY TABLE_NAME`;
 
 // Inclut les colonnes des vues comme côté PG — elles restent orphelines dans
@@ -81,6 +92,16 @@ const PK_SQL = `
 		AND tc.TABLE_NAME = kcu.TABLE_NAME
 	WHERE tc.TABLE_SCHEMA = @p1 AND tc.CONSTRAINT_TYPE = 'PRIMARY KEY'
 	ORDER BY tc.TABLE_NAME, kcu.ORDINAL_POSITION`;
+
+// Enums compensés (M/6) : table metadata `(name, members JSON array)` écrite
+// par le DDL `create enum`. Alimente `schema.enums` — la résolution
+// `type: <enum>` au lower create-table ET le node Enums du canvas. Le lien
+// colonne↔enum n'est pas reconstruit (le CHECK T-SQL porte les members
+// inline, pas le nom) : pas de Field.enumValues V1.
+const ENUMS_SQL = `
+	SELECT [name], [members]
+	FROM [_snql_enums]
+	ORDER BY [name]`;
 
 // Les DEUX côtés bornés au schéma cible (@p1) : une FK cross-schema donnerait
 // une relation pendante vers une table non introspectée — même politique que PG.
@@ -174,7 +195,8 @@ export function buildMssqlSchemaModel(
 	tables: readonly string[],
 	columns: readonly MssqlColumnRow[],
 	pks: readonly MssqlPkRow[],
-	fks: readonly MssqlFkRow[]
+	fks: readonly MssqlFkRow[],
+	enums: readonly MssqlEnumRow[] = []
 ): SchemaModel {
 	const fieldsByTable = new Map<string, Field[]>();
 	for (const col of columns) {
@@ -206,12 +228,30 @@ export function buildMssqlSchemaModel(
 			: { name, fields, source: "declared" };
 	});
 
+	// Enums compensés — members JSON parsés defensivement (une ligne
+	// corrompue est ignorée plutôt que de bloquer tout le schéma).
+	const enumsList: EnumTypeDef[] = [];
+	for (const e of enums) {
+		try {
+			const members = JSON.parse(e.members) as unknown;
+			if (
+				Array.isArray(members) &&
+				members.every((m) => typeof m === "string")
+			) {
+				enumsList.push({ name: e.name, members, source: "declared" });
+			}
+		} catch {
+			// ligne metadata corrompue — skip.
+		}
+	}
+
 	const fkRows = fks.map(normalizeMssqlFkRow);
 	const refs = buildRefsFromFkRows(fkRows);
 	return {
 		engine: "mssql",
 		collections,
 		relations: buildRelationsFromFkRows(fkRows),
+		...(enumsList.length > 0 ? { enums: enumsList } : {}),
 		...(refs.length > 0 ? { refs } : {})
 	};
 }
@@ -249,15 +289,20 @@ export async function introspectMssql(
 			{ cause }
 		);
 	}
-	const [pks, fks] = await Promise.all([
+	const [pks, fks, enums] = await Promise.all([
 		softQuery(run, PK_SQL, params, "primary keys"),
-		softQuery(run, FK_SQL, params, "foreign keys")
+		softQuery(run, FK_SQL, params, "foreign keys"),
+		// Enums compensés (M/6) : la table metadata `_snql_enums` n'existe
+		// qu'après le premier `create enum` — 208 (invalid object) est déjà
+		// dans les codes soft → 0 enum, jamais un blocage.
+		softQuery(run, ENUMS_SQL, params, "enums")
 	]);
 	return buildMssqlSchemaModel(
 		tables.rows.map((row) => String(row["table_name"])),
 		columns.rows as unknown as MssqlColumnRow[],
 		pks as unknown as MssqlPkRow[],
-		fks as unknown as MssqlFkRow[]
+		fks as unknown as MssqlFkRow[],
+		enums as unknown as MssqlEnumRow[]
 	);
 }
 

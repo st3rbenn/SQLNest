@@ -9,6 +9,7 @@ import type {
 	RawPlan,
 	TransactionPlan
 } from "../ir/plan";
+import { isSqlDecimal, isSqlJsonLiteral } from "../ir/plan";
 import type { Span } from "../lexer/token";
 import type {
 	Mapper,
@@ -294,7 +295,9 @@ export const mssqlMapper: Mapper = {
 		let wrapOrder: string | undefined;
 		if (plan.kind === "list-tables") {
 			const nsRef = params.add(namespace);
-			baseText = `SELECT TABLE_NAME AS name FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = ${nsRef} AND TABLE_TYPE = 'BASE TABLE'`;
+			// Tables metadata SQLNest (`_snql_*`) exclues — compensations
+			// internes, jamais des tables user (miroir introspect adapter).
+			baseText = `SELECT TABLE_NAME AS name FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = ${nsRef} AND TABLE_TYPE = 'BASE TABLE' AND TABLE_NAME NOT LIKE '\\_snql\\_%' ESCAPE '\\'`;
 			defaultOrder = "[name] ASC";
 			wrapOrder = defaultOrder;
 		} else if (plan.kind === "describe-table") {
@@ -342,6 +345,39 @@ export const mssqlMapper: Mapper = {
 			params: params.all(),
 			paramSpans: params.allSpans()
 		};
+	},
+	/**
+	 * DDL Tier-2 MSSQL (M/6) — natif pour tables/colonnes/index/FK, compensé
+	 * via la table metadata `_snql_enums` pour les enums (T-SQL n'a pas de
+	 * type enum ; les colonnes enum = nvarchar(450) + CHECK IN sur le
+	 * snapshot des members). Idempotence D3 : T-SQL n'a pas de `CREATE …
+	 * IF NOT EXISTS` → guards `IF OBJECT_ID/COL_LENGTH/sys.indexes` ; le
+	 * `create table if not exists` concurrent est sérialisé par
+	 * `sp_getapplock` (miroir de l'advisory lock PG, transaction-scoped).
+	 * Defaults INLINE (T-SQL refuse un @p dans une contrainte DEFAULT —
+	 * même contrainte que le 08P01 PG, pattern pg-ddl-inline-defaults).
+	 */
+	mapDDL(
+		plan: import("../ir/plan").DDLPlan,
+		ctx?: import("./mapper").MapperContext
+	): NativeQuery {
+		const namespace = ctx?.namespace ?? "dbo";
+		if (plan.kind === "create-table") return renderCreateTable(plan, namespace);
+		if (plan.kind === "add-column") return renderAddColumn(plan, namespace);
+		if (plan.kind === "add-index" || plan.kind === "add-unique-index") {
+			return renderAddIndex(plan);
+		}
+		if (plan.kind === "drop-index") return renderDropIndex(plan);
+		if (plan.kind === "drop-table") return renderDropTable(plan);
+		if (plan.kind === "drop-column") return renderDropColumn(plan);
+		if (plan.kind === "create-enum") return renderCreateEnum(plan, namespace);
+		if (plan.kind === "add-enum-member") return renderAddEnumMember(plan, namespace);
+		if (plan.kind === "drop-enum") return renderDropEnum(plan, namespace);
+		if (plan.kind === "drop-ref") return renderDropRef(plan);
+		throw new SnqlError(
+			`DDL kind '${(plan as { kind: string }).kind}' non supporté par le codegen MSSQL M/6`,
+			"codegen_ddl_unsupported"
+		);
 	},
 	/**
 	 * `raw "SQL"` → SqlQuery text-only, params vides (l'adapter M/1 exécute
@@ -754,4 +790,343 @@ function renderValue(
 		return value.value === null ? "NULL" : params.add(value.value, span);
 	}
 	return renderExpr(value.expr, params);
+}
+
+// ─── DDL Tier-2 (M/6) ───────────────────────────────────────────────────
+
+/**
+ * Mapping SnqlType canonique → type T-SQL pour DDL. Choix figés (miroir des
+ * décisions PG_DDL_TYPE, adaptés aux contraintes T-SQL) :
+ *  - `string → nvarchar(max)` SAUF en position clé (PK/UNIQUE) ou enum →
+ *    `nvarchar(450)` : nvarchar(max) est invalide comme colonne de clé
+ *    d'index (900 bytes max → 450 chars), PG text n'a pas cette limite.
+ *  - `decimal → decimal(38, 10)` (T-SQL exige precision/scale fixes).
+ *  - `date → datetimeoffset` (préserve l'instant UTC, miroir timestamptz).
+ *  - `json`/`array → nvarchar(max)` (pas de type json T-SQL, porteur JSON).
+ *  - `enum → nvarchar(450)` + CHECK IN sur le snapshot des members.
+ */
+const MSSQL_DDL_TYPE: Readonly<Record<import("../schema/model").SnqlType, string>> = {
+	string: "nvarchar(max)",
+	int: "int",
+	bigint: "bigint",
+	float: "float",
+	decimal: "decimal(38, 10)",
+	bool: "bit",
+	date: "datetimeoffset",
+	json: "nvarchar(max)",
+	array: "nvarchar(max)",
+	uuid: "uniqueidentifier",
+	enum: "nvarchar(450)",
+	unknown: "nvarchar(max)"
+};
+
+const KEYABLE_STRING_TYPE = "nvarchar(450)";
+
+/** Type SQL d'un field — string en position clé rétrogradé nvarchar(450). */
+function mssqlFieldTypeSql(
+	f: import("../ir/plan").CreateTableField,
+	isPrimaryKey: boolean
+): string {
+	if (f.type === "string" && (isPrimaryKey || f.unique)) {
+		return KEYABLE_STRING_TYPE;
+	}
+	return MSSQL_DDL_TYPE[f.type];
+}
+
+/**
+ * Littéral T-SQL inline pour un default DDL — T-SQL refuse un paramètre
+ * dans une contrainte DEFAULT (même famille que le 08P01 PG, pattern
+ * pg-ddl-inline-defaults). Escape : doubling des quotes, préfixe N
+ * (unicode) ; PAS d'escape backslash (T-SQL ne le traite pas).
+ */
+function mssqlInlineDefault(value: import("../ir/plan").DdlDefault): string {
+	if (value === null) return "NULL";
+	if (typeof value === "string") return `N'${value.replace(/'/g, "''")}'`;
+	if (typeof value === "number") return String(value);
+	if (typeof value === "bigint") return `CAST(${value.toString()} AS bigint)`;
+	if (typeof value === "boolean") return value ? "1" : "0";
+	if (isSqlDecimal(value)) return value.raw;
+	if (isSqlJsonLiteral(value)) return `N'${value.raw.replace(/'/g, "''")}'`;
+	throw new SnqlError(
+		`Type de default DDL non supporté par mssqlInlineDefault : ${typeof value}`,
+		"codegen_ddl_default_unsupported"
+	);
+}
+
+/** Littéral string T-SQL escapé (membres d'enum dans les CHECK IN). */
+function nstr(value: string): string {
+	return `N'${value.replace(/'/g, "''")}'`;
+}
+
+/** Clause FK column-level (ADR-031) — `restrict` → NO ACTION : T-SQL n'a
+ *  pas RESTRICT et, sans contraintes deferred, NO ACTION lui est
+ *  fonctionnellement équivalent. */
+const MSSQL_REF_ACTION: Readonly<
+	Record<import("../schema/model").OnDeleteRule, string>
+> = {
+	restrict: "NO ACTION",
+	cascade: "CASCADE",
+	"set-null": "SET NULL"
+};
+
+function mssqlRefClause(ref: import("../ir/plan").FieldRefPlan): string {
+	return (
+		`CONSTRAINT ${quoteIdent(ref.name)} REFERENCES ` +
+		`${quoteIdent(ref.targetCollection)} (${quoteIdent(ref.targetColumn)}) ` +
+		`ON DELETE ${MSSQL_REF_ACTION[ref.onDelete]} ` +
+		`ON UPDATE ${MSSQL_REF_ACTION[ref.onUpdate]}`
+	);
+}
+
+/** CHECK IN des members d'un field enum (compensation type enum). Nom de
+ *  contrainte dérivé des idents validés — permet un drop ciblé futur. */
+function enumCheckClause(
+	table: string,
+	f: import("../ir/plan").CreateTableField
+): string | undefined {
+	if (f.type !== "enum" || f.enumMembers === undefined || f.enumMembers.length === 0) {
+		return undefined;
+	}
+	const checkName = quoteIdent(`ck_${table}_${f.name}_enum`);
+	const members = f.enumMembers.map(nstr).join(", ");
+	return `CONSTRAINT ${checkName} CHECK (${quoteIdent(f.name)} IN (${members}))`;
+}
+
+function renderFieldDef(
+	f: import("../ir/plan").CreateTableField,
+	table: string,
+	primaryKey: readonly string[] | undefined
+): string {
+	const inPk = primaryKey?.includes(f.name) ?? false;
+	const parts: string[] = [quoteIdent(f.name), mssqlFieldTypeSql(f, inPk)];
+	if (!f.nullable) parts.push("NOT NULL");
+	if (f.unique) parts.push("UNIQUE");
+	if (f.defaultValue !== undefined) {
+		parts.push(`DEFAULT ${mssqlInlineDefault(f.defaultValue)}`);
+	}
+	const check = enumCheckClause(table, f);
+	if (check !== undefined) parts.push(check);
+	if (f.ref !== undefined) parts.push(mssqlRefClause(f.ref));
+	return parts.join(" ");
+}
+
+/** Réf objet qualifiée en littéral pour OBJECT_ID/COL_LENGTH — les noms
+ *  passent par quoteIdent (IDENT_RE) AVANT d'entrer dans le littéral. */
+function objectLiteral(namespace: string, name: string): string {
+	return nstr(`${quoteIdent(namespace)}.${quoteIdent(name)}`);
+}
+
+function ddlQuery(text: string): SqlQuery {
+	return { engine: "mssql", kind: "sql", text, params: [], paramSpans: [] };
+}
+
+/**
+ * `create table` — sans `if not exists` : CREATE TABLE simple. Avec :
+ * SqlTransaction 2 steps [sp_getapplock 'sqlnest_ddl:<t>' (Exclusive,
+ * Transaction-scoped) → IF OBJECT_ID IS NULL CREATE] — miroir exact de
+ * l'advisory lock D3 PG : deux create concurrents sont sérialisés, le
+ * second voit la table et no-op proprement.
+ */
+function renderCreateTable(
+	plan: import("../ir/plan").CreateTablePlan,
+	namespace: string
+): NativeQuery {
+	const cols = plan.fields.map((f) =>
+		renderFieldDef(f, plan.target, plan.primaryKey)
+	);
+	if (plan.primaryKey !== undefined && plan.primaryKey.length > 0) {
+		cols.push(`PRIMARY KEY (${plan.primaryKey.map(quoteIdent).join(", ")})`);
+	}
+	const createText = `CREATE TABLE ${quoteIdent(plan.target)} (${cols.join(", ")})`;
+	if (!plan.ifNotExists) return ddlQuery(createText);
+
+	const guarded = `IF OBJECT_ID(${objectLiteral(namespace, plan.target)}, N'U') IS NULL ${createText}`;
+	const lockParams = newParams();
+	const resourceRef = lockParams.add(`sqlnest_ddl:${plan.target}`);
+	const lockStep: SqlQuery = {
+		engine: "mssql",
+		kind: "sql",
+		text: `EXEC sp_getapplock @Resource = ${resourceRef}, @LockMode = 'Exclusive', @LockOwner = 'Transaction'`,
+		params: lockParams.all(),
+		paramSpans: lockParams.allSpans()
+	};
+	const transaction: SqlTransaction = {
+		engine: "mssql",
+		kind: "transaction",
+		steps: [
+			{ kind: "statement", query: lockStep },
+			{ kind: "statement", query: ddlQuery(guarded) }
+		]
+	};
+	return transaction;
+}
+
+/**
+ * `add column` → `ALTER TABLE … ADD` (T-SQL : ADD, jamais ADD COLUMN).
+ * D10 backfill : NOT NULL + DEFAULT backfille nativement ; nullable +
+ * DEFAULT exige `WITH VALUES` pour peupler les rows existantes (parité
+ * PG qui backfille toujours). `if not exists` → guard COL_LENGTH.
+ */
+function renderAddColumn(
+	plan: import("../ir/plan").AddColumnPlan,
+	namespace: string
+): NativeQuery {
+	const f = plan.column;
+	const def = renderFieldDef(f, plan.target, undefined);
+	const withValues =
+		f.defaultValue !== undefined && f.nullable ? " WITH VALUES" : "";
+	const alterText = `ALTER TABLE ${quoteIdent(plan.target)} ADD ${def}${withValues}`;
+	if (!plan.ifNotExists) return ddlQuery(alterText);
+	const table = nstr(`${quoteIdent(namespace)}.${quoteIdent(plan.target)}`);
+	return ddlQuery(
+		`IF COL_LENGTH(${table}, ${nstr(f.name)}) IS NULL ${alterText}`
+	);
+}
+
+/** `add [unique] index` → `CREATE [UNIQUE] INDEX … ON …`. Pas d'ONLINE=ON
+ *  (Enterprise-only — un Standard refuserait) : lock court assumé, miroir
+ *  du choix CONCURRENTLY documenté côté PG. */
+function renderAddIndex(
+	plan: import("../ir/plan").AddIndexPlan
+): NativeQuery {
+	const unique = plan.kind === "add-unique-index" ? "UNIQUE " : "";
+	const cols = plan.fields.map(quoteIdent).join(", ");
+	const createText = `CREATE ${unique}INDEX ${quoteIdent(plan.name)} ON ${quoteIdent(plan.target)} (${cols})`;
+	if (!plan.ifNotExists) return ddlQuery(createText);
+	return ddlQuery(
+		`IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = ${nstr(plan.name)} AND object_id = OBJECT_ID(${nstr(quoteIdent(plan.target))})) ${createText}`
+	);
+}
+
+/** `drop index NAME from T` → `DROP INDEX [IF EXISTS] [n] ON [t]` — T-SQL
+ *  exige la table (l'index est table-scoped, pas schema-scoped comme PG). */
+function renderDropIndex(
+	plan: import("../ir/plan").DropIndexPlan
+): NativeQuery {
+	const ifExists = plan.ifExists ? "IF EXISTS " : "";
+	return ddlQuery(
+		`DROP INDEX ${ifExists}${quoteIdent(plan.name)} ON ${quoteIdent(plan.target)}`
+	);
+}
+
+/** `drop table` → `DROP TABLE [IF EXISTS]` — le refus si FK dépendantes est
+ *  natif T-SQL (comportement par défaut, pas de mot-clé RESTRICT). */
+function renderDropTable(
+	plan: import("../ir/plan").DropTablePlan
+): NativeQuery {
+	const ifExists = plan.ifExists ? "IF EXISTS " : "";
+	return ddlQuery(`DROP TABLE ${ifExists}${quoteIdent(plan.target)}`);
+}
+
+/** `drop column` → `ALTER TABLE … DROP COLUMN [IF EXISTS]` (natif 2016+).
+ *  Refus natif si contrainte/index dépendant (défaut T-SQL ≡ RESTRICT). */
+function renderDropColumn(
+	plan: import("../ir/plan").DropColumnPlan
+): NativeQuery {
+	const ifExists = plan.ifExists ? "IF EXISTS " : "";
+	return ddlQuery(
+		`ALTER TABLE ${quoteIdent(plan.target)} DROP COLUMN ${ifExists}${quoteIdent(plan.column)}`
+	);
+}
+
+/** `drop ref` → `ALTER TABLE … DROP CONSTRAINT [IF EXISTS]` — natif, miroir
+ *  PG exact (D7 typing gate côté frontend). */
+function renderDropRef(plan: import("../ir/plan").DropRefPlan): NativeQuery {
+	const ifExists = plan.ifExists ? "IF EXISTS " : "";
+	return ddlQuery(
+		`ALTER TABLE ${quoteIdent(plan.target)} DROP CONSTRAINT ${ifExists}${quoteIdent(plan.name)}`
+	);
+}
+
+/** Nom qualifié de la table metadata enums + DDL de bootstrap (créée au
+ *  premier `create enum` — M/5 sait déjà la lire, shape figé). */
+function enumsMetaTable(namespace: string): string {
+	return `${quoteIdent(namespace)}.[_snql_enums]`;
+}
+
+function ensureEnumsTableSql(namespace: string): string {
+	return (
+		`IF OBJECT_ID(${nstr(`${quoteIdent(namespace)}.[_snql_enums]`)}, N'U') IS NULL ` +
+		`CREATE TABLE ${enumsMetaTable(namespace)} ([name] nvarchar(128) NOT NULL PRIMARY KEY, [members] nvarchar(max) NOT NULL)`
+	);
+}
+
+/**
+ * `create enum` — compensation : bootstrap `_snql_enums` + INSERT (name,
+ * members JSON array). Les statements du batch mixent DDL guardé et DML
+ * paramétré (@pN valides sur l'INSERT — seul le DDL pur refuse les
+ * params). `if not exists` → INSERT guardé NOT EXISTS (sinon la violation
+ * PK remonte en erreur duplicate propre, miroir 42710 PG).
+ */
+function renderCreateEnum(
+	plan: import("../ir/plan").CreateEnumPlan,
+	namespace: string
+): NativeQuery {
+	const params = newParams();
+	const nameRef = params.add(plan.name);
+	const membersRef = params.add(JSON.stringify(plan.members));
+	const meta = enumsMetaTable(namespace);
+	const insert = `INSERT INTO ${meta} ([name], [members]) VALUES (${nameRef}, ${membersRef})`;
+	const guardedInsert = plan.ifNotExists
+		? `IF NOT EXISTS (SELECT 1 FROM ${meta} WHERE [name] = ${nameRef}) ${insert}`
+		: insert;
+	return {
+		engine: "mssql",
+		kind: "sql",
+		text: `${ensureEnumsTableSql(namespace)}; ${guardedInsert}`,
+		params: params.all(),
+		paramSpans: params.allSpans()
+	};
+}
+
+/**
+ * `add enum member` — `JSON_MODIFY(members, 'append $', @p)` avec dedup
+ * NOT EXISTS sur OPENJSON (déjà présent → 0 row affected, silence D3
+ * miroir `ADD VALUE IF NOT EXISTS` PG). Enum inconnu → 0 row affected
+ * silencieux (divergence assumée vs l'erreur PG — même comportement que
+ * l'`$addToSet` Mongo sur _id absent, documenté).
+ */
+function renderAddEnumMember(
+	plan: import("../ir/plan").AddEnumMemberPlan,
+	namespace: string
+): NativeQuery {
+	const params = newParams();
+	const nameRef = params.add(plan.name);
+	const memberRef = params.add(plan.member);
+	const meta = enumsMetaTable(namespace);
+	const text =
+		`UPDATE ${meta} SET [members] = JSON_MODIFY([members], 'append $', ${memberRef}) ` +
+		`WHERE [name] = ${nameRef} ` +
+		`AND NOT EXISTS (SELECT 1 FROM OPENJSON([members]) WHERE [value] = ${memberRef})`;
+	return {
+		engine: "mssql",
+		kind: "sql",
+		text,
+		params: params.all(),
+		paramSpans: params.allSpans()
+	};
+}
+
+/**
+ * `drop enum` — DELETE de la ligne metadata. Les CHECK IN des colonnes
+ * utilisatrices restent en place (le lien colonne↔enum n'est pas traçable
+ * en T-SQL V1 — le CHECK porte les members inline, pas le nom) : RESTRICT
+ * D8 non vérifiable côté engine, divergence documentée vs le 2BP01 PG.
+ * `if exists` et absent → 0 row affected, silence naturel.
+ */
+function renderDropEnum(
+	plan: import("../ir/plan").DropEnumPlan,
+	namespace: string
+): NativeQuery {
+	const params = newParams();
+	const nameRef = params.add(plan.name);
+	const meta = enumsMetaTable(namespace);
+	const text = `IF OBJECT_ID(${nstr(`${quoteIdent(namespace)}.[_snql_enums]`)}, N'U') IS NOT NULL DELETE FROM ${meta} WHERE [name] = ${nameRef}`;
+	return {
+		engine: "mssql",
+		kind: "sql",
+		text,
+		params: params.all(),
+		paramSpans: params.allSpans()
+	};
 }

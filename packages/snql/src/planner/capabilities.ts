@@ -168,7 +168,8 @@ export const MSSQL_CAPABILITIES: Capabilities = caps(
 		"transaction",
 		"introspect",
 		"cte",
-		"cte-recursive"
+		"cte-recursive",
+		"ddl"
 	],
 	["int", "float", "text", "bool", "date", "timestamp"],
 	{ subqueryStrategy: "native" }

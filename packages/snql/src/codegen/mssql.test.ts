@@ -350,7 +350,7 @@ describe("codegen mssql — introspection (M/5)", () => {
 	it("list tables → INFORMATION_SCHEMA, namespace bindé", () => {
 		const { text, params } = introspectSql("list tables");
 		expect(text).toBe(
-			`SELECT TABLE_NAME AS name FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = @p1 AND TABLE_TYPE = 'BASE TABLE' ORDER BY [name] ASC`
+			`SELECT TABLE_NAME AS name FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = @p1 AND TABLE_TYPE = 'BASE TABLE' AND TABLE_NAME NOT LIKE '\\_snql\\_%' ESCAPE '\\' ORDER BY [name] ASC`
 		);
 		expect(params).toEqual(["dbo"]);
 	});
@@ -358,7 +358,7 @@ describe("codegen mssql — introspection (M/5)", () => {
 	it("list tables + where/limit → wrap TOP, ordre par défaut conservé", () => {
 		const { text } = introspectSql(`list tables where name like "a%" limit 3`);
 		expect(text).toBe(
-			`SELECT TOP (3) * FROM (SELECT TABLE_NAME AS name FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = @p1 AND TABLE_TYPE = 'BASE TABLE') AS [t] WHERE [name] LIKE @p2 ORDER BY [name] ASC`
+			`SELECT TOP (3) * FROM (SELECT TABLE_NAME AS name FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = @p1 AND TABLE_TYPE = 'BASE TABLE' AND TABLE_NAME NOT LIKE '\\_snql\\_%' ESCAPE '\\') AS [t] WHERE [name] LIKE @p2 ORDER BY [name] ASC`
 		);
 	});
 
@@ -414,6 +414,266 @@ describe("codegen mssql — let / CTE (M/5)", () => {
 		expect(native.text).toMatch(/^WITH \[chain\] AS \(\(/);
 		expect(native.text).toContain("UNION ALL");
 		expect(native.text).not.toContain("RECURSIVE");
+	});
+});
+
+// ─── M/6 — DDL Tier-2 (plans construits, miroir du harness pg-ddl) ───
+
+function mapDdl(plan: import("../ir/plan").DDLPlan) {
+	return getMapper("mssql").mapDDL!(plan, { namespace: "dbo" });
+}
+
+function ddlText(plan: import("../ir/plan").DDLPlan): {
+	text: string;
+	params: readonly unknown[];
+} {
+	const native = mapDdl(plan);
+	if (native.kind !== "sql") throw new Error(`attendu sql, reçu ${native.kind}`);
+	return { text: native.text, params: native.params };
+}
+
+describe("codegen mssql — DDL (M/6)", () => {
+	it("create table : types DDL, PK, string clé → nvarchar(450)", () => {
+		const { text, params } = ddlText({
+			op: "ddl",
+			kind: "create-table",
+			target: "users",
+			ifNotExists: false,
+			fields: [
+				{ name: "id", type: "string", nullable: false, unique: false },
+				{ name: "age", type: "int", nullable: false, unique: false },
+				{ name: "bio", type: "string", nullable: true, unique: false },
+				{
+					name: "active",
+					type: "bool",
+					nullable: false,
+					unique: false,
+					defaultValue: true
+				}
+			],
+			primaryKey: ["id"]
+		});
+		expect(text).toBe(
+			`CREATE TABLE [users] ([id] nvarchar(450) NOT NULL, [age] int NOT NULL, [bio] nvarchar(max), [active] bit NOT NULL DEFAULT 1, PRIMARY KEY ([id]))`
+		);
+		expect(params).toEqual([]);
+	});
+
+	it("create table if not exists → SqlTransaction sp_getapplock + guard", () => {
+		const native = mapDdl({
+			op: "ddl",
+			kind: "create-table",
+			target: "t",
+			ifNotExists: true,
+			fields: [{ name: "id", type: "int", nullable: false, unique: false }],
+			primaryKey: ["id"]
+		});
+		expect(native.kind).toBe("transaction");
+		if (native.kind !== "transaction") throw new Error();
+		const [lock, create] = native.steps;
+		if (lock?.kind !== "statement" || create?.kind !== "statement") {
+			throw new Error();
+		}
+		expect(lock.query.text).toContain("sp_getapplock");
+		expect(lock.query.params).toEqual(["sqlnest_ddl:t"]);
+		expect(create.query.text).toBe(
+			`IF OBJECT_ID(N'[dbo].[t]', N'U') IS NULL CREATE TABLE [t] ([id] int NOT NULL, PRIMARY KEY ([id]))`
+		);
+	});
+
+	it("create table avec ref → FK inline, restrict → NO ACTION", () => {
+		const { text } = ddlText({
+			op: "ddl",
+			kind: "create-table",
+			target: "orders",
+			ifNotExists: false,
+			fields: [
+				{ name: "id", type: "int", nullable: false, unique: false },
+				{
+					name: "user_id",
+					type: "int",
+					nullable: false,
+					unique: false,
+					ref: {
+						name: "fk_orders_user_id",
+						fromColumn: "user_id",
+						targetCollection: "users",
+						targetColumn: "id",
+						onDelete: "restrict",
+						onUpdate: "restrict"
+					}
+				}
+			],
+			primaryKey: ["id"]
+		});
+		expect(text).toContain(
+			`[user_id] int NOT NULL CONSTRAINT [fk_orders_user_id] REFERENCES [users] ([id]) ON DELETE NO ACTION ON UPDATE NO ACTION`
+		);
+	});
+
+	it("create table field enum → nvarchar(450) + CHECK IN members", () => {
+		const { text } = ddlText({
+			op: "ddl",
+			kind: "create-table",
+			target: "posts",
+			ifNotExists: false,
+			fields: [
+				{ name: "id", type: "int", nullable: false, unique: false },
+				{
+					name: "statut",
+					type: "enum",
+					nullable: false,
+					unique: false,
+					enumTypeName: "statut",
+					enumMembers: ["brouillon", "publie"]
+				}
+			],
+			primaryKey: ["id"]
+		});
+		expect(text).toContain(
+			`[statut] nvarchar(450) NOT NULL CONSTRAINT [ck_posts_statut_enum] CHECK ([statut] IN (N'brouillon', N'publie'))`
+		);
+	});
+
+	it("add column nullable + default → WITH VALUES (backfill D10)", () => {
+		const { text } = ddlText({
+			op: "ddl",
+			kind: "add-column",
+			target: "users",
+			ifNotExists: false,
+			column: {
+				name: "note",
+				type: "string",
+				nullable: true,
+				unique: false,
+				defaultValue: "aucune"
+			}
+		});
+		expect(text).toBe(
+			`ALTER TABLE [users] ADD [note] nvarchar(max) DEFAULT N'aucune' WITH VALUES`
+		);
+	});
+
+	it("add column if not exists → guard COL_LENGTH", () => {
+		const { text } = ddlText({
+			op: "ddl",
+			kind: "add-column",
+			target: "users",
+			ifNotExists: true,
+			column: { name: "age", type: "int", nullable: false, unique: false }
+		});
+		expect(text).toBe(
+			`IF COL_LENGTH(N'[dbo].[users]', N'age') IS NULL ALTER TABLE [users] ADD [age] int NOT NULL`
+		);
+	});
+
+	it("add unique index + if not exists guard sys.indexes", () => {
+		const { text } = ddlText({
+			op: "ddl",
+			kind: "add-unique-index",
+			target: "users",
+			fields: ["email"],
+			name: "unique_users_email",
+			ifNotExists: true
+		});
+		expect(text).toBe(
+			`IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'unique_users_email' AND object_id = OBJECT_ID(N'[users]')) CREATE UNIQUE INDEX [unique_users_email] ON [users] ([email])`
+		);
+	});
+
+	it("drop index → ON table obligatoire T-SQL", () => {
+		const { text } = ddlText({
+			op: "ddl",
+			kind: "drop-index",
+			target: "users",
+			name: "idx_users_email",
+			ifExists: false
+		});
+		expect(text).toBe(`DROP INDEX [idx_users_email] ON [users]`);
+	});
+
+	it("drop table / drop column / drop ref", () => {
+		expect(
+			ddlText({
+				op: "ddl",
+				kind: "drop-table",
+				target: "tmp",
+				ifExists: true
+			}).text
+		).toBe(`DROP TABLE IF EXISTS [tmp]`);
+		expect(
+			ddlText({
+				op: "ddl",
+				kind: "drop-column",
+				target: "users",
+				column: "note",
+				ifExists: false
+			}).text
+		).toBe(`ALTER TABLE [users] DROP COLUMN [note]`);
+		expect(
+			ddlText({
+				op: "ddl",
+				kind: "drop-ref",
+				target: "orders",
+				name: "fk_orders_user_id",
+				ifExists: false
+			}).text
+		).toBe(`ALTER TABLE [orders] DROP CONSTRAINT [fk_orders_user_id]`);
+	});
+
+	it("create enum → bootstrap _snql_enums + INSERT paramétré", () => {
+		const { text, params } = ddlText({
+			op: "ddl",
+			kind: "create-enum",
+			name: "statut",
+			members: ["brouillon", "publie"],
+			ifNotExists: false
+		});
+		expect(text).toBe(
+			`IF OBJECT_ID(N'[dbo].[_snql_enums]', N'U') IS NULL CREATE TABLE [dbo].[_snql_enums] ([name] nvarchar(128) NOT NULL PRIMARY KEY, [members] nvarchar(max) NOT NULL); INSERT INTO [dbo].[_snql_enums] ([name], [members]) VALUES (@p1, @p2)`
+		);
+		expect(params).toEqual(["statut", '["brouillon","publie"]']);
+	});
+
+	it("create enum if not exists → INSERT guardé NOT EXISTS", () => {
+		const { text } = ddlText({
+			op: "ddl",
+			kind: "create-enum",
+			name: "statut",
+			members: ["a"],
+			ifNotExists: true
+		});
+		expect(text).toContain(
+			`IF NOT EXISTS (SELECT 1 FROM [dbo].[_snql_enums] WHERE [name] = @p1) INSERT INTO`
+		);
+	});
+
+	it("add enum member → JSON_MODIFY append + dedup OPENJSON", () => {
+		const { text, params } = ddlText({
+			op: "ddl",
+			kind: "add-enum-member",
+			name: "statut",
+			member: "archive",
+			ifNotExists: false
+		});
+		expect(text).toBe(
+			`UPDATE [dbo].[_snql_enums] SET [members] = JSON_MODIFY([members], 'append $', @p2) WHERE [name] = @p1 AND NOT EXISTS (SELECT 1 FROM OPENJSON([members]) WHERE [value] = @p2)`
+		);
+		expect(params).toEqual(["statut", "archive"]);
+	});
+
+	it("drop enum → DELETE metadata guardé", () => {
+		const { text, params } = ddlText({
+			op: "ddl",
+			kind: "drop-enum",
+			name: "statut",
+			ifExists: true,
+			cascade: false
+		});
+		expect(text).toBe(
+			`IF OBJECT_ID(N'[dbo].[_snql_enums]', N'U') IS NOT NULL DELETE FROM [dbo].[_snql_enums] WHERE [name] = @p1`
+		);
+		expect(params).toEqual(["statut"]);
 	});
 });
 

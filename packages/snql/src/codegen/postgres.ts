@@ -18,7 +18,6 @@ import type {
 	LogicalPlan,
 	MutationPlan,
 	PlanExpr,
-	PlanProjectField,
 	PlanRowValue,
 	RawPlan,
 	TransactionPlan
@@ -107,8 +106,6 @@ const {
 	quoteIdent,
 	renderPlan,
 	renderExpr,
-	renderProjection,
-	renderSortKey,
 	renderJoinPath
 } = PG;
 

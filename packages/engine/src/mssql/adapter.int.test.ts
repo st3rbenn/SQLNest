@@ -595,3 +595,182 @@ describe.skipIf(!hasMssql)("mssql introspection tier-1 + let (intégration M/5)"
 		});
 	});
 });
+
+describe.skipIf(!hasMssql)("mssql DDL Tier-2 (intégration M/6)", () => {
+	async function withConn<T>(
+		fn: (conn: Awaited<ReturnType<typeof mssqlAdapter.connect>>) => Promise<T>
+	): Promise<T> {
+		const conn = await mssqlAdapter.connect(
+			resolveMssqlConfig({ url: MSSQL_URL })
+		);
+		try {
+			return await fn(conn);
+		} finally {
+			await conn.close();
+		}
+	}
+
+	it("cycle table : create (PK + FK ref) → introspect → drop ref → drop", async () => {
+		await withConn(async (conn) => {
+			await runQuery(conn, `raw "DROP TABLE IF EXISTS m6_orders"`);
+			try {
+				const created = await runQuery(
+					conn,
+					`create table m6_orders { id: int, artist_ref: int ref artist.artist_id, primary key (id) }`
+				);
+				expect(created.written).toBe(true);
+
+				const schema = await conn.introspect();
+				const table = schema.collections.find((c) => c.name === "m6_orders");
+				expect(table?.primaryKey).toEqual(["id"]);
+				const ref = schema.refs?.find(
+					(r) => r.fromCollection === "m6_orders"
+				);
+				expect(ref).toMatchObject({
+					toCollection: "artist",
+					toColumn: "artist_id"
+				});
+
+				// drop ref → la contrainte disparaît du catalogue.
+				await runQuery(conn, `drop ref ${ref?.name} from m6_orders`);
+				const after = await conn.introspect();
+				expect(
+					after.refs?.some((r) => r.fromCollection === "m6_orders") ?? false
+				).toBe(false);
+
+				await runQuery(conn, `drop table m6_orders`);
+				const final = await conn.introspect();
+				expect(
+					final.collections.some((c) => c.name === "m6_orders")
+				).toBe(false);
+			} finally {
+				await runQuery(conn, `raw "DROP TABLE IF EXISTS m6_orders"`);
+			}
+		});
+	});
+
+	it("create table if not exists ×2 → idempotent (sp_getapplock + guard)", async () => {
+		await withConn(async (conn) => {
+			await runQuery(conn, `raw "DROP TABLE IF EXISTS m6_idem"`);
+			try {
+				await runQuery(conn, `create table if not exists m6_idem { id: int, primary key (id) }`);
+				// 2e appel : la table existe → no-op silencieux, pas d'erreur.
+				await runQuery(conn, `create table if not exists m6_idem { id: int, primary key (id) }`);
+				const rs = await runQuery(conn, `find m6_idem pick count(*) as n`);
+				expect(Number(rs.rows[0]?.["n"])).toBe(0);
+			} finally {
+				await runQuery(conn, `raw "DROP TABLE IF EXISTS m6_idem"`);
+			}
+		});
+	});
+
+	it("add column avec default → backfill D10 des rows existantes", async () => {
+		await withConn(async (conn) => {
+			await runQuery(conn, `raw "DROP TABLE IF EXISTS m6_bf"`);
+			try {
+				await runQuery(conn, `create table m6_bf { id: int, primary key (id) }`);
+				await runQuery(conn, `add { id: 1 } into m6_bf`);
+				await runQuery(
+					conn,
+					`add column tier text default "free" into m6_bf`
+				);
+				const rs = await runQuery(conn, `find m6_bf pick id, tier`);
+				expect(rs.rows[0]).toMatchObject({ id: 1, tier: "free" });
+			} finally {
+				await runQuery(conn, `raw "DROP TABLE IF EXISTS m6_bf"`);
+			}
+		});
+	});
+
+	it("index : add unique → violation réelle au doublon → drop index", async () => {
+		await withConn(async (conn) => {
+			await runQuery(conn, `raw "DROP TABLE IF EXISTS m6_idx"`);
+			try {
+				// Colonne d'index en int : un `add unique index` sur une colonne
+				// string non-clé serait refusé par T-SQL (nvarchar(max) invalide
+				// comme clé d'index — limite structurelle vs text PG, l'erreur
+				// moteur remonte claire ; noté vault/Capability Matrix).
+				await runQuery(
+					conn,
+					`create table m6_idx { id: int, code: int, primary key (id) }`
+				);
+				await runQuery(conn, `add unique index (code) into m6_idx`);
+				await runQuery(conn, `add { id: 1, code: 7 } into m6_idx`);
+				await expect(
+					runQuery(conn, `add { id: 2, code: 7 } into m6_idx`)
+				).rejects.toThrow(/duplicate|dupliqu/i);
+				await runQuery(conn, `drop index unique_m6_idx_code from m6_idx`);
+				// Sans l'index unique, le doublon passe.
+				const dup = await runQuery(
+					conn,
+					`add { id: 2, code: 7 } into m6_idx`
+				);
+				expect(dup.rowCount).toBe(1);
+			} finally {
+				await runQuery(conn, `raw "DROP TABLE IF EXISTS m6_idx"`);
+			}
+		});
+	});
+
+	it("cycle enums compensés : create → list/describe → add member → drop", async () => {
+		await withConn(async (conn) => {
+			await runQuery(conn, `drop enum m6_statut if exists`);
+			try {
+				await runQuery(
+					conn,
+					`create enum m6_statut { "brouillon", "publie" }`
+				);
+				const list = await runQuery(conn, "list enums");
+				const row = list.rows.find((r) => r["name"] === "m6_statut");
+				expect(Number(row?.["members_count"])).toBe(2);
+
+				const desc = await runQuery(conn, "describe enum m6_statut");
+				expect(desc.rows.map((r) => r["member"])).toEqual([
+					"brouillon",
+					"publie"
+				]);
+				expect(desc.rows.map((r) => Number(r["position"]))).toEqual([1, 2]);
+
+				await runQuery(conn, `add enum member m6_statut "archive"`);
+				// Dedup : ré-ajout du même member → silencieux, toujours 3.
+				await runQuery(conn, `add enum member m6_statut "archive"`);
+				const after = await runQuery(conn, "describe enum m6_statut");
+				expect(after.rows.map((r) => r["member"])).toEqual([
+					"brouillon",
+					"publie",
+					"archive"
+				]);
+
+				await runQuery(conn, `drop enum m6_statut`);
+				const empty = await runQuery(conn, "describe enum m6_statut");
+				expect(empty.rowCount).toBe(0);
+			} finally {
+				await runQuery(conn, `drop enum m6_statut if exists`);
+			}
+		});
+	});
+
+	it("create table field enum → CHECK IN réel (valeur hors set refusée)", async () => {
+		await withConn(async (conn) => {
+			await runQuery(conn, `raw "DROP TABLE IF EXISTS m6_posts"`);
+			await runQuery(conn, `drop enum m6_ptype if exists`);
+			try {
+				await runQuery(conn, `create enum m6_ptype { "draft", "live" }`);
+				// Le lower résout type: m6_ptype via le schema introspecté (enums).
+				const schema = await conn.introspect();
+				await runQuery(
+					conn,
+					`create table m6_posts { id: int, statut: m6_ptype, primary key (id) }`,
+					schema
+				);
+				await runQuery(conn, `add { id: 1, statut: "draft" } into m6_posts`);
+				await expect(
+					runQuery(conn, `add { id: 2, statut: "autre" } into m6_posts`)
+				).rejects.toThrow(/CHECK|conflicted/i);
+			} finally {
+				await runQuery(conn, `raw "DROP TABLE IF EXISTS m6_posts"`);
+				await runQuery(conn, `drop enum m6_ptype if exists`);
+			}
+		});
+	});
+});
