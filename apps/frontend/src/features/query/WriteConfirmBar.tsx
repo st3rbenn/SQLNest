@@ -239,6 +239,10 @@ function shortLabel(finding: UnfilteredFinding): string {
 			return `Confirmer copie massive vers ${finding.target}`;
 		case "raw_opaque":
 			return "Confirmer requête raw (non analysable)";
+		case "destructive_drop":
+			// Bug pré-existant DDL/4 : case manquant → label vide au gate sur
+			// tous les drops. Couvre table/column/index/enum + ref (FK/3).
+			return `Confirmer drop de ${finding.target}`;
 	}
 }
 
