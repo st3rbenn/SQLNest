@@ -78,10 +78,20 @@ export interface UsePreviewSnapshotSyncOptions {
 	readonly hiddenIds: ReadonlySet<string>;
 }
 
+/** Bornes du PreviewSnapshotSchema backend (apps/backend/src/domains/
+ *  db-connections/schema.ts) — le contrat documenté est « le client
+ *  tronque » : une base de 445 tables (GEXSI) dépassait `nodes.max(200)`
+ *  et chaque PUT partait en 400, retry en boucle. La preview gallery est
+ *  une miniature : les N premiers nodes suffisent visuellement. */
+const SNAPSHOT_MAX_NODES = 200;
+const SNAPSHOT_MAX_EDGES = 500;
+const SNAPSHOT_MAX_FRAMES = 50;
+
 /** Compute le snapshot depuis le state courant. Filtre les tables masquées
  *  et les frames dont TOUS les membres sont masqués (les frames-seed
  *  hérités calculent leur rect dynamiquement — pas de rect fixe à
- *  persister, on skip). */
+ *  persister, on skip). Tronqué aux bornes backend — les edges dont un
+ *  bout est tronqué tombent avec (nodeSet). */
 export function computePreviewSnapshot(
 	opts: Omit<UsePreviewSnapshotSyncOptions, "connectionId" | "canvasReady">
 ): PreviewSnapshot {
@@ -91,6 +101,7 @@ export function computePreviewSnapshot(
 		{ x: number; y: number; w: number; h: number }
 	>();
 	for (const n of opts.tableNodes) {
+		if (nodes.length >= SNAPSHOT_MAX_NODES) break;
 		if (opts.hiddenIds.has(n.id)) continue;
 		if (n.width == null || n.height == null) continue;
 		const entry = {
@@ -112,6 +123,7 @@ export function computePreviewSnapshot(
 	const nodeSet = new Set(nodes.map((n) => n.id));
 	const edges: PreviewSnapshot["edges"] = [];
 	for (const r of opts.relations) {
+		if (edges.length >= SNAPSHOT_MAX_EDGES) break;
 		if (!nodeSet.has(r.from.collection) || !nodeSet.has(r.to.collection)) {
 			continue;
 		}
@@ -120,6 +132,7 @@ export function computePreviewSnapshot(
 
 	const frames: PreviewSnapshot["frames"] = [];
 	for (const f of opts.frames) {
+		if (frames.length >= SNAPSHOT_MAX_FRAMES) break;
 		let rect = f.rect;
 		if (!rect) {
 			// Frame-seed sans rect ancré : bbox des membres présents.
