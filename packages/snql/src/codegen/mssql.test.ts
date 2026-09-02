@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { compile, getMapper } from "../index";
+import * as lowerModule from "../ir/lower";
 import { lowerMutation, lowerRaw, lowerTransaction } from "../ir/lower";
 import { parse } from "../parser/parser";
 import { tokenize } from "../lexer/lexer";
@@ -322,6 +323,97 @@ describe("codegen mssql — mutations (M/4)", () => {
 			`OUTPUT INSERTED.*;`
 		);
 		expect(params).toEqual([1, 1]);
+	});
+});
+
+// ─── M/5 — introspection tier-1 + let/CTE ────────────────────
+
+function introspectSql(source: string): {
+	text: string;
+	params: readonly unknown[];
+} {
+	const stmt = parse(tokenize(source));
+	if (stmt.operation !== "introspect") throw new Error("introspect attendu");
+	const { lowerIntrospect } = requireLower();
+	const native = getMapper("mssql").mapIntrospect!(lowerIntrospect(stmt), {
+		namespace: "dbo"
+	});
+	if (native.kind !== "sql") throw new Error("attendu du SQL");
+	return { text: native.text, params: native.params };
+}
+
+function requireLower(): typeof import("../ir/lower") {
+	return lowerModule;
+}
+
+describe("codegen mssql — introspection (M/5)", () => {
+	it("list tables → INFORMATION_SCHEMA, namespace bindé", () => {
+		const { text, params } = introspectSql("list tables");
+		expect(text).toBe(
+			`SELECT TABLE_NAME AS name FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = @p1 AND TABLE_TYPE = 'BASE TABLE' ORDER BY [name] ASC`
+		);
+		expect(params).toEqual(["dbo"]);
+	});
+
+	it("list tables + where/limit → wrap TOP, ordre par défaut conservé", () => {
+		const { text } = introspectSql(`list tables where name like "a%" limit 3`);
+		expect(text).toBe(
+			`SELECT TOP (3) * FROM (SELECT TABLE_NAME AS name FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = @p1 AND TABLE_TYPE = 'BASE TABLE') AS [t] WHERE [name] LIKE @p2 ORDER BY [name] ASC`
+		);
+	});
+
+	it("describe table → colonnes + PK + FK, tri ORDINAL_POSITION", () => {
+		const { text, params } = introspectSql("describe track");
+		expect(text).toContain("FROM INFORMATION_SCHEMA.COLUMNS c");
+		expect(text).toContain("sys.foreign_key_columns");
+		expect(text).toContain("ORDER BY c.ORDINAL_POSITION ASC");
+		expect(params).toEqual(["dbo", "track"]);
+	});
+
+	it("list enums → IF OBJECT_ID garde, branche vide au même shape", () => {
+		const { text, params } = introspectSql("list enums");
+		expect(text).toBe(
+			`IF OBJECT_ID(@p1, N'U') IS NOT NULL SELECT [name], (SELECT COUNT(*) FROM OPENJSON([members])) AS members_count FROM [dbo].[_snql_enums] ORDER BY [name] ASC ELSE SELECT TOP 0 CAST(NULL AS nvarchar(4000)) AS [name], CAST(NULL AS int) AS members_count`
+		);
+		expect(params).toEqual(["dbo._snql_enums"]);
+	});
+
+	it("describe enum → OPENJSON positions 1..N", () => {
+		const { text, params } = introspectSql("describe enum statut");
+		expect(text).toContain("CROSS APPLY OPENJSON([members]) j");
+		expect(text).toContain("CAST(j.[key] AS int) + 1 AS position");
+		expect(params).toEqual(["dbo._snql_enums", "statut"]);
+	});
+});
+
+describe("codegen mssql — let / CTE (M/5)", () => {
+	it("let simple → WITH natif", () => {
+		const stmt = parse(
+			tokenize("let heavy = find track where milliseconds > 300000; find heavy pick name limit 2")
+		);
+		if (stmt.operation !== "let") throw new Error("let attendu");
+		const { lowerLet } = requireLower();
+		const native = getMapper("mssql").mapLet!(lowerLet(stmt));
+		if (native.kind !== "sql") throw new Error();
+		expect(native.text).toBe(
+			`WITH [heavy] AS (SELECT * FROM [track] WHERE [milliseconds] > @p1) SELECT TOP (@p2) [name] FROM [heavy]`
+		);
+		expect(native.params).toEqual([300000, 2]);
+	});
+
+	it("let rec → WITH nu (pas de mot-clé RECURSIVE en T-SQL)", () => {
+		const stmt = parse(
+			tokenize(
+				"let rec chain = find employee where reports_to = null pick employee_id, reports_to union all find employee as e with one chain as c on e.reports_to = c.employee_id pick e.employee_id, e.reports_to; find chain limit 50"
+			)
+		);
+		if (stmt.operation !== "let") throw new Error("let attendu");
+		const { lowerLet } = requireLower();
+		const native = getMapper("mssql").mapLet!(lowerLet(stmt));
+		if (native.kind !== "sql") throw new Error();
+		expect(native.text).toMatch(/^WITH \[chain\] AS \(\(/);
+		expect(native.text).toContain("UNION ALL");
+		expect(native.text).not.toContain("RECURSIVE");
 	});
 });
 

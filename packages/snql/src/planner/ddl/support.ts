@@ -56,56 +56,67 @@ export const DDL_SUPPORT: Readonly<
 > = {
 	"create-table": {
 		postgres: { mode: "native", locks: [EXCLUSIVE_TABLE] },
+		mssql: { mode: "native", locks: [EXCLUSIVE_TABLE] },
 		mongodb: { mode: "compensated", locks: [METADATA_DATABASE] },
 		kv: { mode: "compensated", locks: [] }
 	},
 	"drop-table": {
 		postgres: { mode: "native", locks: [EXCLUSIVE_TABLE] },
+		mssql: { mode: "native", locks: [EXCLUSIVE_TABLE] },
 		mongodb: { mode: "compensated", locks: [METADATA_DATABASE] },
 		kv: { mode: "compensated", locks: [] }
 	},
 	"add-column": {
 		postgres: { mode: "native", locks: [EXCLUSIVE_TABLE] },
+		mssql: { mode: "native", locks: [EXCLUSIVE_TABLE] },
 		mongodb: { mode: "compensated", locks: [METADATA_DATABASE] },
 		kv: { mode: "compensated", locks: [] }
 	},
 	"drop-column": {
 		postgres: { mode: "native", locks: [EXCLUSIVE_TABLE] },
+		mssql: { mode: "native", locks: [EXCLUSIVE_TABLE] },
 		mongodb: { mode: "compensated", locks: [METADATA_DATABASE] },
 		kv: { mode: "compensated", locks: [] }
 	},
 	"add-index": {
 		postgres: { mode: "native", locks: [] },
+		mssql: { mode: "native", locks: [] },
 		mongodb: { mode: "native", locks: [METADATA_DATABASE] },
 		kv: { mode: "compensated", locks: [] }
 	},
 	"add-unique-index": {
 		postgres: { mode: "native", locks: [] },
+		mssql: { mode: "native", locks: [] },
 		mongodb: { mode: "native", locks: [METADATA_DATABASE] },
 		kv: { mode: "compensated", locks: [] }
 	},
 	"drop-index": {
 		postgres: { mode: "native", locks: [] },
+		mssql: { mode: "native", locks: [] },
 		mongodb: { mode: "native", locks: [METADATA_DATABASE] },
 		kv: { mode: "compensated", locks: [] }
 	},
 	"create-enum": {
 		postgres: { mode: "native", locks: [METADATA_DATABASE] },
+		mssql: { mode: "compensated", locks: [METADATA_DATABASE] },
 		mongodb: { mode: "compensated", locks: [METADATA_DATABASE] },
 		kv: { mode: "compensated", locks: [] }
 	},
 	"add-enum-member": {
 		postgres: { mode: "native", locks: [METADATA_DATABASE] },
+		mssql: { mode: "compensated", locks: [METADATA_DATABASE] },
 		mongodb: { mode: "compensated", locks: [METADATA_DATABASE] },
 		kv: { mode: "compensated", locks: [] }
 	},
 	"drop-enum": {
 		postgres: { mode: "native", locks: [METADATA_DATABASE] },
+		mssql: { mode: "compensated", locks: [METADATA_DATABASE] },
 		mongodb: { mode: "compensated", locks: [METADATA_DATABASE] },
 		kv: { mode: "compensated", locks: [] }
 	},
 	"drop-ref": {
 		postgres: { mode: "native", locks: [EXCLUSIVE_TABLE] },
+		mssql: { mode: "native", locks: [EXCLUSIVE_TABLE] },
 		mongodb: { mode: "compensated", locks: [METADATA_DATABASE] },
 		kv: { mode: "compensated", locks: [] }
 	}
@@ -156,5 +167,10 @@ export function ddlSupportCell(
 }
 
 function isKnownEngine(engine: string): engine is EngineKind {
-	return engine === "postgres" || engine === "mongodb" || engine === "kv";
+	return (
+		engine === "postgres" ||
+		engine === "mongodb" ||
+		engine === "kv" ||
+		engine === "mssql"
+	);
 }

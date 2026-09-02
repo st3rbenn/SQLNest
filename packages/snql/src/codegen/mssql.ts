@@ -1,6 +1,7 @@
 import { SnqlError } from "../diagnostics";
 import type {
 	CastTarget,
+	IntrospectPlan,
 	LogicalPlan,
 	MutationPlan,
 	PlanExpr,
@@ -147,7 +148,12 @@ const MSSQL_DIALECT: SqlDialect = {
 	upsertNewRef: (columnSql) => `[${MERGE_SOURCE}].${columnSql}`,
 	onJsonColumn: (alias) => {
 		jsonColumns.add(alias);
-	}
+	},
+	// T-SQL écrit ses CTE récursifs avec un WITH nu (pas de mot-clé
+	// RECURSIVE). Garde-fou runaway : MAXRECURSION serveur = 100 par défaut
+	// (erreur claire au-delà) — miroir de la protection statement_timeout du
+	// let rec PG, par profondeur plutôt que par durée.
+	recursiveCtePrefix: "WITH"
 };
 
 const MSSQL = createSqlRenderer(MSSQL_DIALECT);
@@ -213,6 +219,131 @@ export const mssqlMapper: Mapper = {
 			: { engine: "mssql", kind: "transaction", steps };
 	},
 	/**
+	 * `let x = …; body` → `WITH … BODY` (CTE natifs T-SQL, récursifs sans
+	 * mot-clé RECURSIVE — voir recursiveCtePrefix). Bindings + body partagent
+	 * la ParamList (placeholders @pN séquentiels).
+	 */
+	mapLet(plan: import("../ir/plan").LetPlan): NativeQuery {
+		jsonColumns = new Set();
+		const params = newParams();
+		const text = MSSQL.renderLet(plan, params, renderMutation);
+		const collected = [...jsonColumns];
+		return {
+			engine: "mssql",
+			kind: "sql",
+			text,
+			params: params.all(),
+			paramSpans: params.allSpans(),
+			...(collected.length > 0 ? { jsonColumns: collected } : {})
+		};
+	},
+	/**
+	 * Introspection tier-1 (M/5) — miroir du pattern PG : INFORMATION_SCHEMA
+	 * + sys.* avec le namespace bindé. Les enums viennent de la table
+	 * metadata `_snql_enums` (compensation — T-SQL n'a pas de type enum, M/6
+	 * l'écrira au `create enum`) : `IF OBJECT_ID(...)` garde les deux
+	 * branches (table absente → 0 row, même shape — parité Mongo
+	 * `_snql_enums` manquante). Les postOps wrappent CHAQUE branche du IF
+	 * (un IF n'est pas une expression sous-requêtable) et le baseText des
+	 * kinds wrappés ne porte JAMAIS d'ORDER BY (interdit en sous-requête
+	 * T-SQL) — l'ordre par défaut passe en `defaultOrder` du wrapper.
+	 */
+	mapIntrospect(
+		plan: IntrospectPlan,
+		ctx?: import("./mapper").MapperContext
+	): NativeQuery {
+		// `list schema_events` — table système SQLNest, routée par le backend
+		// (jamais le tunnel proxy vers la DB user). Copie du contrat PG.
+		if (plan.kind === "list-schema-events") {
+			return plan.postOps !== undefined && plan.postOps.length > 0
+				? {
+						engine: "mssql",
+						kind: "sqlnest-introspect",
+						target: "schema-events",
+						postOps: plan.postOps
+					}
+				: {
+						engine: "mssql",
+						kind: "sqlnest-introspect",
+						target: "schema-events"
+					};
+		}
+		// Miroir du garde-fou PG : le refus vit au planner (matrice), ce
+		// check évite un fallback silencieux si le kind descend jusqu'ici.
+		if (plan.kind === "list-databases") {
+			throw new SnqlError(
+				"'list databases' non supporté sur MSSQL — utilise 'list schemas' pour les namespaces intra-DB.",
+				"codegen_introspect_unsupported"
+			);
+		}
+		const namespace = ctx?.namespace ?? "dbo";
+		const params = newParams();
+		const hasPostOps = plan.postOps !== undefined && plan.postOps.length > 0;
+
+		if (plan.kind === "list-enums" || plan.kind === "describe-enum") {
+			return renderEnumsIntrospect(plan, namespace, params, hasPostOps);
+		}
+
+		let baseText: string;
+		// `defaultOrder` : ORDER BY appliqué hors wrap (suffix direct) ET
+		// passé au wrapper quand ses colonnes sont projetées. describe-table
+		// trie sur ORDINAL_POSITION (non projetée) → suffix seulement ; sous
+		// postOps sans sort, l'ordre n'est pas garanti (même sémantique que
+		// la sous-requête PG).
+		let defaultOrder: string;
+		let wrapOrder: string | undefined;
+		if (plan.kind === "list-tables") {
+			const nsRef = params.add(namespace);
+			baseText = `SELECT TABLE_NAME AS name FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = ${nsRef} AND TABLE_TYPE = 'BASE TABLE'`;
+			defaultOrder = "[name] ASC";
+			wrapOrder = defaultOrder;
+		} else if (plan.kind === "describe-table") {
+			if (plan.target === undefined) {
+				throw new SnqlError(
+					"'describe' sans table cible (bug parser)",
+					"codegen_introspect_missing_target"
+				);
+			}
+			const nsRef = params.add(namespace);
+			const targetRef = params.add(plan.target);
+			baseText = describeTableSql(nsRef, targetRef);
+			defaultOrder = "c.ORDINAL_POSITION ASC";
+			wrapOrder = undefined;
+		} else if (plan.kind === "list-schemas") {
+			// Exclut la plomberie MSSQL (schemas système + rôles db_*) — l'user
+			// veut voir SES schemas, miroir du filtre pg_* côté PG.
+			baseText = `SELECT s.name AS name FROM sys.schemas s WHERE s.name NOT IN ('sys', 'INFORMATION_SCHEMA', 'guest') AND s.name NOT LIKE 'db\\_%' ESCAPE '\\'`;
+			defaultOrder = "[name] ASC";
+			wrapOrder = defaultOrder;
+		} else if (plan.kind === "list-indexes") {
+			const nsRef = params.add(namespace);
+			const targetRef = plan.target !== undefined ? params.add(plan.target) : undefined;
+			baseText = listIndexesSql(nsRef, targetRef);
+			defaultOrder = "[table] ASC, [name] ASC";
+			wrapOrder = defaultOrder;
+		} else {
+			throw new SnqlError(
+				`Introspect kind '${plan.kind}' non supporté par le codegen MSSQL M/5`,
+				"codegen_introspect_unsupported"
+			);
+		}
+		const text = hasPostOps
+			? MSSQL.wrapIntrospectPostOps(
+					baseText,
+					plan.postOps ?? [],
+					params,
+					wrapOrder
+				)
+			: `${baseText} ORDER BY ${defaultOrder}`;
+		return {
+			engine: "mssql",
+			kind: "sql",
+			text,
+			params: params.all(),
+			paramSpans: params.allSpans()
+		};
+	},
+	/**
 	 * `raw "SQL"` → SqlQuery text-only, params vides (l'adapter M/1 exécute
 	 * déjà). Refus explicit d'un `raw {...}` (payload document Mongo).
 	 */
@@ -232,6 +363,129 @@ export const mssqlMapper: Mapper = {
 		};
 	}
 };
+
+/**
+ * SQL de `describe <table>` — miroir du describeTableSql PG : une ligne par
+ * colonne avec type, nullable, default, is_primary_key, foreign_key
+ * (`table.col` de la cible, première par ordre lexical sur FK multi-cible).
+ * Pas d'ORDER BY dans le baseText (interdit en sous-requête T-SQL quand des
+ * postOps wrappent) — l'ordre ORDINAL_POSITION est appliqué en suffix hors
+ * wrap. COLUMN_DEFAULT remonte tel quel, parenthèses T-SQL incluses
+ * (`((0))`) — pas de strip regex, T-SQL n'a pas de regex_replace.
+ */
+function describeTableSql(ns: string, target: string): string {
+	return (
+		`SELECT ` +
+			`c.COLUMN_NAME AS name, ` +
+			`c.DATA_TYPE AS type, ` +
+			`CAST(CASE WHEN c.IS_NULLABLE = 'YES' THEN 1 ELSE 0 END AS bit) AS nullable, ` +
+			`c.COLUMN_DEFAULT AS [default], ` +
+			`CAST(CASE WHEN pk.column_name IS NOT NULL THEN 1 ELSE 0 END AS bit) AS is_primary_key, ` +
+			`fk.foreign_key AS foreign_key ` +
+		`FROM INFORMATION_SCHEMA.COLUMNS c ` +
+		`LEFT JOIN (` +
+			`SELECT kcu.COLUMN_NAME AS column_name ` +
+			`FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc ` +
+			`JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu ` +
+				`ON kcu.CONSTRAINT_NAME = tc.CONSTRAINT_NAME ` +
+				`AND kcu.TABLE_SCHEMA = tc.TABLE_SCHEMA ` +
+				`AND kcu.TABLE_NAME = tc.TABLE_NAME ` +
+			`WHERE tc.CONSTRAINT_TYPE = 'PRIMARY KEY' ` +
+				`AND tc.TABLE_SCHEMA = ${ns} AND tc.TABLE_NAME = ${target}` +
+		`) pk ON pk.column_name = c.COLUMN_NAME ` +
+		`LEFT JOIN (` +
+			`SELECT COL_NAME(fkc.parent_object_id, fkc.parent_column_id) AS column_name, ` +
+				`MIN(OBJECT_NAME(fkc.referenced_object_id) + '.' + COL_NAME(fkc.referenced_object_id, fkc.referenced_column_id)) AS foreign_key ` +
+			`FROM sys.foreign_key_columns fkc ` +
+			`JOIN sys.tables t ON t.object_id = fkc.parent_object_id ` +
+			`WHERE SCHEMA_NAME(t.schema_id) = ${ns} AND t.name = ${target} ` +
+			`GROUP BY COL_NAME(fkc.parent_object_id, fkc.parent_column_id)` +
+		`) fk ON fk.column_name = c.COLUMN_NAME ` +
+		`WHERE c.TABLE_SCHEMA = ${ns} AND c.TABLE_NAME = ${target}`
+	);
+}
+
+/**
+ * SQL de `list indexes [on <table>]` — sys.indexes porte les flags,
+ * STRING_AGG WITHIN GROUP reconstruit la liste des colonnes clés dans
+ * l'ordre déclaré (key_ordinal). Les heaps (index name NULL) sont exclus.
+ */
+function listIndexesSql(ns: string, target: string | undefined): string {
+	const tableFilter = target !== undefined ? ` AND t.name = ${target}` : "";
+	return (
+		`SELECT ` +
+			`i.name AS name, ` +
+			`t.name AS [table], ` +
+			`i.is_unique AS [unique], ` +
+			`(SELECT STRING_AGG(COL_NAME(ic.object_id, ic.column_id), ', ') WITHIN GROUP (ORDER BY ic.key_ordinal) ` +
+			`FROM sys.index_columns ic ` +
+			`WHERE ic.object_id = i.object_id AND ic.index_id = i.index_id AND ic.is_included_column = 0) AS columns ` +
+		`FROM sys.indexes i ` +
+		`JOIN sys.tables t ON t.object_id = i.object_id ` +
+		`WHERE SCHEMA_NAME(t.schema_id) = ${ns} AND i.name IS NOT NULL${tableFilter}`
+	);
+}
+
+/**
+ * `list enums` / `describe enum <name>` — lecture de la table metadata
+ * `_snql_enums(name, members)` (members = JSON array, écrit par le DDL
+ * compensé M/6). `IF OBJECT_ID(@pN)` garde : table absente → la branche
+ * ELSE renvoie 0 row au MÊME shape (parité Mongo `_snql_enums` manquante →
+ * 0 rows, jamais une erreur). Avec postOps, CHAQUE branche est wrappée (les
+ * placeholders du wrap sont bindés par branche — valeurs dupliquées, ordre
+ * positionnel correct). OPENJSON = 2016+/compat 130 (noté M/7).
+ */
+function renderEnumsIntrospect(
+	plan: IntrospectPlan,
+	namespace: string,
+	params: ParamList,
+	hasPostOps: boolean
+): NativeQuery {
+	const nsIdent = quoteIdent(namespace);
+	const metaTable = `${nsIdent}.[_snql_enums]`;
+	const objectRef = params.add(`${namespace}._snql_enums`);
+	let mainSelect: string;
+	let emptySelect: string;
+	let defaultOrder: string;
+	if (plan.kind === "list-enums") {
+		mainSelect = `SELECT [name], (SELECT COUNT(*) FROM OPENJSON([members])) AS members_count FROM ${metaTable}`;
+		emptySelect = `SELECT TOP 0 CAST(NULL AS nvarchar(4000)) AS [name], CAST(NULL AS int) AS members_count`;
+		defaultOrder = "[name] ASC";
+	} else {
+		if (plan.target === undefined) {
+			throw new SnqlError(
+				"'describe enum' sans nom cible (bug parser)",
+				"codegen_introspect_missing_target"
+			);
+		}
+		const targetRef = params.add(plan.target);
+		mainSelect =
+			`SELECT j.value AS member, CAST(j.[key] AS int) + 1 AS position ` +
+			`FROM ${metaTable} CROSS APPLY OPENJSON([members]) j ` +
+			`WHERE [name] = ${targetRef}`;
+		emptySelect = `SELECT TOP 0 CAST(NULL AS nvarchar(4000)) AS member, CAST(NULL AS int) AS position`;
+		defaultOrder = "[position] ASC";
+	}
+	const mainText = hasPostOps
+		? MSSQL.wrapIntrospectPostOps(
+				mainSelect,
+				plan.postOps ?? [],
+				params,
+				defaultOrder
+			)
+		: `${mainSelect} ORDER BY ${defaultOrder}`;
+	const emptyText = hasPostOps
+		? MSSQL.wrapIntrospectPostOps(emptySelect, plan.postOps ?? [], params)
+		: emptySelect;
+	const text = `IF OBJECT_ID(${objectRef}, N'U') IS NOT NULL ${mainText} ELSE ${emptyText}`;
+	return {
+		engine: "mssql",
+		kind: "sql",
+		text,
+		params: params.all(),
+		paramSpans: params.allSpans()
+	};
+}
 
 function renderReadAsSqlQuery(plan: LogicalPlan): SqlQuery {
 	const params = newParams();

@@ -97,7 +97,8 @@ const PG_DIALECT: SqlDialect = {
 		if (offsetRef !== undefined) bits.push(`OFFSET ${offsetRef}`);
 		return { afterOrder: bits.join(" ") };
 	},
-	upsertNewRef: (columnSql) => `EXCLUDED.${columnSql}`
+	upsertNewRef: (columnSql) => `EXCLUDED.${columnSql}`,
+	recursiveCtePrefix: "WITH RECURSIVE"
 };
 
 const PG = createSqlRenderer(PG_DIALECT);
@@ -248,7 +249,7 @@ export const postgresMapper: Mapper = {
 		}
 		// stages pipeline (where/pick/sort/limit) → SELECT wrapper.
 		const text = plan.postOps !== undefined && plan.postOps.length > 0
-			? wrapIntrospectWithPostOps(baseText, plan.postOps, params)
+			? PG.wrapIntrospectPostOps(baseText, plan.postOps, params)
 			: baseText;
 		return {
 			engine: "postgres",
@@ -313,32 +314,7 @@ export const postgresMapper: Mapper = {
 	 */
 	mapLet(plan: LetPlan): NativeQuery {
 		const params = newParams();
-		const bindingParts: string[] = [];
-		let hasRecursive = false;
-		for (const b of plan.bindings) {
-			if (b.kind === "recursive") {
-				hasRecursive = true;
-				const baseSql = renderPlan(b.base, params);
-				const stepSql = renderPlan(b.step, params);
-				// Parens explicites autour de chaque membre : sans elles un `sort/limit`
-				// dans la base laisserait le LIMIT s'attacher au tout de l'union.
-				bindingParts.push(
-					`${quoteIdent(b.name)} AS ((${baseSql}) UNION ALL (${stepSql}))`
-				);
-			} else {
-				const inner = renderPlan(b.plan, params);
-				bindingParts.push(`${quoteIdent(b.name)} AS (${inner})`);
-			}
-		}
-		const bodyText = plan.body.op === "insert"
-			|| plan.body.op === "update"
-			|| plan.body.op === "delete"
-			? renderMutation(plan.body, params)
-			: renderPlan(plan.body, params);
-		// `WITH RECURSIVE` s'applique globalement à TOUS les bindings du WITH dès
-		// qu'un seul est récursif ; les bindings plain restent valides sous ce prefix.
-		const prefix = hasRecursive ? "WITH RECURSIVE" : "WITH";
-		const text = `${prefix} ${bindingParts.join(", ")} ${bodyText}`;
+		const text = PG.renderLet(plan, params, renderMutation);
 		return {
 			engine: "postgres",
 			kind: "sql",
@@ -456,63 +432,6 @@ function listIndexesSql(ns: string, target: string | undefined): string {
 		`WHERE n.nspname = ${ns}${tableFilter} ` +
 		`ORDER BY t.relname, i.relname`
 	);
-}
-
-/**
- * wrap la query d'introspection en subquery et applique les
- * postOps (filter/project/sort/limit) via un SELECT wrapper standard. Les
- * $N nouveaux (predicates, limit) sont ajoutés au ParamList commun — l'ordre
- * séquentiel `$1..$N` reste bind-safe côté driver PG.
- *
- * Aggregate/join dans postOps refusés (le parseIntrospectTail rejette déjà
- * with/group/having) — cette route reste sur les stages simples.
- */
-function wrapIntrospectWithPostOps(
-	baseText: string,
-	postOps: readonly import("../planner/planner").CompensationOp[],
-	params: ParamList
-): string {
-	const wrapAlias = "t";
-	const whereClauses: string[] = [];
-	let projectSql: string | undefined;
-	let orderSql: string | undefined;
-	let limitSql: string | undefined;
-	let offsetSql: string | undefined;
-	for (const op of postOps) {
-		switch (op.op) {
-			case "filter":
-				whereClauses.push(renderExpr(op.predicate, params));
-				break;
-			case "project":
-				projectSql = op.fields.map((f: PlanProjectField) => renderProjection(f, params)).join(", ");
-				break;
-			case "sort":
-				orderSql = op.keys.map(renderSortKey).join(", ");
-				break;
-			case "limit":
-				limitSql = String(op.count);
-				if (op.offset !== undefined) offsetSql = String(op.offset);
-				break;
-			case "join":
-			case "aggregate":
-				// Ces cas ne devraient pas apparaître (parseIntrospectTail refuse
-				// with/group/having), mais on cadre pour fail fast si un futur
-				// refactor introduit la voie.
-				throw new SnqlError(
-					`Op '${op.op}' non supporté dans un post-traitement d'introspection`,
-					"codegen_introspect_postop_unsupported"
-				);
-		}
-	}
-	const parts: string[] = [
-		`SELECT ${projectSql ?? "*"}`,
-		`FROM (${baseText}) AS ${quoteIdent(wrapAlias)}`
-	];
-	if (whereClauses.length > 0) parts.push(`WHERE ${whereClauses.join(" AND ")}`);
-	if (orderSql !== undefined) parts.push(`ORDER BY ${orderSql}`);
-	if (limitSql !== undefined) parts.push(`LIMIT ${limitSql}`);
-	if (offsetSql !== undefined) parts.push(`OFFSET ${offsetSql}`);
-	return parts.join(" ");
 }
 
 /**

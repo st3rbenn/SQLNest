@@ -480,3 +480,118 @@ describe.skipIf(!hasMssql)("mssql écritures SNQL (intégration M/4)", () => {
 		});
 	});
 });
+
+describe.skipIf(!hasMssql)("mssql introspection tier-1 + let (intégration M/5)", () => {
+	async function withConn<T>(
+		fn: (conn: Awaited<ReturnType<typeof mssqlAdapter.connect>>) => Promise<T>
+	): Promise<T> {
+		const conn = await mssqlAdapter.connect(
+			resolveMssqlConfig({ url: MSSQL_URL })
+		);
+		try {
+			return await fn(conn);
+		} finally {
+			await conn.close();
+		}
+	}
+
+	it("list tables → 11 tables chinook triées", async () => {
+		await withConn(async (conn) => {
+			const rs = await runQuery(conn, "list tables");
+			expect(rs.rows.map((r) => r["name"])).toEqual([
+				"album",
+				"artist",
+				"customer",
+				"employee",
+				"genre",
+				"invoice",
+				"invoice_line",
+				"media_type",
+				"playlist",
+				"playlist_track",
+				"track"
+			]);
+		});
+	});
+
+	it("list tables + where/limit → postOps wrappés TOP", async () => {
+		await withConn(async (conn) => {
+			const rs = await runQuery(
+				conn,
+				`list tables where name like "p%" limit 1`
+			);
+			expect(rs.rows.map((r) => r["name"])).toEqual(["playlist"]);
+		});
+	});
+
+	it("describe track → colonnes, PK, FK target", async () => {
+		await withConn(async (conn) => {
+			const rs = await runQuery(conn, "describe track");
+			expect(rs.rows[0]).toMatchObject({
+				name: "track_id",
+				type: "int",
+				nullable: false,
+				is_primary_key: true
+			});
+			const albumFk = rs.rows.find((r) => r["name"] === "album_id");
+			expect(albumFk?.["foreign_key"]).toBe("album.album_id");
+			expect(albumFk?.["nullable"]).toBe(true);
+		});
+	});
+
+	it("list indexes on album → PK index unique présent", async () => {
+		await withConn(async (conn) => {
+			const rs = await runQuery(conn, "list indexes on album");
+			const pk = rs.rows.find((r) => String(r["name"]).startsWith("PK_"));
+			expect(pk).toMatchObject({ table: "album", unique: true });
+			expect(pk?.["columns"]).toBe("album_id");
+		});
+	});
+
+	it("list schemas → dbo présent, plomberie sys/db_* exclue", async () => {
+		await withConn(async (conn) => {
+			const rs = await runQuery(conn, "list schemas");
+			const names = rs.rows.map((r) => r["name"]);
+			expect(names).toContain("dbo");
+			expect(names).not.toContain("sys");
+			expect(names.some((n) => String(n).startsWith("db_"))).toBe(false);
+		});
+	});
+
+	it("list enums → table metadata absente = 0 row, JAMAIS une erreur", async () => {
+		await withConn(async (conn) => {
+			const rs = await runQuery(conn, "list enums");
+			expect(rs.rowCount).toBe(0);
+			expect(rs.rows).toEqual([]);
+		});
+	});
+
+	it("describe enum inconnu → 0 row (miroir table absente)", async () => {
+		await withConn(async (conn) => {
+			const rs = await runQuery(conn, "describe enum statut");
+			expect(rs.rowCount).toBe(0);
+		});
+	});
+
+	it("let → WITH natif réel", async () => {
+		await withConn(async (conn) => {
+			const rs = await runQuery(
+				conn,
+				"let heavy = find track where milliseconds > 3000000; find heavy pick name sort name limit 2"
+			);
+			expect(rs.rowCount).toBe(2);
+			expect(rs.written).toBe(false);
+		});
+	});
+
+	it("let rec → CTE récursif réel (org chart employee)", async () => {
+		await withConn(async (conn) => {
+			const rs = await runQuery(
+				conn,
+				"let rec org = find employee where reports_to = null pick employee_id, first_name union all find employee as e with one org as o on e.reports_to = o.employee_id pick e.employee_id, e.first_name; find org pick employee_id sort employee_id limit 20"
+			);
+			// Chinook : 8 employees, tous atteignables depuis le root (Andrew).
+			expect(rs.rowCount).toBe(8);
+		});
+	});
+});

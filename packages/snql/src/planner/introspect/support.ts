@@ -15,7 +15,7 @@
 import type { IntrospectKind } from "../../parser/ast";
 
 /** Engines connus du planner. Les engines inconnus refusent tout par défaut. */
-export type EngineKind = "postgres" | "mongodb" | "kv";
+export type EngineKind = "postgres" | "mongodb" | "kv" | "mssql";
 
 /**
  * Matrice de support par kind côté engine adapter (CLI). Un kind présent dans
@@ -28,14 +28,14 @@ export type EngineKind = "postgres" | "mongodb" | "kv";
 export const INTROSPECT_SUPPORT: Readonly<
 	Record<IntrospectKind, ReadonlySet<EngineKind>>
 > = {
-	"list-tables": new Set(["postgres", "mongodb"]),
-	"describe-table": new Set(["postgres", "mongodb"]),
-	"list-schemas": new Set(["postgres", "mongodb"]),
-	"list-indexes": new Set(["postgres", "mongodb"]),
+	"list-tables": new Set(["postgres", "mongodb", "mssql"]),
+	"describe-table": new Set(["postgres", "mongodb", "mssql"]),
+	"list-schemas": new Set(["postgres", "mongodb", "mssql"]),
+	"list-indexes": new Set(["postgres", "mongodb", "mssql"]),
 	"list-databases": new Set(["mongodb"]),
 	"list-schema-events": new Set(),
-	"list-enums": new Set(["postgres", "mongodb"]),
-	"describe-enum": new Set(["postgres", "mongodb"])
+	"list-enums": new Set(["postgres", "mongodb", "mssql"]),
+	"describe-enum": new Set(["postgres", "mongodb", "mssql"])
 };
 
 /**
@@ -53,6 +53,8 @@ export const INTROSPECT_HINTS: Readonly<
 	"list-indexes": {},
 	"list-databases": {
 		postgres:
+			"utilise 'list schemas' pour les namespaces intra-DB",
+		mssql:
 			"utilise 'list schemas' pour les namespaces intra-DB"
 	},
 	// Un hint identique pour tous les engines : c'est un kind routé côté
@@ -63,6 +65,8 @@ export const INTROSPECT_HINTS: Readonly<
 		mongodb:
 			"'list schema_events' est routé par le client SQLNest — utilise-le depuis la console web",
 		kv:
+			"'list schema_events' est routé par le client SQLNest — utilise-le depuis la console web",
+		mssql:
 			"'list schema_events' est routé par le client SQLNest — utilise-le depuis la console web"
 	},
 	"list-enums": {},
@@ -133,5 +137,10 @@ export function introspectHintFor(
 }
 
 function isKnownEngine(engine: string): engine is EngineKind {
-	return engine === "postgres" || engine === "mongodb" || engine === "kv";
+	return (
+		engine === "postgres" ||
+		engine === "mongodb" ||
+		engine === "kv" ||
+		engine === "mssql"
+	);
 }

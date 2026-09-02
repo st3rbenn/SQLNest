@@ -3,6 +3,7 @@ import { SNQL_FUNCTIONS } from "../functions";
 import type {
 	CastTarget,
 	CompareOp,
+	LetPlan,
 	LogicalPlan,
 	MutationPlan,
 	PlanExpr,
@@ -13,6 +14,7 @@ import type {
 } from "../ir/plan";
 import { isSqlDecimal, linearize } from "../ir/plan";
 import type { Span } from "../lexer/token";
+import type { CompensationOp } from "../planner/planner";
 import type { SerializedSpan, SqlQuery, SqlTransactionStep } from "./mapper";
 
 /**
@@ -98,6 +100,11 @@ export interface SqlDialect {
 	 * absent (le driver parse json/jsonb nativement).
 	 */
 	onJsonColumn?(alias: string): void;
+	/**
+	 * Préfixe du WITH quand au moins un binding est récursif : PG exige
+	 * `WITH RECURSIVE`, T-SQL écrit ses CTE récursifs avec un `WITH` nu.
+	 */
+	readonly recursiveCtePrefix: string;
 }
 
 /** Contexte de typage d'un paramètre pour `SqlDialect.typedParam`. */
@@ -258,9 +265,42 @@ export interface SqlRenderer {
 	renderPath(path: readonly string[]): string;
 	/** Path d'une clé de join mutation : col bare → préfixée par l'alias. */
 	renderJoinPath(path: readonly string[], alias: string): string;
+	/**
+	 * `let x = …; body` → `WITH b1 AS (…), b2 AS (…) BODY_SQL`. Bindings et
+	 * body partagent la MÊME ParamList (placeholders séquentiels à travers
+	 * tout le WITH+BODY). Le préfixe récursif vient du dialecte
+	 * (`WITH RECURSIVE` PG, `WITH` nu T-SQL). `renderMutation` est injecté
+	 * par le mapper (le codegen mutation est dialecte-spécifique).
+	 */
+	renderLet(
+		plan: LetPlan,
+		params: ParamList,
+		renderMutation: (plan: MutationPlan, params: ParamList) => string
+	): string;
+	/**
+	 * Wrap une query d'introspection en sous-requête et applique les postOps
+	 * (filter/project/sort/limit) via un SELECT wrapper. La pagination passe
+	 * par les fragments du dialecte, avec des LITERAUX inline (pas de
+	 * placeholders — comportement historique PG, les counts viennent du plan,
+	 * jamais de l'user). `defaultOrder` (optionnel) est appliqué si les
+	 * postOps n'ont pas de sort — pour les dialectes qui ne tolèrent pas
+	 * d'ORDER BY dans la sous-requête (T-SQL) et perdent l'ordre de base.
+	 */
+	wrapIntrospectPostOps(
+		baseText: string,
+		postOps: readonly CompensationOp[],
+		params: ParamList,
+		defaultOrder?: string
+	): string;
 }
 
 export function createSqlRenderer(dialect: SqlDialect): SqlRenderer {
+	// Collections dont les joins doivent être INNER (référence au CTE
+	// récursif dans son propre step — voir renderLeftJoin). Posé par
+	// renderLet autour du rendu du step ; le codegen est strictement
+	// synchrone, la variable de closure est safe.
+	let innerJoinTargets: ReadonlySet<string> = new Set();
+
 	function quoteIdent(name: string): string {
 		if (!IDENT_RE.test(name)) {
 			throw new SnqlError(
@@ -699,7 +739,18 @@ export function createSqlRenderer(dialect: SqlDialect): SqlRenderer {
 			: table;
 		const local = qualify(base, join.localField);
 		const foreign = qualify(join.as, join.foreignField);
-		return `LEFT JOIN ${table_ref} ON ${foreign} = ${local}`;
+		// Membre récursif d'un CTE : la référence au CTE lui-même ne peut pas
+		// vivre dans un OUTER JOIN (PG « recursive reference must not appear
+		// within an outer join », T-SQL « Outer join is not allowed in the
+		// recursive part ») — et l'INNER est LA sémantique de la récursion
+		// (joindre le niveau précédent ; un LEFT accumulerait tous les
+		// orphelins à chaque itération = boucle infinie). Seuls les joins qui
+		// CIBLENT le CTE récursif basculent — un LEFT JOIN vers une autre
+		// table reste légal dans le step.
+		const joinKeyword = innerJoinTargets.has(join.collection)
+			? "INNER JOIN"
+			: "LEFT JOIN";
+		return `${joinKeyword} ${table_ref} ON ${foreign} = ${local}`;
 	}
 
 	function renderExpr(expr: PlanExpr, params: ParamList): string {
@@ -917,6 +968,123 @@ export function createSqlRenderer(dialect: SqlDialect): SqlRenderer {
 			: path;
 	}
 
+	function renderLet(
+		plan: LetPlan,
+		params: ParamList,
+		renderMutation: (plan: MutationPlan, params: ParamList) => string
+	): string {
+		const bindingParts: string[] = [];
+		let hasRecursive = false;
+		for (const b of plan.bindings) {
+			if (b.kind === "recursive") {
+				hasRecursive = true;
+				const baseSql = renderPlan(b.base, params);
+				// Le step référence le CTE en cours de définition : ses joins
+				// vers b.name doivent être INNER (contrainte PG ET T-SQL).
+				const previous = innerJoinTargets;
+				innerJoinTargets = new Set([...previous, b.name]);
+				let stepSql: string;
+				try {
+					stepSql = renderPlan(b.step, params);
+				} finally {
+					innerJoinTargets = previous;
+				}
+				// Parens explicites autour de chaque membre : sans elles un
+				// `sort/limit` dans la base laisserait le LIMIT s'attacher au tout
+				// de l'union.
+				bindingParts.push(
+					`${quoteIdent(b.name)} AS ((${baseSql}) UNION ALL (${stepSql}))`
+				);
+			} else {
+				const inner = renderPlan(b.plan, params);
+				bindingParts.push(`${quoteIdent(b.name)} AS (${inner})`);
+			}
+		}
+		const bodyText = plan.body.op === "insert"
+			|| plan.body.op === "update"
+			|| plan.body.op === "delete"
+			? renderMutation(plan.body, params)
+			: renderPlan(plan.body, params);
+		// Le préfixe récursif s'applique globalement à TOUS les bindings du WITH
+		// dès qu'un seul est récursif ; les bindings plain restent valides.
+		const prefix = hasRecursive ? dialect.recursiveCtePrefix : "WITH";
+		return `${prefix} ${bindingParts.join(", ")} ${bodyText}`;
+	}
+
+	function wrapIntrospectPostOps(
+		baseText: string,
+		postOps: readonly CompensationOp[],
+		params: ParamList,
+		defaultOrder?: string
+	): string {
+		const wrapAlias = "t";
+		const whereClauses: string[] = [];
+		let projectSql: string | undefined;
+		let orderSql: string | undefined;
+		let limit: number | null = null;
+		let offset: number | null = null;
+		for (const op of postOps) {
+			switch (op.op) {
+				case "filter":
+					whereClauses.push(renderExpr(op.predicate, params));
+					break;
+				case "project":
+					projectSql = op.fields
+						.map((f) => renderProjection(f, params))
+						.join(", ");
+					break;
+				case "sort":
+					orderSql = op.keys.map(renderSortKey).join(", ");
+					break;
+				case "limit":
+					limit = op.count;
+					if (op.offset !== undefined) offset = op.offset;
+					break;
+				case "join":
+				case "aggregate":
+					// Ces cas ne devraient pas apparaître (parseIntrospectTail refuse
+					// with/group/having), mais on cadre pour fail fast si un futur
+					// refactor introduit la voie.
+					throw new SnqlError(
+						`Op '${op.op}' non supporté dans un post-traitement d'introspection`,
+						"codegen_introspect_postop_unsupported"
+					);
+			}
+		}
+		if (orderSql === undefined && defaultOrder !== undefined) {
+			orderSql = defaultOrder;
+		}
+		// Pagination en literals inline (jamais des valeurs user — elles
+		// viennent du plan). limitFragments reçoit les literals comme refs.
+		const limitFragments = limit !== null || offset !== null
+			? dialect.limitFragments({
+					limitRef: limit !== null ? String(limit) : "",
+					offsetRef: offset !== null ? String(offset) : undefined,
+					hasOrderBy: orderSql !== undefined
+				})
+			: undefined;
+		let selectPrefix = "SELECT";
+		if (limitFragments?.selectPrefixSuffix !== undefined) {
+			selectPrefix = `${selectPrefix} ${limitFragments.selectPrefixSuffix}`;
+		}
+		const parts: string[] = [
+			`${selectPrefix} ${projectSql ?? "*"}`,
+			`FROM (${baseText}) AS ${quoteIdent(wrapAlias)}`
+		];
+		if (whereClauses.length > 0) {
+			parts.push(`WHERE ${whereClauses.join(" AND ")}`);
+		}
+		if (orderSql !== undefined) {
+			parts.push(`ORDER BY ${orderSql}`);
+		} else if (limitFragments?.forcedOrderBy !== undefined) {
+			parts.push(`ORDER BY ${limitFragments.forcedOrderBy}`);
+		}
+		if (limitFragments?.afterOrder !== undefined && limitFragments.afterOrder !== "") {
+			parts.push(limitFragments.afterOrder);
+		}
+		return parts.join(" ");
+	}
+
 	return {
 		dialect,
 		newParams: () => new ParamList(dialect),
@@ -926,6 +1094,8 @@ export function createSqlRenderer(dialect: SqlDialect): SqlRenderer {
 		renderProjection,
 		renderSortKey,
 		renderPath,
-		renderJoinPath
+		renderJoinPath,
+		renderLet,
+		wrapIntrospectPostOps
 	};
 }

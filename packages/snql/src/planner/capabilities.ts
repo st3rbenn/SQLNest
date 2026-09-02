@@ -165,7 +165,10 @@ export const MSSQL_CAPABILITIES: Capabilities = caps(
 		"upsert",
 		"write-join",
 		"insert-select",
-		"transaction"
+		"transaction",
+		"introspect",
+		"cte",
+		"cte-recursive"
 	],
 	["int", "float", "text", "bool", "date", "timestamp"],
 	{ subqueryStrategy: "native" }
