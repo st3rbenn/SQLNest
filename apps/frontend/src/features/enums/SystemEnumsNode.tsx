@@ -71,26 +71,21 @@ export function SystemEnumsNode({
 				minHeight={ENUMS_NODE_MIN_HEIGHT}
 				icon={<IconBraces size={14} stroke={2} color={SYSTEM_BORDER} />}
 				title="Enums"
-				headerRight={
-					<span
-						style={{
-							fontSize: 10,
-							fontWeight: 600,
-							color: SYSTEM_BORDER,
-							fontVariantNumeric: "tabular-nums"
-						}}
-					>
-						{enums.length}
-					</span>
-				}
 				onResizeEnd={onResizeEnd}
 			>
+				{/* Anatomie miroir schema_events : le body est du contenu TRONQUÉ
+				  * par la hauteur (overflow hidden, resize pour voir plus) — PAS
+				  * une zone scrollable. La frame se drag en l'attrapant partout
+				  * SAUF sur les contrôles (chevron+nom, « + ») qui portent
+				  * `nodrag` — sans lui le d3-drag RF capture le mousedown et le
+				  * click ne fire pas (même raison que le footer schema_events).
+				  * Les boutons sont réduits à leur contenu, le reste de chaque
+				  * row est une zone draggable. */}
 				<div
-					className="nowheel nodrag"
 					style={{
 						flex: "1 1 auto",
 						minHeight: 0,
-						overflowY: "auto",
+						overflow: "hidden",
 						padding: "4px 0"
 					}}
 				>
@@ -146,7 +141,7 @@ function EnumRow({
 						display: "flex",
 						alignItems: "center",
 						gap: 5,
-						flex: "1 1 auto",
+						flex: "0 1 auto",
 						minWidth: 0,
 						background: "transparent",
 						border: "none",
@@ -173,17 +168,19 @@ function EnumRow({
 					>
 						{entry.name}
 					</span>
-					<span
-						style={{
-							marginLeft: "auto",
-							flexShrink: 0,
-							fontSize: 10.5,
-							color: "var(--sqlnest-text-tertiary)"
-						}}
-					>
-						{entry.members.length}
-					</span>
 				</button>
+				{/* Spacer draggable — la zone entre le nom et le count attrape
+				  * le drag de la frame (aucun nodrag ici). */}
+				<span style={{ flex: "1 1 auto" }} />
+				<span
+					style={{
+						flexShrink: 0,
+						fontSize: 10.5,
+						color: "var(--sqlnest-text-tertiary)"
+					}}
+				>
+					{entry.members.length}
+				</span>
 				{onAddMember !== undefined && (
 					<button
 						type="button"
