@@ -21,7 +21,7 @@
 		"README.md"
 	],
 	"scripts": {
-		"build": "esbuild src/bin.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/sqlnest.mjs --banner:js='#!/usr/bin/env node' --define:process.env.NODE_ENV=\\\"production\\\" --define:__SQLNEST_CLI_VERSION__=\\\"$npm_package_version\\\" --minify-syntax --external:@noble/curves --external:@noble/hashes --external:@noble/ciphers --external:msgpackr --external:smol-toml --external:ws --external:mongodb --external:pg --external:@inquirer/* --external:mute-stream --external:cli-width --external:@sindresorhus/is --external:signal-exit --external:yoctocolors-cjs",
+		"build": "esbuild src/bin.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/sqlnest.mjs --banner:js='#!/usr/bin/env node' --define:process.env.NODE_ENV=\\\"production\\\" --define:__SQLNEST_CLI_VERSION__=\\\"$npm_package_version\\\" --minify-syntax --external:@noble/curves --external:@noble/hashes --external:@noble/ciphers --external:msgpackr --external:smol-toml --external:ws --external:mongodb --external:pg --external:tedious --external:@inquirer/* --external:mute-stream --external:cli-width --external:@sindresorhus/is --external:signal-exit --external:yoctocolors-cjs",
 		"postbuild": "chmod +x dist/sqlnest.mjs",
 		"prepack": "pnpm build",
 		"prepublishOnly": "pnpm build",
@@ -39,6 +39,7 @@
 		"msgpackr": "^1.11.2",
 		"pg": "^8.13.1",
 		"smol-toml": "^1.7.1",
+		"tedious": "^20.0.0",
 		"ws": "^8.21.2"
 	},
 	"devDependencies": {

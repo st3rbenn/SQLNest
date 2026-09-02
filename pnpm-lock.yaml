@@ -310,6 +310,9 @@ importers:
       smol-toml:
         specifier: ^1.7.1
         version: 1.7.1
+      tedious:
+        specifier: ^20.0.0
+        version: 20.0.0
       ws:
         specifier: ^8.21.2
         version: 8.21.2
@@ -7555,7 +7558,7 @@ snapshots:
       - utf-8-validate
       - vite
 
-  '@vitest/browser@3.2.4(msw@2.11.3(@types/node@24.6.2)(typescript@5.9.3))(playwright@1.55.1)(vitest@3.2.4)':
+  '@vitest/browser@3.2.4(msw@2.11.3(@types/node@24.6.2)(typescript@5.9.3))(playwright@1.55.1)(rolldown-vite@7.1.12(@types/node@24.6.2)(esbuild@0.28.1)(tsx@4.20.6)(yaml@2.8.1))(vitest@3.2.4)':
     dependencies:
       '@testing-library/dom': 10.4.1
       '@testing-library/user-event': 14.6.1(@testing-library/dom@10.4.1)
@@ -7564,7 +7567,7 @@ snapshots:
       magic-string: 0.30.19
       sirv: 3.0.2
       tinyrainbow: 2.0.0
-      vitest: 3.2.4(@types/node@24.6.2)(@vitest/browser@3.2.4)(esbuild@0.25.10)(happy-dom@20.11.1)(msw@2.11.3(@types/node@24.6.2)(typescript@5.9.3))(tsx@4.20.6)(yaml@2.8.1)
+      vitest: 3.2.4(@types/node@24.6.2)(@vitest/browser@3.2.4)(esbuild@0.28.1)(happy-dom@20.11.1)(msw@2.11.3(@types/node@24.6.2)(typescript@5.9.3))(tsx@4.20.6)(yaml@2.8.1)
       ws: 8.21.2
     optionalDependencies:
       playwright: 1.55.1
@@ -10116,7 +10119,7 @@ snapshots:
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@types/node': 24.6.2
-      '@vitest/browser': 3.2.4(msw@2.11.3(@types/node@24.6.2)(typescript@5.9.3))(playwright@1.55.1)(vitest@3.2.4)
+      '@vitest/browser': 3.2.4(msw@2.11.3(@types/node@24.6.2)(typescript@5.9.3))(playwright@1.55.1)(rolldown-vite@7.1.12(@types/node@24.6.2)(esbuild@0.28.1)(tsx@4.20.6)(yaml@2.8.1))(vitest@3.2.4)
       happy-dom: 20.11.1
     transitivePeerDependencies:
       - esbuild
