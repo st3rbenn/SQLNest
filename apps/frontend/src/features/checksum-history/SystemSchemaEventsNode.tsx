@@ -1,18 +1,10 @@
+import { IconChevronDown, IconChevronRight, IconClockHour3, IconServer } from "@tabler/icons-react";
+import type { Node, NodeProps } from "@xyflow/react";
+import { useEffect, useState } from "react";
 import {
-	IconChevronDown,
-	IconChevronRight,
-	IconClockHour3,
-	IconLock,
-	IconServer
-} from "@tabler/icons-react";
-import {
-	Handle,
-	type Node,
-	type NodeProps,
-	NodeResizer,
-	Position
-} from "@xyflow/react";
-import { type CSSProperties, Fragment, useEffect, useState } from "react";
+	SYSTEM_BORDER,
+	SystemNodeShell
+} from "../schema/nodes/SystemNodeShell";
 import type { ChecksumHistoryEntry } from "./checksumHistoryClient";
 import { SCHEMA_EVENTS_COLLECTION } from "./schemaEventsCollection";
 import { UnseenEventsBadge } from "./UnseenEventsBadge";
@@ -27,11 +19,6 @@ export const SYSTEM_TABLE_MIN_HEIGHT = 140;
 
 const HEADER_H = 46;
 const ROW_H = 22;
-
-/** Palette système — distincte des tables user (bleu declared / ambre inferred).
- * Violet indigo sur `--sqlnest-surface` : signale "meta / infrastructure". */
-const SYSTEM_BORDER = "#7c5cff";
-const SYSTEM_HEADER = "rgba(124,92,255,0.12)";
 
 export interface SystemSchemaEventsNodeData {
 	readonly connectionId: string;
@@ -53,47 +40,14 @@ export type SystemSchemaEventsNodeType = Node<
 	"system-schema-events"
 >;
 
-const HIDDEN_HANDLE: CSSProperties = { opacity: 0, border: "none" };
-const HANDLE_SIDES = [
-	{ id: "top", position: Position.Top },
-	{ id: "right", position: Position.Right },
-	{ id: "bottom", position: Position.Bottom },
-	{ id: "left", position: Position.Left }
-] as const;
-
-function AllHandles() {
-	return (
-		<>
-			{HANDLE_SIDES.map((s) => (
-				<Fragment key={s.id}>
-					<Handle
-						id={s.id}
-						type="source"
-						position={s.position}
-						style={HIDDEN_HANDLE}
-					/>
-					<Handle
-						id={s.id}
-						type="target"
-						position={s.position}
-						style={HIDDEN_HANDLE}
-					/>
-				</Fragment>
-			))}
-		</>
-	);
-}
-
 /**
  * Node RF de la table système `schema_events` — audit trail des checksums
  * vus par le canvas courant. Auto-injecté sur tous les canvases,
  * non-supprimable, draggable + resizable comme les tables user.
  *
- * Réutilise le pattern TableNode : `NodeResizer` (4 sides + 4 corners avec
- * onResizeEnd), `AllHandles` (4 sides × source+target invisibles),
- * `width/height` push par RF → shell dimensionnable. Le drag et le resize
- * sont pilotés nativement par RF via `useNodesState` (voir
- * `useSchemaEventsNode`).
+ * Le chrome (bordure violette, header + badge Système, NodeResizer,
+ * AllHandles) vit dans [[SystemNodeShell]] — partagé avec le node Enums.
+ * Ici : uniquement le contenu propre (fields preview + audit trail).
  */
 export function SystemSchemaEventsNode({
 	data,
@@ -131,86 +85,15 @@ export function SystemSchemaEventsNode({
 	return (
 		<div style={{ position: "relative" }}>
 			<UnseenEventsBadge count={unseen.count} capped={unseen.capped} />
-			<div
-				style={{
-					width: effectiveWidth,
-					height: effectiveHeight,
-					background: "var(--sqlnest-surface)",
-					border: `2px solid ${SYSTEM_BORDER}`,
-					borderRadius: 10,
-					overflow: "hidden",
-					fontFamily: "ui-sans-serif, system-ui, sans-serif",
-					boxShadow: "0 1px 3px rgba(0,0,0,0.35)",
-					display: "flex",
-					flexDirection: "column"
-				}}
+			<SystemNodeShell
+				width={effectiveWidth}
+				height={effectiveHeight}
+				minWidth={SYSTEM_TABLE_MIN_WIDTH}
+				minHeight={SYSTEM_TABLE_MIN_HEIGHT}
+				icon={<IconServer size={14} stroke={2} color={SYSTEM_BORDER} />}
+				title={SCHEMA_EVENTS_COLLECTION.name}
+				onResizeEnd={onResizeEnd}
 			>
-				<NodeResizer
-					isVisible
-					minWidth={SYSTEM_TABLE_MIN_WIDTH}
-					maxWidth={800}
-					minHeight={SYSTEM_TABLE_MIN_HEIGHT}
-					maxHeight={1200}
-					lineStyle={{ borderColor: SYSTEM_BORDER, borderWidth: 1.5 }}
-					handleStyle={{
-						width: 8,
-						height: 8,
-						borderRadius: 2,
-						background: "var(--sqlnest-surface)",
-						borderColor: SYSTEM_BORDER,
-						borderWidth: 2
-					}}
-					onResizeEnd={(_, params) =>
-						onResizeEnd?.({
-							width: params.width,
-							height: params.height,
-							x: params.x ?? 0,
-							y: params.y ?? 0
-						})
-					}
-				/>
-				<AllHandles />
-				<div
-					style={{
-						display: "flex",
-						alignItems: "center",
-						justifyContent: "space-between",
-						gap: 8,
-						padding: "10px 12px",
-						borderBottom: "1px solid var(--sqlnest-border)",
-						background: SYSTEM_HEADER,
-						flexShrink: 0
-					}}
-				>
-					<span
-						style={{
-							display: "flex",
-							alignItems: "center",
-							gap: 6,
-							fontWeight: 700,
-							fontSize: 13,
-							color: "var(--sqlnest-text-primary)"
-						}}
-					>
-						<IconServer size={14} stroke={2} color={SYSTEM_BORDER} />
-						{SCHEMA_EVENTS_COLLECTION.name}
-					</span>
-					<span
-						style={{
-							display: "flex",
-							alignItems: "center",
-							gap: 3,
-							fontSize: 10,
-							fontWeight: 600,
-							color: SYSTEM_BORDER,
-							letterSpacing: 0.5,
-							textTransform: "uppercase"
-						}}
-					>
-						<IconLock size={10} stroke={2.5} />
-						Système
-					</span>
-				</div>
 				<div style={{ padding: "4px 0", flex: "0 0 auto" }}>
 					{shownFields.map((f) => (
 						<div
@@ -281,7 +164,7 @@ export function SystemSchemaEventsNode({
 						onLoadMore={() => history.fetchNextPage()}
 					/>
 				)}
-			</div>
+			</SystemNodeShell>
 		</div>
 	);
 }

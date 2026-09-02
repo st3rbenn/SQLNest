@@ -1,30 +1,16 @@
+import { IconBraces, IconChevronDown, IconChevronRight, IconPlus } from "@tabler/icons-react";
+import type { Node, NodeProps } from "@xyflow/react";
+import { useState } from "react";
 import {
-	IconBraces,
-	IconChevronDown,
-	IconChevronRight,
-	IconPlus
-} from "@tabler/icons-react";
-import {
-	Handle,
-	type Node,
-	type NodeProps,
-	NodeResizer,
-	Position
-} from "@xyflow/react";
-import { type CSSProperties, Fragment, useState } from "react";
+	SYSTEM_BORDER,
+	SystemNodeShell
+} from "../schema/nodes/SystemNodeShell";
 
 export const ENUMS_NODE_ID = "__sqlnest_enums__";
 export const ENUMS_NODE_DEFAULT_WIDTH = 260;
 export const ENUMS_NODE_DEFAULT_HEIGHT = 190;
 export const ENUMS_NODE_MIN_WIDTH = 220;
 export const ENUMS_NODE_MIN_HEIGHT = 120;
-
-const HEADER_H = 46;
-
-/** Palette système partagée avec SystemSchemaEventsNode — violet indigo =
- * famille « meta / infrastructure », distincte des tables user. */
-const SYSTEM_BORDER = "#7c5cff";
-const SYSTEM_HEADER = "rgba(124,92,255,0.12)";
 
 /** Vue minimale d'un enum pour le node — dérivée de `SchemaModel.enums`. */
 export interface EnumNodeEntry {
@@ -48,37 +34,6 @@ export interface SystemEnumsNodeData {
 
 export type SystemEnumsNodeType = Node<SystemEnumsNodeData, "system-enums">;
 
-const HIDDEN_HANDLE: CSSProperties = { opacity: 0, border: "none" };
-const HANDLE_SIDES = [
-	{ id: "top", position: Position.Top },
-	{ id: "right", position: Position.Right },
-	{ id: "bottom", position: Position.Bottom },
-	{ id: "left", position: Position.Left }
-] as const;
-
-function AllHandles() {
-	return (
-		<>
-			{HANDLE_SIDES.map((s) => (
-				<Fragment key={s.id}>
-					<Handle
-						id={s.id}
-						type="source"
-						position={s.position}
-						style={HIDDEN_HANDLE}
-					/>
-					<Handle
-						id={s.id}
-						type="target"
-						position={s.position}
-						style={HIDDEN_HANDLE}
-					/>
-				</Fragment>
-			))}
-		</>
-	);
-}
-
 /**
  * Node RF système « Enums » (sprint EN) — rend `schema.enums` visible sur le
  * canvas : un enum n'est pas une table, il était invisible et son nom exact
@@ -86,10 +41,9 @@ function AllHandles() {
  * Injecté seulement quand le schéma déclare ≥1 enum, non-supprimable,
  * draggable + resizable.
  *
- * Réutilise le pattern SystemSchemaEventsNode : `NodeResizer` + `AllHandles`
- * + géométrie persistée via `useEnumsNode`. Chaque enum est une row
- * expandable in-place (membres ordonnés) avec une action « + membre » qui
- * ouvre une console pré-remplie.
+ * Le chrome (bordure violette, header + badge Système, NodeResizer,
+ * AllHandles) vit dans [[SystemNodeShell]] — partagé avec schema_events.
+ * Ici : uniquement les rows d'enums expandables + l'action « + membre ».
  */
 export function SystemEnumsNode({
 	data,
@@ -108,89 +62,29 @@ export function SystemEnumsNode({
 		});
 	};
 
-	const effectiveWidth = width ?? ENUMS_NODE_DEFAULT_WIDTH;
-	const effectiveHeight = heightProp ?? ENUMS_NODE_DEFAULT_HEIGHT;
-
 	return (
 		<div style={{ position: "relative" }}>
-			<div
-				style={{
-					width: effectiveWidth,
-					height: effectiveHeight,
-					background: "var(--sqlnest-surface)",
-					border: `2px solid ${SYSTEM_BORDER}`,
-					borderRadius: 10,
-					overflow: "hidden",
-					fontFamily: "ui-sans-serif, system-ui, sans-serif",
-					boxShadow: "0 1px 3px rgba(0,0,0,0.35)",
-					display: "flex",
-					flexDirection: "column"
-				}}
-			>
-				<NodeResizer
-					isVisible
-					minWidth={ENUMS_NODE_MIN_WIDTH}
-					maxWidth={800}
-					minHeight={ENUMS_NODE_MIN_HEIGHT}
-					maxHeight={1200}
-					lineStyle={{ borderColor: SYSTEM_BORDER, borderWidth: 1.5 }}
-					handleStyle={{
-						width: 8,
-						height: 8,
-						borderRadius: 2,
-						background: "var(--sqlnest-surface)",
-						borderColor: SYSTEM_BORDER,
-						borderWidth: 2
-					}}
-					onResizeEnd={(_, params) =>
-						onResizeEnd?.({
-							width: params.width,
-							height: params.height,
-							x: params.x ?? 0,
-							y: params.y ?? 0
-						})
-					}
-				/>
-				<AllHandles />
-				<div
-					style={{
-						display: "flex",
-						alignItems: "center",
-						justifyContent: "space-between",
-						gap: 8,
-						padding: "10px 12px",
-						borderBottom: "1px solid var(--sqlnest-border)",
-						background: SYSTEM_HEADER,
-						flexShrink: 0,
-						height: HEADER_H,
-						boxSizing: "border-box"
-					}}
-				>
-					<span
-						style={{
-							display: "flex",
-							alignItems: "center",
-							gap: 6,
-							fontWeight: 700,
-							fontSize: 13,
-							color: "var(--sqlnest-text-primary)"
-						}}
-					>
-						<IconBraces size={14} stroke={2} color={SYSTEM_BORDER} />
-						Enums
-					</span>
+			<SystemNodeShell
+				width={width ?? ENUMS_NODE_DEFAULT_WIDTH}
+				height={heightProp ?? ENUMS_NODE_DEFAULT_HEIGHT}
+				minWidth={ENUMS_NODE_MIN_WIDTH}
+				minHeight={ENUMS_NODE_MIN_HEIGHT}
+				icon={<IconBraces size={14} stroke={2} color={SYSTEM_BORDER} />}
+				title="Enums"
+				headerRight={
 					<span
 						style={{
 							fontSize: 10,
 							fontWeight: 600,
 							color: SYSTEM_BORDER,
-							letterSpacing: 0.5,
-							textTransform: "uppercase"
+							fontVariantNumeric: "tabular-nums"
 						}}
 					>
 						{enums.length}
 					</span>
-				</div>
+				}
+				onResizeEnd={onResizeEnd}
+			>
 				<div
 					className="nowheel nodrag"
 					style={{
@@ -214,7 +108,7 @@ export function SystemEnumsNode({
 						/>
 					))}
 				</div>
-			</div>
+			</SystemNodeShell>
 		</div>
 	);
 }
