@@ -138,7 +138,8 @@ const LIST_SUBCOMMANDS: readonly string[] = [
 	"schemas",
 	"indexes",
 	"databases",
-	"schema_events"
+	"schema_events",
+	"enums"
 ];
 
 /**
@@ -334,7 +335,8 @@ function contextOptions(
 			return LIST_SUBCOMMANDS.map(keyword);
 		}
 		if (lower === "describe") {
-			return collections(schema);
+			// Tables + le sous-verbe `enum` (sprint EN : `describe enum <name>`).
+			return [...collections(schema), keyword("enum")];
 		}
 		if (lower === "drop") {
 			// ADR-029 D7 destructive — WriteConfirmBar D7 typing gate au run.
@@ -347,6 +349,18 @@ function contextOptions(
 				keyword("ref")
 			];
 		}
+	}
+
+	// `describe enum |` (sprint EN) → enums en scope — le nom exact (et sa
+	// casse, ex. DISASTER_QUALIFICATION) devient découvrable sans deviner.
+	if (
+		toks.length === 2 &&
+		toks[0]?.kind === "ident" &&
+		toks[0].value.toLowerCase() === "describe" &&
+		last.kind === "ident" &&
+		last.value.toLowerCase() === "enum"
+	) {
+		return enumSuggestions(schema);
 	}
 
 	// après une commande d'introspection, dispatch spécifique — les

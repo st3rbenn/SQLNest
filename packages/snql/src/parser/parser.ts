@@ -267,7 +267,7 @@ function parseIntrospectList(cursor: TokenCursor): IntrospectStatement {
 	const sub = cursor.peek();
 	if (sub.kind !== "ident") {
 		throw new SnqlError(
-			`'list' attend une sous-commande (tables / schemas / indexes / databases / schema_events), trouvé '${sub.value}'`,
+			`'list' attend une sous-commande (tables / schemas / indexes / databases / schema_events / enums), trouvé '${sub.value}'`,
 			"parse_introspect_unknown_list",
 			sub.span
 		);
@@ -361,8 +361,22 @@ function parseIntrospectList(cursor: TokenCursor): IntrospectStatement {
 			span: { start: listTok.span.start, end: endSpan.end }
 		};
 	}
+	if (subLower === "enums") {
+		const subTok = cursor.next();
+		const tail = parseIntrospectTail(cursor);
+		const endSpan =
+			tail.stages.length > 0
+				? tail.stages[tail.stages.length - 1]!.span
+				: subTok.span;
+		return {
+			operation: "introspect",
+			kind: "list-enums",
+			...(tail.stages.length > 0 ? { stages: tail.stages } : {}),
+			span: { start: listTok.span.start, end: endSpan.end }
+		};
+	}
 	throw new SnqlError(
-		`'list' attend une sous-commande connue (tables / schemas / indexes / databases / schema_events), trouvé '${sub.value}'`,
+		`'list' attend une sous-commande connue (tables / schemas / indexes / databases / schema_events / enums), trouvé '${sub.value}'`,
 		"parse_introspect_unknown_list",
 		sub.span
 	);
@@ -636,6 +650,25 @@ function parseRaw(cursor: TokenCursor): RawStatement {
  */
 function parseIntrospectDescribe(cursor: TokenCursor): IntrospectStatement {
 	const descTok = cursor.next(); // `describe`
+	// `describe enum <name>` (sprint EN) — `enum` soft-ident suivi d'un 2ᵉ
+	// ident. `describe enum` SEUL reste un describe-table d'une table nommée
+	// `enum` (edge-case préservé, pas de breaking).
+	if (peekIdent(cursor, "enum") && cursor.peek(1).kind === "ident") {
+		cursor.next(); // `enum`
+		const nameTok = cursor.next();
+		const tail = parseIntrospectTail(cursor);
+		const endSpan =
+			tail.stages.length > 0
+				? tail.stages[tail.stages.length - 1]!.span
+				: nameTok.span;
+		return {
+			operation: "introspect",
+			kind: "describe-enum",
+			target: nameTok.value,
+			...(tail.stages.length > 0 ? { stages: tail.stages } : {}),
+			span: { start: descTok.span.start, end: endSpan.end }
+		};
+	}
 	const target = cursor.peek();
 	if (target.kind !== "ident") {
 		throw new SnqlError(

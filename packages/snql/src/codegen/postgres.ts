@@ -161,6 +161,24 @@ export const postgresMapper: Mapper = {
 			const nsRef = params.add(namespace);
 			const targetRef = plan.target !== undefined ? params.add(plan.target) : undefined;
 			baseText = listIndexesSql(nsRef, targetRef);
+		} else if (plan.kind === "list-enums") {
+			// Enums nommés du schéma (sprint EN) — même source catalog que
+			// l'introspection (pg_type typtype='e' + pg_enum), scopée namespace.
+			const nsRef = params.add(namespace);
+			baseText = `SELECT t.typname AS name, count(e.enumlabel)::int AS members_count FROM pg_type t JOIN pg_enum e ON e.enumtypid = t.oid JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = ${nsRef} GROUP BY t.typname ORDER BY t.typname`;
+		} else if (plan.kind === "describe-enum") {
+			if (plan.target === undefined) {
+				throw new SnqlError(
+					"'describe enum' sans nom cible (bug parser)",
+					"codegen_introspect_missing_target"
+				);
+			}
+			// Membres ordonnés (enumsortorder) — position 1..N propre via
+			// row_number (enumsortorder est un float côté PG). Enum inexistant
+			// → 0 ligne, miroir de `describe <table>` inexistante.
+			const nsRef = params.add(namespace);
+			const targetRef = params.add(plan.target);
+			baseText = `SELECT e.enumlabel AS member, (row_number() OVER (ORDER BY e.enumsortorder))::int AS position FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = ${nsRef} AND t.typname = ${targetRef} ORDER BY e.enumsortorder`;
 		} else {
 			throw new SnqlError(
 				`Introspect kind '${plan.kind}' non supporté par le codegen Postgres v1`,

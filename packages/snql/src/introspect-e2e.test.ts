@@ -704,3 +704,96 @@ describe("lower — table système schema_events break net", () => {
 		).not.toThrow();
 	});
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Sprint EN — list enums + describe enum (ferme la lecture raw-only, ADR-019)
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("parser — list enums / describe enum", () => {
+	it("parse `list enums` en IntrospectStatement", () => {
+		const stmt = parse(tokenize("list enums"));
+		if (stmt.operation !== "introspect") throw new Error("attendu introspect");
+		expect(stmt.kind).toBe("list-enums");
+	});
+
+	it("parse `describe enum DISASTER_QUALIFICATION` (nom + casse préservés)", () => {
+		const stmt = parse(tokenize("describe enum DISASTER_QUALIFICATION"));
+		if (stmt.operation !== "introspect") throw new Error("attendu introspect");
+		expect(stmt.kind).toBe("describe-enum");
+		expect(stmt.target).toBe("DISASTER_QUALIFICATION");
+	});
+
+	it("`describe enum` SEUL reste un describe-table d'une table nommée enum (edge préservé)", () => {
+		const stmt = parse(tokenize("describe enum"));
+		if (stmt.operation !== "introspect") throw new Error("attendu introspect");
+		expect(stmt.kind).toBe("describe-table");
+		expect(stmt.target).toBe("enum");
+	});
+
+	it("le message sous-commande inconnue liste `enums`", () => {
+		try {
+			parse(tokenize("list foobar"));
+			throw new Error("SnqlError attendu");
+		} catch (e) {
+			if (!(e instanceof SnqlError)) throw e;
+			expect(e.message).toContain("enums");
+		}
+	});
+});
+
+describe("codegen PG — list enums / describe enum", () => {
+	function pgIntrospect(source: string) {
+		const stmt = parse(tokenize(source));
+		if (stmt.operation !== "introspect") throw new Error();
+		const planned = lowerIntrospect(stmt);
+		const mapper = getMapper("postgres");
+		if (mapper.mapIntrospect === undefined) throw new Error("no mapIntrospect");
+		return mapper.mapIntrospect(planned, { namespace: "public" });
+	}
+
+	it("list enums → pg_type + pg_enum scopé namespace, count membres", () => {
+		const native = pgIntrospect("list enums");
+		if (native.kind !== "sql") throw new Error("kind sql attendu");
+		expect(native.text).toBe(
+			`SELECT t.typname AS name, count(e.enumlabel)::int AS members_count FROM pg_type t JOIN pg_enum e ON e.enumtypid = t.oid JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = $1 GROUP BY t.typname ORDER BY t.typname`
+		);
+		expect(native.params).toEqual(["public"]);
+	});
+
+	it("describe enum → membres ordonnés enumsortorder, ns + nom bindés", () => {
+		const native = pgIntrospect("describe enum DISASTER_QUALIFICATION");
+		if (native.kind !== "sql") throw new Error("kind sql attendu");
+		expect(native.text).toBe(
+			`SELECT e.enumlabel AS member, (row_number() OVER (ORDER BY e.enumsortorder))::int AS position FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = $1 AND t.typname = $2 ORDER BY e.enumsortorder`
+		);
+		expect(native.params).toEqual(["public", "DISASTER_QUALIFICATION"]);
+	});
+});
+
+describe("codegen Mongo + planner — enums", () => {
+	it("Mongo passe-plat mongo-introspect (dispatch adapter _snql_enums)", () => {
+		for (const src of ["list enums", "describe enum role_type"]) {
+			const stmt = parse(tokenize(src));
+			if (stmt.operation !== "introspect") throw new Error();
+			const planned = lowerIntrospect(stmt);
+			const mapper = getMapper("mongodb");
+			if (mapper.mapIntrospect === undefined) throw new Error("no mapIntrospect");
+			const native = mapper.mapIntrospect(planned);
+			expect(native.kind).toBe("mongo-introspect");
+		}
+	});
+
+	it("planner : list-enums + describe-enum supportés PG et Mongo", () => {
+		for (const src of ["list enums", "describe enum role_type"]) {
+			const stmt = parse(tokenize(src));
+			if (stmt.operation !== "introspect") throw new Error();
+			const planned = lowerIntrospect(stmt);
+			expect(() =>
+				assertIntrospectSupported(planned, POSTGRES_CAPABILITIES, "postgres")
+			).not.toThrow();
+			expect(() =>
+				assertIntrospectSupported(planned, MONGODB_CAPABILITIES, "mongodb")
+			).not.toThrow();
+		}
+	});
+});

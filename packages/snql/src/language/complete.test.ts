@@ -328,18 +328,19 @@ describe("completeSnql — robustesse", () => {
 			"schemas",
 			"indexes",
 			"databases",
-			"schema_events"
+			"schema_events",
+			"enums"
 		]);
 	});
 
-	it("`describe ` propose les collections", () => {
-		expect(labels("describe ")).toEqual(["users", "orders"]);
+	it("`describe ` propose les collections + le sous-verbe enum", () => {
+		expect(labels("describe ")).toEqual(["users", "orders", "enum"]);
 	});
 
 	it("`describe u` (mot partiel) propose toujours les collections", () => {
 		// Le mot partiel `u` est le trailing word remplacé par le CM6 layer —
 		// completeSnql renvoie la liste complète, le préfixe est filtré côté UI.
-		expect(labels("describe u")).toEqual(["users", "orders"]);
+		expect(labels("describe u")).toEqual(["users", "orders", "enum"]);
 	});
 
 	// autocomplete des rows de sortie après pick/where/sort
@@ -680,6 +681,11 @@ describe("completeSnql — DDL/5 (ADR-029)", () => {
 			const roleType = result.options.find((o) => o.label === "role_type");
 			expect(roleType?.type).toBe("type");
 			expect(roleType?.detail).toBe("enum (2 members)");
+		});
+
+		it("`describe enum ` propose les enums en scope (sprint EN — noms exacts découvrables)", () => {
+			const opts = labelsWith("describe enum ");
+			expect(opts).toEqual(["role_type", "status_type"]);
 		});
 	});
 });

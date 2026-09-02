@@ -465,7 +465,13 @@ export type IntrospectKind =
 	// Table système SQLNest — audit trail des checksums de schéma. Codegen
 	// émet un `SqlnestIntrospectQuery` cross-engine, routé backend vers
 	// `getCanvasChecksumHistory` (pas la DB user via tunnel).
-	| "list-schema-events";
+	| "list-schema-events"
+	// Enums nommés du schéma (sprint EN, ferme la lecture raw-only contraire
+	// à ADR-019) — shape {name, members_count}. PG pg_type+pg_enum natif,
+	// Mongo lit `_snql_enums`.
+	| "list-enums"
+	// Membres ordonnés d'un enum — shape {member, position}. `target` = nom.
+	| "describe-enum";
 
 export interface IntrospectStatement {
 	readonly operation: "introspect";

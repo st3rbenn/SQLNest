@@ -968,6 +968,59 @@ class MongoConnection implements Connection {
 					rowCount: rows.length
 				};
 			}
+			if (query.plan.kind === "list-enums") {
+				// Compensation (sprint EN) : les enums Mongo vivent dans la
+				// collection metadata `_snql_enums` ({_id: name, members}).
+				// Collection absente → curseur vide = aucun enum, pas d'erreur.
+				const docs = await db
+					.collection<{ _id: string; members?: readonly string[] }>(
+						"_snql_enums"
+					)
+					.find({})
+					.sort({ _id: 1 })
+					.toArray();
+				const rows: Row[] = docs.map((d) => ({
+					name: String(d._id),
+					members_count: Array.isArray(d.members) ? d.members.length : 0
+				}));
+				return {
+					columns: [
+						{ name: "name", type: "string", nullable: false },
+						{ name: "members_count", type: "int", nullable: false }
+					],
+					rows,
+					rowCount: rows.length
+				};
+			}
+			if (query.plan.kind === "describe-enum") {
+				const target = query.plan.target;
+				if (target === undefined) {
+					throw new EngineExecutionError(
+						"'describe enum' sans nom cible (bug parser)"
+					);
+				}
+				// Enum inexistant → 0 ligne (parité stricte avec PG où la query
+				// catalog rend vide — pas de divergence cross-engine sur un typo).
+				const doc = await db
+					.collection<{ _id: string; members?: readonly string[] }>(
+						"_snql_enums"
+					)
+					.findOne({ _id: target });
+				const members =
+					doc !== null && Array.isArray(doc.members) ? doc.members : [];
+				const rows: Row[] = members.map((m, i) => ({
+					member: m,
+					position: i + 1
+				}));
+				return {
+					columns: [
+						{ name: "member", type: "string", nullable: false },
+						{ name: "position", type: "int", nullable: false }
+					],
+					rows,
+					rowCount: rows.length
+				};
+			}
 			if (query.plan.kind === "list-indexes") {
 				const collectionNames = query.plan.target !== undefined
 					? [query.plan.target]

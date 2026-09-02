@@ -33,7 +33,9 @@ export const INTROSPECT_SUPPORT: Readonly<
 	"list-schemas": new Set(["postgres", "mongodb"]),
 	"list-indexes": new Set(["postgres", "mongodb"]),
 	"list-databases": new Set(["mongodb"]),
-	"list-schema-events": new Set()
+	"list-schema-events": new Set(),
+	"list-enums": new Set(["postgres", "mongodb"]),
+	"describe-enum": new Set(["postgres", "mongodb"])
 };
 
 /**
@@ -62,7 +64,9 @@ export const INTROSPECT_HINTS: Readonly<
 			"'list schema_events' est routé par le client SQLNest — utilise-le depuis la console web",
 		kv:
 			"'list schema_events' est routé par le client SQLNest — utilise-le depuis la console web"
-	}
+	},
+	"list-enums": {},
+	"describe-enum": {}
 };
 
 /**
@@ -78,7 +82,9 @@ export const INTROSPECT_ERROR_CODES: Readonly<
 	"list-schemas": "planner_introspect_schemas_unsupported",
 	"list-indexes": "planner_introspect_indexes_unsupported",
 	"list-databases": "planner_introspect_databases_unsupported",
-	"list-schema-events": "planner_introspect_schema_events_unsupported"
+	"list-schema-events": "planner_introspect_schema_events_unsupported",
+	"list-enums": "planner_introspect_enums_unsupported",
+	"describe-enum": "planner_introspect_describe_enum_unsupported"
 };
 
 /**
