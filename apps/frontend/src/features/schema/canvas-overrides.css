@@ -143,27 +143,24 @@
 }
 
 /*
- * NodeResizer des tables système (`schema_events`, `Enums`) — même
- * comportement que les tables user (hidden par défaut, révélé au hover).
- * Les nodes système sont `selectable: false` donc pas de cas `.selected`
- * à gérer, juste `:hover`. Tout nouveau node système = ajouter sa classe
- * RF ici (pas de bloc dupliqué).
+ * NodeResizer des tables système — même comportement que les tables user
+ * (hidden par défaut, révélé au hover). Cible la classe partagée
+ * `sqlnest-system-node`, posée sur le wrapper RF par `useSystemNodeGeom` :
+ * TOUT node système (schema_events, Enums, futurs) hérite du behaviour
+ * sans une ligne de CSS ici. Les nodes système sont `selectable: false`
+ * donc pas de cas `.selected` à gérer, juste `:hover`.
  */
-.react-flow__node-system-schema-events .react-flow__resize-control.handle,
-.react-flow__node-system-schema-events .react-flow__resize-control.line,
-.react-flow__node-system-enums .react-flow__resize-control.handle,
-.react-flow__node-system-enums .react-flow__resize-control.line {
+.sqlnest-system-node .react-flow__resize-control.handle,
+.sqlnest-system-node .react-flow__resize-control.line {
 	opacity: 0;
 	pointer-events: none;
 	transition: opacity 120ms ease-out;
 }
-.react-flow__node-system-schema-events:hover .react-flow__resize-control.handle,
-.react-flow__node-system-enums:hover .react-flow__resize-control.handle {
+.sqlnest-system-node:hover .react-flow__resize-control.handle {
 	opacity: 1;
 	pointer-events: auto;
 }
-.react-flow__node-system-schema-events:hover .react-flow__resize-control.line,
-.react-flow__node-system-enums:hover .react-flow__resize-control.line {
+.sqlnest-system-node:hover .react-flow__resize-control.line {
 	opacity: 0.6;
 	pointer-events: auto;
 }

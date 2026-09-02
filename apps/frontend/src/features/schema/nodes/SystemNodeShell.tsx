@@ -8,6 +8,12 @@ import { type CSSProperties, Fragment } from "react";
 export const SYSTEM_BORDER = "#7c5cff";
 export const SYSTEM_HEADER = "rgba(124,92,255,0.12)";
 
+/** Classe RF posée sur le wrapper de TOUT node système (injectée par
+ * `useSystemNodeGeom`, pas par les features). C'est elle que cible le CSS
+ * de comportement partagé (resize handles au hover, canvas-overrides.css)
+ * — un nouveau node système hérite du behaviour sans toucher au CSS. */
+export const SYSTEM_NODE_CLASS = "sqlnest-system-node";
+
 const HIDDEN_HANDLE: CSSProperties = { opacity: 0, border: "none" };
 const HANDLE_SIDES = [
 	{ id: "top", position: Position.Top },

@@ -652,21 +652,47 @@ function CanvasInner({
 	);
 	const enumsSystem = useEnumsNode(connectionId, enumEntries, onAddEnumMember);
 
+	// Registre des nodes système — UNE entrée par node, tout le wiring
+	// (displayNodes, onNodesChange, persist du drag) itère ce tableau.
+	// Ajouter un node système = ajouter une entrée ici, rien d'autre.
+	const systemNodeControls = useMemo(
+		() =>
+			[
+				{
+					id: SYSTEM_TABLE_ID,
+					node: systemEvents.node as SchemaNode | null,
+					onNodesChange: systemEvents.onNodesChange as (
+						changes: never
+					) => void,
+					updatePosition: systemEvents.updatePosition
+				},
+				{
+					id: ENUMS_NODE_ID,
+					node: enumsSystem.node as SchemaNode | null,
+					onNodesChange: enumsSystem.onNodesChange as (
+						changes: never
+					) => void,
+					updatePosition: enumsSystem.updatePosition
+				}
+			] as const,
+		[
+			systemEvents.node,
+			systemEvents.onNodesChange,
+			systemEvents.updatePosition,
+			enumsSystem.node,
+			enumsSystem.onNodesChange,
+			enumsSystem.updatePosition
+		]
+	);
+
 	const displayNodes = useMemo<SchemaNode[]>(
 		() => [
 			...frameNodes,
 			...displayTableNodes,
 			...consoleDisplayNodes,
-			systemEvents.node,
-			...(enumsSystem.node !== null ? [enumsSystem.node] : [])
+			...systemNodeControls.flatMap((c) => (c.node !== null ? [c.node] : []))
 		],
-		[
-			frameNodes,
-			displayTableNodes,
-			consoleDisplayNodes,
-			systemEvents.node,
-			enumsSystem.node
-		]
+		[frameNodes, displayTableNodes, consoleDisplayNodes, systemNodeControls]
 	);
 
 	// Espace réservé en bas du canvas pour la toolbar flottante — sert au
@@ -997,12 +1023,9 @@ function CanvasInner({
 					// changes par id internally.
 					handleNodesChange(changes);
 					onConsoleNodesChange(changes);
-					systemEvents.onNodesChange(
-						changes as Parameters<typeof systemEvents.onNodesChange>[0]
-					);
-					enumsSystem.onNodesChange(
-						changes as Parameters<typeof enumsSystem.onNodesChange>[0]
-					);
+					for (const c of systemNodeControls) {
+						c.onNodesChange(changes as never);
+					}
 				}}
 				nodeTypes={nodeTypes}
 				edgeTypes={edgeTypes}
@@ -1104,11 +1127,9 @@ function CanvasInner({
 					) {
 						consoleNodes.updatePosition(node.id, node.position);
 					}
-					if (node.id === SYSTEM_TABLE_ID) {
-						systemEvents.updatePosition(node.position);
-					}
-					if (node.id === ENUMS_NODE_ID) {
-						enumsSystem.updatePosition(node.position);
+					const sys = systemNodeControls.find((c) => c.id === node.id);
+					if (sys !== undefined) {
+						sys.updatePosition(node.position);
 					}
 				}}
 				onNodesDelete={(deleted) => {

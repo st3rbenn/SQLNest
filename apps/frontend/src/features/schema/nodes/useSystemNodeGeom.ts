@@ -1,5 +1,6 @@
 import { type Node, useNodesState } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
+import { SYSTEM_NODE_CLASS } from "./SystemNodeShell";
 
 /**
  * Géométrie persistée d'un node système — une par (prefix, connection).
@@ -77,7 +78,13 @@ export function useSystemNodeGeom<TNode extends Node>(
 	const key = `${storagePrefix}${connectionId}`;
 
 	const initial = useMemo<TNode[]>(
-		() => [build(loadGeom(key, defaults))],
+		() => {
+			const built = build(loadGeom(key, defaults));
+			// Classe RF partagée injectée ICI (pas dans les features) — le CSS
+			// de comportement système (resize hover) cible cette classe, un
+			// nouveau node système en hérite automatiquement.
+			return [{ ...built, className: SYSTEM_NODE_CLASS }];
+		},
 		// `build` volontairement hors deps : les hooks feature le passent
 		// inline — le node initial ne dépend que de la connection (la data
 		// live est recomposée par-dessus côté feature).
