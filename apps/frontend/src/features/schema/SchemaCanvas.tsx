@@ -53,6 +53,12 @@ import {
 } from "../checksum-history/SystemSchemaEventsNode";
 import { useSchemaEventsNode } from "../checksum-history/useSchemaEventsNode";
 import {
+	ENUMS_NODE_ID,
+	SystemEnumsNode,
+	type SystemEnumsNodeType
+} from "../enums/SystemEnumsNode";
+import { useEnumsNode } from "../enums/useEnumsNode";
+import {
 	NODE_WIDTH,
 	nodeHeight,
 	TableNode,
@@ -72,7 +78,8 @@ const nodeTypes = {
 	table: TableNode,
 	frame: FrameNode,
 	console: ConsoleNode,
-	"system-schema-events": SystemSchemaEventsNode
+	"system-schema-events": SystemSchemaEventsNode,
+	"system-enums": SystemEnumsNode
 };
 const edgeTypes = { fk: InteractiveEdge };
 
@@ -80,7 +87,8 @@ type SchemaNode =
 	| TableNodeType
 	| FrameNodeType
 	| ConsoleNodeType
-	| SystemSchemaEventsNodeType;
+	| SystemSchemaEventsNodeType
+	| SystemEnumsNodeType;
 
 /** Exportées + queryKey helper — permet à `useNavigateToCanvas` de
  *  prefetch le layout ELK dans le queryClient AVANT de naviguer. Le
@@ -591,14 +599,74 @@ function CanvasInner({
 
 	const systemEvents = useSchemaEventsNode(connectionId, teamSlug);
 
+	// Sprint EN : node système « Enums » — rend `schema.enums` visible (un
+	// enum n'est pas une table, il était invisible au canvas). L'action
+	// « + membre » ouvre une console au centre pré-remplie `add enum member
+	// <name> ""` : on seed la clé localStorage des tabs
+	// (`sqlnest.console.tabs.<connId>.<nodeId>`) juste après `create()` —
+	// `useConsoleTabs` la lit au mount du shell, la console s'ouvre remplie.
+	const seedConsoleWithSource = useCallback(
+		(source: string) => {
+			const rect = containerRef.current?.getBoundingClientRect();
+			if (!rect) return;
+			const pt = rf.screenToFlowPosition({
+				x: rect.left + rect.width / 2,
+				y: rect.top + rect.height / 2
+			});
+			const nodeId = consoleNodes.create({
+				x: pt.x - CONSOLE_NODE_DEFAULT_WIDTH / 2,
+				y: pt.y - CONSOLE_NODE_DEFAULT_HEIGHT / 2
+			});
+			try {
+				const tabId =
+					typeof crypto !== "undefined" &&
+					typeof crypto.randomUUID === "function"
+						? crypto.randomUUID()
+						: `tab-${Math.random().toString(36).slice(2, 10)}`;
+				window.localStorage.setItem(
+					`sqlnest.console.tabs.${connectionId}.${nodeId}`,
+					JSON.stringify({
+						tabs: [{ id: tabId, name: "Sans titre", source }],
+						activeTabId: tabId
+					})
+				);
+			} catch {
+				// quota / private mode — la console s'ouvre vide, pas bloquant.
+			}
+		},
+		[rf, consoleNodes, connectionId]
+	);
+	const onAddEnumMember = useCallback(
+		(enumName: string) => {
+			seedConsoleWithSource(`add enum member ${enumName} ""`);
+		},
+		[seedConsoleWithSource]
+	);
+	const enumEntries = useMemo(
+		() =>
+			(schema.enums ?? []).map((e) => ({
+				name: e.name,
+				members: e.members
+			})),
+		[schema.enums]
+	);
+	const enumsSystem = useEnumsNode(connectionId, enumEntries, onAddEnumMember);
+
 	const displayNodes = useMemo<SchemaNode[]>(
 		() => [
 			...frameNodes,
 			...displayTableNodes,
 			...consoleDisplayNodes,
-			systemEvents.node
+			systemEvents.node,
+			...(enumsSystem.node !== null ? [enumsSystem.node] : [])
 		],
-		[frameNodes, displayTableNodes, consoleDisplayNodes, systemEvents.node]
+		[
+			frameNodes,
+			displayTableNodes,
+			consoleDisplayNodes,
+			systemEvents.node,
+			enumsSystem.node
+		]
 	);
 
 	// Espace réservé en bas du canvas pour la toolbar flottante — sert au
@@ -932,6 +1000,9 @@ function CanvasInner({
 					systemEvents.onNodesChange(
 						changes as Parameters<typeof systemEvents.onNodesChange>[0]
 					);
+					enumsSystem.onNodesChange(
+						changes as Parameters<typeof enumsSystem.onNodesChange>[0]
+					);
 				}}
 				nodeTypes={nodeTypes}
 				edgeTypes={edgeTypes}
@@ -1035,6 +1106,9 @@ function CanvasInner({
 					}
 					if (node.id === SYSTEM_TABLE_ID) {
 						systemEvents.updatePosition(node.position);
+					}
+					if (node.id === ENUMS_NODE_ID) {
+						enumsSystem.updatePosition(node.position);
 					}
 				}}
 				onNodesDelete={(deleted) => {
