@@ -140,3 +140,16 @@
 .sqlnest-notification::before {
 	display: none !important;
 }
+
+/* macOS trackpad : un pan 2-doigts horizontal sur le canvas (`panOnScroll`
+ * RF) dont le wheel atteint le document (départ sur un overlay/HUD, ou
+ * filtré par d3-zoom) déclenche le geste back/forward du navigateur en
+ * plein travail. `none` coupe la navigation par overscroll — le bouton
+ * back et ⌘[ restent intacts. Appliqué aux 2 axes : l'app est une SPA
+ * plein écran sans scroll document, le chaînage vertical (bounce) est
+ * tout aussi indésirable ; les conteneurs scrollables internes gardent
+ * leur scroll propre. */
+html,
+body {
+	overscroll-behavior: none;
+}
