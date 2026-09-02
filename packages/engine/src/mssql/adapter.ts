@@ -11,19 +11,19 @@ import {
 	ConnectionClosedError,
 	EngineConfigError,
 	EngineConnectionError,
-	EngineExecutionError,
-	EngineIntrospectionError
+	EngineExecutionError
 } from "../errors";
 import { describeMssqlConfig, type MssqlConnectionConfig } from "./config";
+import { introspectMssql } from "./introspect";
 
 /**
  * Adapter MSSQL (chantier M/1) — driver **tedious nu** (choix user : contrôle
  * TLS maximal, indispensable pour la passe 2014). Cible dev = MSSQL 2022
  * (docker `sqlnest-mssql`), la vraie 2014 valide en M/7.
  *
- * Périmètre M/1 : connect / ping / fingerprint / execute(SqlQuery) / close.
- * L'introspection (SchemaModel) arrive en M/2, le codegen T-SQL en M/3 —
- * les deux lèvent des erreurs TYPÉES en attendant (jamais de silence).
+ * Périmètre : connect / ping / fingerprint / execute(SqlQuery) / close (M/1)
+ * + introspection SchemaModel (M/2, voir ./introspect). Le codegen T-SQL
+ * arrive en M/3 — il lève une erreur TYPÉE en attendant (jamais de silence).
  *
  * tedious n'exécute qu'UNE Request à la fois par connexion : les appels sont
  * sérialisés via une chaîne de promesses (`#queue`) — même garantie d'ordre
@@ -141,9 +141,9 @@ class MssqlConnection implements Connection {
 						const list = Array.isArray(meta) ? meta : Object.values(meta);
 						columns = list.map((m) => ({
 							name: m.colName,
-							// Mapping de type fin en M/2 (introspection) — M/1 reporte
-							// un type neutre, suffisant pour l'affichage des rows.
-							type: "string",
+							// Fallback safe identique à PG : le type riche vient de
+							// `inferResultColumns(schema)` dans run.ts, pas du driver.
+							type: "unknown",
 							nullable: true
 						}));
 					});
@@ -187,11 +187,9 @@ class MssqlConnection implements Connection {
 	}
 
 	async introspect(): Promise<SchemaModel> {
-		// M/2 — SchemaModel via INFORMATION_SCHEMA + sys.foreign_keys.
-		// Refus TYPÉ transitoire (jamais un modèle vide silencieux : un canvas
-		// « 0 table » masquerait l'état réel du chantier).
-		throw new EngineIntrospectionError(
-			"Introspection MSSQL pas encore câblée (slice M/2) — connect/ping/execute SQL disponibles"
+		return introspectMssql(
+			(text, params) => this.#run(text, params),
+			this.#config.schema
 		);
 	}
 

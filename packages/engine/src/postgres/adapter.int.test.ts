@@ -64,7 +64,11 @@ describe.skipIf(!hasPg)("postgres adapter (intégration)", () => {
 			} satisfies NativeQuery;
 			const rs = await conn.execute(query);
 			expect(rs.rowCount).toBe(3);
-			expect(rs.columns).toEqual([{ name: "email" }]);
+			// type/nullable = fallback safe du driver — l'enrichissement vient de
+			// `inferResultColumns(schema)` dans run.ts, pas de l'adapter.
+			expect(rs.columns).toEqual([
+				{ name: "email", type: "unknown", nullable: true }
+			]);
 			expect(rs.rows.map((row) => row.email)).toEqual([
 				"ada@example.com",
 				"alan@example.com",

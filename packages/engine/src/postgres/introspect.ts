@@ -4,13 +4,16 @@ import type {
 	Field,
 	OnDeleteRule,
 	OnUpdateRule,
-	RefDef,
-	Relation,
 	SchemaModel,
 	SnqlType
 } from "@sqlnest/snql";
 import type { Pool as PgPool, QueryResultRow } from "pg";
 import { EngineIntrospectionError } from "../errors";
+import {
+	buildRefsFromFkRows,
+	buildRelationsFromFkRows,
+	type RelationalFkRow
+} from "../relational-refs";
 
 // --- Lignes brutes renvoyées par le catalogue ---
 
@@ -221,11 +224,12 @@ export function buildSchemaModel(
 		enumsList.push({ name, members, source: "declared" });
 	}
 
-	const refs = buildRefs(fks);
+	const fkRows = fks.map(normalizePgFkRow);
+	const refs = buildRefsFromFkRows(fkRows);
 	return {
 		engine: "postgres",
 		collections,
-		relations: buildRelations(fks),
+		relations: buildRelationsFromFkRows(fkRows),
 		...(enumsList.length > 0 ? { enums: enumsList } : {}),
 		...(refs.length > 0 ? { refs } : {})
 	};
@@ -240,67 +244,17 @@ function pgRefRule(ch: string): OnDeleteRule & OnUpdateRule {
 	return "restrict";
 }
 
-/**
- * Reconstruit les `RefDef` (ADR-031 FK/1a) depuis pg_constraint — symétrique de
- * la lecture `_snql_refs` côté Mongo, pour peupler `schema.refs` cross-engine
- * (base du forward-nav FK/2a). Composite FK (> 1 colonne) skippée V1 : `RefDef`
- * est single-column ; le forward-nav ne cible pas les FK composites (ADR D5).
- */
-function buildRefs(fks: readonly FkRow[]): RefDef[] {
-	const byConstraint = new Map<string, FkRow[]>();
-	for (const fk of fks) {
-		const arr = byConstraint.get(fk.constraint_oid) ?? [];
-		arr.push(fk);
-		byConstraint.set(fk.constraint_oid, arr);
-	}
-	const refs: RefDef[] = [];
-	for (const rows of byConstraint.values()) {
-		if (rows.length !== 1) continue; // composite FK → hors scope nav V1
-		const fk = rows[0]!;
-		refs.push({
-			name: fk.constraint_name,
-			fromCollection: fk.from_table,
-			fromColumn: fk.from_column,
-			toCollection: fk.to_table,
-			toColumn: fk.to_column,
-			onDelete: pgRefRule(fk.on_delete),
-			onUpdate: pgRefRule(fk.on_update),
-			source: "declared"
-		});
-	}
-	return refs;
-}
-
-/** Groupe les lignes FK par OID de contrainte (préserve l'ordre des colonnes composites). */
-function buildRelations(fks: readonly FkRow[]): Relation[] {
-	const byConstraint = new Map<
-		string,
-		{
-			from_table: string;
-			to_table: string;
-			from: string[];
-			to: string[];
-		}
-	>();
-	for (const fk of fks) {
-		const entry = byConstraint.get(fk.constraint_oid) ?? {
-			from_table: fk.from_table,
-			to_table: fk.to_table,
-			from: [],
-			to: []
-		};
-		entry.from.push(fk.from_column);
-		entry.to.push(fk.to_column);
-		byConstraint.set(fk.constraint_oid, entry);
-	}
-
-	return [...byConstraint.values()].map((entry) => ({
-		from: { collection: entry.from_table, fields: entry.from },
-		to: { collection: entry.to_table, fields: entry.to },
-		kind: "many-to-one" as const,
-		origin: "foreign-key" as const,
-		confidence: 1
-	}));
+function normalizePgFkRow(fk: FkRow): RelationalFkRow {
+	return {
+		constraintId: fk.constraint_oid,
+		constraintName: fk.constraint_name,
+		fromTable: fk.from_table,
+		fromColumn: fk.from_column,
+		toTable: fk.to_table,
+		toColumn: fk.to_column,
+		onDelete: pgRefRule(fk.on_delete),
+		onUpdate: pgRefRule(fk.on_update)
+	};
 }
 
 /**

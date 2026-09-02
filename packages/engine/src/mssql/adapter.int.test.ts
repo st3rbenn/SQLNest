@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { EngineExecutionError, EngineIntrospectionError } from "../errors";
+import { EngineExecutionError } from "../errors";
 import { mssqlAdapter } from "./adapter";
 import { resolveMssqlConfig } from "./config";
 
 /**
- * Tests d'intégration MSSQL (M/1) — gatés par
+ * Tests d'intégration MSSQL (M/1 connect + M/2 introspection) — gatés par
  * `SNQL_TEST_MSSQL_URL=mssql://sa:SqlNest!Dev2022@localhost:1433/Chinook?trustServerCertificate=true`
  * (docker `sqlnest-mssql` + `pnpm db:seed:chinook:mssql`).
  */
@@ -106,14 +106,81 @@ describe.skipIf(!hasMssql)("mssql adapter (intégration M/1)", () => {
 		}
 	});
 
-	it("introspect → refus typé M/2 (jamais un modèle vide silencieux)", async () => {
+	it("introspect chinook → SchemaModel complet (M/2)", async () => {
 		const conn = await mssqlAdapter.connect(
 			resolveMssqlConfig({ url: MSSQL_URL })
 		);
 		try {
-			await expect(conn.introspect()).rejects.toThrow(
-				EngineIntrospectionError
+			const schema = await conn.introspect();
+			expect(schema.engine).toBe("mssql");
+
+			// 11 tables Chinook, triées — miroir exact des seeds PG/Mongo.
+			expect(schema.collections.map((c) => c.name)).toEqual([
+				"Album",
+				"Artist",
+				"Customer",
+				"Employee",
+				"Genre",
+				"Invoice",
+				"InvoiceLine",
+				"MediaType",
+				"Playlist",
+				"PlaylistTrack",
+				"Track"
+			]);
+
+			// Types mappés : INT → int, NVARCHAR → string, NUMERIC → decimal,
+			// DATETIME → date ; nullabilité lue du catalogue.
+			const track = schema.collections.find((c) => c.name === "Track")!;
+			expect(track.primaryKey).toEqual(["TrackId"]);
+			const fieldsByName = new Map(track.fields.map((f) => [f.name, f]));
+			expect(fieldsByName.get("TrackId")).toMatchObject({
+				type: "int",
+				nullable: false
+			});
+			expect(fieldsByName.get("Name")).toMatchObject({
+				type: "string",
+				nullable: false
+			});
+			expect(fieldsByName.get("UnitPrice")).toMatchObject({
+				type: "decimal"
+			});
+			expect(fieldsByName.get("Composer")).toMatchObject({ nullable: true });
+			const invoice = schema.collections.find((c) => c.name === "Invoice")!;
+			expect(
+				invoice.fields.find((f) => f.name === "InvoiceDate")
+			).toMatchObject({ type: "date", nullable: false });
+
+			// PK composite : ordre ordinal (PlaylistId puis TrackId).
+			const playlistTrack = schema.collections.find(
+				(c) => c.name === "PlaylistTrack"
+			)!;
+			expect(playlistTrack.primaryKey).toEqual(["PlaylistId", "TrackId"]);
+
+			// Les 11 FK Chinook → 11 relations many-to-one + 11 refs
+			// (toutes single-column), self-ref Employee.ReportsTo incluse.
+			expect(schema.relations).toHaveLength(11);
+			expect(
+				schema.relations.every(
+					(r) => r.kind === "many-to-one" && r.origin === "foreign-key"
+				)
+			).toBe(true);
+			const refPairs = (schema.refs ?? []).map(
+				(r) => `${r.fromCollection}.${r.fromColumn}->${r.toCollection}.${r.toColumn}`
 			);
+			expect(refPairs.sort()).toEqual([
+				"Album.ArtistId->Artist.ArtistId",
+				"Customer.SupportRepId->Employee.EmployeeId",
+				"Employee.ReportsTo->Employee.EmployeeId",
+				"Invoice.CustomerId->Customer.CustomerId",
+				"InvoiceLine.InvoiceId->Invoice.InvoiceId",
+				"InvoiceLine.TrackId->Track.TrackId",
+				"PlaylistTrack.PlaylistId->Playlist.PlaylistId",
+				"PlaylistTrack.TrackId->Track.TrackId",
+				"Track.AlbumId->Album.AlbumId",
+				"Track.GenreId->Genre.GenreId",
+				"Track.MediaTypeId->MediaType.MediaTypeId"
+			]);
 		} finally {
 			await conn.close();
 		}
