@@ -41,7 +41,7 @@ export async function heartbeatTunnel(
 	clearToken: string,
 	dbFingerprint: string | null = null,
 	dbSchemaChecksum: string | null = null,
-	engine: "postgres" | "mongodb" | null = null,
+	engine: "postgres" | "mongodb" | "mssql" | null = null,
 	nowMs: number = Date.now()
 ): Promise<HeartbeatResult> {
 	const session = await authenticateTunnelSession(db, clearToken, nowMs);

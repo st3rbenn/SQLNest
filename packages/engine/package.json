@@ -23,7 +23,8 @@
 	"dependencies": {
 		"@sqlnest/snql": "workspace:*",
 		"mongodb": "^6.10.0",
-		"pg": "^8.13.1"
+		"pg": "^8.13.1",
+		"tedious": "^20.0.0"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "catalog:",

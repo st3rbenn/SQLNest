@@ -1,11 +1,13 @@
 import type { EngineAdapter } from "./adapter";
 import { UnknownEngineError } from "./errors";
 import { mongoAdapter } from "./mongo/adapter";
+import { mssqlAdapter } from "./mssql/adapter";
 import { postgresAdapter } from "./postgres/adapter";
 
 const REGISTRY: Readonly<Record<string, EngineAdapter>> = {
 	postgres: postgresAdapter,
-	mongodb: mongoAdapter
+	mongodb: mongoAdapter,
+	mssql: mssqlAdapter
 };
 
 /** Adapter d'un moteur par identifiant, ou `undefined` si non enregistré. */

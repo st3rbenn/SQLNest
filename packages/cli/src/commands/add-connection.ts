@@ -90,14 +90,16 @@ export async function addConnection(
 	// Sélection de l'engine en tête — le port default + le scheme DSN
 	// dépendent de ce choix. Sur non-TTY, le prompter.select throw : le
 	// caller peut fallback sur `--url` (mode scriptable).
-	const engine = await opts.prompter.select<"postgres" | "mongodb">({
+	const engine = await opts.prompter.select<"postgres" | "mongodb" | "mssql">({
 		message: "Engine",
 		choices: [
 			{ value: "postgres", label: "PostgreSQL", description: "port 5432 par défaut" },
-			{ value: "mongodb", label: "MongoDB", description: "port 27017 par défaut" }
+			{ value: "mongodb", label: "MongoDB", description: "port 27017 par défaut" },
+			{ value: "mssql", label: "SQL Server", description: "port 1433 par défaut" }
 		]
 	});
-	const defaultPort = engine === "postgres" ? "5432" : "27017";
+	const defaultPort =
+		engine === "postgres" ? "5432" : engine === "mongodb" ? "27017" : "1433";
 
 	const host = (await opts.prompter.line("Host: ")).trim();
 	if (!host) throw new AddConnectionError("invalid-input", "Host vide");
@@ -118,11 +120,11 @@ export async function addConnection(
 	if (!database) throw new AddConnectionError("invalid-input", "Database vide");
 
 	// Mongo autorise les connexions anonymes (mongodb://host:port/db) — user
-	// et password vides sont valides. Postgres non — user obligatoire.
+	// et password vides sont valides. Postgres et MSSQL non — user obligatoire.
 	const user = (await opts.prompter.line(
 		engine === "mongodb" ? "User (vide pour anonyme): " : "User: "
 	)).trim();
-	if (engine === "postgres" && !user) {
+	if (engine !== "mongodb" && !user) {
 		throw new AddConnectionError("invalid-input", "User vide");
 	}
 
@@ -144,14 +146,30 @@ export async function addConnection(
 		)).trim();
 	}
 
-	const scheme = engine === "postgres" ? "postgres" : "mongodb";
+	// MSSQL : les instances dev/legacy présentent souvent un cert
+	// self-signed (docker 2022, chaînes Windows 2014) — prompt explicite,
+	// jamais de trust silencieux (même politique que le sslmode PG).
+	let trustServerCertificate = false;
+	if (engine === "mssql") {
+		const trust = (await opts.prompter.line(
+			"Trust server certificate (self-signed) ? [y/N]: "
+		))
+			.trim()
+			.toLowerCase();
+		trustServerCertificate = trust === "y" || trust === "yes";
+	}
+
+	const scheme =
+		engine === "postgres" ? "postgres" : engine === "mongodb" ? "mongodb" : "mssql";
 	const auth = user
 		? `${encodeURIComponent(user)}:${encodeURIComponent(password)}@`
 		: "";
 	const query =
 		authSource && authSource !== database
 			? `?authSource=${encodeURIComponent(authSource)}`
-			: "";
+			: trustServerCertificate
+				? "?trustServerCertificate=true"
+				: "";
 	const url = `${scheme}://${auth}${host}:${port}/${encodeURIComponent(database)}${query}`;
 
 	addLocalConnection({ name: opts.name, url });

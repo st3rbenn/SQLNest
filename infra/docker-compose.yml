@@ -97,7 +97,33 @@ services:
       timeout: 5s
       retries: 30
 
+  # MSSQL dev (chantier M/1) — cible dev = 2022, dernière image Linux
+  # officielle (2014 n'a AUCUNE image Docker ; la passe 2014 = M/7 posera
+  # COMPATIBILITY_LEVEL 120 sur la DB seedée + validation sur la vraie
+  # instance user). SA password DEV uniquement — sqlservr exige 8+ chars
+  # et 3 classes de caractères, sinon le process refuse de démarrer.
+  # Port hôte 1433 standard (rarement occupé sur un poste dev macOS).
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: sqlnest-mssql
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "SqlNest!Dev2022"
+      MSSQL_PID: Developer
+    ports:
+      - "1433:1433"
+    volumes:
+      - mssqldata:/var/opt/mssql
+    healthcheck:
+      # mssql-tools18 : sqlcmd exige -C (trust server cert) car l'image
+      # génère un self-signed au boot.
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'SqlNest!Dev2022' -C -Q 'SELECT 1' -b -o /dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
 volumes:
   pgdata:
   pgdata_app:
   mongodata:
+  mssqldata:

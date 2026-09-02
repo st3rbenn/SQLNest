@@ -6,6 +6,7 @@ import type {
 } from "@sqlnest/snql";
 import type { PostgresConnectionConfig } from "./config";
 import type { MongoConnectionConfig } from "./mongo/config";
+import type { MssqlConnectionConfig } from "./mssql/config";
 
 /**
  * Config de connexion **résolue**, discriminée par `engine`. C'est ce que
@@ -14,7 +15,8 @@ import type { MongoConnectionConfig } from "./mongo/config";
  */
 export type ResolvedEngineConfig =
 	| PostgresConnectionConfig
-	| MongoConnectionConfig;
+	| MongoConnectionConfig
+	| MssqlConnectionConfig;
 
 /** Résultat d'un `ping` : latence mesurée + version serveur si disponible. */
 export interface PingResult {

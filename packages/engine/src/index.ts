@@ -66,6 +66,9 @@ export {
 } from "./mongo/capability-probe";
 export type { MongoConfigInput, MongoConnectionConfig } from "./mongo/config";
 export { describeMongoConfig, resolveMongoConfig } from "./mongo/config";
+export { mssqlAdapter } from "./mssql/adapter";
+export type { MssqlConfigInput, MssqlConnectionConfig } from "./mssql/config";
+export { describeMssqlConfig, resolveMssqlConfig } from "./mssql/config";
 export {
 	inferCollection,
 	inferRelations,

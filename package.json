@@ -11,6 +11,7 @@
 		"db:seed:shop": "node infra/scripts/seed-shop.mjs",
 		"db:seed:chinook": "bash infra/scripts/seed-chinook.sh",
 		"db:seed:chinook:mongo": "node infra/scripts/seed-chinook-mongo.mjs",
+		"db:seed:chinook:mssql": "bash infra/scripts/seed-chinook-mssql.sh",
 		"test:chinook-parity": "SNQL_TEST_PG_CHINOOK_URL=postgres://sqlnest:sqlnest@localhost:5433/chinook SNQL_TEST_MONGO_CHINOOK_URL=mongodb://localhost:27017/chinook?directConnection=true pnpm --filter @sqlnest/engine test --run chinook-parity",
 		"app:db:generate": "pnpm --filter @sqlnest/db db:generate",
 		"app:db:migrate": "pnpm --filter @sqlnest/db db:migrate",

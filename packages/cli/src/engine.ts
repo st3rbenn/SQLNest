@@ -22,6 +22,7 @@ import {
 	type PingResult,
 	type ResolvedEngineConfig,
 	resolveMongoConfig,
+	resolveMssqlConfig,
 	type ResultSet,
 	resolvePostgresConfig,
 	runQuery,
@@ -53,21 +54,22 @@ export async function openConnectionForTunnel(
 }
 
 /**
- * Détecte l'engine ("postgres" | "mongodb") depuis la DSN locale du tunnel.
- * Exposé pour que `serve` l'envoie au backend via heartbeat (backfill
+ * Détecte l'engine ("postgres" | "mongodb" | "mssql") depuis la DSN locale du
+ * tunnel. Exposé pour que `serve` l'envoie au backend via heartbeat (backfill
  * db_connection.engine — le pairing initial stocke DEFAULT_ENGINE en dur).
  * Retourne null si la DSN ne peut pas être résolue (mode dégradé best-effort).
  */
 export function detectEngineFromConnectionName(
 	tunnelName: string,
 	env: NodeJS.ProcessEnv = process.env
-): "postgres" | "mongodb" | null {
+): "postgres" | "mongodb" | "mssql" | null {
 	try {
 		const url = resolveLocalConnectionUrl(tunnelName, env);
 		const colonIdx = url.indexOf(":");
 		const scheme = colonIdx > 0 ? url.slice(0, colonIdx).toLowerCase() : "";
 		if (scheme === "postgres" || scheme === "postgresql") return "postgres";
 		if (scheme === "mongodb" || scheme === "mongodb+srv") return "mongodb";
+		if (scheme === "mssql" || scheme === "sqlserver") return "mssql";
 		return null;
 	} catch {
 		return null;
@@ -76,8 +78,8 @@ export function detectEngineFromConnectionName(
 
 /**
  * Détecte l'engine cible depuis le scheme de la DSN et route vers le bon
- * resolver. Support v1 : postgres/postgresql → PG, mongodb/mongodb+srv →
- * Mongo. Tout autre scheme = engine non supporté (message clair).
+ * resolver. Support : postgres/postgresql → PG, mongodb/mongodb+srv → Mongo,
+ * mssql/sqlserver → MSSQL (M/1). Tout autre scheme = message clair.
  */
 function resolveEngineConfigFromUrl(url: string): ResolvedEngineConfig {
 	// Parse le scheme sans exposer la DSN complète en erreur (aucun log de
@@ -90,8 +92,11 @@ function resolveEngineConfigFromUrl(url: string): ResolvedEngineConfig {
 	if (scheme === "mongodb" || scheme === "mongodb+srv") {
 		return resolveMongoConfig({ url });
 	}
+	if (scheme === "mssql" || scheme === "sqlserver") {
+		return resolveMssqlConfig({ url });
+	}
 	throw new Error(
-		`Scheme de DSN non supporté ('${scheme}:'). Attendu : postgres / postgresql / mongodb / mongodb+srv.`
+		`Scheme de DSN non supporté ('${scheme}:'). Attendu : postgres / postgresql / mongodb / mongodb+srv / mssql / sqlserver.`
 	);
 }
 

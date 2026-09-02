@@ -99,7 +99,7 @@ export interface ApiClient {
 		tunnelToken: string,
 		dbFingerprint?: string | null,
 		dbSchemaChecksum?: string | null,
-		engine?: "postgres" | "mongodb" | null
+		engine?: "postgres" | "mongodb" | "mssql" | null
 	): Promise<HeartbeatResult>;
 }
 
@@ -221,7 +221,7 @@ export function createApiClient(
 			tunnelToken: string,
 			dbFingerprint: string | null = null,
 			dbSchemaChecksum: string | null = null,
-			engine: "postgres" | "mongodb" | null = null
+			engine: "postgres" | "mongodb" | "mssql" | null = null
 		) {
 			const body: Record<string, string> = {};
 			if (dbFingerprint != null && dbFingerprint !== "") {

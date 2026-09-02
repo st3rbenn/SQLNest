@@ -251,7 +251,7 @@ export const HeartbeatBody = z.object({
 	 *  historiquement stockées avec DEFAULT_ENGINE="postgres" par le pairing.
 	 *  Consommé par le hook frontend useLiveDiagnostics (émission INFO
 	 *  divergences PG↔Mongo — hors Mongo, hint hors-sujet). */
-	engine: z.enum(["postgres", "mongodb"]).optional()
+	engine: z.enum(["postgres", "mongodb", "mssql"]).optional()
 });
 z.globalRegistry.add(HeartbeatBody, { id: "HeartbeatBody" });
 export type HeartbeatBodyT = z.infer<typeof HeartbeatBody>;
