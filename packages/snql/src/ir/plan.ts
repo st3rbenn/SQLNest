@@ -731,9 +731,25 @@ export interface DropEnumPlan {
 }
 
 /**
+ * `drop ref` lowered (ADR-031 FK/3). Le lower valide target + name via
+ * IDENT_REGEX D1 et, si `schema.refs` disponible, que la ref existe sur la
+ * table cible (sauf `ifExists`). Destructif au sens D7 (typing gate) —
+ * retirer une FK relâche l'intégrité référentielle. PG `ALTER TABLE DROP
+ * CONSTRAINT` natif ; Mongo purge `_snql_refs` (deleteOne par `_id` = name).
+ */
+export interface DropRefPlan {
+	readonly op: "ddl";
+	readonly kind: "drop-ref";
+	readonly target: string;
+	readonly name: string;
+	readonly ifExists: boolean;
+	readonly span?: Span;
+}
+
+/**
  * Union des plans DDL. Corpus Tier-2 (create-table/add-column/[add-|drop-]
  * index/drop-table/drop-column) + Enum Tier-3+ (create-enum/add-enum-member/
- * drop-enum).
+ * drop-enum) + Relations FK/3 (drop-ref).
  */
 export type DDLPlan =
 	| CreateTablePlan
@@ -744,7 +760,8 @@ export type DDLPlan =
 	| DropColumnPlan
 	| CreateEnumPlan
 	| AddEnumMemberPlan
-	| DropEnumPlan;
+	| DropEnumPlan
+	| DropRefPlan;
 
 /** Un plan complet : lecture, mutation, transaction, introspect, raw, let/CTE ou DDL Tier-2. */
 export type Plan =

@@ -563,7 +563,8 @@ export type DDLKind =
 	| "drop-index"
 	| "create-enum"
 	| "add-enum-member"
-	| "drop-enum";
+	| "drop-enum"
+	| "drop-ref";
 
 /**
  * Un type de field dans un body `create table` ou dans `add column`. Soit un
@@ -757,9 +758,27 @@ export interface DropEnumStmt {
 }
 
 /**
+ * `drop ref <fk_name> from <table> [if exists]` (ADR-031 FK/3). Retire une FK
+ * déclarée sans dropper la table. Adressage par nom de contrainte (auto-gen
+ * `fk_<t>_<c>_<target>` ou le `as` de la déclaration) — miroir `drop index`.
+ * Destructif au sens D7 (typing UI gate) : retirer une FK relâche
+ * silencieusement l'intégrité référentielle. PG `ALTER TABLE DROP CONSTRAINT`
+ * natif ; Mongo purge l'entrée `_snql_refs` (l'enforcement runtime s'arrête,
+ * le write path recharge les refs à chaque write) ; KV shape descriptor.
+ */
+export interface DropRefStmt {
+	readonly operation: "ddl";
+	readonly kind: "drop-ref";
+	readonly target: string;
+	readonly name: string;
+	readonly ifExists?: boolean;
+	readonly span: Span;
+}
+
+/**
  * Union des statements DDL. Corpus Tier-2 (create-table/add-column/[add-|
  * drop-]index/drop-table/drop-column) + Enum Tier-3+ (create-enum/
- * add-enum-member/drop-enum).
+ * add-enum-member/drop-enum) + Relations FK/3 (drop-ref).
  */
 export type DDLStatement =
 	| CreateTableStmt
@@ -770,7 +789,8 @@ export type DDLStatement =
 	| DropColumnStmt
 	| CreateEnumStmt
 	| AddEnumMemberStmt
-	| DropEnumStmt;
+	| DropEnumStmt
+	| DropRefStmt;
 
 /** Racine de l'AST : lecture (`Query`), mutation, transaction, introspection, raw, let/CTE ou DDL Tier-2. */
 export type Statement =

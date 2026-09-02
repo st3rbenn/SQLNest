@@ -15,6 +15,7 @@ import type {
 	DropColumnStmt,
 	DropEnumStmt,
 	DropIndexStmt,
+	DropRefStmt,
 	DropTableStmt,
 	Expr,
 	FieldRefModifier,
@@ -215,6 +216,16 @@ function parseStatement(cursor: TokenCursor): Statement {
 		peekIdent(cursor, "enum", 1)
 	) {
 		return parseDropEnum(cursor);
+	}
+	// FK/3 : `drop ref <fk_name> from <table> [if exists]`. `ref` reste
+	// soft-ident (préserve `add {ref: 1} into t` insert alias et le field
+	// modifier `ref` en body create-table). Dispatch head-of-statement.
+	if (
+		first.kind === "ident" &&
+		first.value.toLowerCase() === "drop" &&
+		peekIdent(cursor, "ref", 1)
+	) {
+		return parseDropRef(cursor);
 	}
 	const verbTok = first;
 	if (verbTok.kind !== "verb") {
@@ -2369,6 +2380,54 @@ function parseDropIndex(cursor: TokenCursor): DropIndexStmt {
 	return {
 		operation: "ddl",
 		kind: "drop-index",
+		target: targetTok.value,
+		name: nameTok.value,
+		...(ifExists ? { ifExists } : {}),
+		span: { start: dropTok.span.start, end: targetTok.span.end }
+	};
+}
+
+/**
+ * `drop ref <fk_name> from <table> [if exists]` (ADR-031 FK/3). Préposition
+ * unifiée `from` (D6). Adressage par nom de contrainte (auto-gen
+ * `fk_<t>_<c>_<target>` ou le `as` de la déclaration) — l'autocomplete propose
+ * les refs en scope depuis `schema.refs`.
+ */
+function parseDropRef(cursor: TokenCursor): DropRefStmt {
+	const dropTok = cursor.next(); // `drop` soft-ident
+	cursor.next(); // `ref` soft-ident (déjà peeked au dispatch)
+
+	const nameTok = cursor.expect("ident", "un nom de foreign key après 'drop ref'");
+
+	// Préposition unifiée `from <table>` (D6, aligné drop index/column).
+	if (!peekKeyword(cursor, "from")) {
+		throw new SnqlError(
+			"'drop ref' attend 'from <table>' pour cibler la table porteuse",
+			"parse_ddl_drop_ref_missing_from",
+			cursor.peek().span
+		);
+	}
+	cursor.next();
+	const targetTok = cursor.expect("ident", "un nom de table après 'from'");
+
+	// `if exists` optionnel (D3 name-only sémantique).
+	let ifExists = false;
+	if (peekIdent(cursor, "if")) {
+		cursor.next();
+		if (!peekKeyword(cursor, "exists")) {
+			throw new SnqlError(
+				"'if' doit être suivi de 'exists' dans un drop ref",
+				"parse_ddl_expected_exists_after_if",
+				cursor.peek().span
+			);
+		}
+		cursor.next();
+		ifExists = true;
+	}
+
+	return {
+		operation: "ddl",
+		kind: "drop-ref",
 		target: targetTok.value,
 		name: nameTok.value,
 		...(ifExists ? { ifExists } : {}),

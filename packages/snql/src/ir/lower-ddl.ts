@@ -16,6 +16,7 @@ import type {
 	DropColumnStmt,
 	DropEnumStmt,
 	DropIndexStmt,
+	DropRefStmt,
 	DropTableStmt,
 	Expr
 } from "../parser/ast";
@@ -32,6 +33,7 @@ import type {
 	DropColumnPlan,
 	DropEnumPlan,
 	DropIndexPlan,
+	DropRefPlan,
 	DropTablePlan,
 	SqlJsonLiteral,
 	SqlValue
@@ -76,10 +78,54 @@ export function lowerDDL(
 	if (statement.kind === "drop-enum") {
 		return lowerDropEnum(statement, schema);
 	}
+	if (statement.kind === "drop-ref") {
+		return lowerDropRef(statement, schema);
+	}
 	throw new SnqlError(
 		`DDL kind '${(statement as { kind: string }).kind}' non supporté au lower`,
 		"lower_ddl_unsupported_kind"
 	);
+}
+
+/**
+ * Lower `drop ref` (ADR-031 FK/3) : D1 ident regex sur name + target. Si
+ * `schema.refs` disponible, on vérifie que la ref existe SUR la table cible
+ * (sauf `if exists` — miroir drop-enum). L'erreur liste les refs de la table
+ * pour rendre le nom auto-généré retrouvable sans `raw`. Les relations
+ * INFÉRÉES (heuristique naming) vivent dans `schema.relations`, pas `refs` —
+ * introuvables ici par construction, ce qui est le comportement voulu (rien
+ * à dropper : aucune contrainte déclarée n'existe).
+ */
+function lowerDropRef(
+	stmt: DropRefStmt,
+	schema?: SchemaModel
+): DropRefPlan {
+	assertIdent(stmt.target, "target");
+	assertIdent(stmt.name, "ref name");
+	if (schema?.refs !== undefined && !stmt.ifExists) {
+		const ref = schema.refs.find(
+			(r) => r.name === stmt.name && r.fromCollection === stmt.target
+		);
+		if (ref === undefined) {
+			const onTarget = schema.refs
+				.filter((r) => r.fromCollection === stmt.target)
+				.map((r) => `${r.name} (${r.fromColumn} → ${r.toCollection}.${r.toColumn})`)
+				.join(", ");
+			throw new SnqlError(
+				`Foreign key '${stmt.name}' inconnue sur '${stmt.target}' — refs déclarées : ${onTarget || "(aucune)"}`,
+				"lower_ddl_drop_ref_unknown_ref",
+				stmt.span
+			);
+		}
+	}
+	return {
+		op: "ddl",
+		kind: "drop-ref",
+		target: stmt.target,
+		name: stmt.name,
+		ifExists: stmt.ifExists ?? false,
+		...(stmt.span !== undefined ? { span: stmt.span } : {})
+	};
 }
 
 /**
@@ -571,7 +617,7 @@ function resolveFieldType(
 
 function assertIdent(
 	name: string,
-	kind: "target" | "field" | "enum name"
+	kind: "target" | "field" | "enum name" | "ref name"
 ): void {
 	if (!IDENT_REGEX.test(name)) {
 		throw new SnqlError(

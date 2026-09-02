@@ -132,18 +132,22 @@ function walk(stmt: Statement, out: UnfilteredFinding[]): void {
 			// `add-index` / `add-unique-index` / `create-enum` /
 			// `add-enum-member` = non-destructifs (pass-through V1).
 			// `drop-table` / `drop-column` / `drop-index` / `drop-enum` (ADR-030
-			// Enum/3 D8) = destructifs D7 → typing UI gate WriteConfirmBar "Tape
-			// DROP <target> pour confirmer".
+			// Enum/3 D8) / `drop-ref` (ADR-031 FK/3 — retirer une FK relâche
+			// l'intégrité référentielle) = destructifs D7 → typing UI gate
+			// WriteConfirmBar "Tape DROP <target> pour confirmer".
 			if (
 				stmt.kind === "drop-table" ||
 				stmt.kind === "drop-column" ||
 				stmt.kind === "drop-index" ||
-				stmt.kind === "drop-enum"
+				stmt.kind === "drop-enum" ||
+				stmt.kind === "drop-ref"
 			) {
-				// target = table pour drop-table/drop-column, name pour drop-index
-				// et drop-enum (l'user retape ce qu'il voit dans son SNQL).
+				// target = table pour drop-table/drop-column, name pour drop-index,
+				// drop-enum et drop-ref (l'user retape ce qu'il voit dans son SNQL).
 				const dropTarget =
-					stmt.kind === "drop-index" || stmt.kind === "drop-enum"
+					stmt.kind === "drop-index" ||
+					stmt.kind === "drop-enum" ||
+					stmt.kind === "drop-ref"
 						? stmt.name
 						: stmt.target;
 				out.push({

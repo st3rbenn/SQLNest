@@ -539,6 +539,37 @@ describe("add/drop index DDL (ADR-029 DDL/3)", () => {
 	});
 });
 
+// ─── FK/3 — drop ref (ADR-031) ─────────────────────────────────────────
+describe("drop ref DDL (ADR-031 FK/3)", () => {
+	it("parse drop ref minimal", () => {
+		expect(stmt("drop ref fk_orders_user_id_users from orders")).toMatchObject({
+			operation: "ddl",
+			kind: "drop-ref",
+			target: "orders",
+			name: "fk_orders_user_id_users"
+		});
+	});
+
+	it("parse drop ref if exists (D3)", () => {
+		expect(
+			stmt("drop ref fk_orders_user_id_users from orders if exists")
+		).toMatchObject({ ifExists: true, kind: "drop-ref" });
+	});
+
+	it("refuse drop ref sans 'from'", () => {
+		expect(() => stmt("drop ref fk_x orders")).toThrow(
+			/'from <table>'/
+		);
+	});
+
+	it("préserve `add {ref: 1} into t` insert alias (soft-ident ref)", () => {
+		expect(stmt('add {ref: "abc"} into tickets')).toMatchObject({
+			operation: "insert",
+			collection: "tickets"
+		});
+	});
+});
+
 // ─── DDL/4 — drop table / drop column (ADR-029) ────────────────────────
 describe("drop table / drop column DDL (ADR-029 DDL/4)", () => {
 	it("parse drop table minimal", () => {

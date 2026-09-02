@@ -9,6 +9,7 @@ import type {
 	AddIndexPlan,
 	CreateEnumPlan,
 	CreateTablePlan,
+	DDLPlan,
 	DropColumnPlan,
 	DropEnumPlan,
 	DropIndexPlan,
@@ -635,6 +636,78 @@ describe("lower DDL — drop enum (ADR-030 Enum/3 D8)", () => {
 
 	it("D1 : refuse enum name commençant par un chiffre", () => {
 		expect(() => lowerDropEnum("drop enum 1bad")).toThrow();
+	});
+});
+
+describe("lower DDL — drop ref (ADR-031 FK/3)", () => {
+	const schemaWithRefs: import("../schema/model").SchemaModel = {
+		engine: "postgres",
+		collections: [],
+		relations: [],
+		refs: [
+			{
+				name: "fk_orders_user_id_users",
+				fromCollection: "orders",
+				fromColumn: "user_id",
+				toCollection: "users",
+				toColumn: "id",
+				onDelete: "cascade",
+				onUpdate: "restrict",
+				source: "declared"
+			}
+		]
+	};
+
+	function lowerDropRef(
+		source: string,
+		schema?: import("../schema/model").SchemaModel
+	): DDLPlan {
+		const parsed = parse(tokenize(source)) as DDLStatement;
+		const plan = lowerDDL(parsed, schema);
+		if (plan.kind !== "drop-ref") {
+			throw new Error(`expected drop-ref plan, got ${plan.kind}`);
+		}
+		return plan;
+	}
+
+	it("abaisse minimal (sans schema — analyse offline)", () => {
+		expect(
+			lowerDropRef("drop ref fk_orders_user_id_users from orders")
+		).toMatchObject({
+			op: "ddl",
+			kind: "drop-ref",
+			target: "orders",
+			name: "fk_orders_user_id_users",
+			ifExists: false
+		});
+	});
+
+	it("propage if exists", () => {
+		expect(
+			lowerDropRef("drop ref fk_orders_user_id_users from orders if exists")
+		).toMatchObject({ ifExists: true });
+	});
+
+	it("valide que la ref existe sur la table si schema fourni", () => {
+		expect(() =>
+			lowerDropRef("drop ref fk_ghost from orders", schemaWithRefs)
+		).toThrow(/inconnue.*fk_orders_user_id_users/);
+	});
+
+	it("refuse une ref existante mais portée par une AUTRE table", () => {
+		expect(() =>
+			lowerDropRef("drop ref fk_orders_user_id_users from users", schemaWithRefs)
+		).toThrow(/inconnue sur 'users'/);
+	});
+
+	it("ifExists → pas de refus si ref inconnue (silence D3 pattern)", () => {
+		expect(() =>
+			lowerDropRef("drop ref fk_ghost from orders if exists", schemaWithRefs)
+		).not.toThrow();
+	});
+
+	it("D1 : refuse ref name commençant par un chiffre", () => {
+		expect(() => lowerDropRef("drop ref 1bad from orders")).toThrow();
 	});
 });
 

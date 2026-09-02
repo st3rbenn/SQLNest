@@ -103,6 +103,11 @@ export const DDL_SUPPORT: Readonly<
 		postgres: { mode: "native", locks: [METADATA_DATABASE] },
 		mongodb: { mode: "compensated", locks: [METADATA_DATABASE] },
 		kv: { mode: "compensated", locks: [] }
+	},
+	"drop-ref": {
+		postgres: { mode: "native", locks: [EXCLUSIVE_TABLE] },
+		mongodb: { mode: "compensated", locks: [METADATA_DATABASE] },
+		kv: { mode: "compensated", locks: [] }
 	}
 };
 
@@ -121,7 +126,8 @@ export const DDL_ERROR_CODES: Readonly<Record<DDLKind, string>> = {
 	"drop-index": "planner_ddl_drop_index_unsupported",
 	"create-enum": "planner_ddl_create_enum_unsupported",
 	"add-enum-member": "planner_ddl_add_enum_member_unsupported",
-	"drop-enum": "planner_ddl_drop_enum_unsupported"
+	"drop-enum": "planner_ddl_drop_enum_unsupported",
+	"drop-ref": "planner_ddl_drop_ref_unsupported"
 };
 
 /**

@@ -776,3 +776,58 @@ describe("DDL/4 E2E — drop table / drop column cross-engine (ADR-029)", () => 
 		});
 	});
 });
+
+describe("FK/3 E2E — drop ref cross-engine (ADR-031)", () => {
+	const source = "drop ref fk_orders_user_id_users from orders";
+
+	function mongoDropRef(src: string) {
+		if (mongoMapper.mapDDL === undefined) throw new Error("mapDDL manquant");
+		const q = mongoMapper.mapDDL(lowerDDL(parse(tokenize(src)) as DDLStatement));
+		if (q.kind !== "mongo-ddl" || q.operation !== "drop-ref") {
+			throw new Error(`attendu drop-ref, got ${q.kind}`);
+		}
+		return q;
+	}
+
+	function kvDropRef(src: string) {
+		const q = mapKvDDL(lowerDDL(parse(tokenize(src)) as DDLStatement));
+		if (q.operation !== "drop-ref") {
+			throw new Error(`attendu drop-ref, got ${q.operation}`);
+		}
+		return q;
+	}
+
+	it("PG : ALTER TABLE DROP CONSTRAINT natif", () => {
+		const q = pg(source);
+		if (q.kind !== "sql") throw new Error("attendu sql");
+		expect(q.text).toBe(
+			`ALTER TABLE "orders" DROP CONSTRAINT "fk_orders_user_id_users"`
+		);
+	});
+
+	it("Mongo : drop-ref (adapter deleteOne _snql_refs par _id=name + fromCollection)", () => {
+		expect(mongoDropRef(source)).toMatchObject({
+			operation: "drop-ref",
+			collection: "orders",
+			name: "fk_orders_user_id_users",
+			ifExists: false
+		});
+	});
+
+	it("KV : drop-ref (retrait snapshot ref du descriptor, wiring V-next)", () => {
+		expect(kvDropRef(source)).toMatchObject({
+			operation: "drop-ref",
+			collection: "orders",
+			name: "fk_orders_user_id_users"
+		});
+	});
+
+	it("D3 idempotence : if exists propagé cross-engine", () => {
+		const src = "drop ref fk_orders_user_id_users from orders if exists";
+		const q = pg(src);
+		if (q.kind !== "sql") throw new Error("attendu sql");
+		expect(q.text).toContain("IF EXISTS");
+		expect(mongoDropRef(src).ifExists).toBe(true);
+		expect(kvDropRef(src).ifExists).toBe(true);
+	});
+});

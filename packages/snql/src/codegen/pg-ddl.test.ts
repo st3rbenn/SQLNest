@@ -631,3 +631,46 @@ describe("codegen PG — ref FK modifier (ADR-031 FK/1)", () => {
 		);
 	});
 });
+
+describe("codegen PG — drop ref (ADR-031 FK/3)", () => {
+	it("émet ALTER TABLE DROP CONSTRAINT", () => {
+		const q = mapDDL({
+			op: "ddl",
+			kind: "drop-ref",
+			target: "orders",
+			name: "fk_orders_user_id_users",
+			ifExists: false
+		});
+		if (q.kind !== "sql") throw new Error("attendu sql");
+		expect(q.text).toBe(
+			`ALTER TABLE "orders" DROP CONSTRAINT "fk_orders_user_id_users"`
+		);
+		expect(q.params).toEqual([]);
+	});
+
+	it("DROP CONSTRAINT IF EXISTS (D3)", () => {
+		const q = mapDDL({
+			op: "ddl",
+			kind: "drop-ref",
+			target: "orders",
+			name: "fk_orders_user_id_users",
+			ifExists: true
+		});
+		if (q.kind !== "sql") throw new Error("attendu sql");
+		expect(q.text).toBe(
+			`ALTER TABLE "orders" DROP CONSTRAINT IF EXISTS "fk_orders_user_id_users"`
+		);
+	});
+
+	it("interdit un name non-quoté-safe (safety-net quoteIdent)", () => {
+		expect(() =>
+			mapDDL({
+				op: "ddl",
+				kind: "drop-ref",
+				target: "orders",
+				name: 'bad"fk',
+				ifExists: false
+			})
+		).toThrow(/Identifiant invalide/);
+	});
+});

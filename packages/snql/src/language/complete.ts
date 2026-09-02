@@ -338,12 +338,13 @@ function contextOptions(
 		}
 		if (lower === "drop") {
 			// ADR-029 D7 destructive — WriteConfirmBar D7 typing gate au run.
-			// Enum/3 ajoute `enum` (D8 destructive gate).
+			// Enum/3 ajoute `enum` (D8), FK/3 ajoute `ref`.
 			return [
 				keyword("table"),
 				keyword("column"),
 				keyword("index"),
-				keyword("enum")
+				keyword("enum"),
+				keyword("ref")
 			];
 		}
 	}
@@ -1596,6 +1597,7 @@ function ddlContextOptions(
 		if (t1Lower === "column") return dropColumnCompletions(toks, schema);
 		if (t1Lower === "index") return dropIndexCompletions(toks, schema);
 		if (t1Lower === "enum") return dropEnumCompletions(toks, schema);
+		if (t1Lower === "ref") return dropRefCompletions(toks, schema);
 		return null;
 	}
 
@@ -1961,6 +1963,84 @@ function dropIndexCompletions(
 	// `drop index NAME from |` → collections.
 	if (last.kind === "keyword" && last.value === "from") {
 		return collections(schema);
+	}
+
+	return [];
+}
+
+/**
+ * FK déclarées en scope (ADR-031 FK/3) — labels = noms de contraintes,
+ * detail = `from.col → to.col`. Contrairement aux index, les noms de refs
+ * VIVENT dans le SchemaModel (`schema.refs`, PG pg_constraint / Mongo
+ * `_snql_refs`) — l'user n'a pas à retrouver un auto-généré via raw.
+ */
+function refSuggestions(schema: SchemaModel): readonly SnqlCompletion[] {
+	return (
+		schema.refs?.map((r) => ({
+			label: r.name,
+			type: "relation" as const,
+			detail: `${r.fromCollection}.${r.fromColumn} → ${r.toCollection}.${r.toColumn}`
+		})) ?? []
+	);
+}
+
+/**
+ * Complétions pour `drop ref <fk_name> from <table> [if exists]` (FK/3).
+ * Positions :
+ *  - `drop ref |` : refs déclarées en scope (noms + navigation).
+ *  - `drop ref NAME |` : `from`.
+ *  - `drop ref NAME from |` : la table porteuse de NAME si connue, sinon
+ *    toutes les collections.
+ *  - `drop ref NAME from T |` : `if`.
+ *  - `drop ref NAME from T if |` : `exists`.
+ */
+function dropRefCompletions(
+	toks: readonly Token[],
+	schema: SchemaModel
+): readonly SnqlCompletion[] {
+	const last = toks[toks.length - 1];
+	if (last === undefined) return [];
+
+	// `drop ref |` → refs déclarées en scope.
+	if (toks.length === 2) return refSuggestions(schema);
+
+	// `drop ref NAME |` → `from`.
+	if (toks.length === 3 && last.kind === "ident") {
+		return [keyword("from")];
+	}
+
+	// `drop ref NAME from |` → la fromCollection de NAME si résolue (précis),
+	// sinon toutes les collections (schema absent/stale).
+	if (last.kind === "keyword" && last.value === "from") {
+		const nameTok = toks[2];
+		const named =
+			nameTok !== undefined
+				? schema.refs?.find((r) => r.name === nameTok.value)
+				: undefined;
+		if (named !== undefined) {
+			return [
+				{
+					label: named.fromCollection,
+					type: "collection" as const,
+					detail: `porte ${named.name}`
+				}
+			];
+		}
+		return collections(schema);
+	}
+
+	// `drop ref NAME from T |` → `if`.
+	if (toks.length === 5 && last.kind === "ident") {
+		return [keyword("if")];
+	}
+
+	// `drop ref NAME from T if |` → `exists`.
+	if (
+		toks.length === 6 &&
+		last.kind === "ident" &&
+		last.value.toLowerCase() === "if"
+	) {
+		return [keyword("exists")];
 	}
 
 	return [];

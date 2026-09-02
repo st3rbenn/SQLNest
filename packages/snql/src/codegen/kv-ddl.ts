@@ -21,6 +21,7 @@ import type {
 	DropColumnPlan,
 	DropEnumPlan,
 	DropIndexPlan,
+	DropRefPlan,
 	DropTablePlan
 } from "../ir/plan";
 import type { SnqlType } from "../schema/model";
@@ -33,6 +34,7 @@ import type {
 	KvDDLDropColumnQuery,
 	KvDDLDropEnumQuery,
 	KvDDLDropIndexQuery,
+	KvDDLDropRefQuery,
 	KvDDLDropTableQuery,
 	KvDDLQuery,
 	KvFieldDescriptor
@@ -77,6 +79,7 @@ export function mapKvDDL(plan: DDLPlan): KvDDLQuery {
 	if (plan.kind === "create-enum") return renderKvCreateEnum(plan);
 	if (plan.kind === "add-enum-member") return renderKvAddEnumMember(plan);
 	if (plan.kind === "drop-enum") return renderKvDropEnum(plan);
+	if (plan.kind === "drop-ref") return renderKvDropRef(plan);
 	throw new SnqlError(
 		`DDL kind '${(plan as { kind: string }).kind}' non supporté par le codegen KV V1`,
 		"codegen_ddl_unsupported"
@@ -192,6 +195,23 @@ function renderKvDropIndex(plan: DropIndexPlan): KvDDLDropIndexQuery {
 		engine: "kv",
 		kind: "kv-ddl",
 		operation: "drop-index",
+		collection: plan.target,
+		ifExists: plan.ifExists,
+		name: plan.name
+	};
+}
+
+/**
+ * Rend `drop ref NAME from T` en KvDDLDropRefQuery (ADR-031 FK/3).
+ * Compensation : retire le snapshot `ref` du descriptor colonne dans
+ * `namespace:_schema:{collection}` — le middleware pré-write cesse
+ * d'enforcer. Shape V1, wiring runtime V-next.
+ */
+function renderKvDropRef(plan: DropRefPlan): KvDDLDropRefQuery {
+	return {
+		engine: "kv",
+		kind: "kv-ddl",
+		operation: "drop-ref",
 		collection: plan.target,
 		ifExists: plan.ifExists,
 		name: plan.name

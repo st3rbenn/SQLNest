@@ -97,3 +97,33 @@ describe("reverse-nav autocomplete (ADR-031 D7, FK/2b)", () => {
 		expect(labels("find users pick orders.")).toEqual(["count"]);
 	});
 });
+
+describe("drop ref autocomplete (ADR-031 FK/3)", () => {
+	it("`drop ` propose `ref` parmi les cibles drop", () => {
+		expect(labels("drop ")).toContain("ref");
+	});
+
+	it("`drop ref ` propose les refs déclarées avec nav en detail", () => {
+		const opts = at("drop ref ").options;
+		const ref = opts.find((o) => o.label === "fk_orders_user_id_users");
+		expect(ref).toBeDefined();
+		expect(ref?.type).toBe("relation");
+		expect(ref?.detail).toBe("orders.user_id → users.id");
+	});
+
+	it("`drop ref NAME ` propose `from`", () => {
+		expect(labels("drop ref fk_orders_user_id_users ")).toContain("from");
+	});
+
+	it("`drop ref NAME from ` propose la table porteuse (précis)", () => {
+		expect(labels("drop ref fk_orders_user_id_users from ")).toEqual([
+			"orders"
+		]);
+	});
+
+	it("`drop ref inconnu from ` retombe sur toutes les collections", () => {
+		const l = labels("drop ref fk_ghost from ");
+		expect(l).toContain("orders");
+		expect(l).toContain("users");
+	});
+});

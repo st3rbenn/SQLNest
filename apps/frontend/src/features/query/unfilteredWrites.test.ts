@@ -239,3 +239,19 @@ describe("hasAnyUnfilteredWrite — utilitaire boolean", () => {
 		).toBe(true);
 	});
 });
+
+describe("collectUnfilteredWrites — DDL drop ref (ADR-031 FK/3, D7)", () => {
+	it("drop ref = destructive_drop, target = nom de la FK (retapé au gate)", () => {
+		const findings = analyze("drop ref fk_orders_user_id_users from orders");
+		expect(findings).toHaveLength(1);
+		expect(findings[0]?.kind).toBe("destructive_drop");
+		expect(findings[0]?.verb).toBe("drop");
+		expect(findings[0]?.target).toBe("fk_orders_user_id_users");
+	});
+
+	it("drop ref if exists reste gaté (le modifier n'exempte pas du D7)", () => {
+		expect(
+			analyze("drop ref fk_orders_user_id_users from orders if exists")
+		).toHaveLength(1);
+	});
+});

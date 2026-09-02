@@ -420,6 +420,25 @@ export interface MongoDDLDropEnumQuery {
 	readonly cascade: boolean;
 }
 
+/**
+ * FK/3 drop-ref sur Mongo (ADR-031). Compensation runtime :
+ * `_snql_refs.deleteOne({_id: name})` — `_id` = nom de contrainte (clé
+ * d'upsert de la déclaration FK/1a). `deletedCount === 0` : silence si
+ * `ifExists=true`, sinon refus typé « ref inconnue ». L'enforcement runtime
+ * s'arrête de lui-même : le write path recharge `_snql_refs` à chaque write
+ * (`#loadRefs`), aucun cache à invalider. `collection` = table porteuse
+ * (fromCollection) — transportée pour le message d'erreur et la cohérence
+ * du contrat, le delete est par `_id`.
+ */
+export interface MongoDDLDropRefQuery {
+	readonly engine: string;
+	readonly kind: "mongo-ddl";
+	readonly operation: "drop-ref";
+	readonly collection: string;
+	readonly name: string;
+	readonly ifExists: boolean;
+}
+
 export type MongoDDLQuery =
 	| MongoDDLCreateCollectionQuery
 	| MongoDDLAddColumnQuery
@@ -429,7 +448,8 @@ export type MongoDDLQuery =
 	| MongoDDLDropColumnQuery
 	| MongoDDLCreateEnumQuery
 	| MongoDDLAddEnumMemberQuery
-	| MongoDDLDropEnumQuery;
+	| MongoDDLDropEnumQuery
+	| MongoDDLDropRefQuery;
 
 /**
  * DDL Tier-2 sur KV (ADR-029). Entièrement compensé — KV est schema-less,
@@ -630,6 +650,21 @@ export interface KvDDLDropEnumQuery {
 	readonly cascade: boolean;
 }
 
+/**
+ * FK/3 drop-ref sur KV (ADR-031). Compensation runtime : retire le snapshot
+ * `ref` du descriptor de colonne dans `namespace:_schema:{collection}` — le
+ * middleware pré-write cesse d'enforcer la ref. Shape V1, wiring runtime
+ * V-next (miroir statut DDL Tier-2 KV).
+ */
+export interface KvDDLDropRefQuery {
+	readonly engine: string;
+	readonly kind: "kv-ddl";
+	readonly operation: "drop-ref";
+	readonly collection: string;
+	readonly ifExists: boolean;
+	readonly name: string;
+}
+
 export type KvDDLQuery =
 	| KvDDLCreateTableQuery
 	| KvDDLAddColumnQuery
@@ -639,7 +674,8 @@ export type KvDDLQuery =
 	| KvDDLDropColumnQuery
 	| KvDDLCreateEnumQuery
 	| KvDDLAddEnumMemberQuery
-	| KvDDLDropEnumQuery;
+	| KvDDLDropEnumQuery
+	| KvDDLDropRefQuery;
 
 /**
  * native shape pour un `raw {...}` Mongo — command native

@@ -1070,7 +1070,10 @@ class MongoConnection implements Connection {
 		if (query.operation === "add-enum-member") {
 			return this.#executeDDLAddEnumMember(query);
 		}
-		return this.#executeDDLDropEnum(query);
+		if (query.operation === "drop-enum") {
+			return this.#executeDDLDropEnum(query);
+		}
+		return this.#executeDDLDropRef(query);
 	}
 
 	/**
@@ -1336,6 +1339,52 @@ class MongoConnection implements Connection {
 			if (cause instanceof EngineExecutionError) throw cause;
 			throw new EngineExecutionError(
 				`drop enum MongoDB échouée sur '${query.name}' — ${describeMongoExecutionError(cause)}`,
+				{ cause }
+			);
+		}
+	}
+
+	/**
+	 * FK/3 drop ref Mongo (ADR-031). La FK déclarée vit dans `_snql_refs`
+	 * (`_id` = nom de contrainte, upsert FK/1a) — un `deleteOne` suffit :
+	 * l'enforcement write-precheck/cascade s'arrête de lui-même puisque
+	 * `#loadRefs` recharge la collection à chaque write (aucun cache).
+	 * Le filtre inclut `fromCollection` = parité sémantique PG (`ALTER TABLE
+	 * t DROP CONSTRAINT name` exige la contrainte SUR t). D3 : deletedCount 0
+	 * → silence si `ifExists`, sinon refus typé. Auto-cleanup : `_snql_refs`
+	 * vide → drop de la collection metadata (aucun artefact SQLNest dans le
+	 * dump, miroir du cleanup `_snql_enums`).
+	 */
+	async #executeDDLDropRef(
+		query: Extract<NativeQuery, { kind: "mongo-ddl"; operation: "drop-ref" }>
+	): Promise<ResultSet> {
+		const db = this.#requireDb();
+		const refsCol = db.collection("_snql_refs");
+		try {
+			const res = await refsCol.deleteOne({
+				_id: query.name as unknown as import("mongodb").ObjectId,
+				fromCollection: query.collection
+			});
+			if (res.deletedCount === 0 && !query.ifExists) {
+				throw new EngineExecutionError(
+					`drop ref échouée : foreign key '${query.name}' inconnue sur '${query.collection}' — rien dans _snql_refs (utilise 'if exists' pour ignorer)`
+				);
+			}
+			const remaining = await refsCol.countDocuments({});
+			if (remaining === 0) {
+				try {
+					await refsCol.drop();
+				} catch (cleanupCause) {
+					const code = (cleanupCause as { code?: unknown } | null)?.code;
+					// NamespaceNotFound = collection jamais créée ou déjà purgée — safe.
+					if (code !== 26) throw cleanupCause;
+				}
+			}
+			return { columns: [], rows: [], rowCount: 0 };
+		} catch (cause) {
+			if (cause instanceof EngineExecutionError) throw cause;
+			throw new EngineExecutionError(
+				`drop ref MongoDB échouée sur '${query.name}' — ${describeMongoExecutionError(cause)}`,
 				{ cause }
 			);
 		}

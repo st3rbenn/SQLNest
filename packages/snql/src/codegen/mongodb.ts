@@ -13,6 +13,7 @@ import type {
 	DropColumnPlan,
 	DropEnumPlan,
 	DropIndexPlan,
+	DropRefPlan,
 	DropTablePlan,
 	IntrospectPlan,
 	LogicalPlan,
@@ -39,6 +40,7 @@ import type {
 	MongoDDLDropColumnQuery,
 	MongoDDLDropEnumQuery,
 	MongoDDLDropIndexQuery,
+	MongoDDLDropRefQuery,
 	MongoIndexSpec,
 	MongoRefSpec,
 	MongoQuery,
@@ -217,6 +219,7 @@ export const mongoMapper: Mapper = {
 		if (plan.kind === "create-enum") return renderMongoCreateEnum(plan);
 		if (plan.kind === "add-enum-member") return renderMongoAddEnumMember(plan);
 		if (plan.kind === "drop-enum") return renderMongoDropEnum(plan);
+		if (plan.kind === "drop-ref") return renderMongoDropRef(plan);
 		throw new SnqlError(
 			`DDL kind '${(plan as { kind: string }).kind}' non supporté par le codegen Mongo V1`,
 			"codegen_ddl_unsupported"
@@ -3048,6 +3051,23 @@ function renderMongoDropIndex(plan: DropIndexPlan): MongoDDLDropIndexQuery {
 		collection: plan.target,
 		ifExists: plan.ifExists,
 		name: plan.name
+	};
+}
+
+/**
+ * Rend `drop ref NAME from T` en `MongoDDLDropRefQuery` (ADR-031 FK/3).
+ * Compensation runtime : `_snql_refs.deleteOne({_id: name})` (`_id` = nom de
+ * contrainte, clé d'upsert FK/1a). L'enforcement write-precheck/cascade
+ * s'arrête de lui-même — `#loadRefs` recharge à chaque write.
+ */
+function renderMongoDropRef(plan: DropRefPlan): MongoDDLDropRefQuery {
+	return {
+		engine: "mongodb",
+		kind: "mongo-ddl",
+		operation: "drop-ref",
+		collection: plan.target,
+		name: plan.name,
+		ifExists: plan.ifExists
 	};
 }
 

@@ -12,6 +12,7 @@ import type {
 	DropColumnPlan,
 	DropEnumPlan,
 	DropIndexPlan,
+	DropRefPlan,
 	DropTablePlan,
 	IntrospectPlan,
 	LetPlan,
@@ -199,6 +200,7 @@ export const postgresMapper: Mapper = {
 		if (plan.kind === "create-enum") return renderCreateEnum(plan);
 		if (plan.kind === "add-enum-member") return renderAddEnumMember(plan);
 		if (plan.kind === "drop-enum") return renderDropEnum(plan);
+		if (plan.kind === "drop-ref") return renderDropRef(plan);
 		throw new SnqlError(
 			`DDL kind '${(plan as { kind: string }).kind}' non supporté par le codegen Postgres V1`,
 			"codegen_ddl_unsupported"
@@ -1169,6 +1171,24 @@ function renderAddIndex(plan: AddIndexPlan): NativeQuery {
 function renderDropIndex(plan: DropIndexPlan): NativeQuery {
 	const ifExists = plan.ifExists ? "IF EXISTS " : "";
 	const text = `DROP INDEX ${ifExists}${quoteIdent(plan.name)}`;
+	return {
+		engine: "postgres",
+		kind: "sql",
+		text,
+		params: [],
+		paramSpans: []
+	};
+}
+
+/**
+ * Rend `drop ref NAME from T` en `ALTER TABLE "T" DROP CONSTRAINT [IF EXISTS]
+ * "name"` (ADR-031 FK/3). Pas de CASCADE : une contrainte FK n'a pas de
+ * dépendants. Le frontend applique D7 typing UI gate avant Execute (retirer
+ * une FK relâche silencieusement l'intégrité référentielle).
+ */
+function renderDropRef(plan: DropRefPlan): NativeQuery {
+	const ifExists = plan.ifExists ? "IF EXISTS " : "";
+	const text = `ALTER TABLE ${quoteIdent(plan.target)} DROP CONSTRAINT ${ifExists}${quoteIdent(plan.name)}`;
 	return {
 		engine: "postgres",
 		kind: "sql",
