@@ -138,10 +138,37 @@ export const KV_CAPABILITIES: Capabilities = caps(
 	["int", "float", "text", "bool"]
 );
 
+/**
+ * Relationnel T-SQL — chantier M/3 : LECTURE complète en pushdown natif
+ * (scan/filter/project/join/aggregate/sort/paginate + sub-queries SELECT
+ * imbriqués). Les slices suivantes ouvrent le reste : mutate/upsert/
+ * write-join/insert-select/transaction (M/4), introspect + cte/cte-recursive
+ * (M/5), ddl (M/6) — capacité absente = refus planner typé, l'état du
+ * chantier reste visible (jamais un silence).
+ * `castTargets` sans `json` : T-SQL n'a pas de type json (nvarchar porteur) —
+ * un `cast(x as json)` n'aurait pas la sémantique validation/parse PG.
+ */
+export const MSSQL_CAPABILITIES: Capabilities = caps(
+	"mssql",
+	[
+		"scan",
+		"filter",
+		"project",
+		"join",
+		"aggregate",
+		"sort",
+		"paginate",
+		"subquery"
+	],
+	["int", "float", "text", "bool", "date", "timestamp"],
+	{ subqueryStrategy: "native" }
+);
+
 const REGISTRY: Readonly<Record<string, Capabilities>> = {
 	postgres: POSTGRES_CAPABILITIES,
 	mongodb: MONGODB_CAPABILITIES,
-	kv: KV_CAPABILITIES
+	kv: KV_CAPABILITIES,
+	mssql: MSSQL_CAPABILITIES
 };
 
 /** Capacités d'un moteur par nom, ou `undefined` si inconnu. */

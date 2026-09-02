@@ -84,7 +84,7 @@ export type FunctionKind =
 	| "reserved";
 
 /** Nom d'engine supporté (aligné avec `capabilitiesFor`). */
-export type EngineName = "postgres" | "mongodb" | "kv";
+export type EngineName = "postgres" | "mongodb" | "kv" | "mssql";
 
 /**
  * Descripteur opt-in pour hoister un appel de fonction Mongo en dot-notation
@@ -132,6 +132,8 @@ export interface FunctionEntry {
 		// qu'on les migre. Ajout obligatoire immédiat pour if/nullif/greatest/least
 		// (validé par l'utilisateur — pas d'asymétrie planner/runtime tolérée).
 		readonly kv?: EngineRenderer;
+		/** Renderer T-SQL (chantier MSSQL M/3) — string assembly comme PG. */
+		readonly mssql?: EngineRenderer;
 	};
 }
 
@@ -172,10 +174,12 @@ export function createRegistry(
 	const pgNames = new Set<string>();
 	const mongoNames = new Set<string>();
 	const kvNames = new Set<string>();
+	const mssqlNames = new Set<string>();
 	for (const [name, entry] of byName) {
 		if (entry.engines.postgres !== undefined) pgNames.add(name);
 		if (entry.engines.mongodb !== undefined) mongoNames.add(name);
 		if (entry.engines.kv !== undefined) kvNames.add(name);
+		if (entry.engines.mssql !== undefined) mssqlNames.add(name);
 	}
 	const names = new Set(byName.keys());
 	return {
@@ -185,6 +189,7 @@ export function createRegistry(
 		forEngine: (engine) => {
 			if (engine === "postgres") return pgNames;
 			if (engine === "mongodb") return mongoNames;
+			if (engine === "mssql") return mssqlNames;
 			return kvNames;
 		}
 	};

@@ -45,6 +45,13 @@ export interface SqlQuery {
 	 * occurrences source SNQL sans refactor du codegen.
 	 */
 	readonly identSpans?: Readonly<Record<string, readonly SerializedSpan[]>>;
+	/**
+	 * Colonnes du résultat dont la valeur est une STRING JSON à parser côté
+	 * adapter (chantier MSSQL M/3) : T-SQL n'a pas de type json — les embeds
+	 * `FOR JSON PATH` et objets de row jointe sortent en nvarchar. PG n'en a
+	 * pas besoin (json/jsonb parsés par le driver). Absent = rien à parser.
+	 */
+	readonly jsonColumns?: readonly string[];
 }
 
 /** Requête MongoDB : collection + pipeline d'agrégation (valeurs inline, BSON — pas d'injection). */

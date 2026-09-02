@@ -1,5 +1,6 @@
 import type { Mapper, NativeQuery } from "./codegen/mapper";
 import { mongoMapper } from "./codegen/mongodb";
+import { mssqlMapper } from "./codegen/mssql";
 import { postgresMapper } from "./codegen/postgres";
 import { SnqlError } from "./diagnostics";
 import { lower } from "./ir/lower";
@@ -12,7 +13,7 @@ import type { PhysicalPlan, PlanOptions } from "./planner/planner";
 import { plan } from "./planner/planner";
 import type { SchemaModel } from "./schema/model";
 
-export type SupportedEngine = "postgres" | "mongodb";
+export type SupportedEngine = "postgres" | "mongodb" | "mssql";
 
 export interface CompileOptions {
 	readonly engine: SupportedEngine;
@@ -32,7 +33,8 @@ export interface CompileResult {
 
 const MAPPERS: Readonly<Record<SupportedEngine, Mapper>> = {
 	postgres: postgresMapper,
-	mongodb: mongoMapper
+	mongodb: mongoMapper,
+	mssql: mssqlMapper
 };
 
 export function getMapper(engine: SupportedEngine): Mapper {
@@ -85,6 +87,7 @@ export function planFor(
 
 export { mapKvDDL } from "./codegen/kv-ddl";
 export { mongoMapper } from "./codegen/mongodb";
+export { mssqlMapper } from "./codegen/mssql";
 export { postgresMapper } from "./codegen/postgres";
 export type {
 	KvDDLAddColumnQuery,

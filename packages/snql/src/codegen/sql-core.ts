@@ -88,6 +88,14 @@ export interface SqlDialect {
 	 *  `EXCLUDED."col"`. Les dialectes sans upsert pushdown (MSSQL M/3)
 	 *  throw ici — le planner gate déjà via capabilities. */
 	upsertNewRef(columnSql: string): string;
+	/**
+	 * Notifié pour chaque colonne du résultat dont la valeur est du JSON
+	 * produit par le codegen (embed one-to-many, objet de row jointe) — les
+	 * dialectes sans type json natif (T-SQL) collectent ces alias dans
+	 * `SqlQuery.jsonColumns` pour que l'adapter parse les strings. PG :
+	 * absent (le driver parse json/jsonb nativement).
+	 */
+	onJsonColumn?(alias: string): void;
 }
 
 /** Contexte de typage d'un paramètre pour `SqlDialect.typedParam`. */
@@ -567,6 +575,7 @@ export function createSqlRenderer(dialect: SqlDialect): SqlRenderer {
 		if (sel.joins.length > 0) {
 			const columns = [`${quoteIdent(sel.base)}.*`];
 			for (const join of sel.joins) {
+				if (join.kind !== "count") dialect.onJsonColumn?.(join.as);
 				columns.push(
 					`${renderJoinAliasSource(join, sel.base)} AS ${quoteIdent(join.as)}`
 				);
@@ -591,6 +600,9 @@ export function createSqlRenderer(dialect: SqlDialect): SqlRenderer {
 		if (field.path.length === 1) {
 			const join = sel.joins.find((candidate) => candidate.as === field.path[0]);
 			if (join !== undefined) {
+				if (join.kind !== "count") {
+					dialect.onJsonColumn?.(field.alias ?? join.as);
+				}
 				return `${renderJoinAliasSource(join, sel.base)} AS ${quoteIdent(field.alias ?? join.as)}`;
 			}
 		}

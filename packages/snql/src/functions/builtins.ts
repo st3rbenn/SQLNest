@@ -119,6 +119,44 @@ import {
 	pgUpper
 } from "./builtins.pg";
 import {
+	mssqlAbs,
+	mssqlAvg,
+	mssqlCeil,
+	mssqlCoalesce,
+	mssqlConcat,
+	mssqlCount,
+	mssqlDateAdd,
+	mssqlDateDiff,
+	mssqlDatePart,
+	mssqlDateTrunc,
+	mssqlDenseRank,
+	mssqlFloor,
+	mssqlGreatest,
+	mssqlIf,
+	mssqlJsonGet,
+	mssqlJsonGetText,
+	mssqlLeast,
+	mssqlLength,
+	mssqlLower,
+	mssqlLtrim,
+	mssqlMax,
+	mssqlMin,
+	mssqlNow,
+	mssqlNullif,
+	mssqlRank,
+	mssqlReplace,
+	mssqlRound,
+	mssqlRowNumber,
+	mssqlRtrim,
+	mssqlStringAgg,
+	mssqlStrpos,
+	mssqlSubstring,
+	mssqlSum,
+	mssqlToday,
+	mssqlTrim,
+	mssqlUpper
+} from "./builtins.mssql";
+import {
 	DATE_ADD_UNITS,
 	DATE_DIFF_UNITS,
 	DATE_PART_UNITS,
@@ -133,7 +171,7 @@ const BUILTINS: readonly FunctionEntry[] = [
 		arity: { min: 1, max: 1 },
 		args: ["string"],
 		writeNullBehavior: "propagate",
-		engines: { postgres: pgUpper, mongodb: mongoUpper }
+		engines: { postgres: pgUpper, mongodb: mongoUpper, mssql: mssqlUpper }
 	},
 	{
 		name: "lower",
@@ -141,7 +179,7 @@ const BUILTINS: readonly FunctionEntry[] = [
 		arity: { min: 1, max: 1 },
 		args: ["string"],
 		writeNullBehavior: "propagate",
-		engines: { postgres: pgLower, mongodb: mongoLower }
+		engines: { postgres: pgLower, mongodb: mongoLower, mssql: mssqlLower }
 	},
 	{
 		name: "length",
@@ -149,7 +187,7 @@ const BUILTINS: readonly FunctionEntry[] = [
 		arity: { min: 1, max: 1 },
 		args: ["string"],
 		writeNullBehavior: "propagate",
-		engines: { postgres: pgLength, mongodb: mongoLength }
+		engines: { postgres: pgLength, mongodb: mongoLength, mssql: mssqlLength }
 	},
 	{
 		name: "abs",
@@ -157,7 +195,7 @@ const BUILTINS: readonly FunctionEntry[] = [
 		arity: { min: 1, max: 1 },
 		args: ["number"],
 		writeNullBehavior: "propagate",
-		engines: { postgres: pgAbs, mongodb: mongoAbs }
+		engines: { postgres: pgAbs, mongodb: mongoAbs, mssql: mssqlAbs }
 	},
 	{
 		name: "round",
@@ -165,7 +203,7 @@ const BUILTINS: readonly FunctionEntry[] = [
 		arity: { min: 1, max: 2 },
 		args: ["number", "number"],
 		writeNullBehavior: "propagate",
-		engines: { postgres: pgRound, mongodb: mongoRound }
+		engines: { postgres: pgRound, mongodb: mongoRound, mssql: mssqlRound }
 	},
 	{
 		name: "coalesce",
@@ -176,14 +214,14 @@ const BUILTINS: readonly FunctionEntry[] = [
 		writeNullBehavior: "custom",
 		// kvCoalesce ajouté pour débloquer scalar-around-agg côté KV
 		// (`coalesce(sum(x), 0)`). Migration inline → registre.
-		engines: { postgres: pgCoalesce, mongodb: mongoCoalesce, kv: kvCoalesce }
+		engines: { postgres: pgCoalesce, mongodb: mongoCoalesce, kv: kvCoalesce, mssql: mssqlCoalesce }
 	},
 	{
 		name: "now",
 		kind: "scalar",
 		arity: { min: 0, max: 0 },
 		writeNullBehavior: "deterministic",
-		engines: { postgres: pgNow, mongodb: mongoNow }
+		engines: { postgres: pgNow, mongodb: mongoNow, mssql: mssqlNow }
 	},
 	{
 		name: "concat",
@@ -193,7 +231,7 @@ const BUILTINS: readonly FunctionEntry[] = [
 		// writeNullBehavior VOLONTAIREMENT NON DÉCLARÉ : PG concat absorb NULL comme '',
 		// Mongo $concat propagate. Divergence NULL irréductible sans concat_strict /
 		// concat_ws distincts — reporté. Reste refusé en write context.
-		engines: { postgres: pgConcat, mongodb: mongoConcat }
+		engines: { postgres: pgConcat, mongodb: mongoConcat, mssql: mssqlConcat }
 	},
 
 	// ─── string ────────────────────────────────────────────────
@@ -203,7 +241,7 @@ const BUILTINS: readonly FunctionEntry[] = [
 		arity: { min: 1, max: 2 },
 		args: ["string", "string"],
 		writeNullBehavior: "propagate",
-		engines: { postgres: pgTrim, mongodb: mongoTrim }
+		engines: { postgres: pgTrim, mongodb: mongoTrim, mssql: mssqlTrim }
 	},
 	{
 		name: "ltrim",
@@ -211,7 +249,7 @@ const BUILTINS: readonly FunctionEntry[] = [
 		arity: { min: 1, max: 2 },
 		args: ["string", "string"],
 		writeNullBehavior: "propagate",
-		engines: { postgres: pgLtrim, mongodb: mongoLtrim }
+		engines: { postgres: pgLtrim, mongodb: mongoLtrim, mssql: mssqlLtrim }
 	},
 	{
 		name: "rtrim",
@@ -219,7 +257,7 @@ const BUILTINS: readonly FunctionEntry[] = [
 		arity: { min: 1, max: 2 },
 		args: ["string", "string"],
 		writeNullBehavior: "propagate",
-		engines: { postgres: pgRtrim, mongodb: mongoRtrim }
+		engines: { postgres: pgRtrim, mongodb: mongoRtrim, mssql: mssqlRtrim }
 	},
 	{
 		name: "substring",
@@ -227,7 +265,7 @@ const BUILTINS: readonly FunctionEntry[] = [
 		arity: { min: 3, max: 3 },
 		args: ["string", "number", "number"],
 		writeNullBehavior: "propagate",
-		engines: { postgres: pgSubstring, mongodb: mongoSubstring }
+		engines: { postgres: pgSubstring, mongodb: mongoSubstring, mssql: mssqlSubstring }
 	},
 	{
 		name: "replace",
@@ -235,7 +273,7 @@ const BUILTINS: readonly FunctionEntry[] = [
 		arity: { min: 3, max: 3 },
 		args: ["string", "string", "string"],
 		writeNullBehavior: "propagate",
-		engines: { postgres: pgReplace, mongodb: mongoReplace }
+		engines: { postgres: pgReplace, mongodb: mongoReplace, mssql: mssqlReplace }
 	},
 	{
 		name: "strpos",
@@ -243,7 +281,7 @@ const BUILTINS: readonly FunctionEntry[] = [
 		arity: { min: 2, max: 2 },
 		args: ["string", "string"],
 		writeNullBehavior: "propagate",
-		engines: { postgres: pgStrpos, mongodb: mongoStrpos }
+		engines: { postgres: pgStrpos, mongodb: mongoStrpos, mssql: mssqlStrpos }
 	},
 
 	// ─── number ────────────────────────────────────────────────
@@ -253,7 +291,7 @@ const BUILTINS: readonly FunctionEntry[] = [
 		arity: { min: 1, max: 1 },
 		args: ["number"],
 		writeNullBehavior: "propagate",
-		engines: { postgres: pgFloor, mongodb: mongoFloor }
+		engines: { postgres: pgFloor, mongodb: mongoFloor, mssql: mssqlFloor }
 	},
 	{
 		name: "ceil",
@@ -261,7 +299,7 @@ const BUILTINS: readonly FunctionEntry[] = [
 		arity: { min: 1, max: 1 },
 		args: ["number"],
 		writeNullBehavior: "propagate",
-		engines: { postgres: pgCeil, mongodb: mongoCeil }
+		engines: { postgres: pgCeil, mongodb: mongoCeil, mssql: mssqlCeil }
 	},
 
 	// ─── date ──────────────────────────────────────────────────
@@ -270,7 +308,7 @@ const BUILTINS: readonly FunctionEntry[] = [
 		kind: "scalar",
 		arity: { min: 0, max: 0 },
 		writeNullBehavior: "deterministic",
-		engines: { postgres: pgToday, mongodb: mongoToday }
+		engines: { postgres: pgToday, mongodb: mongoToday, mssql: mssqlToday }
 	},
 	{
 		name: "date_part",
@@ -279,7 +317,7 @@ const BUILTINS: readonly FunctionEntry[] = [
 		args: ["string", "date"],
 		argEnum: [[...DATE_PART_UNITS], undefined],
 		writeNullBehavior: "propagate",
-		engines: { postgres: pgDatePart, mongodb: mongoDatePart }
+		engines: { postgres: pgDatePart, mongodb: mongoDatePart, mssql: mssqlDatePart }
 	},
 	{
 		name: "date_trunc",
@@ -288,7 +326,7 @@ const BUILTINS: readonly FunctionEntry[] = [
 		args: ["string", "date"],
 		argEnum: [[...DATE_TRUNC_UNITS], undefined],
 		writeNullBehavior: "propagate",
-		engines: { postgres: pgDateTrunc, mongodb: mongoDateTrunc }
+		engines: { postgres: pgDateTrunc, mongodb: mongoDateTrunc, mssql: mssqlDateTrunc }
 	},
 	{
 		name: "date_add",
@@ -297,7 +335,7 @@ const BUILTINS: readonly FunctionEntry[] = [
 		args: ["string", "date", "number"],
 		argEnum: [[...DATE_ADD_UNITS], undefined, undefined],
 		writeNullBehavior: "propagate",
-		engines: { postgres: pgDateAdd, mongodb: mongoDateAdd }
+		engines: { postgres: pgDateAdd, mongodb: mongoDateAdd, mssql: mssqlDateAdd }
 	},
 	{
 		name: "date_diff",
@@ -306,7 +344,7 @@ const BUILTINS: readonly FunctionEntry[] = [
 		args: ["string", "date", "date"],
 		argEnum: [[...DATE_DIFF_UNITS], undefined, undefined],
 		writeNullBehavior: "propagate",
-		engines: { postgres: pgDateDiff, mongodb: mongoDateDiff }
+		engines: { postgres: pgDateDiff, mongodb: mongoDateDiff, mssql: mssqlDateDiff }
 	},
 
 	// ─── reserved ───────────────────────────────────
@@ -325,7 +363,7 @@ const BUILTINS: readonly FunctionEntry[] = [
 		// Path segments = literals string/int — validation dédiée au lower (pas argEnum).
 		writeNullBehavior: "propagate",
 		mongoMatchHoist: { toPath: extractStaticDotPath, kind: "value" },
-		engines: { postgres: pgJsonGet, mongodb: mongoJsonGet }
+		engines: { postgres: pgJsonGet, mongodb: mongoJsonGet, mssql: mssqlJsonGet }
 	},
 	{
 		name: "json_get_text",
@@ -335,7 +373,7 @@ const BUILTINS: readonly FunctionEntry[] = [
 		// PAS de mongoMatchHoist v1 : coercion type sans schema introspection
 		// risquerait `field int32 42 != string "42"` silencieux cross-engine.
 		// Fallback $expr avec $toString explicite. Type-aware hoist reporté.
-		engines: { postgres: pgJsonGetText, mongodb: mongoJsonGetText }
+		engines: { postgres: pgJsonGetText, mongodb: mongoJsonGetText, mssql: mssqlJsonGetText }
 	},
 	{
 		name: "json_has_key",
@@ -378,14 +416,14 @@ const BUILTINS: readonly FunctionEntry[] = [
 		// args non typés : cond bool (garde lower_if_cond_type), then/else
 		// homogènes (garde lower_if_branches_type_mismatch).
 		writeNullBehavior: "custom",
-		engines: { postgres: pgIf, mongodb: mongoIf, kv: kvIf }
+		engines: { postgres: pgIf, mongodb: mongoIf, kv: kvIf, mssql: mssqlIf }
 	},
 	{
 		name: "nullif",
 		kind: "scalar",
 		arity: { min: 2, max: 2 },
 		writeNullBehavior: "custom",
-		engines: { postgres: pgNullif, mongodb: mongoNullif, kv: kvNullif }
+		engines: { postgres: pgNullif, mongodb: mongoNullif, kv: kvNullif, mssql: mssqlNullif }
 	},
 	{
 		name: "greatest",
@@ -395,7 +433,8 @@ const BUILTINS: readonly FunctionEntry[] = [
 		engines: {
 			postgres: pgGreatest,
 			mongodb: mongoGreatest,
-			kv: kvGreatest
+			kv: kvGreatest,
+			mssql: mssqlGreatest
 		}
 	},
 	{
@@ -403,7 +442,7 @@ const BUILTINS: readonly FunctionEntry[] = [
 		kind: "scalar",
 		arity: { min: 2, max: null },
 		writeNullBehavior: "custom",
-		engines: { postgres: pgLeast, mongodb: mongoLeast, kv: kvLeast }
+		engines: { postgres: pgLeast, mongodb: mongoLeast, kv: kvLeast, mssql: mssqlLeast }
 	},
 
 	// ─── aggregates scalaires ───────────────────────────────
@@ -424,33 +463,33 @@ const BUILTINS: readonly FunctionEntry[] = [
 		name: "count",
 		kind: "aggregate",
 		arity: { min: 0, max: 1 },
-		engines: { postgres: pgCount, mongodb: mongoCount, kv: kvCount }
+		engines: { postgres: pgCount, mongodb: mongoCount, kv: kvCount, mssql: mssqlCount }
 	},
 	{
 		name: "sum",
 		kind: "aggregate",
 		arity: { min: 1, max: 1 },
 		args: ["number"],
-		engines: { postgres: pgSum, mongodb: mongoSum, kv: kvSum }
+		engines: { postgres: pgSum, mongodb: mongoSum, kv: kvSum, mssql: mssqlSum }
 	},
 	{
 		name: "avg",
 		kind: "aggregate",
 		arity: { min: 1, max: 1 },
 		args: ["number"],
-		engines: { postgres: pgAvg, mongodb: mongoAvg, kv: kvAvg }
+		engines: { postgres: pgAvg, mongodb: mongoAvg, kv: kvAvg, mssql: mssqlAvg }
 	},
 	{
 		name: "min",
 		kind: "aggregate",
 		arity: { min: 1, max: 1 },
-		engines: { postgres: pgMin, mongodb: mongoMin, kv: kvMin }
+		engines: { postgres: pgMin, mongodb: mongoMin, kv: kvMin, mssql: mssqlMin }
 	},
 	{
 		name: "max",
 		kind: "aggregate",
 		arity: { min: 1, max: 1 },
-		engines: { postgres: pgMax, mongodb: mongoMax, kv: kvMax }
+		engines: { postgres: pgMax, mongodb: mongoMax, kv: kvMax, mssql: mssqlMax }
 	},
 
 	// ─── aggregateMulti (array/string/json_agg) ─────────────
@@ -476,7 +515,8 @@ const BUILTINS: readonly FunctionEntry[] = [
 		engines: {
 			postgres: pgStringAgg,
 			mongodb: mongoStringAgg,
-			kv: kvStringAgg
+			kv: kvStringAgg,
+			mssql: mssqlStringAgg
 		}
 	},
 	{
@@ -506,14 +546,15 @@ const BUILTINS: readonly FunctionEntry[] = [
 		engines: {
 			postgres: pgRowNumber,
 			mongodb: mongoRowNumber,
-			kv: kvRowNumber
+			kv: kvRowNumber,
+			mssql: mssqlRowNumber
 		}
 	},
 	{
 		name: "rank",
 		kind: "window",
 		arity: { min: 0, max: 0 },
-		engines: { postgres: pgRank, mongodb: mongoRank, kv: kvRank }
+		engines: { postgres: pgRank, mongodb: mongoRank, kv: kvRank, mssql: mssqlRank }
 	},
 	{
 		name: "dense_rank",
@@ -522,7 +563,8 @@ const BUILTINS: readonly FunctionEntry[] = [
 		engines: {
 			postgres: pgDenseRank,
 			mongodb: mongoDenseRank,
-			kv: kvDenseRank
+			kv: kvDenseRank,
+			mssql: mssqlDenseRank
 		}
 	},
 
