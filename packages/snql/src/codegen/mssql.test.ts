@@ -155,7 +155,7 @@ describe("codegen mssql — fonctions (renderers T-SQL)", () => {
 			`get sessions pick date_diff("hour", ended_at, started_at) as h`
 		);
 		expect(text).toBe(
-			`SELECT CAST(FLOOR(DATEDIFF_BIG(millisecond, [started_at], [ended_at]) / 3600000.0) AS int) AS [h] FROM [sessions]`
+			`SELECT CAST(FLOOR((CAST(DATEDIFF(second, [started_at], [ended_at]) AS bigint) * 1000 + DATEDIFF(millisecond, DATEADD(second, DATEDIFF(second, [started_at], [ended_at]), [started_at]), [ended_at])) / 3600000.0) AS int) AS [h] FROM [sessions]`
 		);
 	});
 
@@ -164,7 +164,7 @@ describe("codegen mssql — fonctions (renderers T-SQL)", () => {
 			`get events pick date_trunc("week", created_at) as w`
 		);
 		expect(text).toBe(
-			`SELECT DATETRUNC(iso_week, [created_at]) AS [w] FROM [events]`
+			`SELECT DATEADD(week, DATEDIFF(day, '1900-01-01', [created_at]) / 7, '1900-01-01') AS [w] FROM [events]`
 		);
 	});
 
@@ -373,15 +373,15 @@ describe("codegen mssql — introspection (M/5)", () => {
 	it("list enums → IF OBJECT_ID garde, branche vide au même shape", () => {
 		const { text, params } = introspectSql("list enums");
 		expect(text).toBe(
-			`IF OBJECT_ID(@p1, N'U') IS NOT NULL SELECT [name], (SELECT COUNT(*) FROM OPENJSON([members])) AS members_count FROM [dbo].[_snql_enums] ORDER BY [name] ASC ELSE SELECT TOP 0 CAST(NULL AS nvarchar(4000)) AS [name], CAST(NULL AS int) AS members_count`
+			`IF OBJECT_ID(@p1, N'U') IS NOT NULL SELECT [name], CASE WHEN [members] = '[]' THEN 0 ELSE (LEN([members]) - LEN(REPLACE([members], ',', ''))) + 1 END AS members_count FROM [dbo].[_snql_enums] ORDER BY [name] ASC ELSE SELECT TOP 0 CAST(NULL AS nvarchar(4000)) AS [name], CAST(NULL AS int) AS members_count`
 		);
 		expect(params).toEqual(["dbo._snql_enums"]);
 	});
 
 	it("describe enum → OPENJSON positions 1..N", () => {
 		const { text, params } = introspectSql("describe enum statut");
-		expect(text).toContain("CROSS APPLY OPENJSON([members]) j");
-		expect(text).toContain("CAST(j.[key] AS int) + 1 AS position");
+		expect(text).toContain("CROSS APPLY j.x.nodes('/m') AS m(n)");
+		expect(text).toContain("count(../*[. << $i]) + 1");
 		expect(params).toEqual(["dbo._snql_enums", "statut"]);
 	});
 });
@@ -600,7 +600,7 @@ describe("codegen mssql — DDL (M/6)", () => {
 				target: "tmp",
 				ifExists: true
 			}).text
-		).toBe(`DROP TABLE IF EXISTS [tmp]`);
+		).toBe(`IF OBJECT_ID(N'[dbo].[tmp]', N'U') IS NOT NULL DROP TABLE [tmp]`);
 		expect(
 			ddlText({
 				op: "ddl",
@@ -657,9 +657,9 @@ describe("codegen mssql — DDL (M/6)", () => {
 			ifNotExists: false
 		});
 		expect(text).toBe(
-			`UPDATE [dbo].[_snql_enums] SET [members] = JSON_MODIFY([members], 'append $', @p2) WHERE [name] = @p1 AND NOT EXISTS (SELECT 1 FROM OPENJSON([members]) WHERE [value] = @p2)`
+			`UPDATE [dbo].[_snql_enums] SET [members] = CASE WHEN [members] = '[]' THEN '[' + @p2 + ']' ELSE STUFF([members], LEN([members]), 1, ',' + @p2 + ']') END WHERE [name] = @p1 AND [members] NOT LIKE @p3 ESCAPE '\\'`
 		);
-		expect(params).toEqual(["statut", "archive"]);
+		expect(params).toEqual(["statut", '"archive"', '%"archive"%']);
 	});
 
 	it("drop enum → DELETE metadata guardé", () => {

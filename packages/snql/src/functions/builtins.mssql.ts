@@ -169,8 +169,10 @@ const MSSQL_DATEPART: Readonly<Record<string, string>> = {
 
 /**
  * `date_part(unit, d)` → `DATEPART(<unit>, <d>)`.
- *  - `epoch` → `DATEDIFF_BIG(second, '1970-01-01', <d>)` (2016+, noté M/7 —
- *    DATEDIFF int déborde en 2038).
+ *  - `epoch` → 2 étages universels 2008+ (jours en bigint × 86400 + secondes
+ *    intra-jour) : `DATEDIFF_BIG` est 2016+ et `DATEDIFF(second)` seul
+ *    déborde l'int en 2038 — la passe 2014 (M/7) impose la forme composée,
+ *    exacte partout.
  *  - `dow` → formule indépendante de `@@DATEFIRST` pour la convention PG
  *    (dimanche=0..samedi=6) : `(DATEPART(weekday, d) + @@DATEFIRST - 1) % 7`.
  * Les valeurs datetime sont stockées/lues en UTC (useUTC driver) — pas de
@@ -180,7 +182,7 @@ export const mssqlDatePart: EngineRenderer = (args, ctx) => {
 	const unit = extractStringLiteralArg(args[0], "date_part", 0) as DatePartUnit;
 	const d = ctx.renderExpr(args[1]) as string;
 	if (unit === "epoch") {
-		return `DATEDIFF_BIG(second, '1970-01-01', ${d})`;
+		return `(CAST(DATEDIFF(day, '1970-01-01', ${d}) AS bigint) * 86400 + DATEDIFF(second, DATEADD(day, DATEDIFF(day, '1970-01-01', ${d}), '1970-01-01'), ${d}))`;
 	}
 	if (unit === "dow") {
 		return `((DATEPART(weekday, ${d}) + @@DATEFIRST - 1) % 7)`;
@@ -189,16 +191,21 @@ export const mssqlDatePart: EngineRenderer = (args, ctx) => {
 };
 
 /**
- * `date_trunc(unit, d)` → `DATETRUNC(<unit>, <d>)` (2022+ — noté M/7 :
- * compensation DATEADD/DATEDIFF sur 2014). `week` → `iso_week` : PG
- * date_trunc('week') tronque au lundi ISO indépendamment de la session,
- * DATETRUNC(week) dépendrait de @@DATEFIRST.
+ * `date_trunc(unit, d)` — forme universelle `DATEADD(unit,
+ * DATEDIFF(unit, <ancre>, d), <ancre>)` (2005+) : DATETRUNC est 2022+, la
+ * passe 2014 (M/7) impose l'idiome classique, équivalent exact.
+ *  - `week` : ancre '1900-01-01' (un LUNDI) + DATEDIFF en JOURS divisé par
+ *    7 — troncature au lundi ISO indépendante de @@DATEFIRST (miroir PG).
+ *  - `quarter` : DATEDIFF(quarter) natif.
  */
 export const mssqlDateTrunc: EngineRenderer = (args, ctx) => {
 	const unit = extractStringLiteralArg(args[0], "date_trunc", 0) as DateTruncUnit;
 	const d = ctx.renderExpr(args[1]) as string;
-	const datepart = unit === "week" ? "iso_week" : MSSQL_DATEPART[unit];
-	return `DATETRUNC(${datepart}, ${d})`;
+	if (unit === "week") {
+		return `DATEADD(week, DATEDIFF(day, '1900-01-01', ${d}) / 7, '1900-01-01')`;
+	}
+	const datepart = MSSQL_DATEPART[unit];
+	return `DATEADD(${datepart}, DATEDIFF(${datepart}, '1900-01-01', ${d}), '1900-01-01')`;
 };
 
 /** `date_add(unit, d, amount)` → `DATEADD(<unit>, <amount>, <d>)` — tous les
@@ -217,9 +224,10 @@ export const mssqlDateAdd: EngineRenderer = (args, ctx) => {
  *  - `day` : différence calendaire → `DATEDIFF(day, CAST(e AS date),
  *    CAST(l AS date))` (boundary-count sur dates pures = calendaire exact,
  *    aligné PG `later::date - earlier::date`).
- *  - `hour`/`minute`/`second` : durée réelle →
- *    `FLOOR(DATEDIFF_BIG(millisecond, e, l) / N)` casté int (miroir
- *    FLOOR(EPOCH/N)::int PG, sub-seconde fidèle).
+ *  - `hour`/`minute`/`second` : durée réelle en MILLISECONDES composée en 2
+ *    étages universels 2008+ (secondes bigint × 1000 + reste ms) —
+ *    `DATEDIFF_BIG` est 2016+ et `DATEDIFF(millisecond)` seul déborde l'int
+ *    à ~24 jours (passe 2014 M/7). Sub-seconde fidèle au FLOOR(EPOCH/N) PG.
  */
 export const mssqlDateDiff: EngineRenderer = (args, ctx) => {
 	const unit = extractStringLiteralArg(args[0], "date_diff", 0);
@@ -228,7 +236,9 @@ export const mssqlDateDiff: EngineRenderer = (args, ctx) => {
 	if (unit === "day") {
 		return `DATEDIFF(day, CAST(${earlier} AS date), CAST(${later} AS date))`;
 	}
-	const msDiff = `DATEDIFF_BIG(millisecond, ${earlier}, ${later})`;
+	const secPart = `CAST(DATEDIFF(second, ${earlier}, ${later}) AS bigint)`;
+	const msRemainder = `DATEDIFF(millisecond, DATEADD(second, DATEDIFF(second, ${earlier}, ${later}), ${earlier}), ${later})`;
+	const msDiff = `(${secPart} * 1000 + ${msRemainder})`;
 	switch (unit) {
 		case "second":
 			return `CAST(FLOOR(${msDiff} / 1000.0) AS int)`;
@@ -320,16 +330,23 @@ export const mssqlNullif: EngineRenderer = (args, ctx) => {
 	return `NULLIF(${a}, ${b})`;
 };
 
-/** `greatest(…)` → `GREATEST(…)` — 2022+ (noté M/7 : compensation CASE). */
+/**
+ * `greatest(…)` → `(SELECT MAX(v) FROM (VALUES (a), (b), …) AS t(v))` —
+ * forme universelle 2008+ (GREATEST natif = 2022+, passe 2014 M/7).
+ * NULL-absorb exact : MAX ignore les NULL, comme GREATEST PG (NULL renvoyé
+ * ssi tous les args sont NULL).
+ */
 export const mssqlGreatest: EngineRenderer = (args, ctx) => {
 	const rendered = renderArgs(args, ctx);
-	return `GREATEST(${rendered.join(", ")})`;
+	const values = rendered.map((a) => `(${a})`).join(", ");
+	return `(SELECT MAX(v) FROM (VALUES ${values}) AS __sqlnest_g(v))`;
 };
 
-/** `least(…)` → `LEAST(…)` — 2022+ (noté M/7). */
+/** `least(…)` → MIN sur VALUES — miroir greatest, universel 2008+. */
 export const mssqlLeast: EngineRenderer = (args, ctx) => {
 	const rendered = renderArgs(args, ctx);
-	return `LEAST(${rendered.join(", ")})`;
+	const values = rendered.map((a) => `(${a})`).join(", ");
+	return `(SELECT MIN(v) FROM (VALUES ${values}) AS __sqlnest_l(v))`;
 };
 
 // ─── aggregates scalaires ────────────────────────────────────
@@ -385,12 +402,17 @@ function bracketIdent(name: string): string {
 }
 
 /**
- * `string_agg(x, sep [sort k])` → `STRING_AGG(CONVERT(nvarchar(max), <x>),
- * <sep>) [WITHIN GROUP (ORDER BY …)]` (2017+ — noté M/7 : FOR XML PATH sur
- * 2014). CONVERT force nvarchar(max) : sans lui STRING_AGG tronque à 8000
- * octets ET refuse les types non-string. NULL-skip natif, parité PG.
- * `unique` refusé : STRING_AGG T-SQL n'a pas de DISTINCT (contrairement à
- * PG) — erreur codegen typée plutôt qu'un dedup silencieusement absent.
+ * `string_agg(x, sep [sort k])` — hors contexte GROUP BY le codegen ne peut
+ * pas reconstruire la sous-requête corrélée du FOR XML PATH : la forme
+ * STRING_AGG (2017+) reste LA forme émise, avec `WITHIN GROUP` pour le
+ * sort. Sur un vrai 2014 l'erreur moteur remonte claire (« 'STRING_AGG' is
+ * not a recognized built-in function name ») — gap assumé M/7, documenté
+ * (la compensation FOR XML PATH exige la connaissance du GROUP BY entourant,
+ * hors de portée du renderer par-expression).
+ * CONVERT force nvarchar(max) : sans lui STRING_AGG tronque à 8000 octets
+ * ET refuse les types non-string. NULL-skip natif, parité PG. `unique`
+ * refusé : pas de DISTINCT sur STRING_AGG (erreur typée plutôt qu'un dedup
+ * silencieusement absent).
  */
 export const mssqlStringAgg: EngineRenderer = (args, ctx) => {
 	if (ctx.unique === true) {

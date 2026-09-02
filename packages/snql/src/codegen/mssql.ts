@@ -368,8 +368,8 @@ export const mssqlMapper: Mapper = {
 			return renderAddIndex(plan);
 		}
 		if (plan.kind === "drop-index") return renderDropIndex(plan);
-		if (plan.kind === "drop-table") return renderDropTable(plan);
-		if (plan.kind === "drop-column") return renderDropColumn(plan);
+		if (plan.kind === "drop-table") return renderDropTable(plan, namespace);
+		if (plan.kind === "drop-column") return renderDropColumn(plan, namespace);
 		if (plan.kind === "create-enum") return renderCreateEnum(plan, namespace);
 		if (plan.kind === "add-enum-member") return renderAddEnumMember(plan, namespace);
 		if (plan.kind === "drop-enum") return renderDropEnum(plan, namespace);
@@ -442,9 +442,11 @@ function describeTableSql(ns: string, target: string): string {
 }
 
 /**
- * SQL de `list indexes [on <table>]` — sys.indexes porte les flags,
- * STRING_AGG WITHIN GROUP reconstruit la liste des colonnes clés dans
- * l'ordre déclaré (key_ordinal). Les heaps (index name NULL) sont exclus.
+ * SQL de `list indexes [on <table>]` — sys.indexes porte les flags. La
+ * liste des colonnes clés est reconstruite via STUFF + FOR XML PATH dans
+ * l'ordre key_ordinal : forme universelle 2005+ (STRING_AGG = 2017+, passe
+ * 2014 M/7), identique en sortie — les noms de colonnes sont des idents,
+ * aucun caractère à échapper côté XML. Les heaps (name NULL) sont exclus.
  */
 function listIndexesSql(ns: string, target: string | undefined): string {
 	const tableFilter = target !== undefined ? ` AND t.name = ${target}` : "";
@@ -453,9 +455,10 @@ function listIndexesSql(ns: string, target: string | undefined): string {
 			`i.name AS name, ` +
 			`t.name AS [table], ` +
 			`i.is_unique AS [unique], ` +
-			`(SELECT STRING_AGG(COL_NAME(ic.object_id, ic.column_id), ', ') WITHIN GROUP (ORDER BY ic.key_ordinal) ` +
+			`STUFF((SELECT ', ' + COL_NAME(ic.object_id, ic.column_id) ` +
 			`FROM sys.index_columns ic ` +
-			`WHERE ic.object_id = i.object_id AND ic.index_id = i.index_id AND ic.is_included_column = 0) AS columns ` +
+			`WHERE ic.object_id = i.object_id AND ic.index_id = i.index_id AND ic.is_included_column = 0 ` +
+			`ORDER BY ic.key_ordinal FOR XML PATH('')), 1, 2, '') AS columns ` +
 		`FROM sys.indexes i ` +
 		`JOIN sys.tables t ON t.object_id = i.object_id ` +
 		`WHERE SCHEMA_NAME(t.schema_id) = ${ns} AND i.name IS NOT NULL${tableFilter}`
@@ -484,7 +487,10 @@ function renderEnumsIntrospect(
 	let emptySelect: string;
 	let defaultOrder: string;
 	if (plan.kind === "list-enums") {
-		mainSelect = `SELECT [name], (SELECT COUNT(*) FROM OPENJSON([members])) AS members_count FROM ${metaTable}`;
+		// Count par virgules — universel 2005+ (OPENJSON exige compat ≥ 130,
+		// passe 2014 M/7). Sûr par construction : les members sont des idents
+		// validés au lower (jamais de virgule/quote dans les valeurs).
+		mainSelect = `SELECT [name], CASE WHEN [members] = '[]' THEN 0 ELSE (LEN([members]) - LEN(REPLACE([members], ',', ''))) + 1 END AS members_count FROM ${metaTable}`;
 		emptySelect = `SELECT TOP 0 CAST(NULL AS nvarchar(4000)) AS [name], CAST(NULL AS int) AS members_count`;
 		defaultOrder = "[name] ASC";
 	} else {
@@ -495,10 +501,17 @@ function renderEnumsIntrospect(
 			);
 		}
 		const targetRef = params.add(plan.target);
+		// Split XML universel 2005+ (pas d'OPENJSON) : '["a","b"]' → strip
+		// [ ] " (idents validés = jamais présents dans les valeurs) →
+		// 'a,b' → '<m>a</m><m>b</m>' → nodes. La position = index XPath réel
+		// du node (ordre du document garanti par construction).
 		mainSelect =
-			`SELECT j.value AS member, CAST(j.[key] AS int) + 1 AS position ` +
-			`FROM ${metaTable} CROSS APPLY OPENJSON([members]) j ` +
-			`WHERE [name] = ${targetRef}`;
+			`SELECT m.n.value('.', 'nvarchar(4000)') AS member, ` +
+			`m.n.value('for $i in . return count(../*[. << $i]) + 1', 'int') AS position ` +
+			`FROM ${metaTable} ` +
+			`CROSS APPLY (SELECT CAST('<m>' + REPLACE(REPLACE(REPLACE(REPLACE([members], '[', ''), ']', ''), '"', ''), ',', '</m><m>') + '</m>' AS xml) AS x) AS j ` +
+			`CROSS APPLY j.x.nodes('/m') AS m(n) ` +
+			`WHERE [name] = ${targetRef} AND [members] <> '[]'`;
 		emptySelect = `SELECT TOP 0 CAST(NULL AS nvarchar(4000)) AS member, CAST(NULL AS int) AS position`;
 		defaultOrder = "[position] ASC";
 	}
@@ -998,43 +1011,55 @@ function renderAddIndex(
 	);
 }
 
-/** `drop index NAME from T` → `DROP INDEX [IF EXISTS] [n] ON [t]` — T-SQL
- *  exige la table (l'index est table-scoped, pas schema-scoped comme PG). */
+/** `drop index NAME from T` → `DROP INDEX [n] ON [t]` — T-SQL exige la
+ *  table (l'index est table-scoped, pas schema-scoped comme PG). Le
+ *  `IF EXISTS` natif est 2016+ : idempotence via guard sys.indexes,
+ *  universel 2005+ (passe 2014 M/7). */
 function renderDropIndex(
 	plan: import("../ir/plan").DropIndexPlan
 ): NativeQuery {
-	const ifExists = plan.ifExists ? "IF EXISTS " : "";
+	const dropText = `DROP INDEX ${quoteIdent(plan.name)} ON ${quoteIdent(plan.target)}`;
+	if (!plan.ifExists) return ddlQuery(dropText);
 	return ddlQuery(
-		`DROP INDEX ${ifExists}${quoteIdent(plan.name)} ON ${quoteIdent(plan.target)}`
+		`IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = ${nstr(plan.name)} AND object_id = OBJECT_ID(${nstr(quoteIdent(plan.target))})) ${dropText}`
 	);
 }
 
-/** `drop table` → `DROP TABLE [IF EXISTS]` — le refus si FK dépendantes est
- *  natif T-SQL (comportement par défaut, pas de mot-clé RESTRICT). */
+/** `drop table` — le refus si FK dépendantes est natif T-SQL (défaut ≡
+ *  RESTRICT). `IF EXISTS` natif = 2016+ → guard OBJECT_ID universel. */
 function renderDropTable(
-	plan: import("../ir/plan").DropTablePlan
+	plan: import("../ir/plan").DropTablePlan,
+	namespace: string
 ): NativeQuery {
-	const ifExists = plan.ifExists ? "IF EXISTS " : "";
-	return ddlQuery(`DROP TABLE ${ifExists}${quoteIdent(plan.target)}`);
-}
-
-/** `drop column` → `ALTER TABLE … DROP COLUMN [IF EXISTS]` (natif 2016+).
- *  Refus natif si contrainte/index dépendant (défaut T-SQL ≡ RESTRICT). */
-function renderDropColumn(
-	plan: import("../ir/plan").DropColumnPlan
-): NativeQuery {
-	const ifExists = plan.ifExists ? "IF EXISTS " : "";
+	const dropText = `DROP TABLE ${quoteIdent(plan.target)}`;
+	if (!plan.ifExists) return ddlQuery(dropText);
 	return ddlQuery(
-		`ALTER TABLE ${quoteIdent(plan.target)} DROP COLUMN ${ifExists}${quoteIdent(plan.column)}`
+		`IF OBJECT_ID(${objectLiteral(namespace, plan.target)}, N'U') IS NOT NULL ${dropText}`
 	);
 }
 
-/** `drop ref` → `ALTER TABLE … DROP CONSTRAINT [IF EXISTS]` — natif, miroir
- *  PG exact (D7 typing gate côté frontend). */
-function renderDropRef(plan: import("../ir/plan").DropRefPlan): NativeQuery {
-	const ifExists = plan.ifExists ? "IF EXISTS " : "";
+/** `drop column` — refus natif si contrainte/index dépendant (défaut T-SQL
+ *  ≡ RESTRICT). `IF EXISTS` natif = 2016+ → guard COL_LENGTH universel. */
+function renderDropColumn(
+	plan: import("../ir/plan").DropColumnPlan,
+	namespace: string
+): NativeQuery {
+	const dropText = `ALTER TABLE ${quoteIdent(plan.target)} DROP COLUMN ${quoteIdent(plan.column)}`;
+	if (!plan.ifExists) return ddlQuery(dropText);
+	const table = nstr(`${quoteIdent(namespace)}.${quoteIdent(plan.target)}`);
 	return ddlQuery(
-		`ALTER TABLE ${quoteIdent(plan.target)} DROP CONSTRAINT ${ifExists}${quoteIdent(plan.name)}`
+		`IF COL_LENGTH(${table}, ${nstr(plan.column)}) IS NOT NULL ${dropText}`
+	);
+}
+
+/** `drop ref` → `ALTER TABLE … DROP CONSTRAINT` — natif, miroir PG (D7
+ *  typing gate côté frontend). `IF EXISTS` → guard OBJECT_ID(…, 'F')
+ *  universel 2005+. */
+function renderDropRef(plan: import("../ir/plan").DropRefPlan): NativeQuery {
+	const dropText = `ALTER TABLE ${quoteIdent(plan.target)} DROP CONSTRAINT ${quoteIdent(plan.name)}`;
+	if (!plan.ifExists) return ddlQuery(dropText);
+	return ddlQuery(
+		`IF OBJECT_ID(${nstr(quoteIdent(plan.name))}, N'F') IS NOT NULL ${dropText}`
 	);
 }
 
@@ -1080,11 +1105,13 @@ function renderCreateEnum(
 }
 
 /**
- * `add enum member` — `JSON_MODIFY(members, 'append $', @p)` avec dedup
- * NOT EXISTS sur OPENJSON (déjà présent → 0 row affected, silence D3
- * miroir `ADD VALUE IF NOT EXISTS` PG). Enum inconnu → 0 row affected
- * silencieux (divergence assumée vs l'erreur PG — même comportement que
- * l'`$addToSet` Mongo sur _id absent, documenté).
+ * `add enum member` — append par STUFF sur le `]` final (universel 2005+ :
+ * JSON_MODIFY = 2016+ et OPENJSON = compat ≥ 130, passe 2014 M/7). Le
+ * member JSON-quoted est bindé ; le dedup passe par NOT LIKE sur la forme
+ * quoted avec les wildcards LIKE échappés (`_` est un joker — un member
+ * `a_b` sans escape matcherait `aXb`). Déjà présent → 0 row affected,
+ * silence D3 miroir `ADD VALUE IF NOT EXISTS` PG. Enum inconnu → 0 row
+ * silencieux (même comportement que l'`$addToSet` Mongo, documenté).
  */
 function renderAddEnumMember(
 	plan: import("../ir/plan").AddEnumMemberPlan,
@@ -1092,12 +1119,16 @@ function renderAddEnumMember(
 ): NativeQuery {
 	const params = newParams();
 	const nameRef = params.add(plan.name);
-	const memberRef = params.add(plan.member);
+	const quotedMember = JSON.stringify(plan.member);
+	const quotedRef = params.add(quotedMember);
+	const likePattern = `%${quotedMember.replace(/[\\%_[]/g, (c) => `\\${c}`)}%`;
+	const likeRef = params.add(likePattern);
 	const meta = enumsMetaTable(namespace);
 	const text =
-		`UPDATE ${meta} SET [members] = JSON_MODIFY([members], 'append $', ${memberRef}) ` +
-		`WHERE [name] = ${nameRef} ` +
-		`AND NOT EXISTS (SELECT 1 FROM OPENJSON([members]) WHERE [value] = ${memberRef})`;
+		`UPDATE ${meta} SET [members] = CASE WHEN [members] = '[]' ` +
+		`THEN '[' + ${quotedRef} + ']' ` +
+		`ELSE STUFF([members], LEN([members]), 1, ',' + ${quotedRef} + ']') END ` +
+		`WHERE [name] = ${nameRef} AND [members] NOT LIKE ${likeRef} ESCAPE '\\'`;
 	return {
 		engine: "mssql",
 		kind: "sql",
