@@ -41,7 +41,8 @@ export interface AddConnectionOptions {
 	readonly name: string;
 	readonly force?: boolean;
 	/** DSN complète — skip tous les prompts. Format `postgres://…` ou
-	 *  `postgresql://…` (alias) ou `mongodb://…`. */
+	 *  `postgresql://…` (alias), `mongodb://…`, `mssql://…` ou
+	 *  `sqlserver://…` (alias). */
 	readonly url?: string;
 	readonly prompter: Prompter;
 	readonly stdout: (line: string) => void;
@@ -53,7 +54,7 @@ export interface AddConnectionResult {
 }
 
 const PORT_RE = /^[0-9]{1,5}$/;
-const DSN_RE = /^(postgres|postgresql|mongodb(\+srv)?):\/\/.+/;
+const DSN_RE = /^(postgres|postgresql|mongodb(\+srv)?|mssql|sqlserver):\/\/.+/;
 
 export async function addConnection(
 	opts: AddConnectionOptions
@@ -77,7 +78,7 @@ export async function addConnection(
 		if (!DSN_RE.test(url)) {
 			throw new AddConnectionError(
 				"invalid-input",
-				"DSN invalide (attendu: postgres://… ou postgresql://… ou mongodb://…)"
+				"DSN invalide (attendu: postgres://…, postgresql://…, mongodb://…, mssql://… ou sqlserver://…)"
 			);
 		}
 		addLocalConnection({ name: opts.name, url });

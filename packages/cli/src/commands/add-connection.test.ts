@@ -278,6 +278,30 @@ describe("addConnection — mode --url (DSN inline)", () => {
 		);
 	});
 
+	test("--url mssql:// (et alias sqlserver://) acceptée telle quelle", async () => {
+		const prompter = mockPrompter({});
+		await addConnection({
+			name: "chinook-mssql",
+			url: "mssql://sa:pw@localhost:1433/Chinook?trustServerCertificate=true",
+			prompter,
+			stdout: (l) => out.push(l)
+		});
+		expect(loadLocalConnections()?.connections[0]?.url).toBe(
+			"mssql://sa:pw@localhost:1433/Chinook?trustServerCertificate=true"
+		);
+
+		const prompter2 = mockPrompter({});
+		await addConnection({
+			name: "legacy-2014",
+			url: "sqlserver://u:p@corp-host:1433/prod",
+			prompter: prompter2,
+			stdout: (l) => out.push(l)
+		});
+		expect(
+			loadLocalConnections()?.connections.map((c) => c.url)
+		).toContain("sqlserver://u:p@corp-host:1433/prod");
+	});
+
 	test("--url + entrée existante → prompt overwrite, PUIS skip inputs", async () => {
 		saveLocalConnections({
 			version: LOCAL_CONNECTIONS_VERSION,
