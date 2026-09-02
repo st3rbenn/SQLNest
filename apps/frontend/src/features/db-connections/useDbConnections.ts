@@ -62,13 +62,9 @@ interface ListResponse {
 }
 
 export async function fetchDbConnections(
-	teamSlug: string | null
+	teamSlug: string
 ): Promise<readonly DbConnection[]> {
-	// URL team-scoped si teamSlug est fourni (context router), sinon
-	// fallback route legacy user-scoped (transitionnel).
-	const url = teamSlug
-		? `${API_BASE}/api/teams/${encodeURIComponent(teamSlug)}/db-connections`
-		: `${API_BASE}/api/db-connections`;
+	const url = `${API_BASE}/api/teams/${encodeURIComponent(teamSlug)}/db-connections`;
 	const res = await fetch(url, { credentials: "include" });
 	if (!res.ok) {
 		const data = (await res.json().catch(() => ({}))) as { message?: string };
@@ -91,13 +87,19 @@ export async function fetchDbConnections(
  * = SELECT indexé + O(N) sur registry in-memory par tick. À terme,
  * migrer vers SSE + Redis pub/sub pour zéro latence sans polling.
  *
- * `teamSlug` : si fourni, appelle la route team-scoped ; sinon la route
- * legacy (transitionnel).
+ * `teamSlug = null` (team pas encore chargée) désactive le hook — le poll
+ * démarre dès que le slug arrive.
  */
-export function useDbConnections(teamSlug: string | null = null) {
+export function useDbConnections(teamSlug: string | null) {
 	return useQuery({
 		queryKey: ["db-connections", teamSlug],
-		queryFn: () => fetchDbConnections(teamSlug),
+		queryFn: () => {
+			if (teamSlug === null) {
+				throw new Error("Aucune team chargée");
+			}
+			return fetchDbConnections(teamSlug);
+		},
+		enabled: teamSlug !== null,
 		retry: false,
 		refetchOnWindowFocus: false,
 		refetchInterval: 2000

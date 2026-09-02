@@ -20,11 +20,9 @@ export class SchemaRequestError extends Error {
 
 export async function fetchSchema(
 	connectionId: string,
-	teamSlug: string | null = null
+	teamSlug: string
 ): Promise<SchemaModel> {
-	const url = teamSlug
-		? `${API_BASE}/api/teams/${encodeURIComponent(teamSlug)}/db-connections/${encodeURIComponent(connectionId)}/schema`
-		: `${API_BASE}/api/db-connections/${encodeURIComponent(connectionId)}/schema`;
+	const url = `${API_BASE}/api/teams/${encodeURIComponent(teamSlug)}/db-connections/${encodeURIComponent(connectionId)}/schema`;
 	let res: Response;
 	try {
 		res = await fetch(url, { credentials: "include" });
@@ -45,24 +43,25 @@ export async function fetchSchema(
 }
 
 /**
- * Introspecte le schéma via le proxy tunnel `/api/db-connections/:id/schema`
- * (ou `/api/teams/:slug/db-connections/:id/schema` si un teamSlug est
- * fourni). `connectionId = null` désactive le hook (utile quand aucune
- * connection n'est encore sélectionnée par l'UI).
+ * Introspecte le schéma via le proxy tunnel
+ * `/api/teams/:slug/db-connections/:id/schema`. `connectionId = null`
+ * désactive le hook (aucune connection sélectionnée par l'UI) ;
+ * `teamSlug = null` aussi (team pas encore chargée — le fetch attend le
+ * slug plutôt que d'appeler une route qui n'existe pas).
  */
 export function useSchema(
 	connectionId: string | null,
-	teamSlug: string | null = null
+	teamSlug: string | null
 ) {
 	return useQuery({
 		queryKey: ["schema", teamSlug, connectionId],
 		queryFn: () => {
-			if (connectionId === null) {
+			if (connectionId === null || teamSlug === null) {
 				throw new SchemaRequestError(0, "Aucune connection sélectionnée");
 			}
 			return fetchSchema(connectionId, teamSlug);
 		},
-		enabled: connectionId !== null,
+		enabled: connectionId !== null && teamSlug !== null,
 		retry: false,
 		refetchOnWindowFocus: false
 	});

@@ -153,10 +153,9 @@ export class SnqlRuntimeError extends Error {
 export interface RunQueryInput {
 	readonly connectionId: string;
 	readonly source: string;
-	/** Team courante — obligatoire pour les kinds système (schema_events)
-	 *  qui appellent une route team-scopée. Optionnel pour le proxy tunnel
-	 *  générique (fallback legacy user-scoped). */
-	readonly teamSlug?: string | null;
+	/** Team courante — toutes les routes (kinds système ET proxy tunnel)
+	 *  sont team-scopées. */
+	readonly teamSlug: string;
 }
 
 export async function runQueryRequest(
@@ -168,11 +167,6 @@ export async function runQueryRequest(
 	// parser SNQL — plus de regex intercept fragile.
 	const introspect = detectSqlnestIntrospect(input.source);
 	if (introspect?.kind === "schema-events") {
-		if (input.teamSlug == null) {
-			throw new SnqlRuntimeError(
-				"list schema_events nécessite un context team — recharge le canvas"
-			);
-		}
 		const page = await fetchChecksumHistory(
 			input.connectionId,
 			input.teamSlug,
@@ -201,9 +195,7 @@ export async function runQueryRequest(
 		};
 	}
 
-	const url = input.teamSlug
-		? `${API_BASE}/api/teams/${encodeURIComponent(input.teamSlug)}/db-connections/${encodeURIComponent(input.connectionId)}/query`
-		: `${API_BASE}/api/db-connections/${encodeURIComponent(input.connectionId)}/query`;
+	const url = `${API_BASE}/api/teams/${encodeURIComponent(input.teamSlug)}/db-connections/${encodeURIComponent(input.connectionId)}/query`;
 	const res = await fetch(url, {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },

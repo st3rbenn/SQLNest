@@ -102,21 +102,22 @@ function PreviewSkeleton(): React.ReactNode {
 
 export function MiniSchemaPreview({ connectionId, isOnline, snapshot }: Props) {
 	const queryClient = useQueryClient();
+	const teamSlug = useCurrentTeamSlug();
 	const {
 		data: schema,
 		error,
 		isLoading
-	} = useSchema(isOnline ? connectionId : null);
+	} = useSchema(isOnline ? connectionId : null, teamSlug);
 
 	const prevOnlineRef = useRef(isOnline);
 	useEffect(() => {
 		if (!prevOnlineRef.current && isOnline) {
 			void queryClient.invalidateQueries({
-				queryKey: ["schema", connectionId]
+				queryKey: ["schema", teamSlug, connectionId]
 			});
 		}
 		prevOnlineRef.current = isOnline;
-	}, [isOnline, connectionId, queryClient]);
+	}, [isOnline, connectionId, queryClient, teamSlug]);
 
 	// PRIORITÉ ABSOLUE au snapshot précalculé. Le snapshot est capturé à
 	// partir du VRAI état du canvas (positions RF + frames + hidden), donc

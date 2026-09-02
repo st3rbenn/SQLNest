@@ -178,9 +178,19 @@ export function usePreviewSnapshotSync(
 ): void {
 	const { data: session } = useCurrentUser();
 	const teamSlug = useCurrentTeamSlug();
+	// Toutes les routes snapshot sont team-scopées : sans slug (team pas
+	// encore chargée), on n'arme rien — l'effet re-run quand il arrive.
 	const enabled =
-		session?.user != null && opts.connectionId.length > 0 && opts.canvasReady;
+		session?.user != null &&
+		teamSlug !== null &&
+		opts.connectionId.length > 0 &&
+		opts.canvasReady;
 	const queryClient = useQueryClient();
+	// Le flush unmount/pagehide vit dans un effet à deps vides : sa closure
+	// capture le PREMIER render (slug souvent encore null) — il lit la ref,
+	// jamais la variable, pour envoyer avec le slug courant.
+	const teamSlugRef = useRef(teamSlug);
+	teamSlugRef.current = teamSlug;
 
 	const snapshot = useMemo(
 		() =>
@@ -209,7 +219,7 @@ export function usePreviewSnapshotSync(
 	// (bug apollon_db 2026-08-07). Les changements suivants (drag, resize,
 	// frames) sont debounced normalement pour dedup les rafales.
 	useEffect(() => {
-		if (!enabled) return;
+		if (!enabled || teamSlug === null) return;
 		if (snapshot.nodes.length === 0) return;
 		if (serialized === lastSyncedRef.current) return;
 
@@ -284,12 +294,14 @@ export function usePreviewSnapshotSync(
 				timeoutRef.current = null;
 			}
 			pendingRef.current = null;
+			const slug = teamSlugRef.current;
+			if (slug === null) return;
 			try {
 				const body = JSON.stringify({ snapshot: pending.snapshot });
 				if (body.length >= KEEPALIVE_MAX_BODY_BYTES) return;
 				void putPreviewSnapshot(pending.connectionId, pending.snapshot, {
 					keepalive: true,
-					teamSlug
+					teamSlug: slug
 				}).catch(() => {
 					// Silencieux — le document part.
 				});

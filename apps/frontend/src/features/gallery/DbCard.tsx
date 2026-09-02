@@ -2,6 +2,7 @@ import { Link } from "@tanstack/react-router";
 import type { CSSProperties, MouseEvent } from "react";
 import type { DbConnection } from "../db-connections/useDbConnections";
 import { useSchema } from "../schema/useSchema";
+import { useCurrentTeamSlug } from "../teams/useCurrentTeam";
 import { MiniSchemaPreview } from "./MiniSchemaPreview";
 
 interface Props {
@@ -72,7 +73,8 @@ export function DbCard({ connection, isPending, onClick }: Props) {
 	// supplémentaire. `undefined` tant que la preview n'a pas encore chargé
 	// (ou si CLI hors ligne, via l'`enabled` du hook côté null).
 	const isOnline = connection.isOnline ?? true;
-	const { data: schema } = useSchema(isOnline ? connection.id : null);
+	const teamSlug = useCurrentTeamSlug();
+	const { data: schema } = useSchema(isOnline ? connection.id : null, teamSlug);
 	return (
 		<Link
 			to="/canvas/$connId"

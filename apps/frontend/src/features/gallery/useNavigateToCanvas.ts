@@ -24,13 +24,17 @@ export async function prefetchCanvasData(
 	teamSlug: string | null,
 	connectionId: string
 ): Promise<void> {
-	if (teamSlug !== null) {
-		void queryClient.prefetchQuery({
-			queryKey: ["canvas-state", teamSlug, connectionId],
-			queryFn: () => fetchCanvasState(connectionId, teamSlug),
-			staleTime: Number.POSITIVE_INFINITY
-		});
+	if (teamSlug === null) {
+		// Team pas encore chargée : toutes les routes data sont team-scopées,
+		// rien à préchauffer. Le canvas fetchera au mount avec le slug de
+		// SA route (le redirect legacy /canvas/:connId le résout).
+		return;
 	}
+	void queryClient.prefetchQuery({
+		queryKey: ["canvas-state", teamSlug, connectionId],
+		queryFn: () => fetchCanvasState(connectionId, teamSlug),
+		staleTime: Number.POSITIVE_INFINITY
+	});
 	const schema = await queryClient.ensureQueryData({
 		queryKey: ["schema", teamSlug, connectionId],
 		queryFn: () => fetchSchema(connectionId, teamSlug),
