@@ -10,6 +10,10 @@ import type {
 } from "@sqlnest/snql";
 import { EngineIntrospectionError } from "../errors";
 import {
+	inferNamingRelations,
+	relationPairKey
+} from "../naming-relations";
+import {
 	buildRefsFromFkRows,
 	buildRelationsFromFkRows,
 	type RelationalFkRow
@@ -247,10 +251,33 @@ export function buildMssqlSchemaModel(
 
 	const fkRows = fks.map(normalizeMssqlFkRow);
 	const refs = buildRefsFromFkRows(fkRows);
+	const declaredRelations = buildRelationsFromFkRows(fkRows);
+
+	// Heuristique de nommage (mécanique partagée Mongo) — vital sur les
+	// bases legacy SANS contraintes FK déclarées : les liens n'existent que
+	// par convention `<x>_id`. Ne double jamais une FK déclarée ; la clé
+	// cible = PK single-column de la table visée, sinon la colonne homonyme
+	// (`album.artist_id` → `artist.artist_id`), sinon skip.
+	const declaredPairs = new Set(
+		declaredRelations.map((r) =>
+			relationPairKey(r.from.collection, r.to.collection)
+		)
+	);
+	const inferredRelations = inferNamingRelations(collections, {
+		declaredPairs,
+		targetKeyFor: (target, sourceFieldName) => {
+			if (target.primaryKey?.length === 1) return target.primaryKey[0];
+			if (target.fields.some((f) => f.name === sourceFieldName)) {
+				return sourceFieldName;
+			}
+			return undefined;
+		}
+	});
+
 	return {
 		engine: "mssql",
 		collections,
-		relations: buildRelationsFromFkRows(fkRows),
+		relations: [...declaredRelations, ...inferredRelations],
 		...(enumsList.length > 0 ? { enums: enumsList } : {}),
 		...(refs.length > 0 ? { refs } : {})
 	};

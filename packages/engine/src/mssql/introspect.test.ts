@@ -244,3 +244,92 @@ describe("buildMssqlSchemaModel", () => {
 		]);
 	});
 });
+
+describe("buildMssqlSchemaModel — relations inférées par nommage (heuristique Mongo)", () => {
+	const col = (
+		table: string,
+		name: string,
+		type = "int"
+	) => ({
+		table_name: table,
+		column_name: name,
+		data_type: type,
+		is_nullable: "YES",
+		column_default: null
+	});
+
+	it("sans FK déclarée : <x>_id → PK single de la cible, confidence 0.6", () => {
+		const model = buildMssqlSchemaModel(
+			["album", "artist"],
+			[
+				col("album", "album_id"),
+				col("album", "artist_id"),
+				col("artist", "artist_id")
+			],
+			[{ table_name: "artist", column_name: "artist_id" }],
+			[]
+		);
+		expect(model.relations).toEqual([
+			{
+				from: { collection: "album", fields: ["artist_id"] },
+				to: { collection: "artist", fields: ["artist_id"] },
+				kind: "many-to-one",
+				origin: "naming-heuristic",
+				confidence: 0.6
+			}
+		]);
+	});
+
+	it("cible sans PK : la colonne homonyme fait foi", () => {
+		const model = buildMssqlSchemaModel(
+			["order_line", "order"],
+			[
+				col("order_line", "order_id"),
+				col("order", "order_id"),
+				col("order", "label", "nvarchar")
+			],
+			[],
+			[]
+		);
+		expect(model.relations[0]).toMatchObject({
+			from: { collection: "order_line", fields: ["order_id"] },
+			to: { collection: "order", fields: ["order_id"] },
+			origin: "naming-heuristic"
+		});
+	});
+
+	it("une FK DÉCLARÉE sur la même paire supprime l'inférence (pas de doublon)", () => {
+		const model = buildMssqlSchemaModel(
+			["album", "artist"],
+			[
+				col("album", "artist_id"),
+				col("artist", "artist_id")
+			],
+			[{ table_name: "artist", column_name: "artist_id" }],
+			[
+				{
+					constraint_id: "1",
+					constraint_name: "FK_album_artist",
+					from_table: "album",
+					from_column: "artist_id",
+					to_table: "artist",
+					to_column: "artist_id",
+					on_delete: 0,
+					on_update: 0
+				}
+			]
+		);
+		expect(model.relations).toHaveLength(1);
+		expect(model.relations[0]?.origin).toBe("foreign-key");
+	});
+
+	it("cible inexistante ou self : aucune inférence", () => {
+		const model = buildMssqlSchemaModel(
+			["t"],
+			[col("t", "ghost_id"), col("t", "t_id")],
+			[{ table_name: "t", column_name: "t_id" }],
+			[]
+		);
+		expect(model.relations).toEqual([]);
+	});
+});

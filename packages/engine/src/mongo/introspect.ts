@@ -9,6 +9,7 @@ import type {
 } from "@sqlnest/snql";
 import type { Db } from "mongodb";
 import { EngineIntrospectionError } from "../errors";
+import { inferNamingRelations } from "../naming-relations";
 
 /**
  * bsonType du validator `$jsonSchema` → `SnqlType`. Inverse de `MONGO_BSON_TYPE`
@@ -143,58 +144,17 @@ export function inferCollection(
 		: { name, fields, source: "inferred" };
 }
 
-/** Suffixes après lesquels le pluriel anglais est en `-es` (address → addresses). */
-const ES_ENDINGS = ["s", "x", "z", "ch", "sh"];
-
-/**
- * Cible d'un champ `<x>_id` : la première collection existante parmi les formes
- * plausibles du pluriel/singulier de `<x>` — pluriels réguliers ET irréguliers
- * (`category` → `categories`, `address` → `addresses`). Ne matche que si la
- * collection existe réellement → aucun faux positif ajouté.
- */
-function resolveTargetCollection(
-	prefix: string,
-	names: ReadonlySet<string>
-): string | undefined {
-	const candidates = [`${prefix}s`, prefix];
-	if (prefix.endsWith("y")) {
-		candidates.push(`${prefix.slice(0, -1)}ies`); // category → categories
-	}
-	if (ES_ENDINGS.some((ending) => prefix.endsWith(ending))) {
-		candidates.push(`${prefix}es`); // address → addresses, box → boxes
-	}
-	return candidates.find((candidate) => names.has(candidate));
-}
-
 /**
  * Relations inférées par **heuristique de nommage** : un champ `<x>_id` pointe
  * vers la collection `<x>` (ou `<x>s`) si elle existe. `origin: naming-heuristic`,
- * confiance moyenne — l'utilisateur pourra confirmer.
+ * confiance moyenne — l'utilisateur pourra confirmer. Mécanique partagée
+ * cross-engine dans `naming-relations` (2e consommateur : MSSQL sans FK
+ * déclarées) — la clé cible Mongo est toujours `_id`.
  */
 export function inferRelations(collections: readonly Collection[]): Relation[] {
-	const names = new Set(collections.map((c) => c.name));
-	const relations: Relation[] = [];
-
-	for (const collection of collections) {
-		for (const field of collection.fields) {
-			if (field.name === "_id" || !field.name.endsWith("_id")) {
-				continue;
-			}
-			const prefix = field.name.slice(0, -"_id".length);
-			const target = resolveTargetCollection(prefix, names);
-			if (target !== undefined && target !== collection.name) {
-				relations.push({
-					from: { collection: collection.name, fields: [field.name] },
-					to: { collection: target, fields: ["_id"] },
-					kind: "many-to-one",
-					origin: "naming-heuristic",
-					confidence: 0.6
-				});
-			}
-		}
-	}
-
-	return relations;
+	return inferNamingRelations(collections, {
+		targetKeyFor: () => "_id"
+	});
 }
 
 /**
