@@ -39,6 +39,7 @@ export {
 	type Node,
 	type NodeChange,
 	type NodeMouseHandler,
+	type NodeParentChange,
 	type NodeProps,
 	type NodeTypes,
 	type OnNodesChange,

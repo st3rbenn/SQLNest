@@ -77,6 +77,11 @@ export type NestCanvasProps<
 	onNodesDelete?: (nodes: TNode[]) => void;
 	onSelectionStart?: (event: ReactPointerEvent) => void;
 	onSelectionEnd?: (event: ReactPointerEvent) => void;
+	/**
+	 * Re-parentage pendant un drag : le node peut-il rejoindre `parent`
+	 * (`null` : racine) ? Absent = jamais de changement de parent.
+	 */
+	canReparent?: (node: TNode, parent: TNode | null) => boolean;
 	className?: string;
 	style?: CSSProperties;
 	id?: string;
@@ -96,6 +101,7 @@ const DEFAULT_VIEWPORT: Viewport = { x: 0, y: 0, zoom: 1 };
 /** Recopie les props dans le store après rendu. */
 function StoreUpdater({
 	id,
+	canReparent,
 	nodes,
 	edges,
 	onNodesChange,
@@ -108,6 +114,7 @@ function StoreUpdater({
 	onNodesDelete
 }: {
 	id: string | undefined;
+	canReparent: ((node: Node, parent: Node | null) => boolean) | undefined;
 	nodes: Node[] | undefined;
 	edges: Edge[] | undefined;
 	onNodesChange: ((changes: NodeChange[]) => void) | undefined;
@@ -123,6 +130,9 @@ function StoreUpdater({
 	useEffect(() => {
 		store.setState({ instanceId: id || "1" });
 	}, [store, id]);
+	useEffect(() => {
+		store.setState({ canReparent: canReparent ?? null });
+	}, [store, canReparent]);
 	useEffect(() => {
 		store.setState({
 			minZoom,
@@ -326,6 +336,7 @@ export function NestCanvas<
 		onNodeDrag,
 		onNodeDragStop,
 		onNodesDelete,
+		canReparent,
 		className,
 		style,
 		id,
@@ -354,6 +365,11 @@ export function NestCanvas<
 			<StoreContext.Provider value={store}>
 				<StoreUpdater
 					id={id}
+					canReparent={
+						canReparent as
+							| ((node: Node, parent: Node | null) => boolean)
+							| undefined
+					}
 					nodes={nodes as Node[] | undefined}
 					edges={edges as Edge[] | undefined}
 					onNodesChange={

@@ -55,6 +55,8 @@ export type Node<
 	parentId?: string;
 	/** Poussé hors de son parent pendant un drag, l'enfant l'agrandit. */
 	expandParent?: boolean;
+	/** Rogne ses descendants à ses bords. */
+	clipChildren?: boolean;
 	ariaLabel?: string;
 	ariaRole?: string;
 };
@@ -210,6 +212,14 @@ export type NodeSelectionChange = {
 	selected: boolean;
 };
 export type NodeRemoveChange = { id: string; type: "remove" };
+/** Le node change de parent (`null` : racine), position dans le nouveau repère. */
+export type NodeParentChange = {
+	id: string;
+	type: "parent";
+	parentId: string | null;
+	position: XYPosition;
+	dragging?: boolean;
+};
 export type NodeAddChange<TNode extends Node = Node> = {
 	item: TNode;
 	type: "add";
@@ -225,6 +235,7 @@ export type NodeChange<TNode extends Node = Node> =
 	| NodePositionChange
 	| NodeSelectionChange
 	| NodeRemoveChange
+	| NodeParentChange
 	| NodeAddChange<TNode>
 	| NodeReplaceChange<TNode>;
 

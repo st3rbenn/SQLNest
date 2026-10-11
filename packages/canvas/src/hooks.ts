@@ -63,6 +63,12 @@ export function applyNodeChanges<TNode extends Node>(
 					if (change.position !== undefined) next.position = change.position;
 					if (change.dragging !== undefined) next.dragging = change.dragging;
 					break;
+				case "parent":
+					if (change.parentId === null) delete next.parentId;
+					else next.parentId = change.parentId;
+					next.position = change.position;
+					if (change.dragging !== undefined) next.dragging = change.dragging;
+					break;
 				case "dimensions":
 					if (change.dimensions !== undefined) {
 						next.measured = { ...change.dimensions };

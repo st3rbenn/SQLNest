@@ -1,7 +1,13 @@
 import { autoPan, pointToFlow } from "./geometry";
-import { calculateNodePosition, isParentSelected } from "./parents";
+import { isParentSelected } from "./parents";
+import {
+	absoluteAfter,
+	createExpansionMemory,
+	findDropTarget,
+	withDescendants
+} from "./reparent";
 import type { CanvasStore, DragItem } from "./store";
-import type { Node, XYPosition } from "./types";
+import type { Node, NodeChange, XYPosition } from "./types";
 
 export const NO_DRAG_CLASS = "nodrag";
 const NODE_DRAG_THRESHOLD = 1;
@@ -87,6 +93,10 @@ export function createNodeDrag(
 	let lastPos: XYPosition = { x: 0, y: 0 };
 	let mousePosition: XYPosition = { x: 0, y: 0 };
 	let dragEvent: MouseEvent | TouchEvent | null = null;
+	// Re-parentage : nodes déplacés + descendants (jamais cibles), et
+	// agrandissements du geste à annuler si un node change de parent.
+	let excluded = new Set<string>();
+	const expansions = createExpansionMemory();
 
 	const eventPos = (e: MouseEvent | TouchEvent): XYPosition => {
 		const { clientX, clientY } = clientOf(e);
@@ -118,26 +128,67 @@ export function createNodeDrag(
 
 	const updateNodes = (pos: XYPosition) => {
 		lastPos = pos;
-		const { nodeLookup } = store.getState();
-		let changed = false;
+		const { nodeLookup, parentLookup, canReparent, dropTargetId } =
+			store.getState();
+		let before: NodeChange[] = [];
+		let overrides = new Map<string, XYPosition>();
+		let reparented = false;
+		if (canReparent) {
+			const targets = new Map<string, string | null>();
+			for (const [id, item] of dragItems) {
+				const node = nodeLookup.get(id);
+				if (node === undefined) continue;
+				const target = findDropTarget(
+					pos,
+					node,
+					excluded,
+					nodeLookup,
+					canReparent
+				);
+				targets.set(id, target);
+				const current =
+					item.parentId === undefined ? (node.parentId ?? null) : item.parentId;
+				if (target !== current) reparented = true;
+			}
+			if (reparented) {
+				({ changes: before, overrides } = expansions.revert(excluded));
+			}
+			for (const [id, target] of targets) {
+				const item = dragItems.get(id);
+				if (item) item.parentId = target;
+			}
+			const target = targets.get(params.nodeId) ?? null;
+			if (target !== dropTargetId) store.setState({ dropTargetId: target });
+		}
+		let changed = reparented;
 		for (const [id, item] of dragItems) {
 			const node = nodeLookup.get(id);
 			if (node === undefined) continue;
-			const { position, positionAbsolute } = calculateNodePosition(
-				node,
-				{ x: pos.x - item.distance.x, y: pos.y - item.distance.y },
-				nodeLookup
-			);
+			const positionAbsolute = {
+				x: pos.x - item.distance.x,
+				y: pos.y - item.distance.y
+			};
+			const parentId =
+				item.parentId === undefined ? node.parentId : item.parentId;
+			const parent = parentId
+				? absoluteAfter(parentId, nodeLookup, overrides)
+				: { x: 0, y: 0 };
+			const position = {
+				x: positionAbsolute.x - parent.x,
+				y: positionAbsolute.y - parent.y
+			};
 			changed =
 				changed ||
 				item.position.x !== position.x ||
 				item.position.y !== position.y;
 			item.position = position;
 			item.positionAbsolute = positionAbsolute;
+			if (canReparent) expansions.snapshot(item, nodeLookup, parentLookup);
 		}
 		positionsChanged = positionsChanged || changed;
 		if (!changed) return;
-		store.updateNodePositions(dragItems.values(), true);
+		const emitted = store.updateNodePositions(dragItems.values(), true, before);
+		expansions.track(emitted.slice(before.length), excluded);
 		const { onNodeDrag } = store.getState();
 		if (onNodeDrag && dragEvent !== null) {
 			const [node, nodes] = handlerParams(true);
@@ -182,6 +233,8 @@ export function createNodeDrag(
 				});
 			}
 		}
+		excluded = withDescendants(dragItems.keys(), store.getState().parentLookup);
+		expansions.clear();
 		if (dragItems.size > 0) {
 			callbacks.onDragStart();
 			const { onNodeDragStart } = store.getState();
@@ -241,6 +294,10 @@ export function createNodeDrag(
 
 	const gestureEnd = (e: MouseEvent | TouchEvent) => {
 		active = Math.max(0, active - 1);
+		if (store.getState().dropTargetId !== null) {
+			store.setState({ dropTargetId: null });
+		}
+		expansions.clear();
 		if (!dragStarted || aborted) {
 			if (aborted) {
 				autoPanStarted = false;

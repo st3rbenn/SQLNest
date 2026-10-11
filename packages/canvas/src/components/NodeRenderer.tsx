@@ -3,6 +3,7 @@ import {
 	memo,
 	type KeyboardEvent as ReactKeyboardEvent,
 	type MouseEvent as ReactMouseEvent,
+	useCallback,
 	useEffect,
 	useRef,
 	useState
@@ -20,6 +21,50 @@ import {
 } from "../selection";
 import { type CanvasState, visibleNodeIds } from "../store";
 import type { InternalNode, NodeMouseHandler, NodeTypes } from "../types";
+
+/**
+ * Rognage hérité des ancêtres `clipChildren` : intersection de leurs
+ * rectangles, exprimée dans le repère du node (le polygone peut déborder
+ * de sa boîte). Rien quand le node tient entièrement dans la zone.
+ */
+function clipPathFor(
+	id: string,
+	lookup: Map<string, InternalNode>
+): string | undefined {
+	const node = lookup.get(id);
+	if (node === undefined || !node.parentId) return undefined;
+	let left = Number.NEGATIVE_INFINITY;
+	let top = Number.NEGATIVE_INFINITY;
+	let right = Number.POSITIVE_INFINITY;
+	let bottom = Number.POSITIVE_INFINITY;
+	let clipped = false;
+	let current = lookup.get(node.parentId);
+	let guard = 0;
+	while (current && guard <= lookup.size) {
+		if (current.clipChildren) {
+			const { x, y } = current.internals.positionAbsolute;
+			const { width, height } = nodeDimensions(current);
+			left = Math.max(left, x);
+			top = Math.max(top, y);
+			right = Math.min(right, x + width);
+			bottom = Math.min(bottom, y + height);
+			clipped = true;
+		}
+		current = current.parentId ? lookup.get(current.parentId) : undefined;
+		guard += 1;
+	}
+	if (!clipped) return undefined;
+	const { x, y } = node.internals.positionAbsolute;
+	const { width, height } = nodeDimensions(node);
+	if (x >= left && y >= top && x + width <= right && y + height <= bottom) {
+		return undefined;
+	}
+	const l = left - x;
+	const t = top - y;
+	const r = Math.max(l, right - x);
+	const b = Math.max(t, bottom - y);
+	return `polygon(${l}px ${t}px, ${r}px ${t}px, ${r}px ${b}px, ${l}px ${b}px)`;
+}
 
 export type NodeRendererProps = {
 	nodeTypes: NodeTypes | undefined;
@@ -123,6 +168,10 @@ function NodeWrapperComponent({
 	const store = useStoreApi();
 	const node = useNestStore((s) => s.nodeLookup.get(id));
 	const descriptionId = useNestStore((s) => `nest-node-desc-${s.instanceId}`);
+	const clipPath = useNestStore(
+		useCallback((s: CanvasState) => clipPathFor(id, s.nodeLookup), [id])
+	);
+	const isDropTarget = useNestStore((s) => s.dropTargetId === id);
 	const ref = useRef<HTMLDivElement>(null);
 	const [dragging, setDragging] = useState(false);
 	const isDraggable =
@@ -214,6 +263,7 @@ function NodeWrapperComponent({
 	if (isSelectable) classes.push("selectable");
 	if (isDraggable) classes.push("draggable");
 	if (dragging) classes.push("dragging");
+	if (isDropTarget) classes.push("drop-target");
 
 	const onSelect = (event: ReactMouseEvent) => {
 		// Le drag sélectionne déjà au démarrage ; le clic sans mouvement passe ici.
@@ -267,6 +317,7 @@ function NodeWrapperComponent({
 				transform: `translate(${x}px,${y}px)`,
 				pointerEvents: isSelectable || isDraggable || onClick ? "all" : "none",
 				visibility: hasDimensions(node) ? "visible" : "hidden",
+				...(clipPath ? { clipPath } : {}),
 				...node.style,
 				...(inlineDimensions(node) as CSSProperties)
 			}}

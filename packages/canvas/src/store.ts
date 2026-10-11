@@ -22,7 +22,6 @@ import type {
 	Node,
 	NodeChange,
 	NodeDimensionChange,
-	NodePositionChange,
 	NodeSelectionChange,
 	Transform,
 	XYPosition
@@ -80,6 +79,8 @@ export type DragItem = {
 	position: XYPosition;
 	positionAbsolute: XYPosition;
 	distance: XYPosition;
+	/** Parent visé pendant le drag (re-parentage) ; absent = parent actuel. */
+	parentId?: string | null;
 };
 
 export type CanvasState = {
@@ -120,6 +121,10 @@ export type CanvasState = {
 	ariaLiveMessage: string;
 	connection: ConnectionState;
 	connectionClickStartHandle: ClickStartHandle | null;
+	/** Re-parentage pendant un drag : un node peut-il rejoindre `parent` (`null` : racine) ? */
+	canReparent: ((node: Node, parent: Node | null) => boolean) | null;
+	/** Conteneur visé par le drag en cours. */
+	dropTargetId: string | null;
 };
 
 type Listener = () => void;
@@ -142,7 +147,12 @@ export type CanvasStore = {
 	resetSelectedElements: () => void;
 	/** Sélectionne exactement `ids`, désélectionne le reste. */
 	selectExactly: (ids: Set<string>) => void;
-	updateNodePositions: (items: Iterable<DragItem>, dragging: boolean) => void;
+	/** Changes de position (ou de parent) des items ; `before` passe en tête. */
+	updateNodePositions: (
+		items: Iterable<DragItem>,
+		dragging: boolean,
+		before?: NodeChange[]
+	) => NodeChange[];
 	/** Pan immédiat en pixels écran ; vrai si la vue a bougé. */
 	panBy: (delta: XYPosition) => boolean;
 	deleteSelectedNodes: () => void;
@@ -203,9 +213,6 @@ function adoptNodes(
 						}
 					};
 		lookup.set(userNode.id, internal);
-		if (userNode.parentId) {
-			updateChildNode(internal, lookup, parentLookup, selectedZ);
-		}
 		if (
 			(internal.measured.width === undefined ||
 				internal.measured.height === undefined) &&
@@ -214,6 +221,23 @@ function adoptNodes(
 			initialized = false;
 		}
 	}
+	// Les enfants après tous les parents, quel que soit l'ordre du tableau :
+	// un re-parentage ne réordonne pas les nodes de l'app.
+	const resolved = new Set<string>();
+	const resolve = (id: string, depth: number) => {
+		const node = lookup.get(id);
+		if (node === undefined || resolved.has(id)) return;
+		resolved.add(id);
+		if (!node.parentId || depth > lookup.size) return;
+		resolve(node.parentId, depth + 1);
+		updateChildNode(
+			lookup.get(id) as InternalNode,
+			lookup,
+			parentLookup,
+			selectedZ
+		);
+	};
+	for (const id of Array.from(lookup.keys())) resolve(id, 0);
 	return initialized;
 }
 
@@ -252,7 +276,9 @@ export function createCanvasStore(init: {
 		onSelectionChangeHandlers: [],
 		ariaLiveMessage: "",
 		connection: initialConnection,
-		connectionClickStartHandle: null
+		connectionClickStartHandle: null,
+		canReparent: null,
+		dropTargetId: null
 	};
 	const listeners = new Set<Listener>();
 
@@ -425,27 +451,41 @@ export function createCanvasStore(init: {
 	// parent : c'est le parent qui s'agrandit (cf. `handleExpandParent`).
 	const updateNodePositions = (
 		items: Iterable<DragItem>,
-		dragging: boolean
+		dragging: boolean,
+		before: NodeChange[] = []
 	) => {
 		const { nodeLookup, parentLookup } = state;
-		const changes: NodeChange[] = [];
+		const changes: NodeChange[] = [...before];
 		const expandChildren: ExpandChild[] = [];
 		for (const item of items) {
 			const node = nodeLookup.get(item.id);
-			const expandParent = Boolean(node?.expandParent && node?.parentId);
-			const change: NodePositionChange = {
-				id: item.id,
-				type: "position",
-				position: expandParent
-					? { x: Math.max(0, item.position.x), y: Math.max(0, item.position.y) }
-					: item.position,
-				dragging
-			};
-			if (expandParent && node?.parentId) {
+			const parentId =
+				item.parentId === undefined
+					? node?.parentId
+					: (item.parentId ?? undefined);
+			const expandParent = Boolean(node?.expandParent && parentId);
+			const position = expandParent
+				? { x: Math.max(0, item.position.x), y: Math.max(0, item.position.y) }
+				: item.position;
+			if (
+				item.parentId !== undefined &&
+				(item.parentId ?? undefined) !== node?.parentId
+			) {
+				changes.push({
+					id: item.id,
+					type: "parent",
+					parentId: item.parentId,
+					position,
+					dragging
+				});
+			} else {
+				changes.push({ id: item.id, type: "position", position, dragging });
+			}
+			if (expandParent && parentId && node) {
 				const { width, height } = node.measured;
 				expandChildren.push({
 					id: item.id,
-					parentId: node.parentId,
+					parentId,
 					rect: {
 						...item.positionAbsolute,
 						width: width ?? 0,
@@ -453,7 +493,6 @@ export function createCanvasStore(init: {
 					}
 				});
 			}
-			changes.push(change);
 		}
 		if (expandChildren.length > 0) {
 			changes.push(
@@ -461,6 +500,7 @@ export function createCanvasStore(init: {
 			);
 		}
 		triggerNodeChanges(changes);
+		return changes;
 	};
 
 	const panBy = (delta: XYPosition) => {
