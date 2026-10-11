@@ -70,6 +70,10 @@ export function computeFrameNodes(
 				clipChildren: true,
 				width: rect.width,
 				height: rect.height,
+				// Taille connue : sans `measured`, chaque nouvel objet repart
+				// sans mesure jusqu'au prochain passage du ResizeObserver, et
+				// un resize commencé entre-temps part d'une taille nulle.
+				measured: { width: rect.width, height: rect.height },
 				// Callbacks passés BRUTS (stables via useCallback côté hook).
 				// FrameNode les rappellera avec `frame.key` en premier arg — ça
 				// évite de recréer des closures inline `(r) => handler(key, r)`
