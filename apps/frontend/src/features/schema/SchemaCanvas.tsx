@@ -22,6 +22,7 @@ import { CanvasBottomBar } from "./canvas/floating/CanvasBottomBar";
 import { CanvasLeftPanel } from "./canvas/floating/CanvasLeftPanel";
 import { CanvasOverlays } from "./canvas/floating/CanvasOverlays";
 import { CanvasTopRightHUD } from "./canvas/floating/CanvasTopRightHUD";
+import { canReparentNode, withFrameParents } from "./canvas/frameTree";
 import { useCanvasActions } from "./canvas/useCanvasActions";
 import { useCanvasCommands } from "./canvas/useCanvasCommands";
 import { useCanvasEdges } from "./canvas/useCanvasEdges";
@@ -285,14 +286,19 @@ function CanvasInner({
 		() => ({ push: () => historyPushRef.current() }),
 		[]
 	);
-	const { nodes, setNodes, nodesRef, handleNodesChange, handleTableResize } =
-		useCanvasNodes({
-			base,
-			tablePositions,
-			tableSizes,
-			framesApi,
-			history: historyProxy
-		});
+	const {
+		nodes,
+		setNodes,
+		handleNodesChange,
+		persistMovedTables,
+		handleTableResize
+	} = useCanvasNodes({
+		base,
+		tablePositions,
+		tableSizes,
+		framesApi,
+		history: historyProxy
+	});
 
 	// Historique undo/redo — capture positions + sizes + frames + hiddenIds.
 	// `history.push()` doit être appelé APRÈS chaque geste user notable
@@ -397,27 +403,19 @@ function CanvasInner({
 		}, [setFocusId, setFocusFrameKey])
 	});
 
-	// Frames — orchestration complète (handlers resize/rename/delete/focus,
-	// membership reconciliation post-ELK, drag lifecycle avec snapshot des
-	// positions au drag-start). Voir `useCanvasFrames` pour la doc.
-	const {
-		frameNodes,
-		handleFrameRename,
-		handleFrameDelete,
-		onNodeDragStart,
-		onNodeDrag,
-		onNodeDragStop
-	} = useCanvasFrames({
-		base,
-		nodes,
-		nodesRef,
-		setNodes,
-		hiddenIds,
-		framesApi,
-		tablePositions,
-		history: historyProxy,
-		focusFrame
-	});
+	// Frames — nodes frame (imbriqués, rognés), renommer / supprimer / focus,
+	// persistance en fin de drag. Voir `useCanvasFrames` pour la doc.
+	const { frameNodes, handleFrameRename, handleFrameDelete, onNodeDragStop } =
+		useCanvasFrames({
+			base,
+			nodes,
+			hiddenIds,
+			framesApi,
+			tablePositions,
+			persistMovedTables,
+			history: historyProxy,
+			focusFrame
+		});
 
 	// Edges + neighbors dérivés — pipeline routing/offset dans un hook
 	// dédié (voir `useCanvasEdges` : override user > auto bestHandles,
@@ -688,11 +686,17 @@ function CanvasInner({
 	const displayNodes = useMemo<SchemaNode[]>(
 		() => [
 			...frameNodes,
-			...displayTableNodes,
+			...withFrameParents(displayTableNodes, framesApi.frames),
 			...consoleDisplayNodes,
 			...systemNodeControls.flatMap((c) => (c.node !== null ? [c.node] : []))
 		],
-		[frameNodes, displayTableNodes, consoleDisplayNodes, systemNodeControls]
+		[
+			frameNodes,
+			displayTableNodes,
+			framesApi.frames,
+			consoleDisplayNodes,
+			systemNodeControls
+		]
 	);
 
 	// Espace réservé en bas du canvas pour la toolbar flottante — sert au
@@ -1113,8 +1117,8 @@ function CanvasInner({
 						tableName: node.id
 					});
 				}}
-				onNodeDragStart={onNodeDragStart}
-				onNodeDrag={onNodeDrag}
+				// Tables et frames changent de frame en suivant le pointeur.
+				canReparent={canReparentNode}
 				onNodeDragStop={(event, node, others) => {
 					// Compose : logique frames (drag lifecycle) puis persist de
 					// la position du node console. Le state des consoles a déjà été update

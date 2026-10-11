@@ -362,3 +362,95 @@ describe("useFrames", () => {
 		expect(result.current.frames).toEqual(stored);
 	});
 });
+
+describe("useFrames — frames imbriqués", () => {
+	beforeEach(() => window.localStorage.clear());
+	afterEach(() => window.localStorage.clear());
+
+	const nested: Frame[] = [
+		{
+			key: "outer",
+			label: "Outer",
+			hue: 210,
+			collections: ["alpha"],
+			rect: { x: 0, y: 0, width: 500, height: 500 }
+		},
+		{
+			key: "inner",
+			label: "Inner",
+			hue: 30,
+			collections: ["beta"],
+			rect: { x: 100, y: 100, width: 200, height: 200 },
+			parentKey: "outer"
+		},
+		{
+			key: "deep",
+			label: "Deep",
+			hue: 262,
+			collections: ["gamma"],
+			rect: { x: 120, y: 120, width: 100, height: 100 },
+			parentKey: "inner"
+		}
+	];
+
+	it("supprimer un frame rend son contenu (tables, sous-frames) à son parent", () => {
+		const { result } = renderHook(() => useFrames(CUSTOM_SCHEMA));
+		act(() => result.current.replaceAll(nested));
+		act(() => result.current.removeFrame("inner"));
+		const outer = result.current.frames.find((f) => f.key === "outer");
+		const deep = result.current.frames.find((f) => f.key === "deep");
+		expect(outer?.collections).toEqual(["alpha", "beta"]);
+		expect(deep?.parentKey).toBe("outer");
+	});
+
+	it("supprimer un frame racine : son contenu passe à la racine", () => {
+		const { result } = renderHook(() => useFrames(CUSTOM_SCHEMA));
+		act(() => result.current.replaceAll(nested));
+		act(() => result.current.removeFrame("outer"));
+		expect(
+			result.current.frames.find((f) => f.key === "inner")?.parentKey
+		).toBeUndefined();
+	});
+
+	it("frame créé dans un parent : le parent grandit pour le contenir", () => {
+		const { result } = renderHook(() => useFrames(CUSTOM_SCHEMA));
+		act(() => result.current.replaceAll(nested));
+		act(() => {
+			result.current.createFrame([], {
+				rect: { x: 400, y: 400, width: 300, height: 300 },
+				parentKey: "outer"
+			});
+		});
+		const outer = result.current.frames.find((f) => f.key === "outer");
+		expect(outer?.rect).toEqual({ x: 0, y: 0, width: 724, height: 724 });
+	});
+
+	it("table ajoutée hors des bords : le frame et ses ancêtres grandissent", () => {
+		const { result } = renderHook(() => useFrames(CUSTOM_SCHEMA));
+		act(() => result.current.replaceAll(nested));
+		act(() =>
+			result.current.addTableToFrame("deep", "alpha", {
+				x: 600,
+				y: 120,
+				width: 100,
+				height: 50
+			})
+		);
+		const byKey = new Map(result.current.frames.map((f) => [f.key, f]));
+		expect(byKey.get("deep")?.collections).toEqual(["gamma", "alpha"]);
+		expect(byKey.get("outer")?.collections).toEqual([]);
+		// Marge de 24 à chaque niveau : deep, puis inner, puis outer.
+		expect(byKey.get("deep")?.rect?.width).toBe(604);
+		expect(byKey.get("inner")?.rect?.width).toBe(652);
+		expect(byKey.get("outer")?.rect?.width).toBe(772);
+	});
+
+	it("parentKey cassé à la relecture : frame racine", () => {
+		window.localStorage.setItem(
+			storageKey(CUSTOM_SCHEMA),
+			JSON.stringify([{ ...nested[1], parentKey: "ghost" }])
+		);
+		const { result } = renderHook(() => useFrames(CUSTOM_SCHEMA));
+		expect(result.current.frames[0]?.parentKey).toBeUndefined();
+	});
+});

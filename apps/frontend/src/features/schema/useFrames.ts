@@ -1,5 +1,7 @@
 import { FRAME_HUES } from "@sqlnest/design-system";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { FRAME_PAD } from "./canvas/computeFrameNodes";
+import { growFramesToContain, normalizeFrames } from "./canvas/frameTree";
 import type { Frame, FrameRect } from "./frames";
 import { framesFor } from "./frames";
 import type { SchemaModel } from "./schema-model";
@@ -60,12 +62,17 @@ export interface FramesApi {
 	readonly frameOfTable: (name: string) => Frame | null;
 	readonly createFrame: (
 		tables: readonly string[],
-		options?: { label?: string; rect?: FrameRect }
+		options?: { label?: string; rect?: FrameRect; parentKey?: string }
 	) => Frame;
 	readonly removeFrame: (key: string) => void;
 	readonly renameFrame: (key: string, label: string) => void;
 	readonly removeTableFromFrame: (tableName: string) => void;
-	readonly addTableToFrame: (frameKey: string, tableName: string) => void;
+	/** `tableRect` fourni : le frame (et ses ancêtres) grandit pour la contenir. */
+	readonly addTableToFrame: (
+		frameKey: string,
+		tableName: string,
+		tableRect?: FrameRect
+	) => void;
 	readonly moveFrame: (key: string, dx: number, dy: number) => void;
 	readonly setFrameRect: (key: string, rect: FrameRect) => void;
 	readonly replaceAll: (frames: readonly Frame[]) => void;
@@ -80,7 +87,7 @@ function loadFrames(schema: SchemaModel): readonly Frame[] {
 	if (typeof window === "undefined") return framesFor(schema);
 	try {
 		const raw = window.localStorage.getItem(schemaKey(schema));
-		if (raw !== null) return JSON.parse(raw) as Frame[];
+		if (raw !== null) return normalizeFrames(JSON.parse(raw) as Frame[]);
 	} catch {
 		// storage indispo / JSON corrompu — repart des seeds.
 	}
@@ -141,7 +148,7 @@ export function useFrames(
 	const createFrame = useCallback(
 		(
 			tables: readonly string[],
-			options?: { label?: string; rect?: FrameRect }
+			options?: { label?: string; rect?: FrameRect; parentKey?: string }
 		): Frame => {
 			const uniqueTables = [...new Set(tables)];
 			const newFrame: Frame = {
@@ -149,24 +156,55 @@ export function useFrames(
 				label: options?.label ?? nextLabel(frames),
 				hue: nextHue(frames),
 				collections: uniqueTables,
-				...(options?.rect ? { rect: options.rect } : {})
+				...(options?.rect ? { rect: options.rect } : {}),
+				...(options?.parentKey ? { parentKey: options.parentKey } : {})
 			};
 			// Détache ces tables de leurs frames précédents (une table ne
 			// peut appartenir qu'à un seul frame — évite l'ambiguïté visuelle).
-			setFrames((prev) => [
-				...prev.map((f) => ({
-					...f,
-					collections: f.collections.filter((c) => !uniqueTables.includes(c))
-				})),
-				newFrame
-			]);
+			setFrames((prev) => {
+				const next = [
+					...prev.map((f) => ({
+						...f,
+						collections: f.collections.filter((c) => !uniqueTables.includes(c))
+					})),
+					newFrame
+				];
+				// Imbriqué : le parent grandit pour contenir le nouveau frame.
+				return options?.parentKey && options.rect
+					? growFramesToContain(
+							next,
+							options.parentKey,
+							options.rect,
+							FRAME_PAD
+						)
+					: next;
+			});
 			return newFrame;
 		},
 		[frames]
 	);
 
+	// Le contenu d'un frame supprimé (tables, sous-frames) revient à son parent.
 	const removeFrame = useCallback((key: string) => {
-		setFrames((prev) => prev.filter((f) => f.key !== key));
+		setFrames((prev) => {
+			const removed = prev.find((f) => f.key === key);
+			if (removed === undefined) return prev;
+			return prev
+				.filter((f) => f.key !== key)
+				.map((f) => {
+					if (f.key === removed.parentKey) {
+						return {
+							...f,
+							collections: [...f.collections, ...removed.collections]
+						};
+					}
+					if (f.parentKey !== key) return f;
+					const { parentKey: _removed, ...rest } = f;
+					return removed.parentKey
+						? { ...rest, parentKey: removed.parentKey }
+						: rest;
+				});
+		});
 	}, []);
 
 	const renameFrame = useCallback((key: string, label: string) => {
@@ -186,24 +224,30 @@ export function useFrames(
 		);
 	}, []);
 
-	const addTableToFrame = useCallback((frameKey: string, tableName: string) => {
-		setFrames((prev) =>
-			prev.map((f) => {
-				if (f.key === frameKey) {
-					if (f.collections.includes(tableName)) return f;
-					return { ...f, collections: [...f.collections, tableName] };
-				}
-				// Retire de tout autre frame (invariant : une table par frame).
-				if (f.collections.includes(tableName)) {
-					return {
-						...f,
-						collections: f.collections.filter((c) => c !== tableName)
-					};
-				}
-				return f;
-			})
-		);
-	}, []);
+	const addTableToFrame = useCallback(
+		(frameKey: string, tableName: string, tableRect?: FrameRect) => {
+			setFrames((prev) => {
+				const next = prev.map((f) => {
+					if (f.key === frameKey) {
+						if (f.collections.includes(tableName)) return f;
+						return { ...f, collections: [...f.collections, tableName] };
+					}
+					// Retire de tout autre frame (invariant : une table par frame).
+					if (f.collections.includes(tableName)) {
+						return {
+							...f,
+							collections: f.collections.filter((c) => c !== tableName)
+						};
+					}
+					return f;
+				});
+				return tableRect
+					? growFramesToContain(next, frameKey, tableRect, FRAME_PAD)
+					: next;
+			});
+		},
+		[]
+	);
 
 	const moveFrame = useCallback((key: string, dx: number, dy: number) => {
 		setFrames((prev) =>
@@ -230,7 +274,7 @@ export function useFrames(
 	// restaurer un snapshot d'historique intégral — l'effet de persist qui
 	// dépend de [key, frames] ré-écrit le storage au tick suivant.
 	const replaceAll = useCallback((next: readonly Frame[]) => {
-		setFrames(next);
+		setFrames(normalizeFrames(next));
 	}, []);
 
 	return {

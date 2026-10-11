@@ -50,6 +50,7 @@ const MIN_FRAME_HEIGHT = 120;
  * badge = renommer, right-click badge = supprimer.
  */
 export function FrameNode({
+	id,
 	data,
 	width,
 	height,
@@ -70,6 +71,8 @@ export function FrameNode({
 	// un sélecteur scalaire ne re-render que si la valeur change → ok.
 	// Cappé à [0.5, 2.5] pour éviter les extrêmes.
 	const zoom = useNestStore((s) => s.transform[2]);
+	// Frame d'arrivée de la table ou du frame en cours de drag.
+	const isDropTarget = useNestStore((s) => s.dropTargetId === id);
 	const badgeScale = Math.max(0.5, Math.min(2.5, 1 / zoom));
 
 	const startEdit = () => {
@@ -137,7 +140,10 @@ export function FrameNode({
 					// L=90 ferait tache. On descend à L=45 (nuance moyenne de
 					// la hue) et on baisse l'alpha à 12 % — teinte discernable
 					// des tables du frame sans écraser leur shell.
-					background: `hsla(${frame.hue}, 60%, 45%, 0.12)`,
+					background: `hsla(${frame.hue}, 60%, 45%, ${isDropTarget ? 0.22 : 0.12})`,
+					boxShadow: isDropTarget
+						? `inset 0 0 0 2px hsl(${frame.hue}, 55%, 60%)`
+						: undefined,
 					position: "relative",
 					pointerEvents: "none"
 				}}

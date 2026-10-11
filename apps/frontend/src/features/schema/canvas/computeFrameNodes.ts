@@ -1,6 +1,7 @@
 import type { FrameNodeType } from "../FrameNode";
 import type { Frame, FrameRect } from "../frames";
 import { NODE_WIDTH, type TableNodeType } from "../TableNode";
+import { frameNodeId, frameRelativePosition } from "./frameTree";
 
 export const FRAME_PAD = 24;
 
@@ -49,11 +50,24 @@ export function computeFrameNodes(
 			rect = boundsOfTables(members, FRAME_PAD) ?? undefined;
 			if (!rect) return [];
 		}
+		const parent =
+			frame.parentKey === undefined
+				? undefined
+				: frames.find((f) => f.key === frame.parentKey && f.rect);
 		return [
 			{
-				id: `frame:${frame.key}`,
+				id: frameNodeId(frame.key),
 				type: "frame" as const,
-				position: { x: rect.x, y: rect.y },
+				// Imbriqué : position dans le repère du frame parent, qu'il
+				// agrandit quand on le pousse contre ses bords.
+				position: parent
+					? frameRelativePosition({ ...frame, rect }, frames)
+					: { x: rect.x, y: rect.y },
+				...(parent
+					? { parentId: frameNodeId(parent.key), expandParent: true }
+					: {}),
+				// Le contenu qui dépasse du frame est rogné.
+				clipChildren: true,
 				width: rect.width,
 				height: rect.height,
 				// Callbacks passés BRUTS (stables via useCallback côté hook).
@@ -69,8 +83,7 @@ export function computeFrameNodes(
 					onDelete: onFrameDelete,
 					onFocus: onFrameFocus
 				},
-				// Draggable pour déplacer le frame + ses tables ensemble
-				// (handler `onNodeDrag` applique le delta aux membres).
+				// Draggable : le moteur emmène tables et sous-frames.
 				// NON sélectionnable : au lasso ou au clic, le frame est
 				// ignoré (le user manipule les frames via drag + resize
 				// handles NodeResizer toujours visibles).

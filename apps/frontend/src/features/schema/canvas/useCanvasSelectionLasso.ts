@@ -3,6 +3,7 @@ import { showNotification } from "@sqlnest/design-system";
 import { useCallback, useRef } from "react";
 import type { CanvasTool } from "../CanvasToolbar";
 import type { FramesApi } from "../useFrames";
+import { deepestFrameContaining } from "./frameTree";
 
 const MIN_FRAME_LASSO = 40;
 
@@ -85,7 +86,12 @@ export function useCanvasSelectionLasso(
 			const selectedTableIds = getNodes()
 				.filter((n) => n.selected && n.type === "table")
 				.map((n) => n.id);
-			const frame = framesApi.createFrame(selectedTableIds, { rect });
+			// Dessiné dans un frame : le nouveau frame s'y range.
+			const parent = deepestFrameContaining(framesApi.frames, rect);
+			const frame = framesApi.createFrame(selectedTableIds, {
+				rect,
+				...(parent ? { parentKey: parent.key } : {})
+			});
 			showNotification({
 				title: `Frame « ${frame.label} » créé`,
 				message:

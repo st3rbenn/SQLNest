@@ -16,6 +16,8 @@ export interface Frame {
 	/** Rect ancré (persisté). Si absent, le rect est calculé dynamiquement
 	 *  à partir des positions des tables — cas des frames-seed hérités. */
 	readonly rect?: FrameRect;
+	/** Frame parent (frames imbriqués). Absent : frame racine. */
+	readonly parentKey?: string;
 }
 
 /** Un rect contient un point (bounds inclusifs sur les 4 bords). */

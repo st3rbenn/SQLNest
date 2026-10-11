@@ -122,7 +122,7 @@ export function InteractiveEdge(props: EdgeProps) {
 		markerEnd,
 		data
 	} = props;
-	const { screenToFlowPosition, getNode } = useNestCanvas();
+	const { screenToFlowPosition, getInternalNode } = useNestCanvas();
 	const api = data as InteractiveEdgeData | undefined;
 
 	const [hovered, setHovered] = useState(false);
@@ -151,14 +151,16 @@ export function InteractiveEdge(props: EdgeProps) {
 
 	const showHandles = hovered || dragEnd !== null;
 
-	// Nœud dont on affiche les anchors pendant le drag. `getNode` renvoie
-	// le nœud vivant → les anchors suivent si la table est déplacée.
+	// Nœud dont on affiche les anchors pendant le drag. Le node interne du
+	// moteur porte la position absolue, même pour une table dans un frame :
+	// les anchors suivent si la table est déplacée.
 	const dragNodeId =
 		dragEnd === "source" ? source : dragEnd === "target" ? target : null;
-	const dragNode = dragNodeId !== null ? getNode(dragNodeId) : undefined;
+	const dragNode =
+		dragNodeId !== null ? getInternalNode(dragNodeId) : undefined;
 	const anchors = dragNode
 		? anchorPoints({
-				position: dragNode.position,
+				position: dragNode.internals.positionAbsolute,
 				width: dragNode.width ?? undefined,
 				height: dragNode.height ?? undefined
 			})
@@ -166,9 +168,9 @@ export function InteractiveEdge(props: EdgeProps) {
 
 	// Offsets pour éviter la superposition quand plusieurs edges partagent
 	// un côté. Appliqués aux endpoints du moteur (mid-side par défaut). Nœuds
-	// récupérés via getNode pour connaître width/height.
-	const sourceNode = getNode(source);
-	const targetNode = getNode(target);
+	// lus pour connaître width/height.
+	const sourceNode = getInternalNode(source);
+	const targetNode = getInternalNode(target);
 	const srcOffsetRatio = api?.sourceOffsetRatio ?? 0;
 	const tgtOffsetRatio = api?.targetOffsetRatio ?? 0;
 	const srcOffsetXY = offsetAlongSide(
@@ -264,8 +266,8 @@ export function InteractiveEdge(props: EdgeProps) {
 		if (dragEnd === null || !dragNode) return;
 		const pos = screenToFlowPosition({ x: e.clientX, y: e.clientY });
 		const side = closestSide(pos, {
-			x: dragNode.position.x,
-			y: dragNode.position.y,
+			x: dragNode.internals.positionAbsolute.x,
+			y: dragNode.internals.positionAbsolute.y,
 			width: dragNode.width ?? 240,
 			height: dragNode.height ?? 200
 		});

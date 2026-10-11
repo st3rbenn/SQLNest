@@ -5,6 +5,7 @@ import type { TableNodeType } from "../TableNode";
 import type { FramesApi } from "../useFrames";
 import type { PositionsApi, XY } from "../useTablePositions";
 import { boundsOfTables, FRAME_PAD } from "./computeFrameNodes";
+import { frameRectsFromContent, tableParents, tableRect } from "./frameTree";
 
 export interface UseCanvasActionsOptions {
 	readonly base: LayoutResult | null;
@@ -95,14 +96,10 @@ export function useCanvasActions(
 		const entries: Record<string, XY> = {};
 		for (const n of base.nodes) entries[n.id] = n.position;
 		tablePositions.setManyPositions(entries);
-		const byId = new Map(base.nodes.map((n) => [n.id, n]));
-		for (const frame of framesApi.frames) {
-			const members = frame.collections
-				.map((c) => byId.get(c))
-				.filter((n): n is TableNodeType => n !== undefined);
-			const rect = boundsOfTables(members, FRAME_PAD);
-			if (rect !== null) framesApi.setFrameRect(frame.key, rect);
-		}
+		// De bas en haut : un frame englobe ses tables et ses sous-frames.
+		framesApi.replaceAll(
+			frameRectsFromContent(framesApi.frames, base.nodes, FRAME_PAD)
+		);
 		applyOverview();
 		history.push();
 	}, [base, setNodes, tablePositions, framesApi, applyOverview, history]);
@@ -131,12 +128,18 @@ export function useCanvasActions(
 		history.push();
 	}, [setHiddenIds, history]);
 
+	// Le nouveau frame se range dans le frame commun aux tables
+	// sélectionnées (s'il y en a un), agrandi au besoin pour le contenir.
 	const createFrameFromSelection = useCallback(() => {
 		if (selectedTables.length === 0) return;
 		const selectedNodes = nodes.filter((n) => selectedTables.includes(n.id));
 		const rect = boundsOfTables(selectedNodes, FRAME_PAD);
+		const parents = tableParents(framesApi.frames);
+		const common = new Set(selectedTables.map((t) => parents.get(t)));
+		const parentKey = common.size === 1 ? [...common][0] : undefined;
 		const frame = framesApi.createFrame(selectedTables, {
-			...(rect ? { rect } : {})
+			...(rect ? { rect } : {}),
+			...(parentKey ? { parentKey } : {})
 		});
 		showNotification({
 			title: `Frame « ${frame.label} » créé`,
@@ -157,17 +160,27 @@ export function useCanvasActions(
 		history.push();
 	}, [selectedTables, setHiddenIds, history]);
 
+	// Une table ajoutée hors des bords du frame l'agrandit (et ses
+	// ancêtres) plutôt que d'être rognée.
 	const addTableToFrame = useCallback(
 		(frameKey: string, tableName: string) => {
-			framesApi.addTableToFrame(frameKey, tableName);
+			const table = nodes.find((n) => n.id === tableName);
+			framesApi.addTableToFrame(
+				frameKey,
+				tableName,
+				table ? tableRect(table) : undefined
+			);
 			history.push();
 		},
-		[framesApi, history]
+		[framesApi, nodes, history]
 	);
 
+	// La table remonte d'un niveau : dans le frame parent, sinon à la racine.
 	const removeTableFromFrame = useCallback(
 		(tableName: string) => {
-			framesApi.removeTableFromFrame(tableName);
+			const parentKey = framesApi.frameOfTable(tableName)?.parentKey;
+			if (parentKey) framesApi.addTableToFrame(parentKey, tableName);
+			else framesApi.removeTableFromFrame(tableName);
 			history.push();
 		},
 		[framesApi, history]
