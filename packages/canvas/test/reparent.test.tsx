@@ -297,6 +297,44 @@ describe("agrandissement pendant le geste", () => {
 	});
 });
 
+describe("le frame épouse la table pendant le geste", () => {
+	it("grandit au bord, se relâche quand la table revient dedans", () => {
+		const log: NodeChange[][] = [];
+		const { container } = render(
+			<Harness
+				log={log}
+				initial={[frame("A", 0, 0, 400, 400), table("t", 250, 50, "A")]}
+			/>
+		);
+		sizeContainer();
+		drag(container, "t", [340, 60], [398, 60], { release: false });
+		expect(el(container, "A").style.width).not.toBe("400px");
+		// Retour vers l'intérieur, pointeur toujours dans le frame.
+		mouse(window, "mousemove", { clientX: 300, clientY: 60 });
+		expect(el(container, "A").style.width).toBe("400px");
+		mouse(window, "mouseup", { clientX: 300, clientY: 60 });
+		expect(el(container, "A").style.width).toBe("400px");
+		expect(store().getState().nodeLookup.get("t")?.parentId).toBe("A");
+	});
+
+	it("entrée par le bas : le frame ne garde pas la taille du moment de l'entrée", () => {
+		const log: NodeChange[][] = [];
+		const { container } = render(
+			<Harness
+				log={log}
+				initial={[frame("A", 0, 0, 400, 400), table("t", 100, 500)]}
+			/>
+		);
+		sizeContainer();
+		// Pointeur qui entre par le bas puis remonte bien à l'intérieur.
+		drag(container, "t", [110, 510], [110, 390], { release: false });
+		mouse(window, "mousemove", { clientX: 110, clientY: 150 });
+		mouse(window, "mouseup", { clientX: 110, clientY: 150 });
+		expect(store().getState().nodeLookup.get("t")?.parentId).toBe("A");
+		expect(el(container, "A").style.height).toBe("400px");
+	});
+});
+
 describe("rognage clipChildren", () => {
 	it("un enfant qui dépasse est rogné au bord du frame ; un enfant entièrement dedans ne l'est pas", () => {
 		const { container } = render(

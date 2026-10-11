@@ -99,6 +99,12 @@ export function absoluteAfter(
 	return { x, y };
 }
 
+export type StartGeometry = {
+	position: XYPosition;
+	width?: number | undefined;
+	height?: number | undefined;
+};
+
 type Snapshot = {
 	position: XYPosition;
 	width: number | undefined;
@@ -189,6 +195,29 @@ export function createExpansionMemory() {
 			}
 			touched.clear();
 			return { changes, overrides };
+		},
+
+		/**
+		 * Géométrie de départ des parents photographiés et de leurs enfants
+		 * (hors nodes déplacés) : l'agrandissement se recalcule dessus à
+		 * chaque mouvement, le parent épouse l'enfant puis se relâche.
+		 */
+		geometry(dragged: Set<string>): Map<string, StartGeometry> {
+			const out = new Map<string, StartGeometry>();
+			for (const snap of snapshots.values()) {
+				for (const [id, position] of snap.children) {
+					if (!dragged.has(id)) out.set(id, { position });
+				}
+			}
+			for (const [id, snap] of snapshots) {
+				if (dragged.has(id)) continue;
+				out.set(id, {
+					position: snap.position,
+					width: snap.width,
+					height: snap.height
+				});
+			}
+			return out;
 		},
 
 		clear() {

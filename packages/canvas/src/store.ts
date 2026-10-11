@@ -13,6 +13,7 @@ import {
 	type ParentLookup,
 	updateChildNode
 } from "./parents";
+import { absoluteAfter, type StartGeometry } from "./reparent";
 import type {
 	ConnectionState,
 	Edge,
@@ -147,11 +148,16 @@ export type CanvasStore = {
 	resetSelectedElements: () => void;
 	/** Sélectionne exactement `ids`, désélectionne le reste. */
 	selectExactly: (ids: Set<string>) => void;
-	/** Changes de position (ou de parent) des items ; `before` passe en tête. */
+	/**
+	 * Changes de position (ou de parent) des items ; `before` passe en tête.
+	 * `start` : géométrie sur laquelle calculer l'agrandissement des parents
+	 * (celle du début du geste).
+	 */
 	updateNodePositions: (
 		items: Iterable<DragItem>,
 		dragging: boolean,
-		before?: NodeChange[]
+		before?: NodeChange[],
+		start?: Map<string, StartGeometry>
 	) => NodeChange[];
 	/** Pan immédiat en pixels écran ; vrai si la vue a bougé. */
 	panBy: (delta: XYPosition) => boolean;
@@ -239,6 +245,44 @@ function adoptNodes(
 	};
 	for (const id of Array.from(lookup.keys())) resolve(id, 0);
 	return initialized;
+}
+
+/** Lookups où les nodes de `start` reprennent leur géométrie de départ. */
+function withStartGeometry(
+	lookup: Map<string, InternalNode>,
+	parentLookup: ParentLookup,
+	start: Map<string, StartGeometry>
+): { lookup: Map<string, InternalNode>; parents: ParentLookup } {
+	const positions = new Map(
+		Array.from(start, ([id, geometry]) => [id, geometry.position])
+	);
+	const patched = new Map(lookup);
+	for (const [id, geometry] of start) {
+		const node = lookup.get(id);
+		if (node === undefined) continue;
+		patched.set(id, {
+			...node,
+			position: geometry.position,
+			measured: {
+				width: geometry.width ?? node.measured.width,
+				height: geometry.height ?? node.measured.height
+			},
+			internals: {
+				...node.internals,
+				positionAbsolute: absoluteAfter(id, lookup, positions)
+			}
+		});
+	}
+	const parents: ParentLookup = new Map();
+	for (const [parentId, children] of parentLookup) {
+		parents.set(
+			parentId,
+			new Map(
+				Array.from(children, ([id, child]) => [id, patched.get(id) ?? child])
+			)
+		);
+	}
+	return { lookup: patched, parents };
 }
 
 export function createCanvasStore(init: {
@@ -452,7 +496,8 @@ export function createCanvasStore(init: {
 	const updateNodePositions = (
 		items: Iterable<DragItem>,
 		dragging: boolean,
-		before: NodeChange[] = []
+		before: NodeChange[] = [],
+		start?: Map<string, StartGeometry>
 	) => {
 		const { nodeLookup, parentLookup } = state;
 		const changes: NodeChange[] = [...before];
@@ -495,8 +540,12 @@ export function createCanvasStore(init: {
 			}
 		}
 		if (expandChildren.length > 0) {
+			const geometry =
+				start && start.size > 0
+					? withStartGeometry(nodeLookup, parentLookup, start)
+					: { lookup: nodeLookup, parents: parentLookup };
 			changes.push(
-				...handleExpandParent(expandChildren, nodeLookup, parentLookup)
+				...handleExpandParent(expandChildren, geometry.lookup, geometry.parents)
 			);
 		}
 		triggerNodeChanges(changes);
