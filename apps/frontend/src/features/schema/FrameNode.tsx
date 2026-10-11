@@ -14,13 +14,13 @@ export interface FrameNodeData {
 	 * reconciliation membership (tables tombées hors du nouveau rect →
 	 * retirées). Fourni par SchemaCanvas — `handleFrameResize` stable via
 	 * useCallback. Le suivi live des dimensions/position pendant le drag
-	 * est géré côté SchemaCanvas via l'interception des changes RF (voir
+	 * est géré côté SchemaCanvas via l'interception des NodeChange (voir
 	 * `handleNodesChange`).
 	 *
 	 * La clé est passée en 1er arg APPLIQUÉ CÔTÉ FrameNode (avec
 	 * `data.frame.key`) plutôt que via une closure inline
 	 * `(r) => handler(key, r)` dans computeFrameNodes. Cela garde `data`
-	 * stable entre renders → RF n'invalide plus le NodeResizer en cours
+	 * stable entre renders → le NodeResizer n'est plus invalidé en cours
 	 * de drag (les axes sautaient sinon). */
 	readonly onResizeEnd?: (key: string, rect: FrameRect) => void;
 	/** Callback appelé au commit d'un rename inline (Enter ou blur). Signature
@@ -127,7 +127,7 @@ export function FrameNode({
 				style={{
 					// Suit les dimensions React (width/height du node), mises à
 					// jour en direct par `SchemaCanvas.handleNodesChange` qui
-					// route les `dimensions` NodeChange RF vers setFrameRect.
+					// route les NodeChange `dimensions` vers setFrameRect.
 					// Pas de bordure propre — c'est `NodeResizer.lineStyle` qui
 					// dessine les 4 côtés (sinon double bordure avec halo).
 					width,
@@ -142,7 +142,7 @@ export function FrameNode({
 					pointerEvents: "none"
 				}}
 			>
-				{/* biome-ignore lint/a11y/noNoninteractiveElementInteractions: badge cliquable dans un node RF — pas d'équivalent clavier pour un click sur un node canvas. */}
+				{/* biome-ignore lint/a11y/noNoninteractiveElementInteractions: badge cliquable dans un node — pas d'équivalent clavier pour un click sur un node canvas. */}
 				{/* biome-ignore lint/a11y/useKeyWithClickEvents: idem */}
 				{/* biome-ignore lint/a11y/noStaticElementInteractions: idem */}
 				<div
@@ -153,28 +153,28 @@ export function FrameNode({
 						pointerEvents: "auto",
 						cursor: editing ? "text" : "grab",
 						// Ancre au coin haut-gauche du frame, puis compense le
-						// zoom RF — le badge garde sa taille écran constante.
+						// zoom du canvas — le badge garde sa taille écran constante.
 						transform: `scale(${badgeScale})`,
 						transformOrigin: "0 100%"
 					}}
 					onClick={(e) => {
 						// Clic gauche sur le badge → ouvre FrameDetails (liste des
 						// tables du frame) dans le drawer gauche. Stop-prop pour
-						// éviter que RF ait à re-router — évite aussi les conflits
+						// éviter que le moteur ait à re-router — évite aussi les conflits
 						// avec le drag du frame déclenché par un mousedown sur le
-						// wrapper RF quand on ne bouge pas la souris (tiny threshold).
+						// wrapper du node quand on ne bouge pas la souris (tiny threshold).
 						e.stopPropagation();
 						onFocus?.(frame.key);
 					}}
 					onDoubleClick={(e) => {
-						// Empêche RF `onNodeDoubleClick` de faire son travail
+						// Empêche `onNodeDoubleClick` de faire son travail
 						// (focusAndZoom sur les tables — ici on rename).
 						e.stopPropagation();
 						startEdit();
 					}}
 					onContextMenu={(e) => {
 						// Right-click sur le badge → supprime le frame. Empêche
-						// le menu par défaut du navigateur ET RF's onNodeContextMenu.
+						// le menu par défaut du navigateur ET `onNodeContextMenu`.
 						e.preventDefault();
 						e.stopPropagation();
 						onDelete?.(frame.key);

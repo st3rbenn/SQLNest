@@ -2,7 +2,7 @@ import { type Node, useOnSelectionChange } from "@sqlnest/canvas";
 import { useCallback, useRef, useState } from "react";
 
 export interface UseCanvasSelectionOptions<N extends Node> {
-	/** Setter des nodes RF — utilisé par `clearSelection` pour reset le flag. */
+	/** Setter des nodes — utilisé par `clearSelection` pour reset le flag. */
 	setNodes: React.Dispatch<React.SetStateAction<N[]>>;
 	/**
 	 * Appelé quand la sélection dépasse 1 élément — le parent en profite pour
@@ -19,7 +19,7 @@ export interface UseCanvasSelectionReturn {
 }
 
 /**
- * Sélection multi-tables tenue à jour par React Flow. Filtre les frame-nodes
+ * Sélection multi-tables tenue à jour par le moteur. Filtre les frame-nodes
  * (non sélectionnables, mais robuste face à un futur changement). Le callback
  * `onMultiSelect` est stocké en ref → l'inscription à `useOnSelectionChange`
  * reste stable même si le parent passe une closure recréée à chaque render.
@@ -43,7 +43,7 @@ export function useCanvasSelection<N extends Node>({
 	});
 
 	const clearSelection = useCallback(() => {
-		// Reset du flag `selected` sur tous les nodes — RF ré-émet un
+		// Reset du flag `selected` sur tous les nodes — le moteur ré-émet un
 		// `onSelectionChange` à vide et la sélection multi disparaît.
 		setNodes((ns) => ns.map((n) => ({ ...n, selected: false })));
 	}, [setNodes]);

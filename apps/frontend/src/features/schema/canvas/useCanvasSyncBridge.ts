@@ -41,9 +41,9 @@ export interface UseCanvasSyncBridgeReturn {
  *   - Wire `useCanvasSync` — GET au mount, observe les 5 slices, PUT debounce
  *     2 s. Skip si user anonyme (le hook interne détecte via `session`).
  *
- * ─── Pourquoi `positions`/`sizes` re-injectent aussi dans les nodes RF ───
+ * ─── Pourquoi `positions`/`sizes` re-injectent aussi dans les nodes ───
  * `useCanvasSync.replaceAll` update les hooks (positions/sizes/frames/hidden/
- * edgeAnchors) mais React Flow garde son propre state `nodes` via
+ * edgeAnchors) mais le canvas garde son propre state `nodes` via
  * `useNodesState` — le `useEffect` de seed dans `useCanvasNodes` lit
  * positions/sizes via *ref* (pour ne PAS re-fire à chaque persistance) →
  * ne se déclenche pas au replaceAll. Sans repush direct dans setNodes,
@@ -53,9 +53,9 @@ export interface UseCanvasSyncBridgeReturn {
  * ─── Fallback chaîné serveur → ELK base → keep ───
  * Pour un node absent du payload serveur (ou dont width/height est undefined),
  * on retombe sur `baseRef.current` (positions ELK d'origine) — PAS sur les
- * valeurs courantes du node RF, qui peuvent être stales d'un seed pré-login
+ * valeurs courantes du node, qui peuvent être stales d'un seed pré-login
  * (`persistLocal=true` a chargé le localStorage résiduel). Sans ce fallback,
- * RF continue d'afficher les vieilles dimensions locales tandis que
+ * le canvas continue d'afficher les vieilles dimensions locales tandis que
  * `tableSizes.sizes` (source of truth pour `useCanvasSync`) est vide —
  * divergence permanente + jump au reload suivant.
  */

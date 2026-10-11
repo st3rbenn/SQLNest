@@ -35,7 +35,7 @@ interface Props {
 	 * ouverte. */
 	readonly bottomOffset?: number;
 	/** Outil actif du canvas — piloté par le parent car il conditionne des
-	 * comportements RF (cursor, action au release du lasso, etc.). */
+	 * comportements du canvas (cursor, action au release du lasso, etc.). */
 	readonly activeTool: CanvasTool;
 	readonly onSelectTool: (tool: CanvasTool) => void;
 	/** T5 : crée un node console SNQL au centre du viewport courant. */

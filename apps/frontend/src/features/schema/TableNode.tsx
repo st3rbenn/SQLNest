@@ -84,7 +84,7 @@ const HIDDEN_HANDLE: CSSProperties = { opacity: 0, border: "none" };
  * 4 côtés × (source + target) = 8 handles par table. Les edges pointent
  * chacun sur une paire précise via `sourceHandle`/`targetHandle` (calculée
  * dans `SchemaCanvas.displayEdges` selon les positions relatives). Sans ces
- * 4 côtés, RF n'aurait que Left/Right et les tables empilées verticalement
+ * 4 côtés, on n'aurait que Left/Right et les tables empilées verticalement
  * verraient leurs arrows partir dans le vide.
  */
 const HANDLE_SIDES: readonly { id: Side; position: Position }[] = [
@@ -140,13 +140,13 @@ export function TableNode({
 	const inferred = collection.source === "inferred";
 	const color = colorFor(collection.name);
 	const contentHeight = nodeHeight(collection);
-	// Dimensions effectives — RF push les valeurs du store (mises à jour en
+	// Dimensions effectives — `width`/`height` viennent du store (mis à jour en
 	// direct pendant un drag de resize) ; défauts pour le tout premier render.
 	const effectiveWidth = width ?? NODE_WIDTH;
 	const effectiveHeight = heightProp ?? contentHeight;
 
 	// Un SEUL indicateur visuel de mise en avant. `focused` (data.focused —
-	// click simple pilote le drawer détails) et `selected` (RF store — geste
+	// click simple pilote le drawer détails) et `selected` (store canvas — geste
 	// multi via Cmd/Shift/lasso) reçoivent le même traitement : border
 	// interne bleu vif + shadow diffuse bleu. Sans ça, les deux stacks CSS
 	// se cumulaient (contour interne + outline exterieur `.selected`) et
@@ -156,7 +156,7 @@ export function TableNode({
 	// Enveloppe commune : shell `--sqlnest-surface`, border colorée par
 	// hue (accent bleu / warning jaune override en focus / match), shadow
 	// diffuse, gestion `dimmed`. LOD variants remplissent l'enveloppe à
-	// la taille RÉELLE — sinon les handles (aux bords du wrapper RF) ne
+	// la taille RÉELLE — sinon les handles (aux bords du wrapper du node) ne
 	// s'alignent plus avec le visuel à faible zoom.
 	const shellStyle: CSSProperties = {
 		width: effectiveWidth,
@@ -178,7 +178,7 @@ export function TableNode({
 	};
 
 	// ── LOD < full : cartes colorées silencieuses (dot / pill / compact) ────
-	// Les trois niveaux rendent le même HTML — seul le zoom RF les distingue
+	// Les trois niveaux rendent le même HTML — seul le zoom les distingue
 	// visuellement (dot ≈ point coloré, compact ≈ carrelage). Le tooltip
 	// Mantine (portal → coord écran, taille constante) affiche le nom au
 	// survol : friendly, à la demande, aucun bruit au repos.

@@ -106,7 +106,7 @@ export async function buildLayout(
 		width: NODE_WIDTH,
 		height: nodeHeight(n.data.collection)
 	}));
-	// ELK exige des ids uniques d'arêtes ; on garde ceux de React Flow.
+	// ELK exige des ids uniques d'arêtes ; on garde ceux des edges du canvas.
 	const elkEdges: ElkExtendedEdge[] = edges.map((e) => ({
 		id: e.id,
 		sources: [e.source],
@@ -122,7 +122,6 @@ export async function buildLayout(
 		edges: elkEdges
 	});
 
-	// Rapatrie les positions ELK sur les nœuds React Flow.
 	const positions = new Map<string, { x: number; y: number }>();
 	for (const child of graph.children ?? []) {
 		positions.set(child.id, { x: child.x ?? 0, y: child.y ?? 0 });

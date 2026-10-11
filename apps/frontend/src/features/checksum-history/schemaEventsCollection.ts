@@ -5,7 +5,7 @@ import type { Collection } from "../schema/schema-model";
  * les canvases, indépendante de la DB user. Alimentée par
  * `canvas_checksum_event` côté backend, jamais persistée dans la DB user.
  *
- * Consommé par le node RF système (rendu visuel dans le canvas). L'exécution
+ * Consommé par le node système (rendu visuel dans le canvas). L'exécution
  * SNQL passe par `list schema_events` (verbe introspect dédié) — pas
  * d'injection dans le SchemaModel de l'autocomplete, le lexer/parser
  * reconnaît le kind via `INTROSPECT_SUPPORT`.

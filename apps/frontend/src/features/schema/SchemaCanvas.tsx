@@ -275,7 +275,7 @@ function CanvasInner({
 	// observer + les remplacer via `canvasSyncReplaceAll.edgeAnchors`.
 	const edgeAnchors = useEdgeAnchors(schema, hookOpts);
 
-	// State React Flow `nodes` + handleTableResize + handleNodesChange
+	// State `nodes` + handleTableResize + handleNodesChange
 	// (intercept frame changes) — voir `useCanvasNodes` pour la doc.
 	// `history.push` passé via ref (`historyPushRef`) : `useCanvasHistory`
 	// est déclaré JUSTE APRÈS mais a besoin de `setNodes` qu'on obtient
@@ -302,11 +302,11 @@ function CanvasInner({
 	// `useCanvasHistory` pour l'analyse détaillée du timing.
 	//
 	// `onRestore` : le hook restore positions/sizes/frames/hiddenIds dans
-	// leurs hooks respectifs, mais React Flow garde son propre `nodes` state
+	// leurs hooks respectifs, mais le canvas garde son propre state `nodes`
 	// (via `useNodesState` plus haut) qui n'était pas resync → Cmd+Z ne
 	// bougeait visuellement rien, seul un reload rendait la vue cohérente.
 	// On applique donc ici les overlays positions/sizes du snapshot sur les
-	// nodes RF, avec fallback sur la position ELK d'origine (`baseRef`)
+	// `nodes`, avec fallback sur la position ELK d'origine (`baseRef`)
 	// pour les nodes non présents dans le snapshot (jamais draggés / resizés
 	// à ce moment-là de l'historique).
 	const history = useCanvasHistory({
@@ -357,7 +357,7 @@ function CanvasInner({
 	useUndoRedoShortcuts({ onUndo: history.undo, onRedo: history.redo });
 
 	// Sync serveur du state canvas — connectionId + replaceAll + useCanvasSync.
-	// Voir `useCanvasSyncBridge` pour la doc (repush RF nodes après hydration,
+	// Voir `useCanvasSyncBridge` pour la doc (repush des nodes après hydration,
 	// fallback chaîné serveur → ELK base → keep, gate anonyme).
 	const { canvasReady } = useCanvasSyncBridge({
 		connectionId,
@@ -431,7 +431,7 @@ function CanvasInner({
 	});
 
 	// Nom de la table survolée dans le SchemaTree (side panel). Décide de
-	// `data.hoverHighlight` sur les nodes React Flow — glow bleu subtil sur
+	// `data.hoverHighlight` sur les nodes table — glow bleu subtil sur
 	// la table matching, pour aider à la repérer sans cliquer.
 	const [hoveredTableName, setHoveredTableName] = useState<string | null>(null);
 
@@ -473,26 +473,26 @@ function CanvasInner({
 	// plus haut.)
 
 	// ─── Nodes console T5 ───────────────────────────────────────────────
-	// Chaque node console vit dans le graphe RF comme une table/frame ;
+	// Chaque node console vit dans le graphe comme une table/frame ;
 	// sa géométrie est persistée localement par `useConsoleNodes` (pas
 	// encore sync serveur — deferred).
 	//
 	// Architecture : les consoles ont leur propre `useNodesState<Console>`
-	// séparé du state tables (`useCanvasNodes`) — ce state RF gère nativement
+	// séparé du state tables (`useCanvasNodes`) — ce state gère nativement
 	// les positions et dimensions pendant les drag/resize (identité stable,
 	// pas de re-render depuis persist). `onConsoleNodesChange` est composé
 	// avec `handleNodesChange` du parent dans `onNodesChange`. Persist
-	// depuis le state RF au drop (onNodeDragStop / NodeResizer.onResizeEnd).
+	// depuis ce state au drop (onNodeDragStop / NodeResizer.onResizeEnd).
 	const consoleNodes = useConsoleNodes(connectionId);
 	const [focusedConsoleId, setFocusedConsoleId] = useState<string | null>(null);
 	const [consoleRFNodes, setConsoleRFNodes, onConsoleNodesChange] =
 		useNodesState<ConsoleNodeType>([]);
 
-	// Sync `consoleNodes.geoms` (persist) → state RF. Preserve les valeurs
-	// RF existantes pour un id déjà présent (le state RF est à jour pendant
-	// le drag/resize, on ne veut pas l'écraser par des valeurs persist plus
-	// anciennes). Nouveaux ids : injectés depuis geom. Ids supprimés :
-	// retirés du state RF.
+	// Sync `consoleNodes.geoms` (persist) → state des nodes console. Preserve
+	// les valeurs existantes pour un id déjà présent (ce state est à jour
+	// pendant le drag/resize, on ne veut pas l'écraser par des valeurs
+	// persist plus anciennes). Nouveaux ids : injectés depuis geom. Ids
+	// supprimés : retirés.
 	useEffect(() => {
 		setConsoleRFNodes((prev) => {
 			const prevById = new Map(prev.map((n) => [n.id, n]));
@@ -518,10 +518,10 @@ function CanvasInner({
 
 	const enterConsoleFocus = useCallback((id: string) => {
 		// Fullscreen = React Portal vers document.body (dans ConsoleNode
-		// quand isFocused). Le shell rendu HORS du transform React Flow
+		// quand isFocused). Le shell rendu HORS du transform du viewport
 		// → pas de scale zoom sur le contenu, texte natif. La caméra
 		// canvas n'est pas touchée — pas d'animation "zoom depuis le
-		// centre" perceptible. Le node RF garde sa géom et reste dans le
+		// centre" perceptible. Le node garde sa géom et reste dans le
 		// graphe (le CSS fade le cache derrière l'overlay).
 		setFocusedConsoleId(id);
 	}, []);
@@ -551,19 +551,19 @@ function CanvasInner({
 		() =>
 			consoleRFNodes.map((n) => {
 				const isFocused = n.id === focusedConsoleId;
-				// Le node RF garde sa géom persistée quel que soit isFocused.
+				// Le node garde sa géom persistée quel que soit isFocused.
 				// Le fullscreen est un React Portal rendu par ConsoleNode
-				// vers document.body → hors du transform React Flow. Le node
+				// vers document.body → hors du transform du viewport. Le node
 				// dans le graphe est juste caché par le CSS fade pendant ce
-				// temps (opacity 0 sur toutes les nodes RF).
+				// temps (opacity 0 sur tous les nodes).
 				return {
 					...n,
-					// `selectable: true` : cliquer sur le node le marque `.selected`
-					// (RF standard) — le CSS `.selected` garde les handles NodeResizer
-					// visibles sans hover. Click ailleurs = deselect standard.
+					// `selectable: true` : cliquer sur le node le marque `.selected`,
+					// et le CSS `.selected` garde les handles NodeResizer visibles
+					// sans hover. Click ailleurs = deselect standard.
 					selectable: !isFocused,
 					draggable: !isFocused,
-					// `deletable: false` : le Backspace natif RF supprime le node
+					// `deletable: false` : le Backspace natif du moteur supprime le node
 					// mais ne clean pas les tabs localStorage → on force le user
 					// à passer par le bouton `×` du header qui appelle
 					// `consoleNodes.remove` (clean tabs inclus).
@@ -698,7 +698,7 @@ function CanvasInner({
 	// Espace réservé en bas du canvas pour la toolbar flottante — sert au
 	// safeArea du fit initial pour ne pas cacher les nodes derrière la
 	// toolbar. Constants depuis que la console SNQL n'est plus un panel
-	// bas-docké (elle vit dans un node RF T5). Les 38 px approximent la
+	// bas-docké (elle vit dans un node console T5). Les 38 px approximent la
 	// hauteur de CanvasToolbar + son offset bottom-center.
 	const consoleHeight = 38;
 	const CONSOLE_GAP = 8;
@@ -1016,7 +1016,7 @@ function CanvasInner({
 				nodes={displayNodes as unknown as TableNodeType[]}
 				edges={displayEdges}
 				onNodesChange={(changes) => {
-					// RF émet les changes pour TOUS les nodes affichés — les
+					// Le moteur émet les changes pour TOUS les nodes affichés — les
 					// tables/frames sont routés vers `handleNodesChange` de
 					// useCanvasNodes, les consoles vers `onConsoleNodesChange`
 					// (leur propre useNodesState). Chaque handler filtre les
@@ -1030,7 +1030,7 @@ function CanvasInner({
 				nodeTypes={nodeTypes}
 				edgeTypes={edgeTypes}
 				// Comportements souris :
-				// - wheel/trackpad → pan (Cmd/Ctrl+wheel garde le zoom natif RF)
+				// - wheel/trackpad → pan (Cmd/Ctrl+wheel garde le zoom)
 				// - clic gauche + drag sur le vide → lasso (sélection partielle :
 				//   sélectionne dès qu'un nœud touche le rectangle, pas besoin
 				//   d'être 100 % dedans)
@@ -1045,7 +1045,7 @@ function CanvasInner({
 				onSelectionStart={handleSelectionStart}
 				onSelectionEnd={handleSelectionEnd}
 				// Multi-select via click : accepte Shift OU le modifier natif de
-				// l'OS (Cmd sur Mac, Ctrl sur Win/Linux). RF prend un array de
+				// l'OS (Cmd sur Mac, Ctrl sur Win/Linux). Le moteur prend un array de
 				// key codes — n'importe lequel matche. Ça couvre :
 				//  - Shift+click (intuitif, cross-platform)
 				//  - Cmd+click (attendu sur Mac — convention Finder / natif)
@@ -1053,7 +1053,7 @@ function CanvasInner({
 				multiSelectionKeyCode={["Shift", "Meta", "Control"]}
 				onPaneContextMenu={(event) => event.preventDefault()}
 				// Clic gauche seul = focus visuel (drawer détails + ring + estompage).
-				// Clic avec modifier (Shift / Cmd / Ctrl) = sélection multi RF, on
+				// Clic avec modifier (Shift / Cmd / Ctrl) = sélection multi, on
 				// n'ouvre PAS le drawer détails (sinon il masque le SelectionChip)
 				// ET on clear un focus éventuel (sinon la table précédemment focus
 				// garde son ring bleu foncé pendant que les autres ont juste le
@@ -1067,7 +1067,7 @@ function CanvasInner({
 						// Single-click console → focus modéré (zoom sur ce node
 						// sans passer en fullscreen). Double-clic pour le
 						// vrai fullscreen chrome-less. Skip si modifier
-						// (sélection multi RF, mais consoles sont selectable:
+						// (sélection multi, mais consoles sont selectable:
 						// false donc no-op de toute façon).
 						if (event.shiftKey || event.metaKey || event.ctrlKey) return;
 						rf.fitView({
@@ -1117,7 +1117,7 @@ function CanvasInner({
 				onNodeDrag={onNodeDrag}
 				onNodeDragStop={(event, node, others) => {
 					// Compose : logique frames (drag lifecycle) puis persist de
-					// la position du node console. Le state RF a déjà été update
+					// la position du node console. Le state des consoles a déjà été update
 					// par onConsoleNodesChange pendant le drag — au drop on
 					// snapshotte `node.position` (position finale) dans persist.
 					onNodeDragStop(event, node, others);
@@ -1133,7 +1133,7 @@ function CanvasInner({
 					}
 				}}
 				onNodesDelete={(deleted) => {
-					// RF fire ce callback quand le user press Backspace/Delete
+					// Le moteur fire ce callback quand le user press Backspace/Delete
 					// sur un node sélectionné. On clean uniquement les geoms +
 					// tabs des consoles supprimées ; les tables/frames ont leurs
 					// propres flux (hide/remove-from-frame).
@@ -1149,8 +1149,7 @@ function CanvasInner({
 				}}
 				// `defaultViewport` = zoom initial garanti même quand le container
 				// n'est pas encore mesuré (Mantine AppShell hydrate en 2 passes) ;
-				// dès que les nodes sont mesurés, l'effet `nodesInitialized`
-				// ci-dessus appelle `fitView(OVERVIEW_FIT)` pour un cadrage parfait.
+				// dès qu'il l'est, l'auto-fit de `useCanvasViewport` prend le relais.
 				defaultViewport={{
 					x: 0,
 					y: 0,
@@ -1223,7 +1222,7 @@ export function SchemaCanvas({
 	dbName: string;
 	teamSlug: string;
 }) {
-	// Remonte tout le flow au changement de schéma : état React Flow réinitialisé
+	// Remonte tout le canvas au changement de schéma : état réinitialisé
 	// proprement, le graphe se recadre au montage. Clé combinant moteur, taille et
 	// première/dernière table — assez discriminante pour deux schémas distincts.
 	const cols = schema.collections;

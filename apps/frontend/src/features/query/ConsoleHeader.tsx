@@ -291,7 +291,7 @@ export interface ConsoleHeaderProps {
 	readonly onRenameTab: (id: string, name: string) => void;
 	readonly onReorderTabs: (fromId: string, toId: string) => void;
 	/** `"route"` (défaut) = shell fullscreen ; rend Back Canvas / Fermer +
-	 * Détacher. `"node"` = console vit dans un node RF ; cache back/close
+	 * Détacher. `"node"` = console vit dans un node canvas ; cache back/close
 	 * (le user navigue via le canvas) et cache Détacher (pas de popout
 	 * depuis un node). L'usage passe des actions node-spécifiques via
 	 * `extraLeftActions` (ex : bouton focus / close du node). */

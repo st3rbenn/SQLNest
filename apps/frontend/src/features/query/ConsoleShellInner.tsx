@@ -4,7 +4,7 @@
  * `position: fixed; inset: 0`. Utilisé par :
  *
  *   - `ConsolePage` (route `/query`) : wrap dans un shell fullscreen.
- *   - `ConsoleNode` (node React Flow T5) : wrap dans un node canvas.
+ *   - `ConsoleNode` (T5) : wrap dans un node canvas.
  *
  * Le shell parent fournit la surface (fullscreen ou node) et les
  * hotkeys qui dépendent du contexte (Escape back, ⌘⇧K détacher). Cet
@@ -340,7 +340,7 @@ export function ConsoleShellInner({
 	// remonté.
 
 	// BroadcastChannel cross-window scopé par connectionId. Chaque
-	// instance de ConsoleShellInner (route fullscreen, node RF, popout
+	// instance de ConsoleShellInner (route fullscreen, node canvas, popout
 	// window) partage le même canal pour la même connection. Usage :
 	// notifier les autres instances qu'un run vient d'être fired sur cette
 	// DB — leur pending state (WriteConfirmBar + preview count) devient

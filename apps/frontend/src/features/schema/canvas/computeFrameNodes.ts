@@ -59,7 +59,7 @@ export function computeFrameNodes(
 				// Callbacks passés BRUTS (stables via useCallback côté hook).
 				// FrameNode les rappellera avec `frame.key` en premier arg — ça
 				// évite de recréer des closures inline `(r) => handler(key, r)`
-				// à chaque render, qui faisaient RF re-mesurer tous les frames
+				// à chaque render, qui faisaient re-mesurer tous les frames
 				// en boucle (re-mesures pendant un drag NodeResizer
 				// réinitialisaient son état interne → axes qui sautaient).
 				data: {

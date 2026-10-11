@@ -1,5 +1,5 @@
 /**
- * ConsoleNode — la console SNQL vit dans le canvas comme un node RF
+ * ConsoleNode — la console SNQL vit dans le canvas comme un node
  * custom. Le corps est le même `ConsoleShellInner` que celui de la
  * route `/query` fullscreen (header/tabs/éditeur/résultats/split-resize
  * inchangés) ; seul le châssis change.
@@ -10,7 +10,7 @@
  *   contenu porte `className="nodrag nowheel"` pour ne pas déclencher
  *   le drag depuis l'éditeur, ni le zoom canvas depuis la molette dans
  *   les résultats.
- * - Resize : `NodeResizer` natif RF (4 côtés + 4 coins), visible au
+ * - Resize : `NodeResizer` du moteur (4 côtés + 4 coins), visible au
  *   hover (même pattern que TableNode), lignes/handles bleus accent.
  * - Focus (single-click) : `focusAndZoom` — le canvas zoom modéré sur
  *   ce node (comme pour une table).
@@ -89,7 +89,7 @@ const outerNodeStyle: CSSProperties = {
 };
 
 // Overlay fullscreen — le shell est rendu ici via React Portal quand
-// isFocused. Hors du transform React Flow → texte natif (pas de scale
+// isFocused. Hors du transform du viewport → texte natif (pas de scale
 // zoom), events ne remontent pas au canvas (pas de pan/zoom accidentel
 // depuis un click dans le contenu).
 const overlayStyle: CSSProperties = {
@@ -143,12 +143,12 @@ export function ConsoleNode({
 	} = data;
 
 	// En fullscreen : le shell est rendu via React Portal vers document.body
-	// → hors du transform React Flow (pas de scale zoom qui shrink le
+	// → hors du transform du viewport (pas de scale zoom qui shrink le
 	// contenu, pas de click qui remonte au canvas pour trigger un pan/zoom).
 	// Note : le shell est UNMOUNT côté node quand on entre en fullscreen et
 	// REMOUNT au retour → le state useRunQuery (mutation en cours) est
 	// perdu au switch. Les tabs / historique / geoms persistent car
-	// localStorage. Trade-off accepté pour éviter le RF viewport scale.
+	// localStorage. Trade-off accepté pour éviter le scale du viewport.
 	if (isFocused) {
 		return typeof document !== "undefined"
 			? createPortal(
@@ -205,7 +205,7 @@ export function ConsoleNode({
 					borderWidth: 2
 				}}
 				onResizeEnd={(_, params) => {
-					// Passe aussi x/y — RF déplace l'origine du node quand le
+					// Passe aussi x/y — le resize déplace l'origine du node quand le
 					// user drag depuis un handle top ou left (pour garder
 					// l'opposé fixe). Sans persister x/y, le refresh remettrait
 					// le node à l'ancienne origine → il semblerait grossir

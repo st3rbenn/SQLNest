@@ -42,7 +42,7 @@ export interface UseCanvasFramesReturn {
 
 /**
  * Orchestre TOUT ce qui touche aux frames :
- *   - `frameNodes` composé via `computeFrameNodes` — nœuds RF de type
+ *   - `frameNodes` composé via `computeFrameNodes` — nœuds de type
  *     `frame` avec handlers resize/rename/delete/focus bindés.
  *   - Membership reconciliation post-ELK : un frame sans rect persisté (ex.
  *     seed statique) reçoit le bounding-box de ses membres calculés depuis

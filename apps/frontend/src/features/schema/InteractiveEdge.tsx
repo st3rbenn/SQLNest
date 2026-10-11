@@ -35,7 +35,7 @@ export interface InteractiveEdgeData {
 	readonly [key: string]: unknown;
 }
 
-/** RF Position enum → notre Side (les string values coïncident). */
+/** `Position` → notre Side (les string values coïncident). */
 function toSide(p: Position): Side {
 	if (p === Position.Top) return "top";
 	if (p === Position.Right) return "right";
@@ -43,7 +43,7 @@ function toSide(p: Position): Side {
 	return "left";
 }
 
-/** Inverse : Side → RF Position (pour ré-injecter dans getSmoothStepPath). */
+/** Inverse : Side → `Position` (pour ré-injecter dans getSmoothStepPath). */
 function toPosition(s: Side): Position {
 	if (s === "top") return Position.Top;
 	if (s === "right") return Position.Right;
@@ -165,7 +165,7 @@ export function InteractiveEdge(props: EdgeProps) {
 		: null;
 
 	// Offsets pour éviter la superposition quand plusieurs edges partagent
-	// un côté. Appliqués aux endpoints RF (mid-side par défaut). Nœuds
+	// un côté. Appliqués aux endpoints du moteur (mid-side par défaut). Nœuds
 	// récupérés via getNode pour connaître width/height.
 	const sourceNode = getNode(source);
 	const targetNode = getNode(target);
@@ -217,8 +217,8 @@ export function InteractiveEdge(props: EdgeProps) {
 
 	// Path preview live : recalculé à chaque snapped change → le path suit
 	// la poignée pendant le drag. Au release, le SchemaCanvas réinjecte le
-	// vrai `sourceHandle`/`targetHandle` et RF recalcule sourceX/… → même
-	// path, transition invisible.
+	// vrai `sourceHandle`/`targetHandle` et le moteur recalcule sourceX/…
+	// → même path, transition invisible.
 	const [edgePath, labelX, labelY] = getSmoothStepPath({
 		sourceX: srcXY.x,
 		sourceY: srcXY.y,

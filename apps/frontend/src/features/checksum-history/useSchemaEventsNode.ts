@@ -20,8 +20,8 @@ const DEFAULT_GEOM: SystemNodeGeom = {
 };
 
 /**
- * State RF du node système `schema_events`. La persistence géométrie + le
- * state RF vivent dans le générique [[useSystemNodeGeom]] (partagé avec le
+ * State du node système `schema_events`. La persistence géométrie + le
+ * state vivent dans le générique [[useSystemNodeGeom]] (partagé avec le
  * node Enums) — ici uniquement la composition de `data` (connectionId,
  * teamSlug, onResizeEnd branché sur updateGeom).
  */
@@ -54,7 +54,7 @@ export function useSchemaEventsNode(
 	);
 
 	// data recomposée à chaque render — `onResizeEnd` doit voir l'updateGeom
-	// courant (RF déplace l'origine sur un handle top/left, il faut persister
+	// courant (l'origine bouge sur un handle top/left, il faut persister
 	// x/y avec width/height).
 	const node = useMemo<SystemSchemaEventsNodeType>(
 		() => ({

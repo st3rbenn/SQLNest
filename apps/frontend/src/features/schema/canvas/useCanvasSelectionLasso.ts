@@ -31,7 +31,7 @@ export interface UseCanvasSelectionLassoReturn {
  *     permet de créer un frame VIDE (utile comme conteneur à remplir plus
  *     tard).
  *   - Les tables touchées par le lasso sont lues via `getNodes()` (source
- *     directe RF) car notre state `selectedTables` n'est pas encore flushé
+ *     directe du store) car notre state `selectedTables` n'est pas encore flushé
  *     au moment du release.
  *   - Lasso < `MIN_FRAME_LASSO` (40 px) → no-op (évite les frames dégénérés
  *     d'un simple clic mal calibré).

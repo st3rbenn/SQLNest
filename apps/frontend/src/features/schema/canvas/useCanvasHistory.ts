@@ -24,10 +24,10 @@ export interface UseCanvasHistoryOptions {
 	 * Callback invoqué APRÈS l'application d'un snapshot restauré (undo/redo).
 	 *
 	 * Pourquoi c'est nécessaire — le hook restore les 4 sources qu'il détient
-	 * (positions/sizes/frames/hiddenIds) via `replaceAll`, mais React Flow
+	 * (positions/sizes/frames/hiddenIds) via `replaceAll`, mais le canvas
 	 * garde son propre state `nodes` (via `useNodesState` dans SchemaCanvas)
 	 * qui n'est PAS dans l'API du hook. Sans ce callback, restaurer les
-	 * positions ne bouge visuellement rien — les `nodes` RF gardent les
+	 * positions ne bouge visuellement rien — les `nodes` gardent les
 	 * positions post-drag.
 	 *
 	 * Le consommateur s'en sert typiquement pour appliquer
@@ -122,7 +122,7 @@ export function useCanvasHistory(
 		prevRef.current = s;
 		pendingSyncRef.current = false;
 		// Signale au consommateur pour qu'il resync ses états externes
-		// (typiquement le `nodes` RF). Voir docblock de `onRestore`.
+		// (typiquement `nodes`). Voir docblock de `onRestore`.
 		onRestore?.(s);
 	}, []);
 

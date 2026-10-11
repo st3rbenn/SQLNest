@@ -35,7 +35,7 @@ export interface SystemEnumsNodeData {
 export type SystemEnumsNodeType = Node<SystemEnumsNodeData, "system-enums">;
 
 /**
- * Node RF système « Enums » (sprint EN) — rend `schema.enums` visible sur le
+ * Node système « Enums » (sprint EN) — rend `schema.enums` visible sur le
  * canvas : un enum n'est pas une table, il était invisible et son nom exact
  * (casse comprise, ex. DISASTER_QUALIFICATION) indevinable sans `raw`.
  * Injecté seulement quand le schéma déclare ≥1 enum, non-supprimable,
@@ -77,7 +77,7 @@ export function SystemEnumsNode({
 				  * par la hauteur (overflow hidden, resize pour voir plus) — PAS
 				  * une zone scrollable. La frame se drag en l'attrapant partout
 				  * SAUF sur les contrôles (chevron+nom, « + ») qui portent
-				  * `nodrag` — sans lui le d3-drag RF capture le mousedown et le
+				  * `nodrag` — sans lui le drag du moteur capture le mousedown et le
 				  * click ne fire pas (même raison que le footer schema_events).
 				  * Les boutons sont réduits à leur contenu, le reste de chaque
 				  * row est une zone draggable. */}

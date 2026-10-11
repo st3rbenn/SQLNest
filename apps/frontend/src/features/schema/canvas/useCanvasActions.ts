@@ -66,7 +66,7 @@ export interface UseCanvasActionsReturn {
  * undo/redo. Le hook n'appelle jamais lui-même setNodes DIRECTEMENT pour
  * les mutations hide (on modifie hiddenIds, `displayTableNodes` filtre en
  * downstream), sauf `relayoutAll` qui doit repush les positions ELK dans
- * RF (sinon le state RF garde les positions user pendant que
+ * les nodes (sinon ils gardent les positions user alors que
  * tablePositions a été replaceAll).
  */
 export function useCanvasActions(

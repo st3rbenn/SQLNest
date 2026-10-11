@@ -60,7 +60,7 @@ export interface UsePreviewSnapshotSyncOptions {
 	 *  de PUT un snapshot vide avant que les positions server soient
 	 *  chargées dans le state React. */
 	readonly canvasReady: boolean;
-	/** Nodes React Flow (tables uniquement — pas les frames RF). Chaque node
+	/** Nodes du canvas (tables uniquement — pas les frames). Chaque node
 	 *  a position + width/height après resize. */
 	readonly tableNodes: ReadonlyArray<{
 		readonly id: string;

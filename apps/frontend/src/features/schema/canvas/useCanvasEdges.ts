@@ -40,7 +40,7 @@ export interface UseCanvasEdgesReturn {
 
 /**
  * Dérive tous les artefacts liés aux edges à partir du layout ELK, des
- * nodes RF vivants, des overrides d'ancres user et du focus courant.
+ * nodes vivants, des overrides d'ancres user et du focus courant.
  *
  * Rôle central : **routing edges + spread offset contra-sens**. Sans ce
  * hook, deux edges qui touchent le même côté d'un node (un sortant + un

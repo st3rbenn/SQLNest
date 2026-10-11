@@ -120,7 +120,7 @@ export function MiniSchemaPreview({ connectionId, isOnline, snapshot }: Props) {
 	}, [isOnline, connectionId, queryClient, teamSlug]);
 
 	// PRIORITÉ ABSOLUE au snapshot précalculé. Le snapshot est capturé à
-	// partir du VRAI état du canvas (positions RF + frames + hidden), donc
+	// partir du VRAI état du canvas (positions + frames + hidden), donc
 	// la preview affiche EXACTEMENT ce que l'user voit dans le canvas —
 	// pas de divergence par ELK settings différents.
 	//

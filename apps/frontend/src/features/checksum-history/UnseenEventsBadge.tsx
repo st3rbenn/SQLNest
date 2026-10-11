@@ -30,8 +30,8 @@ const style: CSSProperties = {
 	// Interdit d'intercepter le drag/click du node — la pastille est
 	// décorative, l'action est le bouton « Voir les événements ».
 	pointerEvents: "none",
-	// Reste stable au zoom canvas (RF re-transform le node, pas la pastille
-	// qui suit la taille CSS du parent).
+	// Reste stable au zoom canvas (le zoom transforme le node, pas la
+	// pastille qui suit la taille CSS du parent).
 	zIndex: 2
 };
 

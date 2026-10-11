@@ -21,8 +21,8 @@ const DEFAULT_GEOM: SystemNodeGeom = {
 };
 
 /**
- * State RF du node système « Enums ». La persistence géométrie + le state
- * RF vivent dans le générique [[useSystemNodeGeom]] (partagé avec
+ * State du node système « Enums ». La persistence géométrie + le state
+ * vivent dans le générique [[useSystemNodeGeom]] (partagé avec
  * schema_events) — ici uniquement la composition de `data` (enums live du
  * schéma, onAddMember, onResizeEnd). `node` est `null` quand le schéma ne
  * déclare aucun enum : le node n'est pas injecté (un panneau vide serait

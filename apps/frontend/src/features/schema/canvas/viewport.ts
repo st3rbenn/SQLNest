@@ -44,11 +44,11 @@ export interface ViewportSafeArea {
 }
 
 /**
- * Zoom initial adaptatif : quand RF ne peut pas calculer un fit propre au
+ * Zoom initial adaptatif : quand aucun fit propre n'est calculable au
  * mount (parent 0×0 pendant l'hydratation Mantine AppShell), on part d'un
  * zoom sensé basé sur la taille du schéma. Petit schéma → vue moyenne.
- * Gros schéma → vue **très** aérienne. `fitView` explicit prend le relais
- * dès que `useNodesInitialized` bascule.
+ * Gros schéma → vue **très** aérienne. L'auto-fit de `useCanvasViewport`
+ * prend le relais dès que le conteneur est mesuré.
  */
 export function initialZoom(collectionCount: number): number {
 	if (collectionCount <= 4) return 0.6;
@@ -117,10 +117,9 @@ export function focusZoom(currentZoom: number, opts: { min: number }): number {
 
 /**
  * Bounds englobants de toutes les tables (frames exclus). Utilisé pour
- * calculer un viewport initial propre — `fitView` de React Flow refuse
- * de tourner tant que le conteneur parent n'est pas mesuré (warning
- * « needs a width and a height »), et sous Mantine `AppShell` cette
- * mesure arrive **après** l'hydratation. Pur → testable.
+ * calculer un viewport initial propre — `fitView` ne cadre rien de
+ * propre tant que le conteneur parent n'est pas mesuré, et sous Mantine
+ * `AppShell` cette mesure arrive **après** l'hydratation. Pur → testable.
  */
 export function tablesBounds(nodes: readonly TableNodeType[]): {
 	minX: number;

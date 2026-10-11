@@ -255,7 +255,7 @@ export function ContextMenu({
 			 * qui ne visent PAS le menu (le menu container est en zIndex 9999,
 			 * le backdrop en 9998, donc le menu reste cliquable au-dessus).
 			 * Sans lui, un scroll molette pendant que le menu est ouvert pan
-			 * le canvas ReactFlow en dessous — visible = user perd sa vue en
+			 * le canvas en dessous — visible = user perd sa vue en
 			 * essayant de scroll vers un item bas. */}
 			<div
 				aria-hidden

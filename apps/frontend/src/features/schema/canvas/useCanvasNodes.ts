@@ -40,13 +40,13 @@ export interface UseCanvasNodesReturn {
 }
 
 /**
- * Gère le state React Flow `nodes` du canvas :
+ * Gère le state `nodes` du canvas :
  *   - Seed depuis le layout ELK au mount (lu via ref pour ne pas re-seed à
  *     chaque persistance user → sinon chaque drag-stop clignoterait).
  *   - Overlay des positions + sizes user persistés par-dessus le layout.
- *   - Intercepte les NodeChange RF pour router les changes sur `frame:*`
- *     vers `framesApi.setFrameRect` (RF émet des `dimensions` ET `position`
- *     dans le même batch pour un resize top/left corner — on merge par
+ *   - Intercepte les NodeChange pour router les changes sur `frame:*`
+ *     vers `framesApi.setFrameRect` (un resize top/left corner émet
+ *     `dimensions` ET `position` dans le même batch — on merge par
  *     frame avant d'écrire sinon 2× `setFrameRect` séquentiels perdent
  *     l'un des updates).
  *   - `handleTableResize` : callback stable pour le NodeResizer de chaque
@@ -94,7 +94,7 @@ export function useCanvasNodes(
 		(changes: NodeChange<TableNodeType>[]) => {
 			const restChanges: NodeChange<TableNodeType>[] = [];
 			const api = framesApiRef.current;
-			// RF émet dimensions ET position dans le MÊME batch pour un resize
+			// Le moteur émet dimensions ET position dans le MÊME batch pour un resize
 			// depuis un corner top/left. On doit fusionner par frame avant l'écriture
 			// — sinon deux `setFrameRect` séquentiels lisent `frame.rect` frozen
 			// avant le premier setState (async), et le 2e écrase le 1er.
@@ -107,7 +107,7 @@ export function useCanvasNodes(
 			for (const c of changes) {
 				// NodeChange est une union discriminée : `NodeAddChange` porte
 				// l'id sur `c.item.id`, pas `c.id`. On ignore les `add` pour le
-				// framing (RF ne crée jamais un frame côté runtime — les frames
+				// framing (le moteur ne crée jamais un frame côté runtime — les frames
 				// viennent tous de `framesApi.frames` via `computeFrameNodes`).
 				if (c.type === "add") {
 					restChanges.push(c);
@@ -119,7 +119,7 @@ export function useCanvasNodes(
 				}
 				const key = c.id.slice("frame:".length);
 				if (c.type === "dimensions" && c.dimensions) {
-					// RF émet AUSSI des `dimensions` en dehors de tout geste (mesure
+					// Le moteur émet AUSSI des `dimensions` en dehors de tout geste (mesure
 					// DOM auto). `resizing !== true` = mesure → on ignore, sinon on
 					// écrit à chaque render la même dimension et on peut casser le rect.
 					if (c.resizing !== true) continue;
@@ -129,7 +129,7 @@ export function useCanvasNodes(
 					perFrame.set(key, entry);
 				} else if (c.type === "position" && c.position) {
 					// `position` sur un frame — deux origines :
-					//   1) resize corner top/left → RF émet position (`dragging: false`)
+					//   1) resize corner top/left → `position` avec `dragging: false`
 					//   2) drag manuel → `dragging: true`, géré par `onNodeDrag` custom
 					//      qui shift les membres. SKIP ici pour éviter la double-update.
 					if (c.dragging === true) continue;
@@ -157,7 +157,7 @@ export function useCanvasNodes(
 
 	// Callback stable pour le NodeResizer d'une table : persist les nouvelles
 	// dimensions ET la nouvelle position au release. La position CHANGE quand
-	// le user tire depuis un handle top ou left (RF déplace l'origine pour
+	// le user tire depuis un handle top ou left (l'origine bouge pour
 	// garder l'opposé fixe). Sans persister x/y, un refresh remettait la table
 	// à l'ancienne origine → elle semblait grossir uniquement vers la droite.
 	const handleTableResize = useCallback(

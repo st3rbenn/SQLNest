@@ -56,7 +56,7 @@ export interface EdgeHandlesProps {
 	readonly onUp: (e: PointerEvent) => void;
 	// React dispatche un `MouseEvent` sur `onDoubleClick` (pas un
 	// `PointerEvent` — le double-click natif du browser reste sur l'API
-	// mouse). Typé en conséquence pour matcher la signature RF/DOM.
+	// mouse). Typé en conséquence pour matcher la signature DOM.
 	readonly onDoubleClick: (e: MouseEvent<HTMLDivElement>) => void;
 	readonly onEnter: () => void;
 	readonly onLeave: () => void;

@@ -24,7 +24,7 @@ export interface SystemSchemaEventsNodeData {
 	readonly connectionId: string;
 	readonly teamSlug: string | null;
 	/** Callback au release du resize — persist width/height/position via
-	 * `useSchemaEventsNode` (RF déplace l'origine sur un handle top/left
+	 * `useSchemaEventsNode` (l'origine bouge sur un handle top/left
 	 * pour garder l'opposé fixe → il faut aussi persister x/y). */
 	readonly onResizeEnd?: (params: {
 		width: number;
@@ -41,7 +41,7 @@ export type SystemSchemaEventsNodeType = Node<
 >;
 
 /**
- * Node RF de la table système `schema_events` — audit trail des checksums
+ * Node de la table système `schema_events` — audit trail des checksums
  * vus par le canvas courant. Auto-injecté sur tous les canvases,
  * non-supprimable, draggable + resizable comme les tables user.
  *

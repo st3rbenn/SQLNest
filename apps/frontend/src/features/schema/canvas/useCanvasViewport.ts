@@ -54,7 +54,7 @@ export interface UseCanvasViewportReturn {
 }
 
 /**
- * Gère TOUT ce qui touche au viewport React Flow :
+ * Gère TOUT ce qui touche au viewport du canvas :
  *   - Auto-fit initial au mount ELK + resize container (ResizeObserver),
  *     abandonné dès que l'user interagit (wheel/pan).
  *   - `focusAndZoom(id)` : pan animé + zoom-in vers une table (points

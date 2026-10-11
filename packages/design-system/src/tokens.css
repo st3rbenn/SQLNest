@@ -3,7 +3,7 @@
  *
  * On les expose comme CSS variables globales pour deux raisons :
  *  - être consommables depuis les styles inline React (une seule source de
- *    vérité), depuis les CSS override (canvas RF), et depuis les composants
+ *    vérité), depuis les CSS override (canvas), et depuis les composants
  *    DS qui posent leurs propres surfaces / bordures.
  *  - permettre à un futur toggle (light) de ré-écrire ces mêmes variables
  *    sur `:root[data-theme="light"]` sans toucher au code — c'est ici que se
@@ -68,7 +68,7 @@
 	--sqlnest-success: #10b981;
 	--sqlnest-success-soft: rgba(16, 185, 129, 0.15);
 
-	/* Grille de points du canvas (React Flow Background). */
+	/* Grille de points du canvas. */
 	--sqlnest-canvas-dot: rgba(255, 255, 255, 0.08);
 }
 
@@ -141,9 +141,9 @@
 	display: none !important;
 }
 
-/* macOS trackpad : un pan 2-doigts horizontal sur le canvas (`panOnScroll`
- * RF) dont le wheel atteint le document (départ sur un overlay/HUD, ou
- * filtré par d3-zoom) déclenche le geste back/forward du navigateur en
+/* macOS trackpad : un pan 2-doigts horizontal sur le canvas (`panOnScroll`)
+ * dont le wheel atteint le document (départ sur un overlay/HUD, ou écarté
+ * par le filtre pan/zoom) déclenche le geste back/forward du navigateur en
  * plein travail. `none` coupe la navigation par overscroll — le bouton
  * back et ⌘[ restent intacts. Appliqué aux 2 axes : l'app est une SPA
  * plein écran sans scroll document, le chaînage vertical (bounce) est

@@ -1,7 +1,7 @@
 /**
  * State + persistance des nodes console SNQL du canvas (T5).
  *
- * Chaque console est un node React Flow custom (`type: "console"`) qui
+ * Chaque console est un node custom (`type: "console"`) qui
  * vit dans le graphe à côté des tables et frames. Ce hook ne s'occupe
  * QUE de la géométrie et de l'identité — les tabs / source / dernier
  * résultat sont gérés par `useConsoleTabs(connId, nodeId)` à l'intérieur
@@ -78,13 +78,13 @@ export interface UseConsoleNodesApi {
 	/** Crée un node console à la position donnée avec les dimensions par
 	 * défaut ; renvoie l'id créé. */
 	readonly create: (position: { x: number; y: number }) => string;
-	/** Met à jour la position (drag stop RF). No-op si l'id n'existe pas. */
+	/** Met à jour la position (drag stop). No-op si l'id n'existe pas. */
 	readonly updatePosition: (
 		id: string,
 		position: { x: number; y: number }
 	) => void;
-	/** Met à jour les dimensions ET la position (resize end RF). RF déplace
-	 * l'origine sur un handle top/left pour garder l'opposé fixe → il faut
+	/** Met à jour les dimensions ET la position (resize end). L'origine
+	 * bouge sur un handle top/left pour garder l'opposé fixe → il faut
 	 * persister x/y avec width/height, sinon le node revient à l'ancienne
 	 * origine au refresh. No-op si l'id n'existe pas. */
 	readonly updateGeom: (

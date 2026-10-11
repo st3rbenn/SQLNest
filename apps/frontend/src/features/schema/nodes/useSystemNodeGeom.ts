@@ -6,7 +6,7 @@ import { SYSTEM_NODE_CLASS } from "./SystemNodeShell";
  * Géométrie persistée d'un node système — une par (prefix, connection).
  * localStorage suffit : la position n'a pas besoin d'être synchronisée
  * cross-device. Extrait de `useSchemaEventsNode` quand le node Enums est
- * arrivé — la persistence + le state RF sont identiques pour tous les
+ * arrivé — la persistence + le state du node sont identiques pour tous les
  * nodes système, seule la composition de `data` diffère (elle reste dans
  * chaque hook feature).
  */
@@ -53,7 +53,7 @@ function saveGeom(key: string, geom: SystemNodeGeom): void {
 }
 
 export interface UseSystemNodeGeomApi<TNode extends Node> {
-	/** Node RF courant (géométrie live). `data` est celle du `build` initial —
+	/** Node courant (géométrie live). `data` est celle du `build` initial —
 	 * les hooks feature la recomposent par-dessus à chaque render. */
 	readonly node: TNode;
 	readonly onNodesChange: (
@@ -64,7 +64,7 @@ export interface UseSystemNodeGeomApi<TNode extends Node> {
 }
 
 /**
- * State RF + persistence d'UN node système. `storagePrefix` est suffixé par
+ * State + persistence d'UN node système. `storagePrefix` est suffixé par
  * `connectionId` (clé stable par canvas). `build` construit le node initial
  * depuis la géométrie chargée — appelé au mount et au changement de
  * connection (reset, pour ne pas trainer la géométrie du canvas précédent).
@@ -80,7 +80,7 @@ export function useSystemNodeGeom<TNode extends Node>(
 	const initial = useMemo<TNode[]>(
 		() => {
 			const built = build(loadGeom(key, defaults));
-			// Classe RF partagée injectée ICI (pas dans les features) — le CSS
+			// Classe partagée injectée ICI (pas dans les features) — le CSS
 			// de comportement système (resize hover) cible cette classe, un
 			// nouveau node système en hérite automatiquement.
 			return [{ ...built, className: SYSTEM_NODE_CLASS }];
@@ -94,7 +94,7 @@ export function useSystemNodeGeom<TNode extends Node>(
 
 	const [nodes, setNodes, onNodesChange] = useNodesState<TNode>(initial);
 
-	// Reset le state RF quand la connection change.
+	// Reset le state quand la connection change.
 	const lastKeyRef = useRef(key);
 	useEffect(() => {
 		if (lastKeyRef.current !== key) {

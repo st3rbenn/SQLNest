@@ -8,7 +8,7 @@ import { type CSSProperties, Fragment } from "react";
 export const SYSTEM_BORDER = "#7c5cff";
 export const SYSTEM_HEADER = "rgba(124,92,255,0.12)";
 
-/** Classe RF posée sur le wrapper de TOUT node système (injectée par
+/** Classe posée sur le wrapper de TOUT node système (injectée par
  * `useSystemNodeGeom`, pas par les features). C'est elle que cible le CSS
  * de comportement partagé (resize handles au hover, canvas-overrides.css)
  * — un nouveau node système hérite du behaviour sans toucher au CSS. */
@@ -22,7 +22,7 @@ const HANDLE_SIDES = [
 	{ id: "left", position: Position.Left }
 ] as const;
 
-/** 4 sides × source+target invisibles — permet aux edges RF d'ancrer sur
+/** 4 sides × source+target invisibles — permet aux edges d'ancrer sur
  * n'importe quel côté sans afficher de poignées. Partagé par tous les
  * nodes système (extrait de SystemSchemaEventsNode, qui le dupliquait
  * de TableNode). */
@@ -70,7 +70,7 @@ export interface SystemNodeShellProps {
 }
 
 /**
- * Chrome partagé des nodes système RF : bordure violette, header (icône +
+ * Chrome partagé des nodes système : bordure violette, header (icône +
  * titre + badge « Système » IconLock), NodeResizer stylé + AllHandles.
  * Extrait de SystemSchemaEventsNode quand le node Enums est arrivé — un
  * 2ᵉ consommateur = composant partagé, pas une copie ([[feedback-reuse-

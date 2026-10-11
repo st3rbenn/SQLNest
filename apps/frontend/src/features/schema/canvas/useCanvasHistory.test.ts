@@ -120,11 +120,11 @@ describe("useCanvasHistory", () => {
 	});
 
 	it("onRestore est invoqué avec le snapshot restauré à chaque undo/redo", () => {
-		// Bug 1 : sans ce callback, React Flow `nodes` (détenu ailleurs, hors
+		// Bug 1 : sans ce callback, le state `nodes` (détenu ailleurs, hors
 		// API du hook) n'est jamais resync après un restore → Cmd+Z ne bouge
 		// visuellement rien. Le hook expose donc un `onRestore` pour laisser
 		// le consommateur (SchemaCanvas) réappliquer les overlays du snapshot
-		// sur ses `nodes` RF.
+		// sur ses `nodes`.
 		const onRestore = vi.fn<(s: CanvasSnapshot) => void>();
 		const { result } = renderHook(() => useHarness(onRestore));
 
