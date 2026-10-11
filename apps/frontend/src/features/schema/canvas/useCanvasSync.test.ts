@@ -431,49 +431,119 @@ describe("useCanvasSync", () => {
 		expect(resetBody.payload.edgeAnchors).toEqual({});
 	});
 
-	it("flush au démontage puis remontage → hydraté depuis le cache avec l'état flushé", async () => {
-		// Navigation interne canvas → galerie → canvas : la query est en
-		// staleTime Infinity, le remontage relit le cache sans GET.
+	// ─── Remontage après un flush au démontage ────────────────────────
+	// Navigation interne canvas → galerie → canvas : la query est en
+	// staleTime Infinity, le remontage relit le cache sans GET.
+	const ALBUM_BOTTOM: AnchorMap = { "e0-album-artist": { source: "bottom" } };
+
+	/** GET sans override, ancre déplacée, démontage avant l'échéance du
+	 * debounce : `put` est la réponse du PUT parti au démontage. */
+	async function moveAnchorThenUnmount(
+		wrapper: ReturnType<typeof makeWrapper>,
+		put: Promise<Response>
+	): Promise<void> {
 		fetchMock.mockResolvedValueOnce(
 			mockResponse(200, {
 				payload: { edgeAnchors: {} },
 				updatedAt: "2026-01-01T00:00:06.000Z"
 			})
 		);
-		fetchMock.mockResolvedValueOnce(
-			mockResponse(200, { updatedAt: "2026-01-01T00:00:07.000Z" })
-		);
-		const wrapper = makeWrapper();
-		const anchors: AnchorMap = { "e0-album-artist": { source: "bottom" } };
-
-		const firstOpts = makeOpts();
-		const first = renderHook(
+		fetchMock.mockReturnValueOnce(put);
+		const opts = makeOpts();
+		const hook = renderHook(
 			(props: UseCanvasSyncOptions) => useCanvasSync(props),
-			{ wrapper, initialProps: firstOpts }
+			{ wrapper, initialProps: opts }
 		);
 		await waitFor(() => {
-			expect(firstOpts.replaceAll.edgeAnchors).toHaveBeenCalledWith({});
+			expect(opts.replaceAll.edgeAnchors).toHaveBeenCalledWith({});
 		});
-		first.rerender({ ...firstOpts, edgeAnchors: anchors });
+		hook.rerender({ ...opts, edgeAnchors: ALBUM_BOTTOM });
 		await new Promise((r) => setTimeout(r, 0));
 		await act(async () => {
-			first.unmount();
+			hook.unmount();
 			await new Promise((r) => setTimeout(r, 0));
 		});
 		expect(fetchMock).toHaveBeenCalledTimes(2);
 		expect(fetchMock.mock.calls[1]?.[1]?.keepalive).toBe(true);
+	}
 
-		const secondOpts = makeOpts();
-		const second = renderHook(
+	function remount(wrapper: ReturnType<typeof makeWrapper>) {
+		const opts = makeOpts();
+		const hook = renderHook(
 			(props: UseCanvasSyncOptions) => useCanvasSync(props),
-			{ wrapper, initialProps: secondOpts }
+			{ wrapper, initialProps: opts }
 		);
+		return { ...hook, opts };
+	}
+
+	it("flush au démontage puis remontage → hydraté depuis le cache avec l'état flushé", async () => {
+		const wrapper = makeWrapper();
+		await moveAnchorThenUnmount(
+			wrapper,
+			Promise.resolve(
+				mockResponse(200, { updatedAt: "2026-01-01T00:00:07.000Z" })
+			)
+		);
+
+		const second = remount(wrapper);
 		await waitFor(() => {
 			expect(second.result.current.ready).toBe(true);
 		});
 		expect(fetchMock).toHaveBeenCalledTimes(2);
-		expect(secondOpts.replaceAll.edgeAnchors).toHaveBeenCalledWith(anchors);
+		expect(second.opts.replaceAll.edgeAnchors).toHaveBeenCalledWith(
+			ALBUM_BOTTOM
+		);
 		expect(second.result.current.lastSavedAt).toBe("2026-01-01T00:00:07.000Z");
+	});
+
+	it("remontage avant la réponse du PUT flushé → hydraté une fois la réponse reçue", async () => {
+		let respond = (_res: Response): void => {};
+		const wrapper = makeWrapper();
+		await moveAnchorThenUnmount(
+			wrapper,
+			new Promise<Response>((resolve) => {
+				respond = resolve;
+			})
+		);
+
+		const second = remount(wrapper);
+		await act(async () => {
+			await new Promise((r) => setTimeout(r, 0));
+		});
+		expect(second.result.current.ready).toBe(false);
+		expect(second.opts.replaceAll.edgeAnchors).not.toHaveBeenCalled();
+
+		await act(async () => {
+			respond(mockResponse(200, { updatedAt: "2026-01-01T00:00:08.000Z" }));
+		});
+		await waitFor(() => {
+			expect(second.result.current.ready).toBe(true);
+		});
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+		expect(second.opts.replaceAll.edgeAnchors).toHaveBeenCalledTimes(1);
+		expect(second.opts.replaceAll.edgeAnchors).toHaveBeenCalledWith(
+			ALBUM_BOTTOM
+		);
+	});
+
+	it("PUT flushé en échec → le remontage s'hydrate depuis le cache inchangé", async () => {
+		let fail = (_err: Error): void => {};
+		const wrapper = makeWrapper();
+		await moveAnchorThenUnmount(
+			wrapper,
+			new Promise<Response>((_resolve, reject) => {
+				fail = reject;
+			})
+		);
+
+		const second = remount(wrapper);
+		await act(async () => {
+			fail(new Error("network down"));
+		});
+		await waitFor(() => {
+			expect(second.result.current.ready).toBe(true);
+		});
+		expect(second.opts.replaceAll.edgeAnchors).toHaveBeenCalledWith({});
 	});
 
 	// ─── Race hydratation ↔ push (H1) ─────────────────────────────────

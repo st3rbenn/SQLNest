@@ -32,7 +32,12 @@
  * de la queryKey (éviterait la loop refetch → replaceAll → useEffect → push).
  */
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+	hashKey,
+	type QueryClient,
+	useQuery,
+	useQueryClient
+} from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useCurrentUser } from "../../auth/sessionQuery";
 import type { Frame } from "../frames";
@@ -112,6 +117,39 @@ interface PendingPush {
 	readonly serialized: string;
 }
 
+function canvasStateQueryKey(teamSlug: string | null, connectionId: string) {
+	return ["canvas-state", teamSlug, connectionId] as const;
+}
+
+/**
+ * PUT en vol, par cache TanStack puis par canvas. Démonté pendant la
+ * navigation, un canvas laisse partir son flush ; remonté avant la réponse,
+ * il relirait dans le cache l'état d'avant le dernier geste. Son
+ * hydratation attend donc l'issue de ces PUT.
+ */
+const pushesInFlight = new WeakMap<QueryClient, Map<string, Promise<void>>>();
+
+/** Enregistre un PUT en vol ; la fonction renvoyée le marque terminé. */
+function beginPush(client: QueryClient, canvasKey: string): () => void {
+	let end = (): void => {};
+	const push = new Promise<void>((resolve) => {
+		end = resolve;
+	});
+	const byCanvas =
+		pushesInFlight.get(client) ?? new Map<string, Promise<void>>();
+	pushesInFlight.set(client, byCanvas);
+	const previous = byCanvas.get(canvasKey);
+	const all =
+		previous === undefined
+			? push
+			: Promise.all([previous, push]).then(() => undefined);
+	byCanvas.set(canvasKey, all);
+	void all.then(() => {
+		if (byCanvas.get(canvasKey) === all) byCanvas.delete(canvasKey);
+	});
+	return end;
+}
+
 export function useCanvasSync(opts: UseCanvasSyncOptions): UseCanvasSyncReturn {
 	const { data: session } = useCurrentUser();
 	const user = session?.user ?? null;
@@ -133,6 +171,9 @@ export function useCanvasSync(opts: UseCanvasSyncOptions): UseCanvasSyncReturn {
 	// effect via ses deps. Avec un ref, aucune re-render, et le premier PUT
 	// après un 404 (ou une divergence H1) ne partait jamais.
 	const [hydrated, setHydrated] = useState(false);
+	// PUT d'une instance précédente dont l'hydratation attend l'issue
+	// (cf. `pushesInFlight`).
+	const [awaitedPush, setAwaitedPush] = useState<Promise<void> | null>(null);
 	// `lastSyncedSerializedRef` : sérialisation (JSON string) du dernier
 	// snapshot connu comme « en phase » avec le serveur. Mises à jour :
 	//   1. hydratation 200 (sans divergence détectée) → sérialisation du
@@ -176,7 +217,7 @@ export function useCanvasSync(opts: UseCanvasSyncOptions): UseCanvasSyncReturn {
 	// après le mount. Un refetch → hydratation refire → replaceAll écrase
 	// les gestes user depuis le mount → chaos. L'hydratation est one-shot.
 	const query = useQuery({
-		queryKey: ["canvas-state", teamSlug, opts.connectionId],
+		queryKey: canvasStateQueryKey(teamSlug, opts.connectionId),
 		queryFn: () => fetchCanvasState(opts.connectionId, teamSlug as string),
 		enabled,
 		staleTime: Number.POSITIVE_INFINITY,
@@ -259,6 +300,17 @@ export function useCanvasSync(opts: UseCanvasSyncOptions): UseCanvasSyncReturn {
 		if (hydrated) return;
 		// Attendre que la query settle (success ou error, plus de fetching).
 		if (query.isPending || query.isFetching) return;
+		// Un PUT en vol mettra le cache à jour à sa réponse : hydrater avant
+		// réafficherait l'état d'avant le dernier geste.
+		if (awaitedPush !== null) return;
+		const pushing = pushesInFlight
+			.get(queryClient)
+			?.get(hashKey(canvasStateQueryKey(teamSlug, opts.connectionId)));
+		if (pushing !== undefined) {
+			setAwaitedPush(pushing);
+			void pushing.then(() => setAwaitedPush(null));
+			return;
+		}
 
 		// H3 : annuler tout push débounce armé pendant la fenêtre de fetch —
 		// son payload est stale par rapport à la baseline serveur qu'on
@@ -326,7 +378,11 @@ export function useCanvasSync(opts: UseCanvasSyncOptions): UseCanvasSyncReturn {
 		query.isFetching,
 		query.isError,
 		query.data,
-		hydrated
+		hydrated,
+		awaitedPush,
+		queryClient,
+		teamSlug,
+		opts.connectionId
 	]);
 
 	// ─── Push effectif (async, met à jour lastSyncedSerializedRef) ────────
@@ -338,6 +394,10 @@ export function useCanvasSync(opts: UseCanvasSyncOptions): UseCanvasSyncReturn {
 			pending: PendingPush,
 			options: { readonly keepalive?: boolean } = {}
 		): Promise<void> => {
+			const endPush = beginPush(
+				queryClient,
+				hashKey(canvasStateQueryKey(teamSlug, pending.connectionId))
+			);
 			setSyncStatus("saving");
 			try {
 				const payload = JSON.parse(pending.serialized) as Record<
@@ -363,7 +423,7 @@ export function useCanvasSync(opts: UseCanvasSyncOptions): UseCanvasSyncReturn {
 				// refetchOnMount: false → si on ne pousse pas à jour ici,
 				// personne d'autre ne le fera avant un F5 hard.
 				queryClient.setQueryData(
-					["canvas-state", teamSlug, pending.connectionId],
+					canvasStateQueryKey(teamSlug, pending.connectionId),
 					{ payload, updatedAt: result.updatedAt }
 				);
 				setLastSavedAt(result.updatedAt);
@@ -373,6 +433,8 @@ export function useCanvasSync(opts: UseCanvasSyncOptions): UseCanvasSyncReturn {
 				// changement (nouveau geste user), le debounce reprogrammera un
 				// push. `error` reste affiché jusqu'au prochain succès.
 				setSyncStatus("error");
+			} finally {
+				endPush();
 			}
 		},
 		[queryClient, teamSlug]
