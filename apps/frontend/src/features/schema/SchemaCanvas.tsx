@@ -165,7 +165,7 @@ function CanvasInner({
 	dbName,
 	teamSlug
 }: CanvasInnerProps) {
-	const rf = useNestCanvas();
+	const { screenToFlowPosition, fitView } = useNestCanvas();
 	// Layout ELK — async, mais caché par connectionId dans le queryClient
 	// TanStack. Sans ça, chaque re-mount (retour gallery → canvas) refait
 	// un compute ELK à froid (~500ms-1s) → flick visible avant le rendu
@@ -485,7 +485,7 @@ function CanvasInner({
 	// depuis ce state au drop (onNodeDragStop / NodeResizer.onResizeEnd).
 	const consoleNodes = useConsoleNodes(connectionId);
 	const [focusedConsoleId, setFocusedConsoleId] = useState<string | null>(null);
-	const [consoleRFNodes, setConsoleRFNodes, onConsoleNodesChange] =
+	const [consoleCanvasNodes, setConsoleCanvasNodes, onConsoleNodesChange] =
 		useNodesState<ConsoleNodeType>([]);
 
 	// Sync `consoleNodes.geoms` (persist) → state des nodes console. Preserve
@@ -494,7 +494,7 @@ function CanvasInner({
 	// persist plus anciennes). Nouveaux ids : injectés depuis geom. Ids
 	// supprimés : retirés.
 	useEffect(() => {
-		setConsoleRFNodes((prev) => {
+		setConsoleCanvasNodes((prev) => {
 			const prevById = new Map(prev.map((n) => [n.id, n]));
 			return consoleNodes.geoms.map((g) => {
 				const existing = prevById.get(g.id);
@@ -514,7 +514,7 @@ function CanvasInner({
 				};
 			});
 		});
-	}, [consoleNodes.geoms, setConsoleRFNodes, teamSlug, connectionId]);
+	}, [consoleNodes.geoms, setConsoleCanvasNodes, teamSlug, connectionId]);
 
 	const enterConsoleFocus = useCallback((id: string) => {
 		// Fullscreen = React Portal vers document.body (dans ConsoleNode
@@ -549,7 +549,7 @@ function CanvasInner({
 
 	const consoleDisplayNodes = useMemo<ConsoleNodeType[]>(
 		() =>
-			consoleRFNodes.map((n) => {
+			consoleCanvasNodes.map((n) => {
 				const isFocused = n.id === focusedConsoleId;
 				// Le node garde sa géom persistée quel que soit isFocused.
 				// Le fullscreen est un React Portal rendu par ConsoleNode
@@ -586,7 +586,7 @@ function CanvasInner({
 				};
 			}),
 		[
-			consoleRFNodes,
+			consoleCanvasNodes,
 			consoleNodes.updateGeom,
 			consoleNodes.remove,
 			teamSlug,
@@ -609,7 +609,7 @@ function CanvasInner({
 		(source: string) => {
 			const rect = containerRef.current?.getBoundingClientRect();
 			if (!rect) return;
-			const pt = rf.screenToFlowPosition({
+			const pt = screenToFlowPosition({
 				x: rect.left + rect.width / 2,
 				y: rect.top + rect.height / 2
 			});
@@ -634,7 +634,7 @@ function CanvasInner({
 				// quota / private mode — la console s'ouvre vide, pas bloquant.
 			}
 		},
-		[rf, consoleNodes, connectionId]
+		[screenToFlowPosition, consoleNodes, connectionId]
 	);
 	const onAddEnumMember = useCallback(
 		(enumName: string) => {
@@ -789,12 +789,12 @@ function CanvasInner({
 
 	// Créer un node console au centre du viewport courant. Convertit les
 	// coords écran (centre du container DOM) en coords canvas via
-	// `rf.screenToFlowPosition` — sinon on placerait le node à des
+	// `screenToFlowPosition` — sinon on placerait le node à des
 	// coords canvas fixes indépendantes du pan/zoom courant.
 	const createConsoleAtCenter = useCallback(() => {
 		const rect = containerRef.current?.getBoundingClientRect();
 		if (!rect) return;
-		const pt = rf.screenToFlowPosition({
+		const pt = screenToFlowPosition({
 			x: rect.left + rect.width / 2,
 			y: rect.top + rect.height / 2
 		});
@@ -802,7 +802,7 @@ function CanvasInner({
 			x: pt.x - CONSOLE_NODE_DEFAULT_WIDTH / 2,
 			y: pt.y - CONSOLE_NODE_DEFAULT_HEIGHT / 2
 		});
-	}, [rf, consoleNodes]);
+	}, [screenToFlowPosition, consoleNodes]);
 
 	// Shortcuts toolbar canvas. `useHotkeys` skip auto sur
 	// INPUT/TEXTAREA/SELECT + contentEditable (préserve l'undo/rename
@@ -1070,7 +1070,7 @@ function CanvasInner({
 						// (sélection multi, mais consoles sont selectable:
 						// false donc no-op de toute façon).
 						if (event.shiftKey || event.metaKey || event.ctrlKey) return;
-						rf.fitView({
+						fitView({
 							nodes: [{ id: node.id }],
 							padding: 0.25,
 							duration: 350
