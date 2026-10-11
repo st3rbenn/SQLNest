@@ -14,14 +14,17 @@ const defaultTeamQueryOptions = queryOptions({
 	staleTime: 60_000
 });
 
+// Search params préservés au redirect, comme `/canvas/:connId/query` : les
+// cards de la gallery pointent ici, c'est le point d'entrée habituel.
 export const Route = createFileRoute("/_authenticated/canvas/$connId/")({
-	beforeLoad: async ({ context, params }) => {
+	beforeLoad: async ({ context, params, search }) => {
 		const team = await context.queryClient.ensureQueryData(
 			defaultTeamQueryOptions
 		);
 		throw redirect({
 			to: "/team/$teamSlug/canvas/$connId",
-			params: { teamSlug: team.slug, connId: params.connId }
+			params: { teamSlug: team.slug, connId: params.connId },
+			search: search as never
 		});
 	}
 });
