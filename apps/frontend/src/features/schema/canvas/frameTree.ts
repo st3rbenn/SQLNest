@@ -339,6 +339,12 @@ export function applyCanvasChanges(
 	return { frames: nextFrames, tableChanges, moved };
 }
 
+const containsRect = (outer: FrameRect, inner: FrameRect) =>
+	inner.x >= outer.x &&
+	inner.y >= outer.y &&
+	inner.x + inner.width <= outer.x + outer.width &&
+	inner.y + inner.height <= outer.y + outer.height;
+
 /** Le frame le plus profond qui contient entièrement `rect`. */
 export function deepestFrameContaining(
 	frames: readonly Frame[],
@@ -359,13 +365,7 @@ export function deepestFrameContaining(
 	let bestDepth = -1;
 	for (const f of frames) {
 		if (!f.rect || exclude.has(f.key)) continue;
-		const r = f.rect;
-		if (
-			rect.x >= r.x &&
-			rect.y >= r.y &&
-			rect.x + rect.width <= r.x + r.width &&
-			rect.y + rect.height <= r.y + r.height
-		) {
+		if (containsRect(f.rect, rect)) {
 			const d = depth(f);
 			if (d > bestDepth) {
 				best = f;
@@ -435,6 +435,36 @@ export function growFramesToContain(
 		const rectNext = grown.get(f.key);
 		return rectNext ? { ...f, rect: rectNext } : f;
 	});
+}
+
+/**
+ * Frames enregistrés avant le rognage : un membre pouvait déborder sans être
+ * caché. Chacun grandit une fois pour contenir ses membres, puis est marqué
+ * `clips` — ce qu'un resize rogne ensuite reste rogné.
+ */
+export function fitLegacyFrames(
+	frames: readonly Frame[],
+	tables: readonly TableNodeType[],
+	pad: number
+): readonly Frame[] {
+	if (!frames.some((f) => f.rect && !f.clips)) return frames;
+	const byId = new Map(tables.map((t) => [t.id, t]));
+	let next = frames;
+	for (const frame of frames) {
+		if (!frame.rect || frame.clips) continue;
+		for (const name of frame.collections) {
+			const table = byId.get(name);
+			const rect = next.find((f) => f.key === frame.key)?.rect;
+			if (table === undefined || rect === undefined) continue;
+			const member = tableRect(table);
+			if (!containsRect(rect, member)) {
+				next = growFramesToContain(next, frame.key, member, pad);
+			}
+		}
+	}
+	return next.map((f) =>
+		f.rect && !f.clips ? { ...f, clips: true as const } : f
+	);
 }
 
 /** Rect absolu d'une table (taille par défaut si non mesurée). */

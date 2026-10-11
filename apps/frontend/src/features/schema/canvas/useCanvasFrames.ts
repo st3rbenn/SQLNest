@@ -12,6 +12,7 @@ import {
 	computeFrameNodes,
 	FRAME_PAD
 } from "./computeFrameNodes";
+import { fitLegacyFrames } from "./frameTree";
 
 export interface UseCanvasFramesOptions {
 	readonly base: LayoutResult | null;
@@ -77,6 +78,14 @@ export function useCanvasFrames(
 			if (rect) framesApi.setFrameRect(frame.key, rect);
 		}
 	}, [base, nodes]);
+
+	// Frames enregistrés avant le rognage : grandis une fois pour contenir
+	// leurs membres, qui sinon disparaîtraient rognés.
+	useEffect(() => {
+		if (nodes.length === 0) return;
+		const next = fitLegacyFrames(framesApi.frames, nodes, FRAME_PAD);
+		if (next !== framesApi.frames) framesApi.replaceAll(next);
+	}, [framesApi, nodes]);
 
 	// Fin de resize d'un frame : le rect a suivi le geste en direct ; ce qui
 	// dépasse reste membre (rogné), rien n'est détaché.

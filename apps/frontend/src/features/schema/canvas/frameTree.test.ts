@@ -6,6 +6,7 @@ import {
 	applyCanvasChanges,
 	canReparentNode,
 	deepestFrameContaining,
+	fitLegacyFrames,
 	frameDescendants,
 	frameRectsFromContent,
 	growFramesToContain,
@@ -388,6 +389,31 @@ describe("géométrie des frames", () => {
 				24
 			)
 		).toBe(frames);
+	});
+
+	it("frame d'avant le rognage : grandit pour son membre qui dépasse, puis marqué", () => {
+		// t3 (1000, 0) membre de `legacy` mais hors de son rect.
+		const legacy = frame(
+			"legacy",
+			{ x: 900, y: 200, width: 400, height: 300 },
+			["t3"]
+		);
+		const [next] = fitLegacyFrames([legacy], tables, 24);
+		expect(next?.rect).toEqual({ x: 900, y: -24, width: 400, height: 524 });
+		expect(next?.clips).toBe(true);
+	});
+
+	it("membres déjà dedans : seulement marqué ; frame marqué : jamais regrandi", () => {
+		const inside = fitLegacyFrames(frames, tables, 24);
+		expect(inside.map((f) => f.rect)).toEqual(frames.map((f) => f.rect));
+		expect(inside.every((f) => f.clips)).toBe(true);
+		// Rétréci volontairement après coup : ce qui dépasse reste rogné.
+		const shrunk = inside.map((f) =>
+			f.key === "inner" && f.rect
+				? { ...f, rect: { ...f.rect, width: 20, height: 20 } }
+				: f
+		);
+		expect(fitLegacyFrames(shrunk, tables, 24)).toBe(shrunk);
 	});
 
 	it("auto-layout : rects recalculés de bas en haut", () => {
