@@ -431,6 +431,51 @@ describe("useCanvasSync", () => {
 		expect(resetBody.payload.edgeAnchors).toEqual({});
 	});
 
+	it("flush au démontage puis remontage → hydraté depuis le cache avec l'état flushé", async () => {
+		// Navigation interne canvas → galerie → canvas : la query est en
+		// staleTime Infinity, le remontage relit le cache sans GET.
+		fetchMock.mockResolvedValueOnce(
+			mockResponse(200, {
+				payload: { edgeAnchors: {} },
+				updatedAt: "2026-01-01T00:00:06.000Z"
+			})
+		);
+		fetchMock.mockResolvedValueOnce(
+			mockResponse(200, { updatedAt: "2026-01-01T00:00:07.000Z" })
+		);
+		const wrapper = makeWrapper();
+		const anchors: AnchorMap = { "e0-album-artist": { source: "bottom" } };
+
+		const firstOpts = makeOpts();
+		const first = renderHook(
+			(props: UseCanvasSyncOptions) => useCanvasSync(props),
+			{ wrapper, initialProps: firstOpts }
+		);
+		await waitFor(() => {
+			expect(firstOpts.replaceAll.edgeAnchors).toHaveBeenCalledWith({});
+		});
+		first.rerender({ ...firstOpts, edgeAnchors: anchors });
+		await new Promise((r) => setTimeout(r, 0));
+		await act(async () => {
+			first.unmount();
+			await new Promise((r) => setTimeout(r, 0));
+		});
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+		expect(fetchMock.mock.calls[1]?.[1]?.keepalive).toBe(true);
+
+		const secondOpts = makeOpts();
+		const second = renderHook(
+			(props: UseCanvasSyncOptions) => useCanvasSync(props),
+			{ wrapper, initialProps: secondOpts }
+		);
+		await waitFor(() => {
+			expect(second.result.current.ready).toBe(true);
+		});
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+		expect(secondOpts.replaceAll.edgeAnchors).toHaveBeenCalledWith(anchors);
+		expect(second.result.current.lastSavedAt).toBe("2026-01-01T00:00:07.000Z");
+	});
+
 	// ─── Race hydratation ↔ push (H1) ─────────────────────────────────
 	it("rerender pendant query.isFetching → gestes user préservés (replaceAll pas appelé si divergence détectée)", async () => {
 		// Contrôle manuel du resolve du fetch : on rend l'user actif AVANT
