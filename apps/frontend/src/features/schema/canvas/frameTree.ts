@@ -97,6 +97,13 @@ const tableSize = (n: TableNodeType) => ({
 	height: n.height ?? nodeHeight(n.data.collection)
 });
 
+// Même table, même frame au même endroit → même objet : le moteur ne re-rend
+// pas toutes les tables d'un frame à chaque tick quand une seule bouge.
+const relativeCache = new WeakMap<
+	TableNodeType,
+	{ parentId: string; x: number; y: number; node: TableNodeType }
+>();
+
 /** Tables dans le repère de leur frame : `parentId`, position relative. */
 export function withFrameParents<T extends TableNodeType>(
 	tables: readonly T[],
@@ -108,15 +115,27 @@ export function withFrameParents<T extends TableNodeType>(
 		const key = parents.get(table.id);
 		const rect = key === undefined ? undefined : byKey.get(key)?.rect;
 		if (key === undefined || rect === undefined) return table;
-		return {
+		const parentId = frameNodeId(key);
+		const cached = relativeCache.get(table);
+		if (
+			cached !== undefined &&
+			cached.parentId === parentId &&
+			cached.x === rect.x &&
+			cached.y === rect.y
+		) {
+			return cached.node as T;
+		}
+		const node = {
 			...table,
-			parentId: frameNodeId(key),
+			parentId,
 			expandParent: true,
 			position: {
 				x: table.position.x - rect.x,
 				y: table.position.y - rect.y
 			}
 		};
+		relativeCache.set(table, { parentId, x: rect.x, y: rect.y, node });
+		return node;
 	});
 }
 

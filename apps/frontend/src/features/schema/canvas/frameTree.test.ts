@@ -78,6 +78,17 @@ describe("vers le repère du moteur", () => {
 		expect(out[2]).toBe(tables[2]);
 	});
 
+	it("même table, frame immobile : même objet ; frame déplacé : recalculé", () => {
+		const first = withFrameParents(tables, frames);
+		expect(withFrameParents(tables, frames)[0]).toBe(first[0]);
+		const moved = frames.map((f) =>
+			f.key === "inner" && f.rect ? { ...f, rect: { ...f.rect, x: 120 } } : f
+		);
+		const next = withFrameParents(tables, moved);
+		expect(next[0]).not.toBe(first[0]);
+		expect(next[0]?.position).toEqual({ x: 30, y: 50 });
+	});
+
 	it("parent absent ou cycle : frame racine", () => {
 		const broken = normalizeFrames([
 			frame("a", { x: 0, y: 0, width: 10, height: 10 }, [], "b"),

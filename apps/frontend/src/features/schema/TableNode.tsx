@@ -8,7 +8,7 @@ import {
 	useNestStore
 } from "@sqlnest/canvas";
 import { KindBadge, TypePill } from "@sqlnest/design-system";
-import { type CSSProperties, Fragment } from "react";
+import { type CSSProperties, Fragment, memo } from "react";
 import { colorFor } from "./colors";
 import type { Side } from "./edgeRouting";
 import type { Collection } from "./schema-model";
@@ -128,7 +128,7 @@ const levelSelector = (s: {
 	transform: readonly [number, number, number];
 }): ZoomLevel => levelForZoom(s.transform[2]);
 
-export function TableNode({
+function TableNodeComponent({
 	data,
 	selected,
 	width,
@@ -319,3 +319,14 @@ export function TableNode({
 		</div>
 	);
 }
+
+// Le rendu ne dépend que de data, de la sélection et de la taille : une
+// table emmenée par son frame ne se re-rend pas à chaque tick du drag.
+export const TableNode = memo(
+	TableNodeComponent,
+	(a, b) =>
+		a.data === b.data &&
+		a.selected === b.selected &&
+		a.width === b.width &&
+		a.height === b.height
+);

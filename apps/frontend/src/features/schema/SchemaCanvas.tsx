@@ -23,6 +23,7 @@ import { CanvasLeftPanel } from "./canvas/floating/CanvasLeftPanel";
 import { CanvasOverlays } from "./canvas/floating/CanvasOverlays";
 import { CanvasTopRightHUD } from "./canvas/floating/CanvasTopRightHUD";
 import { canReparentNode, withFrameParents } from "./canvas/frameTree";
+import { createTableDecorator } from "./canvas/tableDecorator";
 import { useCanvasActions } from "./canvas/useCanvasActions";
 import { useCanvasCommands } from "./canvas/useCanvasCommands";
 import { useCanvasEdges } from "./canvas/useCanvasEdges";
@@ -437,30 +438,23 @@ function CanvasInner({
 	// Injecte aussi le callback `onResizeEnd` — TableNode s'en sert pour le
 	// NodeResizer 4 côtés. Absent = pas de handles (utile aux tests / rendus
 	// externes).
+	const tableResizeRef = useRef(handleTableResize);
+	tableResizeRef.current = handleTableResize;
+	const [decorateTable] = useState(() =>
+		createTableDecorator((id, size) => tableResizeRef.current(id, size))
+	);
 	const displayTableNodes = useMemo(
 		() =>
 			nodes
 				.filter((n) => !hiddenIds.has(n.id))
-				.map((n) => {
-					const inFocus = neighbors ? neighbors.has(n.id) : true;
-					return {
-						...n,
-						data: {
-							...n.data,
-							dimmed: neighbors !== null && !inFocus,
-							focused: n.id === focusId,
-							matched: false,
-							hoverHighlight: n.id === hoveredTableName,
-							onResizeEnd: (s: {
-								width: number;
-								height: number;
-								x: number;
-								y: number;
-							}) => handleTableResize(n.id, s)
-						}
-					};
-				}),
-		[nodes, neighbors, focusId, hiddenIds, handleTableResize, hoveredTableName]
+				.map((n) =>
+					decorateTable(n, {
+						dimmed: neighbors !== null && !neighbors.has(n.id),
+						focused: n.id === focusId,
+						hoverHighlight: n.id === hoveredTableName
+					})
+				),
+		[nodes, neighbors, focusId, hiddenIds, decorateTable, hoveredTableName]
 	);
 
 	// (`nodesRef` exposé par `useCanvasNodes` — voir plus haut, consommé par
