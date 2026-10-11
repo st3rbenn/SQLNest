@@ -13,16 +13,20 @@ import {
 	handleExpandParent,
 	type ParentLookup
 } from "../src/parents";
+import { dimensionsAfterResize } from "../src/resizer";
 import { type CanvasStore, createCanvasStore } from "../src/store";
 import type { InternalNode, Node, NodeChange, NodeProps } from "../src/types";
 import { parityInputs } from "./parityInputs";
 
-const fixtures = JSON.parse(
-	readFileSync(
-		join(dirname(fileURLToPath(import.meta.url)), "fixtures/parents.json"),
-		"utf8"
-	)
-);
+const fixture = (name: string) =>
+	JSON.parse(
+		readFileSync(
+			join(dirname(fileURLToPath(import.meta.url)), `fixtures/${name}`),
+			"utf8"
+		)
+	);
+const fixtures = fixture("parents.json");
+const resizeFixtures = fixture("resize.json");
 
 const sortChanges = (changes: NodeChange[]) =>
 	[...changes].sort((a, b) =>
@@ -107,6 +111,29 @@ describe("parité parent / enfant (React Flow figé)", () => {
 					)
 				).toEqual(sortChanges(fixtures.forests[i].expand[k]));
 			});
+		});
+	});
+});
+
+describe("parité resize borné par les enfants (React Flow figé)", () => {
+	it("dimensionsAfterResize avec childExtent = getDimensionsAfterResize RF", () => {
+		const { resizes } = parityInputs();
+		resizes.forEach((r, i) => {
+			const direction = {
+				isHorizontal: r.control.includes("right") || r.control.includes("left"),
+				isVertical: r.control.includes("bottom") || r.control.includes("top"),
+				affectsX: r.control.includes("left"),
+				affectsY: r.control.includes("top")
+			};
+			expect(
+				dimensionsAfterResize(
+					r.start,
+					direction,
+					r.pointer,
+					r.boundaries,
+					r.childExtent
+				)
+			).toEqual(resizeFixtures.outputs[i]);
 		});
 	});
 });
@@ -410,6 +437,56 @@ describe("parent / enfant au rendu", () => {
 		mouse(window, "mouseup", { clientX: 60, clientY: 80 });
 		expect(transformOf(container, "frame")).toBe("translate(60px,80px)");
 		expect(transformOf(container, "a")).toBe("translate(150px,150px)");
+		expect(transformOf(container, "b")).toBe("translate(400px,300px)");
+	});
+
+	it("resize du parent : un bord s'arrête sur un enfant expandParent, pas sur les autres", () => {
+		const { container } = render(<Harness log={[]} />);
+		sizeContainer();
+		const line = (side: string) =>
+			container.querySelector(
+				`[data-id="frame"] > div > .nest-resize-control.line.${side}`
+			) as HTMLElement;
+		// `a` (expandParent) occupe 150 → 350 ; `b` (sans) 400 → 600.
+		mouse(line("left"), "mousedown", { clientX: 100, clientY: 300 });
+		mouse(window, "mousemove", { clientX: 300, clientY: 300 });
+		mouse(window, "mouseup", { clientX: 300, clientY: 300 });
+		const frame = container.querySelector<HTMLElement>('[data-id="frame"]');
+		expect(frame?.style.transform).toBe("translate(150px,100px)");
+		expect(frame?.style.width).toBe("550px");
+		expect(transformOf(container, "a")).toBe("translate(150px,150px)");
+		mouse(line("right"), "mousedown", { clientX: 700, clientY: 300 });
+		mouse(window, "mousemove", { clientX: 250, clientY: 300 });
+		mouse(window, "mouseup", { clientX: 250, clientY: 300 });
+		// Bord droit arrêté sur `a` (350), `b` ne retient rien.
+		expect(frame?.style.width).toBe("200px");
+		expect(transformOf(container, "b")).toBe("translate(400px,300px)");
+	});
+
+	it("enfant expandParent redimensionné hors du parent : le parent grandit", () => {
+		const { container } = render(<Harness log={[]} />);
+		sizeContainer();
+		const line = (side: string) =>
+			container.querySelector(
+				`[data-id="a"] > div > .nest-resize-control.line.${side}`
+			) as HTMLElement;
+		const frame = () =>
+			container.querySelector<HTMLElement>('[data-id="frame"]') as HTMLElement;
+		const a = () =>
+			container.querySelector<HTMLElement>('[data-id="a"]') as HTMLElement;
+		mouse(line("right"), "mousedown", { clientX: 350, clientY: 200 });
+		mouse(window, "mousemove", { clientX: 900, clientY: 200 });
+		mouse(window, "mouseup", { clientX: 900, clientY: 200 });
+		expect(a().style.width).toBe("750px");
+		expect(frame().style.width).toBe("800px");
+		// Par la gauche : le parent recule, `a` reste à son bord, `b` ne bouge pas.
+		mouse(line("left"), "mousedown", { clientX: 150, clientY: 200 });
+		mouse(window, "mousemove", { clientX: 50, clientY: 200 });
+		mouse(window, "mouseup", { clientX: 50, clientY: 200 });
+		expect(frame().style.transform).toBe("translate(50px,100px)");
+		expect(frame().style.width).toBe("850px");
+		expect(a().style.transform).toBe("translate(50px,150px)");
+		expect(a().style.width).toBe("850px");
 		expect(transformOf(container, "b")).toBe("translate(400px,300px)");
 	});
 

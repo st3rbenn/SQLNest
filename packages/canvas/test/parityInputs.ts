@@ -337,8 +337,53 @@ export function parityInputs() {
 		return { nodes, moves, expand };
 	});
 
+	// Resize d'un parent borné par ses enfants (`childExtent`).
+	const controls = [
+		"top",
+		"right",
+		"bottom",
+		"left",
+		"top-left",
+		"top-right",
+		"bottom-left",
+		"bottom-right"
+	] as const;
+	const resizes = Array.from({ length: 400 }, () => {
+		const start = {
+			x: between(-500, 500),
+			y: between(-500, 500),
+			width: between(100, 800),
+			height: between(100, 800)
+		};
+		const left = start.x + between(-50, start.width * 0.6);
+		const top = start.y + between(-50, start.height * 0.6);
+		return {
+			start: {
+				...start,
+				pointerX: between(-800, 800),
+				pointerY: between(-800, 800)
+			},
+			control: pick([...controls]),
+			pointer: { x: between(-1200, 1200), y: between(-1200, 1200) },
+			boundaries: {
+				minWidth: between(0, 200),
+				minHeight: between(0, 200),
+				maxWidth: rand() < 0.3 ? between(400, 1500) : Number.MAX_VALUE,
+				maxHeight: rand() < 0.3 ? between(400, 1500) : Number.MAX_VALUE
+			},
+			childExtent:
+				rand() < 0.8
+					? ([
+							[left, top],
+							[left + between(10, 400), top + between(10, 400)]
+						] as [[number, number], [number, number]])
+					: undefined
+		};
+	});
+
 	return {
 		forests,
+		resizes,
 		viewportForBounds,
 		points,
 		autoPan,

@@ -1,6 +1,7 @@
 import { clientPoint } from "./connection";
 import { isTouchable } from "./drag";
 import { pointToFlow } from "./geometry";
+import { handleExpandParent } from "./parents";
 import type { CanvasStore } from "./store";
 import type { NodeChange, XYPosition } from "./types";
 
@@ -60,25 +61,50 @@ function controlDirection(position: ControlPosition): ControlDirection {
 
 const sizeClamp = (size: number, min: number, max: number) =>
 	Math.max(0, min - size, size - max);
+const lowerExtentClamp = (lowerExtent: number, lowerBound: number) =>
+	Math.max(0, lowerBound - lowerExtent);
+const upperExtentClamp = (upperExtent: number, upperBound: number) =>
+	Math.max(0, upperExtent - upperBound);
+
+/** Coins `[[minX, minY], [maxX, maxY]]` dans le repère du parent du node. */
+export type ChildExtent = [[number, number], [number, number]];
 
 /**
  * Nouvelle géométrie quand le pointeur a bougé de `pointer - start`. Tirer
  * par la gauche (ou le haut) déplace l'origine pour garder le bord opposé
- * fixe ; les bornes min/max rognent le déplacement.
+ * fixe ; les bornes min/max rognent le déplacement, et un bord ne passe pas
+ * sur les enfants qui agrandissent leur parent (`childExtent`).
  */
 export function dimensionsAfterResize(
 	start: ResizeParams & { pointerX: number; pointerY: number },
 	direction: ControlDirection,
 	pointer: XYPosition,
-	b: ResizeBoundaries
+	b: ResizeBoundaries,
+	childExtent?: ChildExtent
 ): ResizeParams {
 	const { affectsX, affectsY, isHorizontal, isVertical } = direction;
 	let distX = Math.floor(isHorizontal ? pointer.x - start.pointerX : 0);
 	let distY = Math.floor(isVertical ? pointer.y - start.pointerY : 0);
 	const newWidth = start.width + (affectsX ? -distX : distX);
 	const newHeight = start.height + (affectsY ? -distY : distY);
-	const clampX = sizeClamp(newWidth, b.minWidth, b.maxWidth);
-	const clampY = sizeClamp(newHeight, b.minHeight, b.maxHeight);
+	let clampX = sizeClamp(newWidth, b.minWidth, b.maxWidth);
+	let clampY = sizeClamp(newHeight, b.minHeight, b.maxHeight);
+	if (childExtent) {
+		let xExtentClamp = 0;
+		let yExtentClamp = 0;
+		if (affectsX && distX > 0) {
+			xExtentClamp = upperExtentClamp(start.x + distX, childExtent[0][0]);
+		} else if (!affectsX && distX < 0) {
+			xExtentClamp = lowerExtentClamp(start.x + newWidth, childExtent[1][0]);
+		}
+		if (affectsY && distY > 0) {
+			yExtentClamp = upperExtentClamp(start.y + distY, childExtent[0][1]);
+		} else if (!affectsY && distY < 0) {
+			yExtentClamp = lowerExtentClamp(start.y + newHeight, childExtent[1][1]);
+		}
+		clampX = Math.max(clampX, xExtentClamp);
+		clampY = Math.max(clampY, yExtentClamp);
+	}
 	distY = distY + (distY < 0 ? clampY : -clampY);
 	distX = distX + (distX < 0 ? clampX : -clampX);
 	return {
@@ -133,6 +159,10 @@ export function createResizer(
 	let start = { ...prev, pointerX: 0, pointerY: 0 };
 	/** Enfants directs : décalés à l'inverse quand le coin haut-gauche bouge. */
 	let children: { id: string; position: XYPosition }[] = [];
+	/** Étendue des enfants `expandParent`, que les bords ne franchissent pas. */
+	let childExtent: ChildExtent | undefined;
+	/** Le node agrandit son parent quand on le redimensionne hors de lui. */
+	let expandsParent = false;
 
 	const flowPos = (e: MouseEvent | TouchEvent) => {
 		const { clientX, clientY } = clientPoint(e);
@@ -157,12 +187,34 @@ export function createResizer(
 			y: node.position.y ?? 0
 		};
 		start = { ...prev, pointerX: pointer.x, pointerY: pointer.y };
+		expandsParent =
+			node.expandParent === true &&
+			node.parentId !== undefined &&
+			nodeLookup.has(node.parentId);
 		children = [];
+		childExtent = undefined;
 		for (const child of store
 			.getState()
 			.parentLookup.get(opts.nodeId)
 			?.values() ?? []) {
 			children.push({ id: child.id, position: { ...child.position } });
+			if (!child.expandParent) continue;
+			const x = node.position.x + child.position.x;
+			const y = node.position.y + child.position.y;
+			const right = x + (child.measured.width ?? 0);
+			const bottom = y + (child.measured.height ?? 0);
+			childExtent = childExtent
+				? [
+						[Math.min(x, childExtent[0][0]), Math.min(y, childExtent[0][1])],
+						[
+							Math.max(right, childExtent[1][0]),
+							Math.max(bottom, childExtent[1][1])
+						]
+					]
+				: [
+						[x, y],
+						[right, bottom]
+					];
 		}
 		resized = false;
 		opts.onResizeStart?.(e as MouseEvent, { ...prev });
@@ -173,7 +225,13 @@ export function createResizer(
 		const o = getOptions();
 		const dir = controlDirection(o.position);
 		const { width: prevWidth, height: prevHeight, x: prevX, y: prevY } = prev;
-		const next = dimensionsAfterResize(start, dir, flowPos(e), o.boundaries);
+		const next = dimensionsAfterResize(
+			start,
+			dir,
+			flowPos(e),
+			o.boundaries,
+			childExtent
+		);
 		const widthChanged = next.width !== prevWidth;
 		const heightChanged = next.height !== prevHeight;
 		const xChanged = next.x !== prevX && widthChanged;
@@ -204,6 +262,18 @@ export function createResizer(
 			prev.width = change.width;
 			prev.height = change.height;
 		}
+		// Tiré hors du parent par la gauche / le haut : le node reste au bord
+		// et le départ du geste suit, c'est le parent qui grandit.
+		if (expandsParent) {
+			if (change.x && change.x < 0) {
+				prev.x = 0;
+				start.x -= change.x;
+			}
+			if (change.y && change.y < 0) {
+				prev.y = 0;
+				start.y -= change.y;
+			}
+		}
 		const withDirection = {
 			...prev,
 			direction: resizeDirection(prev, prevWidth, prevHeight, dir)
@@ -212,11 +282,43 @@ export function createResizer(
 		resized = true;
 		o.onResize?.(e as MouseEvent, withDirection);
 		const changes: NodeChange[] = [];
-		if (change.x !== undefined && change.y !== undefined) {
+		let nextX = change.x;
+		let nextY = change.y;
+		if (expandsParent) {
+			const { nodeLookup, parentLookup } = store.getState();
+			const node = nodeLookup.get(o.nodeId);
+			const parent = node?.parentId ? nodeLookup.get(node.parentId) : undefined;
+			if (node !== undefined && parent !== undefined) {
+				const width = change.width ?? node.measured.width ?? 0;
+				const height = change.height ?? node.measured.height ?? 0;
+				const origin = parent.internals.positionAbsolute;
+				changes.push(
+					...handleExpandParent(
+						[
+							{
+								id: node.id,
+								parentId: parent.id,
+								rect: {
+									x: origin.x + (change.x ?? node.position.x),
+									y: origin.y + (change.y ?? node.position.y),
+									width,
+									height
+								}
+							}
+						],
+						nodeLookup,
+						parentLookup
+					)
+				);
+				nextX = change.x === undefined ? undefined : Math.max(0, change.x);
+				nextY = change.y === undefined ? undefined : Math.max(0, change.y);
+			}
+		}
+		if (nextX !== undefined && nextY !== undefined) {
 			changes.push({
 				id: o.nodeId,
 				type: "position",
-				position: { x: change.x, y: change.y }
+				position: { x: nextX, y: nextY }
 			});
 		}
 		if (change.width !== undefined && change.height !== undefined) {
