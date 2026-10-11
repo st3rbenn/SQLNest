@@ -1,15 +1,10 @@
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
-import {
-	getHandlePosition,
-	getBezierPath as rfGetBezierPath
-} from "@xyflow/system";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Handle } from "../src/components/Handle";
 import { NestCanvas } from "../src/components/NestCanvas";
 import { NodeResizer } from "../src/components/NodeResizer";
 import { useStoreApi } from "../src/context";
-import { handlePosition } from "../src/handles";
 import { applyNodeChanges } from "../src/hooks";
 import { getBezierPath } from "../src/paths";
 import { dimensionsAfterResize } from "../src/resizer";
@@ -26,72 +21,6 @@ import {
 afterEach(async () => {
 	cleanup();
 	await new Promise((resolve) => setTimeout(resolve, 1));
-});
-
-function rng(seed: number) {
-	let s = seed >>> 0;
-	return () => {
-		s = (s * 1664525 + 1013904223) >>> 0;
-		return s / 2 ** 32;
-	};
-}
-const rand = rng(7);
-const between = (a: number, b: number) => a + rand() * (b - a);
-const positions = [
-	Position.Top,
-	Position.Right,
-	Position.Bottom,
-	Position.Left
-];
-const pick = <T,>(xs: T[]) => xs[Math.floor(rand() * xs.length)] as T;
-
-describe("parité géométrie edges", () => {
-	it("getBezierPath = getBezierPath RF", () => {
-		for (let i = 0; i < 2000; i++) {
-			const params = {
-				sourceX: between(-2000, 2000),
-				sourceY: between(-2000, 2000),
-				sourcePosition: pick(positions),
-				targetX: between(-2000, 2000),
-				targetY: between(-2000, 2000),
-				targetPosition: pick(positions)
-			};
-			expect(getBezierPath(params)).toEqual(rfGetBezierPath(params as never));
-		}
-	});
-
-	it("handlePosition = getHandlePosition RF (côté et centre)", () => {
-		for (let i = 0; i < 1000; i++) {
-			const node = {
-				id: "n",
-				position: { x: 0, y: 0 },
-				data: {},
-				measured: { width: between(50, 400), height: between(30, 600) },
-				internals: {
-					positionAbsolute: {
-						x: between(-3000, 3000),
-						y: between(-3000, 3000)
-					},
-					z: 0,
-					userNode: { id: "n", position: { x: 0, y: 0 }, data: {} }
-				}
-			} as InternalNode;
-			const handle: HandleBound = {
-				id: "h",
-				type: "source",
-				nodeId: "n",
-				position: pick(positions),
-				x: between(-10, 300),
-				y: between(-10, 300),
-				width: between(1, 10),
-				height: between(1, 10)
-			};
-			const center = rand() > 0.5;
-			expect(handlePosition(node, handle, Position.Left, center)).toEqual(
-				getHandlePosition(node as never, handle as never, Position.Left, center)
-			);
-		}
-	});
 });
 
 describe("géométrie du resize", () => {

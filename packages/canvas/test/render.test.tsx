@@ -187,6 +187,8 @@ describe("NestCanvas", () => {
 	});
 });
 
+const CANVAS_ID = "schema";
+
 describe("structure DOM", () => {
 	it("calques et classes dans l'ordre de React Flow", () => {
 		const { container } = render(
@@ -237,7 +239,7 @@ describe("structure DOM", () => {
 		expect(api().store.getState().instanceId).toBe("1");
 		second.unmount();
 		render(
-			<NestCanvas id="schema">
+			<NestCanvas id={CANVAS_ID}>
 				<Probe />
 			</NestCanvas>
 		);

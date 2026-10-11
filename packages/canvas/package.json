@@ -32,8 +32,6 @@
 		"@testing-library/react": "^16.3.2",
 		"@types/react": "^19.1.13",
 		"@types/react-dom": "^19.1.9",
-		"@xyflow/react": "12.11.2",
-		"@xyflow/system": "0.0.79",
 		"d3-ease": "3.0.1",
 		"d3-interpolate": "3.0.1",
 		"happy-dom": "^20.11.1",

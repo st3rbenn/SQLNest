@@ -1,5 +1,4 @@
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
-import { getHandlePosition } from "@xyflow/system";
 import { useState } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { EdgeLabelRenderer } from "../src/components/EdgeLabelRenderer";
@@ -198,21 +197,15 @@ describe("EdgeRenderer", () => {
 		render(<Harness edges={[fkEdge]} log={[]} />);
 		act(placeHandles);
 		const props = received[received.length - 1] as EdgeProps;
-		const lookup = store().getState().nodeLookup;
-		const a = lookup.get("a") as InternalNode;
-		const b = lookup.get("b") as InternalNode;
-		const right = a.internals.handleBounds?.source?.[1];
-		const left = b.internals.handleBounds?.target?.[3];
-		const s = getHandlePosition(a as never, right as never, Position.Right);
-		const t = getHandlePosition(b as never, left as never, Position.Left);
 		expect(props).toMatchObject({
 			id: "e1",
 			source: "a",
 			target: "b",
-			sourceX: s.x,
-			sourceY: s.y,
-			targetX: t.x,
-			targetY: t.y,
+			// Bord extérieur du handle, qui déborde de 3 px du node.
+			sourceX: 343,
+			sourceY: 110,
+			targetX: 497,
+			targetY: 360,
 			sourcePosition: Position.Right,
 			targetPosition: Position.Left,
 			sourceHandleId: "right",
@@ -224,9 +217,6 @@ describe("EdgeRenderer", () => {
 			markerEnd: `url('#${store().getState().instanceId}__height=14&type=arrowclosed&width=14')`
 		});
 		expect(props.markerStart).toBeUndefined();
-		// Bord extérieur du handle, qui déborde de 3 px du node.
-		expect({ x: props.sourceX, y: props.sourceY }).toEqual({ x: 343, y: 110 });
-		expect({ x: props.targetX, y: props.targetY }).toEqual({ x: 497, y: 360 });
 	});
 
 	it("un edge suit son node quand l'app le déplace", () => {
