@@ -317,6 +317,53 @@ describe("le frame épouse la table pendant le geste", () => {
 		expect(store().getState().nodeLookup.get("t")?.parentId).toBe("A");
 	});
 
+	it("sortie progressive : le pointeur quitte le frame tel qu'il était au départ", () => {
+		const log: NodeChange[][] = [];
+		const { container } = render(
+			<Harness
+				log={log}
+				initial={[frame("A", 0, 0, 400, 400), table("t", 250, 50, "A")]}
+			/>
+		);
+		sizeContainer();
+		// Saisie au centre : le bord droit de la table reste devant le
+		// pointeur, le frame qui l'épouse aussi.
+		drag(container, "t", [300, 80], [380, 80], { release: false });
+		expect(el(container, "A").style.width).not.toBe("400px");
+		for (let x = 390; x <= 480; x += 10) {
+			mouse(window, "mousemove", { clientX: x, clientY: 80 });
+		}
+		expect(store().getState().nodeLookup.get("t")?.parentId).toBeUndefined();
+		expect(el(container, "A").style.width).toBe("400px");
+		mouse(window, "mouseup", { clientX: 480, clientY: 80 });
+		expect(store().getState().nodeLookup.get("t")?.parentId).toBeUndefined();
+		expect(el(container, "A").style.width).toBe("400px");
+	});
+
+	it("sortie progressive d'un sous-frame : la table rejoint le frame englobant", () => {
+		const log: NodeChange[][] = [];
+		const { container } = render(
+			<Harness
+				log={log}
+				initial={[
+					frame("A", 0, 0, 800, 600),
+					frame("B", 50, 50, 300, 300, "A"),
+					table("t", 150, 100, "B")
+				]}
+			/>
+		);
+		sizeContainer();
+		drag(container, "t", [250, 180], [330, 180], { release: false });
+		expect(el(container, "B").style.width).not.toBe("300px");
+		for (let x = 340; x <= 420; x += 10) {
+			mouse(window, "mousemove", { clientX: x, clientY: 180 });
+		}
+		mouse(window, "mouseup", { clientX: 420, clientY: 180 });
+		expect(store().getState().nodeLookup.get("t")?.parentId).toBe("A");
+		expect(el(container, "B").style.width).toBe("300px");
+		expect(el(container, "A").style.width).toBe("800px");
+	});
+
 	it("entrée par le bas : le frame ne garde pas la taille du moment de l'entrée", () => {
 		const log: NodeChange[][] = [];
 		const { container } = render(

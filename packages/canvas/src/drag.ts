@@ -5,7 +5,8 @@ import {
 	createExpansionMemory,
 	findDropTarget,
 	type StartGeometry,
-	withDescendants
+	withDescendants,
+	withStartGeometry
 } from "./reparent";
 import type { CanvasStore, DragItem } from "./store";
 import type { Node, NodeChange, XYPosition } from "./types";
@@ -129,9 +130,17 @@ export function createNodeDrag(
 
 	const updateNodes = (pos: XYPosition) => {
 		lastPos = pos;
-		const { nodeLookup, canReparent, dropTargetId } = store.getState();
+		const { nodeLookup, parentLookup, canReparent, dropTargetId } =
+			store.getState();
 		let reparented = false;
 		if (canReparent) {
+			// Un parent qui épouse l'enfant garde son bord devant le pointeur :
+			// on vise donc les conteneurs tels qu'ils étaient avant le geste.
+			const { lookup: hitLookup } = withStartGeometry(
+				nodeLookup,
+				parentLookup,
+				expansions.geometry(excluded)
+			);
 			const targets = new Map<string, string | null>();
 			for (const [id, item] of dragItems) {
 				const node = nodeLookup.get(id);
@@ -140,7 +149,7 @@ export function createNodeDrag(
 					pos,
 					node,
 					excluded,
-					nodeLookup,
+					hitLookup,
 					canReparent
 				);
 				targets.set(id, target);

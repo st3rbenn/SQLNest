@@ -13,7 +13,7 @@ import {
 	type ParentLookup,
 	updateChildNode
 } from "./parents";
-import { absoluteAfter, type StartGeometry } from "./reparent";
+import { type StartGeometry, withStartGeometry } from "./reparent";
 import type {
 	ConnectionState,
 	Edge,
@@ -245,44 +245,6 @@ function adoptNodes(
 	};
 	for (const id of Array.from(lookup.keys())) resolve(id, 0);
 	return initialized;
-}
-
-/** Lookups où les nodes de `start` reprennent leur géométrie de départ. */
-function withStartGeometry(
-	lookup: Map<string, InternalNode>,
-	parentLookup: ParentLookup,
-	start: Map<string, StartGeometry>
-): { lookup: Map<string, InternalNode>; parents: ParentLookup } {
-	const positions = new Map(
-		Array.from(start, ([id, geometry]) => [id, geometry.position])
-	);
-	const patched = new Map(lookup);
-	for (const [id, geometry] of start) {
-		const node = lookup.get(id);
-		if (node === undefined) continue;
-		patched.set(id, {
-			...node,
-			position: geometry.position,
-			measured: {
-				width: geometry.width ?? node.measured.width,
-				height: geometry.height ?? node.measured.height
-			},
-			internals: {
-				...node.internals,
-				positionAbsolute: absoluteAfter(id, lookup, positions)
-			}
-		});
-	}
-	const parents: ParentLookup = new Map();
-	for (const [parentId, children] of parentLookup) {
-		parents.set(
-			parentId,
-			new Map(
-				Array.from(children, ([id, child]) => [id, patched.get(id) ?? child])
-			)
-		);
-	}
-	return { lookup: patched, parents };
 }
 
 export function createCanvasStore(init: {

@@ -105,6 +105,45 @@ export type StartGeometry = {
 	height?: number | undefined;
 };
 
+/** Lookups où les nodes de `start` reprennent leur géométrie de départ. */
+export function withStartGeometry(
+	lookup: Map<string, InternalNode>,
+	parentLookup: ParentLookup,
+	start: Map<string, StartGeometry>
+): { lookup: Map<string, InternalNode>; parents: ParentLookup } {
+	if (start.size === 0) return { lookup, parents: parentLookup };
+	const positions = new Map(
+		Array.from(start, ([id, geometry]) => [id, geometry.position])
+	);
+	const patched = new Map(lookup);
+	for (const [id, geometry] of start) {
+		const node = lookup.get(id);
+		if (node === undefined) continue;
+		patched.set(id, {
+			...node,
+			position: geometry.position,
+			measured: {
+				width: geometry.width ?? node.measured.width,
+				height: geometry.height ?? node.measured.height
+			},
+			internals: {
+				...node.internals,
+				positionAbsolute: absoluteAfter(id, lookup, positions)
+			}
+		});
+	}
+	const parents: ParentLookup = new Map();
+	for (const [parentId, children] of parentLookup) {
+		parents.set(
+			parentId,
+			new Map(
+				Array.from(children, ([id, child]) => [id, patched.get(id) ?? child])
+			)
+		);
+	}
+	return { lookup: patched, parents };
+}
+
 type Snapshot = {
 	position: XYPosition;
 	width: number | undefined;
