@@ -32,7 +32,7 @@ function readEngine(): "nest" | "rf" {
 export const canvasEngine = readEngine();
 const useNest = canvasEngine === "nest";
 
-// Pas encore portés sur `@sqlnest/canvas` : neutralisés en mode nest.
+// Pas encore porté sur `@sqlnest/canvas` : neutralisé en mode nest.
 const Nothing = () => null;
 
 export const NestCanvas = (
@@ -57,9 +57,9 @@ export const Background = (
 	useNest ? nest.Background : rf.Background
 ) as typeof rf.Background;
 export const Panel = (useNest ? nest.Panel : rf.Panel) as typeof rf.Panel;
-export const Handle = (useNest ? Nothing : rf.Handle) as typeof rf.Handle;
+export const Handle = (useNest ? nest.Handle : rf.Handle) as typeof rf.Handle;
 export const NodeResizer = (
-	useNest ? Nothing : rf.NodeResizer
+	useNest ? nest.NodeResizer : rf.NodeResizer
 ) as typeof rf.NodeResizer;
 export const EdgeLabelRenderer = (
 	useNest ? Nothing : rf.EdgeLabelRenderer

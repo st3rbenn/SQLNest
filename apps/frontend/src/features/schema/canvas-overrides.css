@@ -81,7 +81,9 @@
  * ciblée sur `.react-flow__node-table` uniquement).
  */
 .react-flow__node-table .react-flow__resize-control.handle,
-.react-flow__node-table .react-flow__resize-control.line {
+.react-flow__node-table .react-flow__resize-control.line,
+.nest-node-table .nest-resize-control.handle,
+.nest-node-table .nest-resize-control.line {
 	opacity: 0;
 	/* `pointer-events: none` critique : sans ça, les handles restent cliquables
 	 * même invisibles → un Cmd+click qui tombe sur la zone d'un handle (les
@@ -92,11 +94,13 @@
 	transition: opacity 120ms ease-out;
 }
 .react-flow__node-table:not(.selected):hover
-	.react-flow__resize-control.handle {
+	.react-flow__resize-control.handle,
+.nest-node-table:not(.selected):hover .nest-resize-control.handle {
 	opacity: 1;
 	pointer-events: auto;
 }
-.react-flow__node-table:not(.selected):hover .react-flow__resize-control.line {
+.react-flow__node-table:not(.selected):hover .react-flow__resize-control.line,
+.nest-node-table:not(.selected):hover .nest-resize-control.line {
 	opacity: 0.6;
 	pointer-events: auto;
 }
@@ -129,18 +133,24 @@
  * ConsoleNode donc rien à cacher ici.
  */
 .react-flow__node-console .react-flow__resize-control.handle,
-.react-flow__node-console .react-flow__resize-control.line {
+.react-flow__node-console .react-flow__resize-control.line,
+.nest-node-console .nest-resize-control.handle,
+.nest-node-console .nest-resize-control.line {
 	opacity: 0;
 	pointer-events: none;
 	transition: opacity 120ms ease-out;
 }
 .react-flow__node-console:hover .react-flow__resize-control.handle,
-.react-flow__node-console.selected .react-flow__resize-control.handle {
+.react-flow__node-console.selected .react-flow__resize-control.handle,
+.nest-node-console:hover .nest-resize-control.handle,
+.nest-node-console.selected .nest-resize-control.handle {
 	opacity: 1;
 	pointer-events: auto;
 }
 .react-flow__node-console:hover .react-flow__resize-control.line,
-.react-flow__node-console.selected .react-flow__resize-control.line {
+.react-flow__node-console.selected .react-flow__resize-control.line,
+.nest-node-console:hover .nest-resize-control.line,
+.nest-node-console.selected .nest-resize-control.line {
 	opacity: 0.6;
 	pointer-events: auto;
 }
@@ -154,16 +164,20 @@
  * donc pas de cas `.selected` à gérer, juste `:hover`.
  */
 .sqlnest-system-node .react-flow__resize-control.handle,
-.sqlnest-system-node .react-flow__resize-control.line {
+.sqlnest-system-node .react-flow__resize-control.line,
+.sqlnest-system-node .nest-resize-control.handle,
+.sqlnest-system-node .nest-resize-control.line {
 	opacity: 0;
 	pointer-events: none;
 	transition: opacity 120ms ease-out;
 }
-.sqlnest-system-node:hover .react-flow__resize-control.handle {
+.sqlnest-system-node:hover .react-flow__resize-control.handle,
+.sqlnest-system-node:hover .nest-resize-control.handle {
 	opacity: 1;
 	pointer-events: auto;
 }
-.sqlnest-system-node:hover .react-flow__resize-control.line {
+.sqlnest-system-node:hover .react-flow__resize-control.line,
+.sqlnest-system-node:hover .nest-resize-control.line {
 	opacity: 0.6;
 	pointer-events: auto;
 }

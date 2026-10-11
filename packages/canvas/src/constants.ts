@@ -17,5 +17,8 @@ export const canvasClass = {
 	backgroundPattern: "nest-background-pattern",
 	panel: "nest-panel",
 	handle: "nest-handle",
-	resizeControl: "nest-resize-control"
+	resizeControl: "nest-resize-control",
+	connectionLine: "nest-connectionline",
+	connection: "nest-connection",
+	connectionPath: "nest-connection-path"
 } as const;

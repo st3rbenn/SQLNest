@@ -169,6 +169,25 @@ function NodeWrapperComponent({
 			observed.current = ref.current;
 		}
 	}, [measured, hidden, resizeObserver]);
+
+	// Type ou côté des handles changé par l'app : les handles ont bougé dans
+	// le node, on les re-mesure.
+	const nodeType = node?.type;
+	const sourcePosition = node?.sourcePosition;
+	const targetPosition = node?.targetPosition;
+	const previousLayout = useRef({ nodeType, sourcePosition, targetPosition });
+	useEffect(() => {
+		const prev = previousLayout.current;
+		if (
+			ref.current &&
+			(prev.nodeType !== nodeType ||
+				prev.sourcePosition !== sourcePosition ||
+				prev.targetPosition !== targetPosition)
+		) {
+			previousLayout.current = { nodeType, sourcePosition, targetPosition };
+			store.updateNodeDimensions([ref.current]);
+		}
+	}, [nodeType, sourcePosition, targetPosition, store]);
 	useEffect(
 		() => () => {
 			if (observed.current) {

@@ -21,7 +21,7 @@ const containerStyle = {
 
 export type ZoomPaneProps = Omit<
 	PanZoomOptions,
-	"userSelectionActive" | "clickDistance"
+	"userSelectionActive" | "clickDistance" | "connectionInProgress"
 > & {
 	defaultViewport: Viewport;
 	minZoom: number;
@@ -94,6 +94,7 @@ export function ZoomPane({
 
 	const panZoom = useNestStore((s) => s.panZoom);
 	const userSelectionActive = useNestStore((s) => s.userSelectionActive);
+	const connectionInProgress = useNestStore((s) => s.connection.inProgress);
 	const {
 		panOnScroll,
 		panOnScrollSpeed,
@@ -113,6 +114,7 @@ export function ZoomPane({
 			panOnDrag,
 			zoomActivationKeyPressed,
 			userSelectionActive,
+			connectionInProgress,
 			clickDistance: selectionOnDrag
 				? Number.POSITIVE_INFINITY
 				: Math.max(0, paneClickDistance)
@@ -127,6 +129,7 @@ export function ZoomPane({
 		panOnDrag,
 		zoomActivationKeyPressed,
 		userSelectionActive,
+		connectionInProgress,
 		selectionOnDrag,
 		paneClickDistance
 	]);

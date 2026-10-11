@@ -24,6 +24,7 @@ import {
 	type Viewport
 } from "../types";
 import { isMacOs } from "../wheel";
+import { ConnectionLine } from "./ConnectionLine";
 import {
 	DEFAULT_MAX_ZOOM,
 	DEFAULT_MIN_ZOOM,
@@ -211,6 +212,7 @@ function GraphView(
 				onPaneContextMenu={onPaneContextMenu}
 			>
 				<ViewportLayer>
+					<ConnectionLine />
 					<div className={canvasClass.edgeLabelRenderer} />
 					<NodeRenderer
 						nodeTypes={nodeTypes}

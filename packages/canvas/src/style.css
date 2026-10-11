@@ -2,10 +2,13 @@
 	direction: ltr;
 	--nest-background-color-default: transparent;
 	--nest-background-pattern-dots-color-default: #91919a;
-	--nest-selection-background-color-default: rgba(150, 150, 180, 0.1);
-	--nest-selection-border-default: 1px dotted rgba(155, 155, 155, 0.8);
+	--nest-selection-background-color-default: rgba(0, 89, 220, 0.08);
+	--nest-selection-border-default: 1px dotted rgba(0, 89, 220, 0.8);
 	--nest-resize-background-color-default: #3367d9;
-	--nest-handle-background-color-default: #333;
+	--nest-handle-background-color-default: #1a192b;
+	--nest-handle-border-color-default: #fff;
+	--nest-connectionline-stroke-default: #b1b1b7;
+	--nest-connectionline-stroke-width-default: 1;
 	--nest-edge-stroke-default: #b1b1b7;
 	--nest-edge-stroke-width-default: 1;
 	--nest-edge-stroke-selected-default: #555;
@@ -137,4 +140,177 @@
 }
 .nest-pane.selection .nest-panel {
 	pointer-events: none;
+}
+
+.nest-node.selectable:focus,
+.nest-node.selectable:focus-visible,
+.nest-selection:focus,
+.nest-selection:focus-visible {
+	outline: none;
+}
+
+.nest-selection {
+	z-index: 6;
+	background: var(
+		--nest-selection-background-color,
+		var(--nest-selection-background-color-default)
+	);
+	border: var(--nest-selection-border, var(--nest-selection-border-default));
+}
+
+.nest-handle {
+	position: absolute;
+	pointer-events: none;
+	min-width: 5px;
+	min-height: 5px;
+	width: 6px;
+	height: 6px;
+	background-color: var(
+		--nest-handle-background-color,
+		var(--nest-handle-background-color-default)
+	);
+	border: 1px solid
+		var(--nest-handle-border-color, var(--nest-handle-border-color-default));
+	border-radius: 100%;
+}
+.nest-handle.connectingfrom {
+	pointer-events: all;
+}
+.nest-handle.connectionindicator {
+	pointer-events: all;
+	cursor: crosshair;
+}
+.nest-handle-bottom {
+	top: auto;
+	left: 50%;
+	bottom: 0;
+	transform: translate(-50%, 50%);
+}
+.nest-handle-top {
+	top: 0;
+	left: 50%;
+	transform: translate(-50%, -50%);
+}
+.nest-handle-left {
+	top: 50%;
+	left: 0;
+	transform: translate(-50%, -50%);
+}
+.nest-handle-right {
+	top: 50%;
+	right: 0;
+	transform: translate(50%, -50%);
+}
+
+svg.nest-connectionline {
+	z-index: 1001;
+	overflow: visible;
+	position: absolute;
+}
+.nest-connection {
+	pointer-events: none;
+}
+.nest-connection-path {
+	stroke: var(
+		--nest-connectionline-stroke,
+		var(--nest-connectionline-stroke-default)
+	);
+	stroke-width: var(
+		--nest-connectionline-stroke-width,
+		var(--nest-connectionline-stroke-width-default)
+	);
+	fill: none;
+}
+
+.nest-resize-control {
+	position: absolute;
+}
+.nest-resize-control.left,
+.nest-resize-control.right {
+	cursor: ew-resize;
+}
+.nest-resize-control.top,
+.nest-resize-control.bottom {
+	cursor: ns-resize;
+}
+.nest-resize-control.top.left,
+.nest-resize-control.bottom.right {
+	cursor: nwse-resize;
+}
+.nest-resize-control.bottom.left,
+.nest-resize-control.top.right {
+	cursor: nesw-resize;
+}
+.nest-resize-control.handle {
+	width: 5px;
+	height: 5px;
+	border: 1px solid #fff;
+	border-radius: 1px;
+	background-color: var(
+		--nest-resize-background-color,
+		var(--nest-resize-background-color-default)
+	);
+	translate: -50% -50%;
+}
+.nest-resize-control.handle.left {
+	left: 0;
+	top: 50%;
+}
+.nest-resize-control.handle.right {
+	left: 100%;
+	top: 50%;
+}
+.nest-resize-control.handle.top {
+	left: 50%;
+	top: 0;
+}
+.nest-resize-control.handle.bottom {
+	left: 50%;
+	top: 100%;
+}
+.nest-resize-control.handle.top.left,
+.nest-resize-control.handle.bottom.left {
+	left: 0;
+}
+.nest-resize-control.handle.top.right,
+.nest-resize-control.handle.bottom.right {
+	left: 100%;
+}
+.nest-resize-control.line {
+	border-color: var(
+		--nest-resize-background-color,
+		var(--nest-resize-background-color-default)
+	);
+	border-width: 0;
+	border-style: solid;
+}
+.nest-resize-control.line.left,
+.nest-resize-control.line.right {
+	width: 1px;
+	transform: translate(-50%, 0);
+	top: 0;
+	height: 100%;
+}
+.nest-resize-control.line.left {
+	left: 0;
+	border-left-width: 1px;
+}
+.nest-resize-control.line.right {
+	left: 100%;
+	border-right-width: 1px;
+}
+.nest-resize-control.line.top,
+.nest-resize-control.line.bottom {
+	height: 1px;
+	transform: translate(0, -50%);
+	left: 0;
+	width: 100%;
+}
+.nest-resize-control.line.top {
+	top: 0;
+	border-top-width: 1px;
+}
+.nest-resize-control.line.bottom {
+	border-bottom-width: 1px;
+	top: 100%;
 }

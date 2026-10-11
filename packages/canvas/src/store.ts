@@ -4,10 +4,13 @@ import {
 	internalNodesBounds,
 	viewportForBounds
 } from "./geometry";
+import { measureHandleBounds, renderedZoom } from "./handles";
 import type { PanZoom } from "./panZoom";
 import type {
+	ConnectionState,
 	Edge,
 	FitViewOptions,
+	HandleType,
 	InternalNode,
 	Node,
 	NodeChange,
@@ -17,6 +20,27 @@ import type {
 	Transform,
 	XYPosition
 } from "./types";
+
+export const initialConnection: ConnectionState = {
+	inProgress: false,
+	isValid: null,
+	from: null,
+	fromHandle: null,
+	fromPosition: null,
+	fromNode: null,
+	to: null,
+	toHandle: null,
+	toPosition: null,
+	toNode: null,
+	pointer: null
+};
+
+/** Handle cliqué en premier d'une connexion « au clic ». */
+export type ClickStartHandle = {
+	nodeId: string;
+	type: HandleType;
+	id: string | null;
+};
 
 export const SELECTED_NODE_Z = 1000;
 
@@ -78,6 +102,8 @@ export type CanvasState = {
 	onSelectionChangeHandlers: SelectionChangeHandler[];
 	/** Annonce lecteur d'écran après un déplacement clavier. */
 	ariaLiveMessage: string;
+	connection: ConnectionState;
+	connectionClickStartHandle: ClickStartHandle | null;
 };
 
 type Listener = () => void;
@@ -104,6 +130,8 @@ export type CanvasStore = {
 	/** Pan immédiat en pixels écran ; vrai si la vue a bougé. */
 	panBy: (delta: XYPosition) => boolean;
 	deleteSelectedNodes: () => void;
+	updateConnection: (connection: ConnectionState) => void;
+	cancelConnection: () => void;
 };
 
 const selectChange = (id: string, selected: boolean): NodeSelectionChange => ({
@@ -155,7 +183,12 @@ function adoptNodes(
 							// Un node re-créé sans `measured` doit être re-mesuré.
 							...(prev?.internals.measuredOnce &&
 							userNode.measured !== undefined
-								? { measuredOnce: true as const }
+								? {
+										measuredOnce: true as const,
+										...(prev.internals.handleBounds
+											? { handleBounds: prev.internals.handleBounds }
+											: {})
+									}
 								: {})
 						}
 					};
@@ -203,7 +236,9 @@ export function createCanvasStore(init: {
 		onNodeDragStop: null,
 		onNodesDelete: null,
 		onSelectionChangeHandlers: [],
-		ariaLiveMessage: ""
+		ariaLiveMessage: "",
+		connection: initialConnection,
+		connectionClickStartHandle: null
 	};
 	const listeners = new Set<Listener>();
 
@@ -261,24 +296,37 @@ export function createCanvasStore(init: {
 
 	const setEdges = (edges: Edge[]) => setState({ edges });
 
+	// Chaque appel re-mesure taille ET handles (ResizeObserver comme
+	// changement de position de handle passent par ici).
 	const updateNodeDimensions = (elements: Iterable<HTMLElement>) => {
-		const { nodeLookup } = state;
+		const { nodeLookup, viewportNode, transform } = state;
+		if (viewportNode === null) return;
+		const zoom = renderedZoom(viewportNode, transform[2]);
 		const changes: NodeDimensionChange[] = [];
 		let updated = false;
 		for (const el of elements) {
 			const id = el.getAttribute("data-id");
 			const node = id === null ? undefined : nodeLookup.get(id);
-			if (node === undefined || node.hidden) continue;
+			if (node === undefined) continue;
+			if (node.hidden) {
+				const { handleBounds: _hidden, ...internals } = node.internals;
+				nodeLookup.set(node.id, { ...node, internals });
+				updated = true;
+				continue;
+			}
 			const width = el.offsetWidth;
 			const height = el.offsetHeight;
 			if (!width || !height) continue;
 			const changed =
 				node.measured.width !== width || node.measured.height !== height;
-			if (!changed && node.internals.measuredOnce) continue;
 			nodeLookup.set(node.id, {
 				...node,
 				measured: { width, height },
-				internals: { ...node.internals, measuredOnce: true }
+				internals: {
+					...node.internals,
+					measuredOnce: true,
+					handleBounds: measureHandleBounds(el, zoom, node.id)
+				}
 			});
 			updated = true;
 			if (changed)
@@ -400,6 +448,10 @@ export function createCanvasStore(init: {
 		);
 	};
 
+	const updateConnection = (connection: ConnectionState) =>
+		setState({ connection });
+	const cancelConnection = () => setState({ connection: initialConnection });
+
 	return {
 		getState,
 		setState,
@@ -415,7 +467,9 @@ export function createCanvasStore(init: {
 		selectExactly,
 		updateNodePositions,
 		panBy,
-		deleteSelectedNodes
+		deleteSelectedNodes,
+		updateConnection,
+		cancelConnection
 	};
 }
 

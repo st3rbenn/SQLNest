@@ -67,9 +67,17 @@ export function Pane({
 	const autoPanId = useRef(0);
 	const autoPanStarted = useRef(false);
 
+	// Un drag de connexion relâché sur le vide ne vaut pas clic.
+	const connectionEndedOnPane = useRef(false);
+
 	const onClick = (event: ReactMouseEvent) => {
-		if (selectionInProgress.current) {
+		if (
+			selectionInProgress.current ||
+			connectionEndedOnPane.current ||
+			store.getState().connection.inProgress
+		) {
 			selectionInProgress.current = false;
+			connectionEndedOnPane.current = false;
 			return;
 		}
 		onPaneClick?.(event);
@@ -197,7 +205,16 @@ export function Pane({
 	};
 
 	const onPointerUp = (event: ReactPointerEvent) => {
-		if (!isSelectionEnabled || event.button !== 0) return;
+		if (!isSelectionEnabled) {
+			if (
+				event.target === container.current &&
+				store.getState().connection.inProgress
+			) {
+				connectionEndedOnPane.current = true;
+			}
+			return;
+		}
+		if (event.button !== 0) return;
 		(event.target as Element).releasePointerCapture?.(event.pointerId);
 		if (
 			!userSelectionActive &&

@@ -18,6 +18,7 @@ const SQLNEST: PanZoomOptions = {
 	panOnDrag: [1],
 	zoomActivationKeyPressed: false,
 	userSelectionActive: false,
+	connectionInProgress: false,
 	clickDistance: Number.POSITIVE_INFINITY
 };
 
@@ -218,6 +219,17 @@ describe("drag de pan", () => {
 		vi.runAllTimers();
 		mouse(el, "click", {});
 		expect(onClick).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe("connexion en cours", () => {
+	it("drag de pan bloqué, molette toujours active", () => {
+		setup([0, 0, 1], { connectionInProgress: true });
+		mouse(el, "mousedown", { button: 1, clientX: 0, clientY: 0 });
+		mouse(window, "mousemove", { clientX: 40, clientY: 0 });
+		expect(t()).toEqual([0, 0, 1]);
+		wheel(el, { deltaY: 20 });
+		expect(t()).toEqual([0, -10, 1]);
 	});
 });
 

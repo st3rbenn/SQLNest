@@ -22,6 +22,8 @@ export type PanZoomOptions = {
 	panOnDrag: boolean | number[];
 	zoomActivationKeyPressed: boolean;
 	userSelectionActive: boolean;
+	/** Drag depuis un handle en cours : seule la molette reste active. */
+	connectionInProgress: boolean;
 	/** Au-delà de cette distance (px) un drag de pan avale le clic qui suit. */
 	clickDistance: number;
 };
@@ -171,6 +173,7 @@ export function createPanZoom(
 			return false;
 		}
 		if (o.userSelectionActive) return false;
+		if (o.connectionInProgress && !isWheel) return false;
 		if (closest(event, NO_WHEEL_CLASS) && isWheel) return false;
 		if (
 			closest(event, NO_PAN_CLASS) &&

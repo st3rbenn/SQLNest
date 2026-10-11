@@ -92,6 +92,25 @@ export type EdgeMarker = {
 	strokeWidth?: number;
 };
 
+export type HandleType = "source" | "target";
+
+/** Handle mesuré, coordonnées relatives au coin du node (unités flow). */
+export type HandleBound = {
+	id: string | null;
+	type: HandleType;
+	nodeId: string;
+	position: Position;
+	x: number;
+	y: number;
+	width: number;
+	height: number;
+};
+
+export type HandleBounds = {
+	source: HandleBound[] | null;
+	target: HandleBound[] | null;
+};
+
 /** Node tel que le moteur le garde : node user + position absolue, z, mesure. */
 export type InternalNode<TNode extends Node = Node> = TNode & {
 	measured: { width?: number | undefined; height?: number | undefined };
@@ -102,7 +121,23 @@ export type InternalNode<TNode extends Node = Node> = TNode & {
 		/** Posé à la première mesure DOM — tant qu'il est absent le node est
 		 *  rendu même hors écran pour pouvoir être mesuré. */
 		measuredOnce?: true;
+		handleBounds?: HandleBounds;
 	};
+};
+
+/** Connexion en cours depuis un handle (`to` / `pointer` en pixels écran). */
+export type ConnectionState = {
+	inProgress: boolean;
+	isValid: boolean | null;
+	from: XYPosition | null;
+	fromHandle: HandleBound | null;
+	fromPosition: Position | null;
+	fromNode: InternalNode | null;
+	to: XYPosition | null;
+	toHandle: HandleBound | null;
+	toPosition: Position | null;
+	toNode: InternalNode | null;
+	pointer: XYPosition | null;
 };
 
 export type NodeProps<TNode extends Node = Node> = Pick<
