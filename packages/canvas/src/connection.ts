@@ -29,6 +29,19 @@ export type Connection = {
 	targetHandle: string | null;
 };
 
+/** Point client d'un événement souris, ou du premier doigt posé. */
+export function clientPoint(event: MouseEvent | TouchEvent): {
+	clientX: number;
+	clientY: number;
+} {
+	if ("clientX" in event) return event;
+	const touch = event.touches[0];
+	return {
+		clientX: touch?.clientX ?? Number.NaN,
+		clientY: touch?.clientY ?? Number.NaN
+	};
+}
+
 const handleDataId = (
 	instanceId: string,
 	nodeId: string,
@@ -112,7 +125,7 @@ type HandleCheck = {
  * proche ; en mode strict, une source se relie à une cible et inversement.
  */
 export function checkHandle(
-	event: MouseEvent,
+	event: MouseEvent | TouchEvent,
 	store: CanvasStore,
 	handle: Pick<HandleBound, "nodeId" | "id" | "type"> | null,
 	from: { nodeId: string; handleId: string | null; type: HandleType }
@@ -124,7 +137,8 @@ export function checkHandle(
 				`.${canvasClass.handle}[data-id="${handleDataId(instanceId, handle.nodeId, handle.id, handle.type)}"]`
 			)
 		: null;
-	const below = document.elementFromPoint(event.clientX, event.clientY);
+	const { clientX, clientY } = clientPoint(event);
+	const below = document.elementFromPoint(clientX, clientY);
 	const toCheck = below?.classList.contains(canvasClass.handle)
 		? below
 		: handleDomNode;
@@ -161,7 +175,7 @@ export function checkHandle(
  * est abandonnée (aucun `onConnect` dans l'app).
  */
 export function startConnection(
-	down: MouseEvent,
+	down: MouseEvent | TouchEvent,
 	store: CanvasStore,
 	handleDomNode: HTMLElement,
 	nodeId: string,
@@ -175,10 +189,11 @@ export function startConnection(
 	const fromNode = nodeLookup.get(nodeId);
 	if (fromInternal === null || fromNode === undefined) return;
 
-	const eventPos = (e: MouseEvent): XYPosition => ({
-		x: e.clientX - bounds.left,
-		y: e.clientY - bounds.top
-	});
+	const eventPos = (e: MouseEvent | TouchEvent): XYPosition => {
+		const { clientX, clientY } = clientPoint(e);
+		return { x: clientX - bounds.left, y: clientY - bounds.top };
+	};
+	const start = clientPoint(down);
 	const fromHandle: HandleBound = { ...fromInternal, nodeId, type };
 	let position = eventPos(down);
 	let started = false;
@@ -204,16 +219,17 @@ export function startConnection(
 		autoPanId = requestAnimationFrame(panLoop);
 	};
 
-	const onMove = (e: MouseEvent) => {
+	const onMove = (e: MouseEvent | TouchEvent) => {
 		if (!started) {
-			const dx = e.clientX - down.clientX;
-			const dy = e.clientY - down.clientY;
+			const { clientX, clientY } = clientPoint(e);
+			const dx = clientX - start.clientX;
+			const dy = clientY - start.clientY;
 			if (dx * dx + dy * dy <= DRAG_THRESHOLD * DRAG_THRESHOLD) return;
 			started = true;
 			store.updateConnection(previous);
 		}
 		if (store.getState().connection.fromHandle === null) {
-			onUp();
+			onUp(e);
 			return;
 		}
 		const { transform, nodeLookup: lookup } = store.getState();
@@ -257,15 +273,21 @@ export function startConnection(
 		previous = next;
 	};
 
-	const onUp = () => {
+	const onUp = (e: MouseEvent | TouchEvent) => {
+		// Un doigt levé alors qu'un autre reste posé ne termine pas la connexion.
+		if ("touches" in e && e.touches.length > 0) return;
 		store.cancelConnection();
 		cancelAnimationFrame(autoPanId);
 		document.removeEventListener("mousemove", onMove);
 		document.removeEventListener("mouseup", onUp);
+		document.removeEventListener("touchmove", onMove);
+		document.removeEventListener("touchend", onUp);
 	};
 
 	document.addEventListener("mousemove", onMove);
 	document.addEventListener("mouseup", onUp);
+	document.addEventListener("touchmove", onMove);
+	document.addEventListener("touchend", onUp);
 }
 
 /**

@@ -11,6 +11,10 @@ const EDGE_CLASS = "nest-edge";
 
 const DBLCLICK_DURATION = 250;
 const WHEEL_IDLE_MS = 150;
+/** Délai d'un double-tap, et durée pendant laquelle la souris émulée après un toucher est ignorée. */
+const TOUCH_DELAY = 500;
+const TAP_DISTANCE = 10;
+const TAP_HIGHLIGHT = "-webkit-tap-highlight-color";
 
 export type PanZoomOptions = {
 	panOnScroll: boolean;
@@ -77,7 +81,10 @@ export function createPanZoom(
 		const { minZoom, maxZoom } = store.getState();
 		return clamp(k, minZoom, maxZoom);
 	};
-	const pointerOf = (event: MouseEvent): [number, number] => {
+	const pointerOf = (event: {
+		clientX: number;
+		clientY: number;
+	}): [number, number] => {
 		const rect = element.getBoundingClientRect();
 		return [
 			event.clientX - rect.left - element.clientLeft,
@@ -151,13 +158,14 @@ export function createPanZoom(
 	 * Filtre commun aux gestes souris (drag, double-clic) et au zoom molette
 	 * actif (touche d'activation enfoncée).
 	 */
-	const accepts = (event: MouseEvent | WheelEvent): boolean => {
+	const accepts = (event: MouseEvent | WheelEvent | TouchEvent): boolean => {
 		if (options === null) return false;
 		const o = options;
 		const isWheel = event.type === "wheel";
+		const button = "button" in event ? event.button : undefined;
 		const zoomScroll = o.zoomActivationKeyPressed || o.zoomOnScroll;
 		if (
-			event.button === 1 &&
+			button === 1 &&
 			event.type === "mousedown" &&
 			(closest(event, NODE_CLASS) || closest(event, EDGE_CLASS))
 		) {
@@ -183,6 +191,16 @@ export function createPanZoom(
 		}
 		if (!o.zoomOnPinch && event.ctrlKey && isWheel) return false;
 		if (
+			!o.zoomOnPinch &&
+			event.type === "touchstart" &&
+			"touches" in event &&
+			event.touches.length > 1
+		) {
+			// Démarré à deux doigts : on bloque aussi le zoom natif de la page.
+			event.preventDefault();
+			return false;
+		}
+		if (
 			!zoomScroll &&
 			!o.panOnScroll &&
 			!(o.zoomOnPinch && event.ctrlKey) &&
@@ -190,18 +208,23 @@ export function createPanZoom(
 		) {
 			return false;
 		}
-		if (!o.panOnDrag && event.type === "mousedown") return false;
+		if (
+			!o.panOnDrag &&
+			(event.type === "mousedown" || event.type === "touchstart")
+		) {
+			return false;
+		}
 		if (
 			Array.isArray(o.panOnDrag) &&
-			!o.panOnDrag.includes(event.button) &&
+			!o.panOnDrag.includes(button as number) &&
 			event.type === "mousedown"
 		) {
 			return false;
 		}
 		const buttonAllowed =
-			(Array.isArray(o.panOnDrag) && o.panOnDrag.includes(event.button)) ||
-			!event.button ||
-			event.button <= 1;
+			(Array.isArray(o.panOnDrag) && o.panOnDrag.includes(button as number)) ||
+			!button ||
+			button <= 1;
 		return (!event.ctrlKey || isWheel) && buttonAllowed;
 	};
 
@@ -263,7 +286,7 @@ export function createPanZoom(
 	};
 
 	const onMouseDown = (event: MouseEvent) => {
-		if (!accepts(event)) return;
+		if (touchending !== null || !accepts(event)) return;
 		const view = event.view ?? window;
 		const x0 = event.clientX;
 		const y0 = event.clientY;
@@ -317,20 +340,152 @@ export function createPanZoom(
 		cleanupDrag = end;
 	};
 
-	const onDoubleClick = (event: MouseEvent) => {
+	const onDoubleClick = (event: MouseEvent | TouchEvent) => {
 		if (options === null || !options.zoomOnDoubleClick || !accepts(event))
 			return;
 		const t0 = getTransform();
-		const p = pointerOf(event);
+		const source =
+			"changedTouches" in event
+				? (event.changedTouches[0] as Touch)
+				: (event as MouseEvent);
+		const p = pointerOf(source);
 		const k = clampZoom(t0[2] * (event.shiftKey ? 0.5 : 2));
 		event.preventDefault();
 		event.stopImmediatePropagation();
 		animateTo(zoomAround(k, p, invert(t0, p)), DBLCLICK_DURATION, p);
 	};
 
+	// Tactile : un doigt déplace, deux doigts zooment en gardant sous chaque
+	// doigt le point du flow touché au départ ; un double-tap vaut double-clic.
+	type TouchPoint = [[number, number], [number, number], number];
+	type TouchGesture = {
+		touch0?: TouchPoint | undefined;
+		touch1?: TouchPoint | undefined;
+		taps: number;
+		active: number;
+	};
+	let touchGesture: TouchGesture | null = null;
+	let touchstarting: ReturnType<typeof setTimeout> | null = null;
+	let touchending: ReturnType<typeof setTimeout> | null = null;
+	let touchfirst: [number, number] = [0, 0];
+
+	const onTouchStart = (event: TouchEvent) => {
+		if (!accepts(event)) return;
+		const touches = event.touches;
+		const clean = event.changedTouches.length === touches.length;
+		const g: TouchGesture = (!clean && touchGesture) || { taps: 0, active: 0 };
+		event.stopImmediatePropagation();
+		let started = false;
+		let p: TouchPoint | null = null;
+		const t = getTransform();
+		for (const touch of Array.from(touches)) {
+			const screen = pointerOf(touch);
+			p = [screen, invert(t, screen), touch.identifier];
+			if (!g.touch0) {
+				g.touch0 = p;
+				started = true;
+				g.taps = 1 + (touchstarting !== null ? 1 : 0);
+			} else if (!g.touch1 && g.touch0[2] !== p[2]) {
+				g.touch1 = p;
+				g.taps = 0;
+			}
+		}
+		if (touchstarting !== null) {
+			clearTimeout(touchstarting);
+			touchstarting = null;
+		}
+		if (started && p !== null) {
+			if (g.taps < 2) {
+				touchfirst = p[0];
+				touchstarting = setTimeout(() => {
+					touchstarting = null;
+				}, TOUCH_DELAY);
+			}
+			interrupt();
+			g.active += 1;
+			if (g.active === 1) touchGesture = g;
+		}
+	};
+
+	const onTouchMove = (event: TouchEvent) => {
+		const g = touchGesture;
+		if (g === null) return;
+		event.preventDefault();
+		event.stopImmediatePropagation();
+		for (const touch of Array.from(event.changedTouches)) {
+			const p = pointerOf(touch);
+			if (g.touch0 && g.touch0[2] === touch.identifier) g.touch0[0] = p;
+			else if (g.touch1 && g.touch1[2] === touch.identifier) g.touch1[0] = p;
+		}
+		const t = getTransform();
+		let k = t[2];
+		let p: [number, number];
+		let l: [number, number];
+		if (g.touch0 && g.touch1) {
+			const [p0, l0] = g.touch0;
+			const [p1, l1] = g.touch1;
+			const dp = (p1[0] - p0[0]) ** 2 + (p1[1] - p0[1]) ** 2;
+			const dl = (l1[0] - l0[0]) ** 2 + (l1[1] - l0[1]) ** 2;
+			k = clampZoom(Math.sqrt(dp / dl));
+			p = [(p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2];
+			l = [(l0[0] + l1[0]) / 2, (l0[1] + l1[1]) / 2];
+		} else if (g.touch0) {
+			[p, l] = g.touch0;
+		} else {
+			return;
+		}
+		setTransform(zoomAround(k, p, l));
+	};
+
+	const onTouchEnd = (event: TouchEvent) => {
+		const g = touchGesture;
+		if (g === null) return;
+		event.stopImmediatePropagation();
+		if (touchending !== null) clearTimeout(touchending);
+		touchending = setTimeout(() => {
+			touchending = null;
+		}, TOUCH_DELAY);
+		let last: Touch | null = null;
+		for (const touch of Array.from(event.changedTouches)) {
+			last = touch;
+			if (g.touch0 && g.touch0[2] === touch.identifier) g.touch0 = undefined;
+			else if (g.touch1 && g.touch1[2] === touch.identifier)
+				g.touch1 = undefined;
+		}
+		if (g.touch1 && !g.touch0) {
+			g.touch0 = g.touch1;
+			g.touch1 = undefined;
+		}
+		if (g.touch0) {
+			g.touch0[1] = invert(getTransform(), g.touch0[0]);
+			return;
+		}
+		g.active -= 1;
+		if (g.active === 0) touchGesture = null;
+		if (g.taps === 2 && last !== null) {
+			const p = pointerOf(last);
+			if (
+				Math.hypot(touchfirst[0] - p[0], touchfirst[1] - p[1]) < TAP_DISTANCE
+			) {
+				onDoubleClick(event);
+			}
+		}
+	};
+
+	const touchable =
+		(typeof navigator !== "undefined" && navigator.maxTouchPoints > 0) ||
+		"ontouchstart" in element;
+
 	element.addEventListener("wheel", onWheel, { passive: false });
 	element.addEventListener("mousedown", onMouseDown);
 	element.addEventListener("dblclick", onDoubleClick);
+	if (touchable) {
+		element.addEventListener("touchstart", onTouchStart, { passive: false });
+		element.addEventListener("touchmove", onTouchMove, { passive: false });
+		element.addEventListener("touchend", onTouchEnd);
+		element.addEventListener("touchcancel", onTouchEnd);
+		element.style.setProperty(TAP_HIGHLIGHT, "rgba(0,0,0,0)");
+	}
 
 	return {
 		update: (next) => {
@@ -345,9 +500,15 @@ export function createPanZoom(
 			interrupt();
 			cleanupDrag?.();
 			if (wheelIdle !== null) clearTimeout(wheelIdle);
+			if (touchstarting !== null) clearTimeout(touchstarting);
+			if (touchending !== null) clearTimeout(touchending);
 			element.removeEventListener("wheel", onWheel);
 			element.removeEventListener("mousedown", onMouseDown);
 			element.removeEventListener("dblclick", onDoubleClick);
+			element.removeEventListener("touchstart", onTouchStart);
+			element.removeEventListener("touchmove", onTouchMove);
+			element.removeEventListener("touchend", onTouchEnd);
+			element.removeEventListener("touchcancel", onTouchEnd);
 		}
 	};
 }

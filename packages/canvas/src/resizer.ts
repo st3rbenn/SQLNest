@@ -1,3 +1,5 @@
+import { clientPoint } from "./connection";
+import { isTouchable } from "./drag";
 import { pointToFlow } from "./geometry";
 import type { CanvasStore } from "./store";
 import type { NodeChange, XYPosition } from "./types";
@@ -113,120 +115,139 @@ export type ResizerOptions = ResizeCallbacks & {
 };
 
 /**
- * Poignée (ou bord) de redimensionnement d'un node. Émet des changes
- * `position` + `dimensions` (resizing) pendant le geste et un `dimensions`
- * final ; le clic qui suit un geste qui a bougé est avalé.
+ * Poignée (ou bord) de redimensionnement d'un node, à la souris ou au doigt.
+ * Émet des changes `position` + `dimensions` (resizing) pendant le geste et
+ * un `dimensions` final ; le clic qui suit un geste souris qui a bougé est
+ * avalé.
  */
 export function createResizer(
 	element: HTMLElement,
 	store: CanvasStore,
 	getOptions: () => ResizerOptions
 ): () => void {
-	let cleanupGesture: (() => void) | null = null;
+	let cleanupMouse: (() => void) | null = null;
+	let started = false;
+	let resized = false;
+	let bounds: DOMRect | null = null;
+	let prev: ResizeParams = { x: 0, y: 0, width: 0, height: 0 };
+	let start = { ...prev, pointerX: 0, pointerY: 0 };
 
-	const onMouseDown = (down: MouseEvent) => {
-		if (down.ctrlKey || down.button) return;
-		const opts = getOptions();
-		const { nodeLookup, domNode, transform } = store.getState();
-		const node = nodeLookup.get(opts.nodeId);
-		if (node === undefined) return;
-		const view = down.view ?? window;
-		down.stopImmediatePropagation();
-		view.addEventListener("dragstart", swallow, true);
-		view.addEventListener("selectstart", swallow, true);
-
-		const bounds = domNode?.getBoundingClientRect() ?? null;
-		const flowPos = (e: MouseEvent) =>
-			pointToFlow(
-				{
-					x: e.clientX - (bounds?.left ?? 0),
-					y: e.clientY - (bounds?.top ?? 0)
-				},
-				store.getState().transform
-			);
-		const startPointer = pointToFlow(
-			{
-				x: down.clientX - (bounds?.left ?? 0),
-				y: down.clientY - (bounds?.top ?? 0)
-			},
-			transform
+	const flowPos = (e: MouseEvent | TouchEvent) => {
+		const { clientX, clientY } = clientPoint(e);
+		return pointToFlow(
+			{ x: clientX - (bounds?.left ?? 0), y: clientY - (bounds?.top ?? 0) },
+			store.getState().transform
 		);
-		const prev: ResizeParams = {
+	};
+
+	const gestureStart = (e: MouseEvent | TouchEvent) => {
+		const opts = getOptions();
+		const { nodeLookup, domNode } = store.getState();
+		const node = nodeLookup.get(opts.nodeId);
+		started = node !== undefined;
+		if (node === undefined) return;
+		bounds = domNode?.getBoundingClientRect() ?? null;
+		const pointer = flowPos(e);
+		prev = {
 			width: node.measured.width ?? 0,
 			height: node.measured.height ?? 0,
 			x: node.position.x ?? 0,
 			y: node.position.y ?? 0
 		};
-		const start = {
+		start = { ...prev, pointerX: pointer.x, pointerY: pointer.y };
+		resized = false;
+		opts.onResizeStart?.(e as MouseEvent, { ...prev });
+	};
+
+	const gestureDrag = (e: MouseEvent | TouchEvent) => {
+		if (!started) return;
+		const o = getOptions();
+		const dir = controlDirection(o.position);
+		const { width: prevWidth, height: prevHeight, x: prevX, y: prevY } = prev;
+		const next = dimensionsAfterResize(start, dir, flowPos(e), o.boundaries);
+		const widthChanged = next.width !== prevWidth;
+		const heightChanged = next.height !== prevHeight;
+		const xChanged = next.x !== prevX && widthChanged;
+		const yChanged = next.y !== prevY && heightChanged;
+		if (!xChanged && !yChanged && !widthChanged && !heightChanged) return;
+		const change: Partial<ResizeParams> = {};
+		if (xChanged || yChanged) {
+			change.x = xChanged ? next.x : prev.x;
+			change.y = yChanged ? next.y : prev.y;
+			prev.x = change.x;
+			prev.y = change.y;
+		}
+		if (widthChanged || heightChanged) {
+			change.width = widthChanged ? next.width : prev.width;
+			change.height = heightChanged ? next.height : prev.height;
+			prev.width = change.width;
+			prev.height = change.height;
+		}
+		const withDirection = {
 			...prev,
-			pointerX: startPointer.x,
-			pointerY: startPointer.y
+			direction: resizeDirection(prev, prevWidth, prevHeight, dir)
 		};
+		if (o.shouldResize?.(e as MouseEvent, withDirection) === false) return;
+		resized = true;
+		o.onResize?.(e as MouseEvent, withDirection);
+		const changes: NodeChange[] = [];
+		if (change.x !== undefined && change.y !== undefined) {
+			changes.push({
+				id: o.nodeId,
+				type: "position",
+				position: { x: change.x, y: change.y }
+			});
+		}
+		if (change.width !== undefined && change.height !== undefined) {
+			changes.push({
+				id: o.nodeId,
+				type: "dimensions",
+				resizing: true,
+				setAttributes: true,
+				dimensions: { width: change.width, height: change.height }
+			});
+		}
+		store.triggerNodeChanges(changes);
+	};
+
+	const gestureEnd = (e: MouseEvent | TouchEvent) => {
+		if (!resized) return;
+		const o = getOptions();
+		o.onResizeEnd?.(e as MouseEvent, { ...prev });
+		store.triggerNodeChanges([
+			{
+				id: o.nodeId,
+				type: "dimensions",
+				resizing: false,
+				dimensions: { width: prev.width, height: prev.height }
+			}
+		]);
+		resized = false;
+	};
+
+	let touchending: ReturnType<typeof setTimeout> | null = null;
+
+	const onMouseDown = (down: MouseEvent) => {
+		if (touchending !== null || down.ctrlKey || down.button) return;
+		const view = down.view ?? window;
+		down.stopImmediatePropagation();
+		view.addEventListener("dragstart", swallow, true);
+		view.addEventListener("selectstart", swallow, true);
 		let moved = false;
-		let resized = false;
-		opts.onResizeStart?.(down, { ...prev });
 
 		const onMove = (e: MouseEvent) => {
 			swallow(e);
 			if (!moved)
 				moved = e.clientX !== down.clientX || e.clientY !== down.clientY;
-			const o = getOptions();
-			const dir = controlDirection(o.position);
-			const { width: prevWidth, height: prevHeight, x: prevX, y: prevY } = prev;
-			const next = dimensionsAfterResize(start, dir, flowPos(e), o.boundaries);
-			const widthChanged = next.width !== prevWidth;
-			const heightChanged = next.height !== prevHeight;
-			const xChanged = next.x !== prevX && widthChanged;
-			const yChanged = next.y !== prevY && heightChanged;
-			if (!xChanged && !yChanged && !widthChanged && !heightChanged) return;
-			const change: Partial<ResizeParams> = {};
-			if (xChanged || yChanged) {
-				change.x = xChanged ? next.x : prev.x;
-				change.y = yChanged ? next.y : prev.y;
-				prev.x = change.x;
-				prev.y = change.y;
-			}
-			if (widthChanged || heightChanged) {
-				change.width = widthChanged ? next.width : prev.width;
-				change.height = heightChanged ? next.height : prev.height;
-				prev.width = change.width;
-				prev.height = change.height;
-			}
-			const withDirection = {
-				...prev,
-				direction: resizeDirection(prev, prevWidth, prevHeight, dir)
-			};
-			if (o.shouldResize?.(e, withDirection) === false) return;
-			resized = true;
-			o.onResize?.(e, withDirection);
-			const changes: NodeChange[] = [];
-			if (change.x !== undefined && change.y !== undefined) {
-				changes.push({
-					id: o.nodeId,
-					type: "position",
-					position: { x: change.x, y: change.y }
-				});
-			}
-			if (change.width !== undefined && change.height !== undefined) {
-				changes.push({
-					id: o.nodeId,
-					type: "dimensions",
-					resizing: true,
-					setAttributes: true,
-					dimensions: { width: change.width, height: change.height }
-				});
-			}
-			store.triggerNodeChanges(changes);
+			gestureDrag(e);
 		};
-
 		const end = () => {
 			view.removeEventListener("mousemove", onMove, true);
 			view.removeEventListener("mouseup", onUp, true);
 			view.removeEventListener("dragstart", swallow, true);
 			view.removeEventListener("selectstart", swallow, true);
-			cleanupGesture = null;
+			cleanupMouse = null;
 		};
-
 		const onUp = (e: MouseEvent) => {
 			end();
 			if (moved) {
@@ -234,27 +255,59 @@ export function createResizer(
 				setTimeout(() => view.removeEventListener("click", swallow, true), 0);
 			}
 			swallow(e);
-			if (!resized) return;
-			const o = getOptions();
-			o.onResizeEnd?.(e, { ...prev });
-			store.triggerNodeChanges([
-				{
-					id: o.nodeId,
-					type: "dimensions",
-					resizing: false,
-					dimensions: { width: prev.width, height: prev.height }
-				}
-			]);
+			gestureEnd(e);
 		};
 
 		view.addEventListener("mousemove", onMove, true);
 		view.addEventListener("mouseup", onUp, true);
-		cleanupGesture = end;
+		cleanupMouse = end;
+		gestureStart(down);
+	};
+
+	const touches = new Set<number>();
+	const onTouchStart = (event: TouchEvent) => {
+		if (event.ctrlKey) return;
+		for (const touch of Array.from(event.changedTouches)) {
+			event.stopImmediatePropagation();
+			touches.add(touch.identifier);
+			gestureStart(event);
+		}
+	};
+	const onTouchMove = (event: TouchEvent) => {
+		for (const touch of Array.from(event.changedTouches)) {
+			if (!touches.has(touch.identifier)) continue;
+			swallow(event);
+			gestureDrag(event);
+		}
+	};
+	const onTouchEnd = (event: TouchEvent) => {
+		if (touchending !== null) clearTimeout(touchending);
+		touchending = setTimeout(() => {
+			touchending = null;
+		}, 500);
+		for (const touch of Array.from(event.changedTouches)) {
+			if (!touches.delete(touch.identifier)) continue;
+			event.stopImmediatePropagation();
+			gestureEnd(event);
+		}
 	};
 
 	element.addEventListener("mousedown", onMouseDown);
+	if (isTouchable(element)) {
+		element.addEventListener("touchstart", onTouchStart);
+		element.addEventListener("touchmove", onTouchMove, { passive: false });
+		element.addEventListener("touchend", onTouchEnd);
+		element.addEventListener("touchcancel", onTouchEnd);
+		element.style.touchAction = "none";
+		element.style.setProperty("-webkit-tap-highlight-color", "rgba(0,0,0,0)");
+	}
 	return () => {
-		cleanupGesture?.();
+		cleanupMouse?.();
+		if (touchending !== null) clearTimeout(touchending);
 		element.removeEventListener("mousedown", onMouseDown);
+		element.removeEventListener("touchstart", onTouchStart);
+		element.removeEventListener("touchmove", onTouchMove);
+		element.removeEventListener("touchend", onTouchEnd);
+		element.removeEventListener("touchcancel", onTouchEnd);
 	};
 }

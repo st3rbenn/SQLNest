@@ -1,7 +1,8 @@
 import type {
 	HTMLAttributes,
 	MouseEvent as ReactMouseEvent,
-	ReactNode
+	ReactNode,
+	TouchEvent as ReactTouchEvent
 } from "react";
 import { clickConnect, startConnection } from "../connection";
 import { canvasClass } from "../constants";
@@ -72,6 +73,7 @@ export function Handle({
 	className,
 	children,
 	onMouseDown,
+	onTouchStart,
 	...rest
 }: HandleProps) {
 	const handleId = id ?? null;
@@ -83,8 +85,15 @@ export function Handle({
 		shallow
 	);
 
-	const onPointerDown = (event: ReactMouseEvent<HTMLDivElement>) => {
-		if (nodeId !== null && isConnectableStart && event.button === 0) {
+	const onPointerDown = (
+		event: ReactMouseEvent<HTMLDivElement> | ReactTouchEvent<HTMLDivElement>
+	) => {
+		if (nodeId === null) return;
+		const isMouse = "clientX" in event.nativeEvent;
+		if (
+			isConnectableStart &&
+			(!isMouse || (event as ReactMouseEvent).button === 0)
+		) {
 			startConnection(
 				event.nativeEvent,
 				store,
@@ -93,7 +102,8 @@ export function Handle({
 				handleId
 			);
 		}
-		onMouseDown?.(event);
+		if (isMouse) onMouseDown?.(event as ReactMouseEvent<HTMLDivElement>);
+		else onTouchStart?.(event as ReactTouchEvent<HTMLDivElement>);
 	};
 	const onClick = (event: ReactMouseEvent<HTMLDivElement>) => {
 		if (nodeId === null) return;
@@ -138,6 +148,7 @@ export function Handle({
 			data-id={`${instanceId}-${nodeId}-${handleId}-${type}`}
 			className={classes.join(" ")}
 			onMouseDown={onPointerDown}
+			onTouchStart={onPointerDown}
 			onClick={onClick}
 			{...rest}
 		>
