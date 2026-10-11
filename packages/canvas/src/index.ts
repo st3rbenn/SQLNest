@@ -9,6 +9,7 @@ export {
 	type NestCanvasInstance,
 	useNestCanvas,
 	useNodesState,
+	useOnSelectionChange,
 	useViewport
 } from "./hooks";
 export type { CanvasState } from "./store";
@@ -23,6 +24,7 @@ export {
 	MarkerType,
 	type Node,
 	type NodeChange,
+	type NodeMouseHandler,
 	type NodeProps,
 	type NodeTypes,
 	type OnNodesChange,

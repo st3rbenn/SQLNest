@@ -1,15 +1,35 @@
-import { type CSSProperties, memo, useEffect, useRef, useState } from "react";
+import {
+	type CSSProperties,
+	memo,
+	type KeyboardEvent as ReactKeyboardEvent,
+	type MouseEvent as ReactMouseEvent,
+	useEffect,
+	useRef,
+	useState
+} from "react";
 import { canvasClass } from "../constants";
 import { NodeIdContext, shallow, useNestStore, useStoreApi } from "../context";
-import { hasDimensions, nodeDimensions } from "../geometry";
+import { createNodeDrag } from "../drag";
+import { getNodesInside, hasDimensions, nodeDimensions } from "../geometry";
+import { isInputEvent } from "../keys";
 import { NO_PAN_CLASS } from "../panZoom";
+import {
+	ARROW_DIRECTIONS,
+	handleNodeClick,
+	moveSelectedNodes
+} from "../selection";
 import { type CanvasState, visibleNodeIds } from "../store";
-import type { InternalNode, NodeTypes } from "../types";
+import type { InternalNode, NodeMouseHandler, NodeTypes } from "../types";
 
 export type NodeRendererProps = {
 	nodeTypes: NodeTypes | undefined;
 	onlyRenderVisibleElements: boolean;
+	onNodeClick: NodeMouseHandler | undefined;
+	onNodeDoubleClick: NodeMouseHandler | undefined;
+	onNodeContextMenu: NodeMouseHandler | undefined;
 };
+
+const SELECTION_KEYS = ["Enter", " ", "Escape"];
 
 const containerStyle: CSSProperties = {
 	position: "absolute",
@@ -21,7 +41,10 @@ const containerStyle: CSSProperties = {
 
 function NodeRendererComponent({
 	nodeTypes,
-	onlyRenderVisibleElements
+	onlyRenderVisibleElements,
+	onNodeClick,
+	onNodeDoubleClick,
+	onNodeContextMenu
 }: NodeRendererProps) {
 	const ids = useNestStore(
 		(s: CanvasState) => visibleNodeIds(s, onlyRenderVisibleElements),
@@ -36,6 +59,9 @@ function NodeRendererComponent({
 					id={id}
 					nodeTypes={nodeTypes}
 					resizeObserver={resizeObserver}
+					onClick={onNodeClick}
+					onDoubleClick={onNodeDoubleClick}
+					onContextMenu={onNodeContextMenu}
 				/>
 			))}
 		</div>
@@ -81,15 +107,48 @@ type NodeWrapperProps = {
 	id: string;
 	nodeTypes: NodeTypes | undefined;
 	resizeObserver: ResizeObserver | null;
+	onClick: NodeMouseHandler | undefined;
+	onDoubleClick: NodeMouseHandler | undefined;
+	onContextMenu: NodeMouseHandler | undefined;
 };
 
 function NodeWrapperComponent({
 	id,
 	nodeTypes,
-	resizeObserver
+	resizeObserver,
+	onClick,
+	onDoubleClick,
+	onContextMenu
 }: NodeWrapperProps) {
+	const store = useStoreApi();
 	const node = useNestStore((s) => s.nodeLookup.get(id));
+	const descriptionId = useNestStore((s) => `nest-node-desc-${s.instanceId}`);
 	const ref = useRef<HTMLDivElement>(null);
+	const [dragging, setDragging] = useState(false);
+	const isDraggable =
+		node !== undefined && !node.hidden && node.draggable !== false;
+	const isSelectable = node?.selectable !== false;
+	const dragParams = useRef({
+		nodeId: id,
+		isSelectable,
+		handleSelector: node?.dragHandle
+	});
+	dragParams.current = {
+		nodeId: id,
+		isSelectable,
+		handleSelector: node?.dragHandle
+	};
+
+	useEffect(() => {
+		const el = ref.current;
+		if (!isDraggable || el === null) return;
+		return createNodeDrag(el, store, () => dragParams.current, {
+			onNodeMouseDown: (nodeId) =>
+				handleNodeClick(store, nodeId, { element: el }),
+			onDragStart: () => setDragging(true),
+			onDragStop: () => setDragging(false)
+		});
+	}, [isDraggable, store]);
 	const observed = useRef<HTMLDivElement | null>(null);
 	const measured =
 		node !== undefined &&
@@ -126,30 +185,86 @@ function NodeWrapperComponent({
 	const NodeComponent = nodeTypes?.[type];
 	if (NodeComponent === undefined) return null;
 
-	const isDraggable = node.draggable !== false;
-	const isSelectable = node.selectable !== false;
+	const isFocusable = node.focusable !== false;
 	const dims = nodeDimensions(node);
+	const userNode = node.internals.userNode;
 	const classes = [canvasClass.node, `${canvasClass.node}-${type}`];
 	if (isDraggable) classes.push(NO_PAN_CLASS);
 	if (node.className) classes.push(node.className);
 	if (node.selected) classes.push("selected");
 	if (isSelectable) classes.push("selectable");
 	if (isDraggable) classes.push("draggable");
+	if (dragging) classes.push("dragging");
+
+	const onSelect = (event: ReactMouseEvent) => {
+		// Le drag sélectionne déjà au démarrage ; le clic sans mouvement passe ici.
+		if (isSelectable) handleNodeClick(store, id, { element: ref.current });
+		onClick?.(event, { ...userNode });
+	};
+	const onKeyDown = (event: ReactKeyboardEvent) => {
+		if (isInputEvent(event.nativeEvent)) return;
+		if (SELECTION_KEYS.includes(event.key) && isSelectable) {
+			handleNodeClick(store, id, {
+				unselect: event.key === "Escape",
+				element: ref.current
+			});
+			return;
+		}
+		const direction = ARROW_DIRECTIONS[event.key];
+		if (direction !== undefined && isDraggable && node.selected) {
+			event.preventDefault();
+			const p = node.internals.positionAbsolute;
+			store.setState({
+				ariaLiveMessage: `Node déplacé vers ${DIRECTION_LABEL[event.key]}. Position x : ${~~p.x}, y : ${~~p.y}`
+			});
+			moveSelectedNodes(store, direction, event.shiftKey ? 4 : 1);
+		}
+	};
+	// Focus clavier sur un node hors écran : on le recentre sans changer le zoom.
+	const onFocus = () => {
+		if (!ref.current?.matches(":focus-visible")) return;
+		const { transform, width, height, panZoom } = store.getState();
+		const visible =
+			getNodesInside([node], { x: 0, y: 0, width, height }, transform, true)
+				.length > 0;
+		if (visible || panZoom === null) return;
+		const k = transform[2];
+		panZoom.setViewport({
+			x: width / 2 - (node.position.x + dims.width / 2) * k,
+			y: height / 2 - (node.position.y + dims.height / 2) * k,
+			zoom: k
+		});
+	};
 
 	const { x, y } = node.internals.positionAbsolute;
 	return (
+		// biome-ignore lint/a11y: conteneur de node focusable, rôle porté par `role`
 		<div
 			ref={ref}
 			className={classes.join(" ")}
 			style={{
 				zIndex: node.internals.z,
 				transform: `translate(${x}px,${y}px)`,
-				pointerEvents: isSelectable || isDraggable ? "all" : "none",
+				pointerEvents: isSelectable || isDraggable || onClick ? "all" : "none",
 				visibility: hasDimensions(node) ? "visible" : "hidden",
 				...node.style,
 				...(inlineDimensions(node) as CSSProperties)
 			}}
 			data-id={id}
+			onClick={onSelect}
+			onDoubleClick={
+				onDoubleClick ? (e) => onDoubleClick(e, { ...userNode }) : undefined
+			}
+			onContextMenu={
+				onContextMenu ? (e) => onContextMenu(e, { ...userNode }) : undefined
+			}
+			onKeyDown={isFocusable ? onKeyDown : undefined}
+			onFocus={isFocusable ? onFocus : undefined}
+			tabIndex={isFocusable ? 0 : undefined}
+			role={node.ariaRole ?? (isFocusable ? "group" : undefined)}
+			aria-roledescription="node"
+			aria-describedby={descriptionId}
+			aria-label={node.ariaLabel}
 		>
 			<NodeIdContext.Provider value={id}>
 				<NodeComponent
@@ -165,7 +280,7 @@ function NodeWrapperComponent({
 					isConnectable
 					sourcePosition={node.sourcePosition}
 					targetPosition={node.targetPosition}
-					dragging={node.dragging ?? false}
+					dragging={dragging}
 					dragHandle={node.dragHandle}
 					zIndex={node.internals.z}
 					parentId={node.parentId}
@@ -178,3 +293,10 @@ function NodeWrapperComponent({
 }
 
 const NodeWrapper = memo(NodeWrapperComponent);
+
+const DIRECTION_LABEL: Record<string, string> = {
+	ArrowUp: "le haut",
+	ArrowDown: "le bas",
+	ArrowLeft: "la gauche",
+	ArrowRight: "la droite"
+};

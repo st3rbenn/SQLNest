@@ -1,5 +1,4 @@
 import {
-	type MouseEvent as ReactMouseEvent,
 	type ReactNode,
 	type RefObject,
 	useEffect,
@@ -94,6 +93,7 @@ export function ZoomPane({
 	}, [store]);
 
 	const panZoom = useNestStore((s) => s.panZoom);
+	const userSelectionActive = useNestStore((s) => s.userSelectionActive);
 	const {
 		panOnScroll,
 		panOnScrollSpeed,
@@ -112,7 +112,7 @@ export function ZoomPane({
 			zoomOnDoubleClick,
 			panOnDrag,
 			zoomActivationKeyPressed,
-			userSelectionActive: false,
+			userSelectionActive,
 			clickDistance: selectionOnDrag
 				? Number.POSITIVE_INFINITY
 				: Math.max(0, paneClickDistance)
@@ -126,57 +126,13 @@ export function ZoomPane({
 		zoomOnDoubleClick,
 		panOnDrag,
 		zoomActivationKeyPressed,
+		userSelectionActive,
 		selectionOnDrag,
 		paneClickDistance
 	]);
 
 	return (
 		<div className={canvasClass.renderer} ref={ref} style={containerStyle}>
-			{children}
-		</div>
-	);
-}
-
-export type PaneProps = {
-	panOnDrag: boolean | number[];
-	isSelecting: boolean;
-	onPaneClick: ((event: ReactMouseEvent) => void) | undefined;
-	onPaneContextMenu: ((event: ReactMouseEvent) => void) | undefined;
-	children: ReactNode;
-};
-
-/** Fond cliquable sous les nodes : clic / menu contextuel sur le vide. */
-export function Pane({
-	panOnDrag,
-	isSelecting,
-	onPaneClick,
-	onPaneContextMenu,
-	children
-}: PaneProps) {
-	const ref = useRef<HTMLDivElement>(null);
-	const dragging = useNestStore((s) => s.paneDragging);
-	const classes: string[] = [canvasClass.pane, canvasClass.container];
-	if (
-		panOnDrag === true ||
-		(Array.isArray(panOnDrag) && panOnDrag.includes(0))
-	) {
-		classes.push("draggable");
-	}
-	if (dragging) classes.push("dragging");
-	if (isSelecting) classes.push("selection");
-	const onSelf =
-		(handler: ((event: ReactMouseEvent) => void) | undefined) =>
-		(event: ReactMouseEvent) => {
-			if (event.target === ref.current) handler?.(event);
-		};
-	return (
-		// biome-ignore lint/a11y: fond de canvas, pas un contrôle
-		<div
-			ref={ref}
-			className={classes.join(" ")}
-			onClick={onSelf(onPaneClick)}
-			onContextMenu={onSelf(onPaneContextMenu)}
-		>
 			{children}
 		</div>
 	);

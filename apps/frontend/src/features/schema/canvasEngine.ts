@@ -34,7 +34,6 @@ const useNest = canvasEngine === "nest";
 
 // Pas encore portés sur `@sqlnest/canvas` : neutralisés en mode nest.
 const Nothing = () => null;
-const noop = () => {};
 
 export const NestCanvas = (
 	useNest ? nest.NestCanvas : rf.ReactFlow
@@ -66,7 +65,7 @@ export const EdgeLabelRenderer = (
 	useNest ? Nothing : rf.EdgeLabelRenderer
 ) as typeof rf.EdgeLabelRenderer;
 export const useOnSelectionChange = (
-	useNest ? noop : rf.useOnSelectionChange
+	useNest ? nest.useOnSelectionChange : rf.useOnSelectionChange
 ) as typeof rf.useOnSelectionChange;
 
 export type {

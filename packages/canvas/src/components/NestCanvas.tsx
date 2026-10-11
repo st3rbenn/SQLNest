@@ -2,23 +2,26 @@ import {
 	type CSSProperties,
 	type MouseEvent as ReactMouseEvent,
 	type ReactNode,
+	type PointerEvent as ReactPointerEvent,
 	type UIEvent,
 	useContext,
 	useEffect,
 	useState
 } from "react";
 import { canvasClass } from "../constants";
-import { StoreContext, useStoreApi } from "../context";
+import { StoreContext, useNestStore, useStoreApi } from "../context";
 import { type KeyCode, useKeyPress } from "../keys";
-import type { CanvasStore } from "../store";
-import type {
-	Edge,
-	EdgeTypes,
-	FitViewOptions,
-	Node,
-	NodeChange,
-	NodeTypes,
-	Viewport
+import type { CanvasState, CanvasStore, NodeDragHandler } from "../store";
+import {
+	type Edge,
+	type EdgeTypes,
+	type FitViewOptions,
+	type Node,
+	type NodeChange,
+	type NodeMouseHandler,
+	type NodeTypes,
+	SelectionMode,
+	type Viewport
 } from "../types";
 import { isMacOs } from "../wheel";
 import {
@@ -27,8 +30,9 @@ import {
 	newStore
 } from "./NestCanvasProvider";
 import { NodeRenderer } from "./NodeRenderer";
+import { Pane } from "./Pane";
 import { Viewport as ViewportLayer } from "./Viewport";
-import { Pane, ZoomPane } from "./ZoomPane";
+import { ZoomPane } from "./ZoomPane";
 
 export type NestCanvasProps<
 	TNode extends Node = Node,
@@ -54,11 +58,23 @@ export type NestCanvasProps<
 	panActivationKeyCode?: KeyCode;
 	zoomActivationKeyCode?: KeyCode;
 	selectionKeyCode?: KeyCode;
+	multiSelectionKeyCode?: KeyCode;
+	deleteKeyCode?: KeyCode;
+	selectionMode?: SelectionMode;
 	paneClickDistance?: number;
 	onlyRenderVisibleElements?: boolean;
 	elevateNodesOnSelect?: boolean;
 	onPaneClick?: (event: ReactMouseEvent) => void;
 	onPaneContextMenu?: (event: ReactMouseEvent) => void;
+	onNodeClick?: NodeMouseHandler<TNode>;
+	onNodeDoubleClick?: NodeMouseHandler<TNode>;
+	onNodeContextMenu?: NodeMouseHandler<TNode>;
+	onNodeDragStart?: (event: MouseEvent, node: TNode, nodes: TNode[]) => void;
+	onNodeDrag?: (event: MouseEvent, node: TNode, nodes: TNode[]) => void;
+	onNodeDragStop?: (event: MouseEvent, node: TNode, nodes: TNode[]) => void;
+	onNodesDelete?: (nodes: TNode[]) => void;
+	onSelectionStart?: (event: ReactPointerEvent) => void;
+	onSelectionEnd?: (event: ReactPointerEvent) => void;
 	className?: string;
 	style?: CSSProperties;
 	id?: string;
@@ -82,7 +98,11 @@ function StoreUpdater({
 	onNodesChange,
 	minZoom,
 	maxZoom,
-	elevateNodesOnSelect
+	elevateNodesOnSelect,
+	onNodeDragStart,
+	onNodeDrag,
+	onNodeDragStop,
+	onNodesDelete
 }: {
 	nodes: Node[] | undefined;
 	edges: Edge[] | undefined;
@@ -90,6 +110,10 @@ function StoreUpdater({
 	minZoom: number;
 	maxZoom: number;
 	elevateNodesOnSelect: boolean;
+	onNodeDragStart: NodeDragHandler | undefined;
+	onNodeDrag: NodeDragHandler | undefined;
+	onNodeDragStop: NodeDragHandler | undefined;
+	onNodesDelete: ((nodes: Node[]) => void) | undefined;
 }) {
 	const store = useStoreApi();
 	useEffect(() => {
@@ -100,6 +124,14 @@ function StoreUpdater({
 			onNodesChange: onNodesChange ?? null
 		});
 	}, [store, minZoom, maxZoom, elevateNodesOnSelect, onNodesChange]);
+	useEffect(() => {
+		store.setState({
+			onNodeDragStart: onNodeDragStart ?? null,
+			onNodeDrag: onNodeDrag ?? null,
+			onNodeDragStop: onNodeDragStop ?? null,
+			onNodesDelete: onNodesDelete ?? null
+		});
+	}, [store, onNodeDragStart, onNodeDrag, onNodeDragStop, onNodesDelete]);
 	useEffect(() => {
 		if (nodes !== undefined) store.setNodes(nodes);
 	}, [store, nodes]);
@@ -127,8 +159,16 @@ function GraphView(
 		selectionKeyCode = "Shift",
 		paneClickDistance = 1,
 		onlyRenderVisibleElements = false,
+		selectionMode = SelectionMode.Full,
+		multiSelectionKeyCode = isMacOs() ? "Meta" : "Control",
+		deleteKeyCode = "Backspace",
 		onPaneClick,
-		onPaneContextMenu
+		onPaneContextMenu,
+		onNodeClick,
+		onNodeDoubleClick,
+		onNodeContextMenu,
+		onSelectionStart,
+		onSelectionEnd
 	} = props;
 
 	const selectionKeyPressed = useKeyPress(selectionKeyCode, {
@@ -141,6 +181,7 @@ function GraphView(
 	const effectivePanOnScroll = panKeyPressed || panOnScroll;
 	const effectiveSelectionOnDrag = selectionOnDrag && panOnDrag !== true;
 	const isSelecting = selectionKeyPressed || effectiveSelectionOnDrag;
+	useGlobalKeys(deleteKeyCode, multiSelectionKeyCode);
 
 	return (
 		<ZoomPane
@@ -160,6 +201,12 @@ function GraphView(
 			<Pane
 				panOnDrag={panOnDrag}
 				isSelecting={isSelecting}
+				selectionKeyPressed={selectionKeyPressed}
+				selectionOnDrag={effectiveSelectionOnDrag}
+				selectionMode={selectionMode}
+				paneClickDistance={paneClickDistance}
+				onSelectionStart={onSelectionStart}
+				onSelectionEnd={onSelectionEnd}
 				onPaneClick={onPaneClick}
 				onPaneContextMenu={onPaneContextMenu}
 			>
@@ -168,11 +215,81 @@ function GraphView(
 					<NodeRenderer
 						nodeTypes={nodeTypes}
 						onlyRenderVisibleElements={onlyRenderVisibleElements}
+						onNodeClick={onNodeClick}
+						onNodeDoubleClick={onNodeDoubleClick}
+						onNodeContextMenu={onNodeContextMenu}
 					/>
 					<div className={canvasClass.viewportPortal} />
 				</ViewportLayer>
 			</Pane>
 		</ZoomPane>
+	);
+}
+
+/** Suppression (Backspace) et multi-sélection (Shift / Cmd / Ctrl). */
+function useGlobalKeys(deleteKeyCode: KeyCode, multiSelectionKeyCode: KeyCode) {
+	const store = useStoreApi();
+	const deletePressed = useKeyPress(deleteKeyCode, {
+		actInsideInputWithModifier: false
+	});
+	const multiPressed = useKeyPress(multiSelectionKeyCode, { target: "window" });
+	useEffect(() => {
+		if (deletePressed) store.deleteSelectedNodes();
+	}, [deletePressed, store]);
+	useEffect(() => {
+		store.setState({ multiSelectionActive: multiPressed });
+	}, [multiPressed, store]);
+}
+
+const selectedNodes = (s: CanvasState): Node[] => {
+	const nodes: Node[] = [];
+	for (const node of s.nodeLookup.values()) {
+		if (node.selected) nodes.push(node.internals.userNode);
+	}
+	return nodes;
+};
+const sameIds = (a: Node[], b: Node[]) =>
+	a.length === b.length && a.every((n, i) => n.id === b[i]?.id);
+
+/** Notifie les abonnés de `useOnSelectionChange` quand l'ensemble sélectionné change. */
+function SelectionListener() {
+	const store = useStoreApi();
+	const nodes = useNestStore(selectedNodes, sameIds);
+	useEffect(() => {
+		const params = { nodes, edges: [] };
+		for (const fn of store.getState().onSelectionChangeHandlers) fn(params);
+	}, [nodes, store]);
+	return null;
+}
+
+const hiddenStyle: CSSProperties = { display: "none" };
+const liveStyle: CSSProperties = {
+	position: "absolute",
+	width: 1,
+	height: 1,
+	margin: -1,
+	border: 0,
+	padding: 0,
+	overflow: "hidden",
+	clip: "rect(0px, 0px, 0px, 0px)",
+	clipPath: "inset(100%)"
+};
+
+function A11yDescriptions() {
+	const { instanceId, message } = useNestStore(
+		(s) => ({ instanceId: s.instanceId, message: s.ariaLiveMessage }),
+		(a, b) => a.instanceId === b.instanceId && a.message === b.message
+	);
+	return (
+		<>
+			<div id={`nest-node-desc-${instanceId}`} style={hiddenStyle}>
+				Entrée ou Espace pour sélectionner un node, flèches pour le déplacer,
+				Retour arrière pour le supprimer, Échap pour annuler.
+			</div>
+			<div aria-live="assertive" aria-atomic="true" style={liveStyle}>
+				{message}
+			</div>
+		</>
 	);
 }
 
@@ -188,6 +305,10 @@ export function NestCanvas<
 		minZoom = DEFAULT_MIN_ZOOM,
 		maxZoom = DEFAULT_MAX_ZOOM,
 		elevateNodesOnSelect = true,
+		onNodeDragStart,
+		onNodeDrag,
+		onNodeDragStop,
+		onNodesDelete,
 		className,
 		style,
 		id,
@@ -223,13 +344,19 @@ export function NestCanvas<
 					minZoom={minZoom}
 					maxZoom={maxZoom}
 					elevateNodesOnSelect={elevateNodesOnSelect}
+					onNodeDragStart={onNodeDragStart as NodeDragHandler | undefined}
+					onNodeDrag={onNodeDrag as NodeDragHandler | undefined}
+					onNodeDragStop={onNodeDragStop as NodeDragHandler | undefined}
+					onNodesDelete={onNodesDelete as ((nodes: Node[]) => void) | undefined}
 				/>
 				<GraphView
 					{...(props as unknown as NestCanvasProps)}
 					minZoom={minZoom}
 					maxZoom={maxZoom}
 				/>
+				<SelectionListener />
 				{children}
+				<A11yDescriptions />
 			</StoreContext.Provider>
 		</div>
 	);

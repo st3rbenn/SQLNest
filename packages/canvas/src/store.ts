@@ -12,10 +12,40 @@ import type {
 	Node,
 	NodeChange,
 	NodeDimensionChange,
-	Transform
+	NodePositionChange,
+	NodeSelectionChange,
+	Transform,
+	XYPosition
 } from "./types";
 
 export const SELECTED_NODE_Z = 1000;
+
+/** Rectangle du lasso : départ en coordonnées flow, rect affiché en écran. */
+export type UserSelectionRect = {
+	startX: number;
+	startY: number;
+	x: number;
+	y: number;
+	width: number;
+	height: number;
+};
+
+export type NodeDragHandler = (
+	event: MouseEvent,
+	node: Node,
+	nodes: Node[]
+) => void;
+export type SelectionChangeHandler = (params: {
+	nodes: Node[];
+	edges: Edge[];
+}) => void;
+
+/** Ce qu'un drag déplace : position courante + décalage pointeur → coin. */
+export type DragItem = {
+	id: string;
+	position: XYPosition;
+	distance: XYPosition;
+};
 
 export type CanvasState = {
 	/** Préfixe des ids SVG (patterns, markers) — unique par instance. */
@@ -37,6 +67,17 @@ export type CanvasState = {
 	onNodesChange: ((changes: NodeChange[]) => void) | null;
 	paneDragging: boolean;
 	fitViewQueued: FitViewOptions | null;
+	/** Shift / Cmd / Ctrl enfoncé : un clic ajoute ou retire de la sélection. */
+	multiSelectionActive: boolean;
+	userSelectionActive: boolean;
+	userSelectionRect: UserSelectionRect | null;
+	onNodeDragStart: NodeDragHandler | null;
+	onNodeDrag: NodeDragHandler | null;
+	onNodeDragStop: NodeDragHandler | null;
+	onNodesDelete: ((nodes: Node[]) => void) | null;
+	onSelectionChangeHandlers: SelectionChangeHandler[];
+	/** Annonce lecteur d'écran après un déplacement clavier. */
+	ariaLiveMessage: string;
 };
 
 type Listener = () => void;
@@ -53,7 +94,23 @@ export type CanvasStore = {
 	updateNodeDimensions: (elements: Iterable<HTMLElement>) => void;
 	fitView: (options?: FitViewOptions) => Promise<boolean>;
 	triggerNodeChanges: (changes: NodeChange[]) => void;
+	/** Sélectionne `ids` (en plus de l'existant si la multi-sélection est active). */
+	addSelectedNodes: (ids: string[]) => void;
+	unselectNodes: (nodes?: Node[]) => void;
+	resetSelectedElements: () => void;
+	/** Sélectionne exactement `ids`, désélectionne le reste. */
+	selectExactly: (ids: Set<string>) => void;
+	updateNodePositions: (items: Iterable<DragItem>, dragging: boolean) => void;
+	/** Pan immédiat en pixels écran ; vrai si la vue a bougé. */
+	panBy: (delta: XYPosition) => boolean;
+	deleteSelectedNodes: () => void;
 };
+
+const selectChange = (id: string, selected: boolean): NodeSelectionChange => ({
+	id,
+	type: "select",
+	selected
+});
 
 let instanceCount = 0;
 
@@ -137,7 +194,16 @@ export function createCanvasStore(init: {
 		elevateNodesOnSelect: true,
 		onNodesChange: null,
 		paneDragging: false,
-		fitViewQueued: null
+		fitViewQueued: null,
+		multiSelectionActive: false,
+		userSelectionActive: false,
+		userSelectionRect: null,
+		onNodeDragStart: null,
+		onNodeDrag: null,
+		onNodeDragStop: null,
+		onNodesDelete: null,
+		onSelectionChangeHandlers: [],
+		ariaLiveMessage: ""
 	};
 	const listeners = new Set<Listener>();
 
@@ -244,6 +310,96 @@ export function createCanvasStore(init: {
 		return true;
 	};
 
+	/**
+	 * Changes de sélection pour atteindre exactement `ids`. Le node interne est
+	 * muté tout de suite : un drag qui démarre dans le même geste doit voir la
+	 * nouvelle sélection avant que l'app ait renvoyé ses nodes.
+	 */
+	const selectionChanges = (ids: Set<string>): NodeSelectionChange[] => {
+		const changes: NodeSelectionChange[] = [];
+		for (const node of state.nodeLookup.values()) {
+			const next = ids.has(node.id);
+			if (!(node.selected === undefined && !next) && node.selected !== next) {
+				node.selected = next;
+				changes.push(selectChange(node.id, next));
+			}
+		}
+		return changes;
+	};
+
+	const selectExactly = (ids: Set<string>) =>
+		triggerNodeChanges(selectionChanges(ids));
+
+	const addSelectedNodes = (ids: string[]) => {
+		if (state.multiSelectionActive) {
+			triggerNodeChanges(ids.map((id) => selectChange(id, true)));
+			return;
+		}
+		selectExactly(new Set(ids));
+	};
+
+	const unselectNodes = (nodes: Node[] = state.nodes) => {
+		const changes: NodeSelectionChange[] = [];
+		for (const node of nodes) {
+			if (!node.selected) continue;
+			const internal = state.nodeLookup.get(node.id);
+			if (internal) internal.selected = false;
+			changes.push(selectChange(node.id, false));
+		}
+		triggerNodeChanges(changes);
+	};
+
+	const resetSelectedElements = () => {
+		triggerNodeChanges(
+			state.nodes
+				.filter((n) => n.selected)
+				.map((n) => selectChange(n.id, false))
+		);
+	};
+
+	const updateNodePositions = (
+		items: Iterable<DragItem>,
+		dragging: boolean
+	) => {
+		const changes: NodePositionChange[] = [];
+		for (const item of items) {
+			changes.push({
+				id: item.id,
+				type: "position",
+				position: item.position,
+				dragging
+			});
+		}
+		triggerNodeChanges(changes);
+	};
+
+	const panBy = (delta: XYPosition) => {
+		const { panZoom, transform } = state;
+		if (panZoom === null || (!delta.x && !delta.y)) return false;
+		panZoom.setViewport({
+			x: transform[0] + delta.x,
+			y: transform[1] + delta.y,
+			zoom: transform[2]
+		});
+		const next = state.transform;
+		return (
+			next[0] !== transform[0] ||
+			next[1] !== transform[1] ||
+			next[2] !== transform[2]
+		);
+	};
+
+	const deleteSelectedNodes = () => {
+		const doomed = state.nodes.filter(
+			(n) => n.selected && n.deletable !== false
+		);
+		if (doomed.length === 0) return;
+		state.onNodesDelete?.(doomed);
+		triggerNodeChanges(
+			doomed.map((n) => ({ id: n.id, type: "remove" as const }))
+		);
+	};
+
 	return {
 		getState,
 		setState,
@@ -252,7 +408,14 @@ export function createCanvasStore(init: {
 		setEdges,
 		updateNodeDimensions,
 		fitView,
-		triggerNodeChanges
+		triggerNodeChanges,
+		addSelectedNodes,
+		unselectNodes,
+		resetSelectedElements,
+		selectExactly,
+		updateNodePositions,
+		panBy,
+		deleteSelectedNodes
 	};
 }
 

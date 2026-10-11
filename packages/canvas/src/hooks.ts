@@ -2,11 +2,13 @@ import {
 	type Dispatch,
 	type SetStateAction,
 	useCallback,
+	useEffect,
 	useMemo,
 	useState
 } from "react";
 import { shallow, useNestStore, useStoreApi } from "./context";
 import { flowToPoint, pointToFlow } from "./geometry";
+import type { SelectionChangeHandler } from "./store";
 import type {
 	FitViewOptions,
 	InternalNode,
@@ -205,4 +207,28 @@ export function useNestCanvas<
 			}
 		};
 	}, [store]);
+}
+
+/** Appelé à chaque changement de l'ensemble des nodes sélectionnés. */
+export function useOnSelectionChange({
+	onChange
+}: {
+	onChange: SelectionChangeHandler;
+}) {
+	const store = useStoreApi();
+	useEffect(() => {
+		store.setState({
+			onSelectionChangeHandlers: [
+				...store.getState().onSelectionChangeHandlers,
+				onChange
+			]
+		});
+		return () => {
+			store.setState({
+				onSelectionChangeHandlers: store
+					.getState()
+					.onSelectionChangeHandlers.filter((fn) => fn !== onChange)
+			});
+		};
+	}, [onChange, store]);
 }

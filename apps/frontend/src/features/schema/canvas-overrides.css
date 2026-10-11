@@ -16,7 +16,8 @@
  * réutilise `--sqlnest-accent`. Fond très translucide pour ne pas
  * masquer les tables sous le rectangle en cours de dessin.
  */
-.react-flow__selection {
+.react-flow__selection,
+.nest-selection {
 	background: rgba(13, 153, 255, 0.08) !important;
 	border: 1px solid var(--sqlnest-accent) !important;
 }
@@ -107,10 +108,12 @@
  * « frame » ; on ne cible QUE le pane (pas les nodes) pour garder le grab
  * cursor sur les tables draggables.
  */
-.canvas-tool-frame .react-flow__pane {
+.canvas-tool-frame .react-flow__pane,
+.canvas-tool-frame .nest-pane {
 	cursor: crosshair !important;
 }
-.canvas-tool-frame .react-flow__selection {
+.canvas-tool-frame .react-flow__selection,
+.canvas-tool-frame .nest-selection {
 	/* Filet bleu accent pour appuyer la sémantique « frame draw » — on
 	 * réutilise `--sqlnest-accent` déjà utilisé pour la sélection normale
 	 * mais on pousse l'opacité et le trait pour distinguer visuellement. */
