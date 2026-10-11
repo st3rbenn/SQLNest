@@ -163,30 +163,28 @@ export type NodeProps<TNode extends Node = Node> = Pick<
 	zIndex: number;
 };
 
-export type EdgeProps<TEdge extends Edge = Edge> = Pick<
-	TEdge,
-	| "id"
-	| "animated"
-	| "data"
-	| "style"
-	| "selected"
-	| "source"
-	| "target"
-	| "selectable"
-	| "deletable"
-> & {
+export type EdgeProps<TEdge extends Edge = Edge> = {
+	id: string;
+	source: string;
+	target: string;
+	data?: TEdge["data"] | undefined;
+	style?: CSSProperties | undefined;
+	selected?: boolean | undefined;
+	animated?: boolean | undefined;
+	selectable?: boolean | undefined;
+	deletable?: boolean | undefined;
 	sourceX: number;
 	sourceY: number;
 	targetX: number;
 	targetY: number;
 	sourcePosition: Position;
 	targetPosition: Position;
-	sourceHandleId?: string | null;
-	targetHandleId?: string | null;
-	markerStart?: string;
-	markerEnd?: string;
-	interactionWidth?: number;
-	label?: string;
+	sourceHandleId?: string | null | undefined;
+	targetHandleId?: string | null | undefined;
+	markerStart?: string | undefined;
+	markerEnd?: string | undefined;
+	interactionWidth?: number | undefined;
+	label?: string | undefined;
 };
 
 export type NodeDimensionChange = {

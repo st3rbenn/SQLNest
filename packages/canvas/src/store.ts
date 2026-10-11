@@ -87,6 +87,7 @@ export type CanvasState = {
 	nodeLookup: Map<string, InternalNode>;
 	nodesInitialized: boolean;
 	edges: Edge[];
+	edgeLookup: Map<string, Edge>;
 	elevateNodesOnSelect: boolean;
 	onNodesChange: ((changes: NodeChange[]) => void) | null;
 	paneDragging: boolean;
@@ -224,6 +225,7 @@ export function createCanvasStore(init: {
 		nodeLookup: new Map(),
 		nodesInitialized: false,
 		edges: [],
+		edgeLookup: new Map(),
 		elevateNodesOnSelect: true,
 		onNodesChange: null,
 		paneDragging: false,
@@ -294,7 +296,8 @@ export function createCanvasStore(init: {
 		}
 	};
 
-	const setEdges = (edges: Edge[]) => setState({ edges });
+	const setEdges = (edges: Edge[]) =>
+		setState({ edges, edgeLookup: new Map(edges.map((e) => [e.id, e])) });
 
 	// Chaque appel re-mesure taille ET handles (ResizeObserver comme
 	// changement de position de handle passent par ici).

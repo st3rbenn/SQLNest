@@ -10,6 +10,8 @@ export const canvasClass = {
 	edges: "nest-edges",
 	edge: "nest-edge",
 	edgePath: "nest-edge-path",
+	marker: "nest-marker",
+	arrowhead: "nest-arrowhead",
 	edgeLabelRenderer: "nest-edgelabel-renderer",
 	viewportPortal: "nest-viewport-portal",
 	selection: "nest-selection",

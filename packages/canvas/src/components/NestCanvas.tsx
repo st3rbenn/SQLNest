@@ -25,6 +25,7 @@ import {
 } from "../types";
 import { isMacOs } from "../wheel";
 import { ConnectionLine } from "./ConnectionLine";
+import { EdgeRenderer } from "./EdgeRenderer";
 import {
 	DEFAULT_MAX_ZOOM,
 	DEFAULT_MIN_ZOOM,
@@ -147,6 +148,7 @@ function GraphView(
 ) {
 	const {
 		nodeTypes,
+		edgeTypes,
 		defaultViewport = DEFAULT_VIEWPORT,
 		panOnScroll = false,
 		panOnScrollSpeed = 0.5,
@@ -212,6 +214,10 @@ function GraphView(
 				onPaneContextMenu={onPaneContextMenu}
 			>
 				<ViewportLayer>
+					<EdgeRenderer
+						edgeTypes={edgeTypes}
+						onlyRenderVisibleElements={onlyRenderVisibleElements}
+					/>
 					<ConnectionLine />
 					<div className={canvasClass.edgeLabelRenderer} />
 					<NodeRenderer
@@ -287,6 +293,10 @@ function A11yDescriptions() {
 			<div id={`nest-node-desc-${instanceId}`} style={hiddenStyle}>
 				Entrée ou Espace pour sélectionner un node, flèches pour le déplacer,
 				Retour arrière pour le supprimer, Échap pour annuler.
+			</div>
+			<div id={`nest-edge-desc-${instanceId}`} style={hiddenStyle}>
+				Entrée ou Espace pour sélectionner un edge, Retour arrière pour le
+				supprimer, Échap pour annuler.
 			</div>
 			<div aria-live="assertive" aria-atomic="true" style={liveStyle}>
 				{message}

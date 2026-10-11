@@ -32,9 +32,6 @@ function readEngine(): "nest" | "rf" {
 export const canvasEngine = readEngine();
 const useNest = canvasEngine === "nest";
 
-// Pas encore porté sur `@sqlnest/canvas` : neutralisé en mode nest.
-const Nothing = () => null;
-
 export const NestCanvas = (
 	useNest ? nest.NestCanvas : rf.ReactFlow
 ) as typeof rf.ReactFlow;
@@ -62,8 +59,11 @@ export const NodeResizer = (
 	useNest ? nest.NodeResizer : rf.NodeResizer
 ) as typeof rf.NodeResizer;
 export const EdgeLabelRenderer = (
-	useNest ? Nothing : rf.EdgeLabelRenderer
+	useNest ? nest.EdgeLabelRenderer : rf.EdgeLabelRenderer
 ) as typeof rf.EdgeLabelRenderer;
+export const getSmoothStepPath = (
+	useNest ? nest.getSmoothStepPath : rf.getSmoothStepPath
+) as typeof rf.getSmoothStepPath;
 export const useOnSelectionChange = (
 	useNest ? nest.useOnSelectionChange : rf.useOnSelectionChange
 ) as typeof rf.useOnSelectionChange;
@@ -75,12 +75,7 @@ export type {
 	NodeChange,
 	NodeProps
 } from "@xyflow/react";
-export {
-	getSmoothStepPath,
-	MarkerType,
-	Position,
-	SelectionMode
-} from "@xyflow/react";
+export { MarkerType, Position, SelectionMode } from "@xyflow/react";
 
 /** Classes DOM du moteur lues par l'app (tween CSS, détection du pane). */
 export const canvasClass = useNest

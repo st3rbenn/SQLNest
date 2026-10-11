@@ -202,6 +202,60 @@
 	transform: translate(50%, -50%);
 }
 
+.nest-edge-path {
+	stroke: var(--nest-edge-stroke, var(--nest-edge-stroke-default));
+	stroke-width: var(
+		--nest-edge-stroke-width,
+		var(--nest-edge-stroke-width-default)
+	);
+	fill: none;
+}
+.nest-canvas .nest-edges {
+	position: absolute;
+}
+.nest-canvas .nest-edges svg {
+	overflow: visible;
+	position: absolute;
+	pointer-events: none;
+}
+.nest-edge {
+	pointer-events: visibleStroke;
+}
+.nest-edge.selectable {
+	cursor: pointer;
+}
+.nest-edge.animated path {
+	stroke-dasharray: 5;
+	animation: nest-dashdraw 0.5s linear infinite;
+}
+.nest-edge.inactive {
+	pointer-events: none;
+}
+.nest-edge.selected,
+.nest-edge:focus,
+.nest-edge:focus-visible {
+	outline: none;
+}
+.nest-edge.selected .nest-edge-path,
+.nest-edge.selectable:focus .nest-edge-path,
+.nest-edge.selectable:focus-visible .nest-edge-path {
+	stroke: var(
+		--nest-edge-stroke-selected,
+		var(--nest-edge-stroke-selected-default)
+	);
+}
+.nest-arrowhead polyline {
+	stroke: var(--nest-edge-stroke, var(--nest-edge-stroke-default));
+}
+.nest-arrowhead polyline.arrowclosed {
+	fill: var(--nest-edge-stroke, var(--nest-edge-stroke-default));
+}
+@keyframes nest-dashdraw {
+	from {
+		stroke-dashoffset: 10;
+	}
+}
+
 svg.nest-connectionline {
 	z-index: 1001;
 	overflow: visible;

@@ -1,4 +1,5 @@
 export { Background, type BackgroundProps } from "./components/Background";
+export { EdgeLabelRenderer } from "./components/EdgeLabelRenderer";
 export { Handle, type HandleProps } from "./components/Handle";
 export { NestCanvas, type NestCanvasProps } from "./components/NestCanvas";
 export { NestCanvasProvider } from "./components/NestCanvasProvider";
@@ -19,7 +20,7 @@ export {
 	useOnSelectionChange,
 	useViewport
 } from "./hooks";
-export { getBezierPath } from "./paths";
+export { getBezierPath, getSmoothStepPath } from "./paths";
 export type {
 	ControlPosition,
 	ResizeParams,
