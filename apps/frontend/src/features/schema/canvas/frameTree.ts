@@ -387,6 +387,25 @@ const union = (a: FrameRect, b: FrameRect): FrameRect => {
 	};
 };
 
+/** `rect` agrandi pour contenir chaque membre qui en dépasse (marge `pad`). */
+export function growRectToContain(
+	rect: FrameRect,
+	members: readonly FrameRect[],
+	pad: number
+): FrameRect {
+	let out = rect;
+	for (const m of members) {
+		if (containsRect(out, m)) continue;
+		out = union(out, {
+			x: m.x - pad,
+			y: m.y - pad,
+			width: m.width + pad * 2,
+			height: m.height + pad * 2
+		});
+	}
+	return out;
+}
+
 /**
  * Agrandit `key` puis ses ancêtres pour contenir `rect` (marge `pad`), sans
  * jamais les rétrécir. Sert quand une table ou un frame rejoint un frame

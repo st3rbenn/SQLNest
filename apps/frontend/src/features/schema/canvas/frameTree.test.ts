@@ -10,6 +10,7 @@ import {
 	frameDescendants,
 	frameRectsFromContent,
 	growFramesToContain,
+	growRectToContain,
 	normalizeFrames,
 	withFrameParents
 } from "./frameTree";
@@ -378,6 +379,19 @@ describe("géométrie des frames", () => {
 			width: 948,
 			height: 748
 		});
+	});
+
+	it("lasso : agrandi pour une table qui dépasse, inchangé sinon", () => {
+		const drawn = { x: 0, y: 0, width: 300, height: 200 };
+		const inside = { x: 10, y: 10, width: 100, height: 50 };
+		expect(growRectToContain(drawn, [inside], 24)).toBe(drawn);
+		expect(
+			growRectToContain(
+				drawn,
+				[inside, { x: 250, y: 150, width: 200, height: 100 }],
+				24
+			)
+		).toEqual({ x: 0, y: 0, width: 474, height: 274 });
 	});
 
 	it("déjà contenu : rien ne change", () => {
