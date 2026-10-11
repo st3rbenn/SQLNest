@@ -218,7 +218,30 @@ describe("structure DOM", () => {
 			"nest-viewport-portal"
 		]);
 		const pattern = root.querySelector("pattern") as SVGPatternElement;
-		expect(pattern.id).toBe(`pattern-${api().store.getState().instanceId}`);
+		expect(pattern.id).toBe("pattern-1");
+	});
+
+	it("préfixe des ids : l'id du canvas, « 1 » par défaut, à chaque montage", () => {
+		const first = render(
+			<NestCanvas>
+				<Probe />
+			</NestCanvas>
+		);
+		expect(api().store.getState().instanceId).toBe("1");
+		first.unmount();
+		const second = render(
+			<NestCanvas>
+				<Probe />
+			</NestCanvas>
+		);
+		expect(api().store.getState().instanceId).toBe("1");
+		second.unmount();
+		render(
+			<NestCanvas id="schema">
+				<Probe />
+			</NestCanvas>
+		);
+		expect(api().store.getState().instanceId).toBe("schema");
 	});
 });
 

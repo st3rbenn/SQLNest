@@ -72,7 +72,9 @@ export type DragItem = {
 };
 
 export type CanvasState = {
-	/** Préfixe des ids SVG (patterns, markers) — unique par instance. */
+	/** Préfixe des ids DOM (handles, markers, motif, descriptions) : l'`id`
+	 *  du canvas, « 1 » par défaut. Deux canvas sur une page doivent avoir
+	 *  chacun leur `id`. */
 	instanceId: string;
 	width: number;
 	height: number;
@@ -141,8 +143,6 @@ const selectChange = (id: string, selected: boolean): NodeSelectionChange => ({
 	selected
 });
 
-let instanceCount = 0;
-
 function zFor(node: Node, elevate: boolean): number {
 	const zIndex =
 		typeof node.zIndex === "number" && Number.isFinite(node.zIndex)
@@ -210,9 +210,8 @@ export function createCanvasStore(init: {
 	maxZoom: number;
 	transform: Transform;
 }): CanvasStore {
-	instanceCount += 1;
 	let state: CanvasState = {
-		instanceId: String(instanceCount),
+		instanceId: "1",
 		width: 0,
 		height: 0,
 		transform: init.transform,

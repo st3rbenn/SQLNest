@@ -95,6 +95,7 @@ const DEFAULT_VIEWPORT: Viewport = { x: 0, y: 0, zoom: 1 };
 
 /** Recopie les props dans le store après rendu. */
 function StoreUpdater({
+	id,
 	nodes,
 	edges,
 	onNodesChange,
@@ -106,6 +107,7 @@ function StoreUpdater({
 	onNodeDragStop,
 	onNodesDelete
 }: {
+	id: string | undefined;
 	nodes: Node[] | undefined;
 	edges: Edge[] | undefined;
 	onNodesChange: ((changes: NodeChange[]) => void) | undefined;
@@ -118,6 +120,9 @@ function StoreUpdater({
 	onNodesDelete: ((nodes: Node[]) => void) | undefined;
 }) {
 	const store = useStoreApi();
+	useEffect(() => {
+		store.setState({ instanceId: id || "1" });
+	}, [store, id]);
 	useEffect(() => {
 		store.setState({
 			minZoom,
@@ -348,6 +353,7 @@ export function NestCanvas<
 		>
 			<StoreContext.Provider value={store}>
 				<StoreUpdater
+					id={id}
 					nodes={nodes as Node[] | undefined}
 					edges={edges as Edge[] | undefined}
 					onNodesChange={
