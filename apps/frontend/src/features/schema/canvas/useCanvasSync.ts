@@ -334,7 +334,10 @@ export function useCanvasSync(opts: UseCanvasSyncOptions): UseCanvasSyncReturn {
 	// + le flush pré-unmount (qui doit pouvoir déclencher sans le hook
 	// React de RQ).
 	const doPush = useCallback(
-		async (pending: PendingPush): Promise<void> => {
+		async (
+			pending: PendingPush,
+			options: { readonly keepalive?: boolean } = {}
+		): Promise<void> => {
 			setSyncStatus("saving");
 			try {
 				const payload = JSON.parse(pending.serialized) as Record<
@@ -347,7 +350,8 @@ export function useCanvasSync(opts: UseCanvasSyncOptions): UseCanvasSyncReturn {
 				const result = await putCanvasState(
 					pending.connectionId,
 					payload,
-					teamSlug as string
+					teamSlug as string,
+					options
 				);
 				// Baseline mise à jour APRÈS confirmation du serveur : si un autre
 				// change arrive entre-temps, le comparateur du push effect verra
@@ -448,23 +452,18 @@ export function useCanvasSync(opts: UseCanvasSyncOptions): UseCanvasSyncReturn {
 					connectionId: pending.connectionId,
 					payload: JSON.parse(pending.serialized) as Record<string, unknown>
 				});
-				const url = `${window.CONTEXT.apiBaseUrl}/api/teams/${encodeURIComponent(teamSlug)}/canvas-state`;
 
 				if (body.length < KEEPALIVE_MAX_BODY_BYTES) {
-					// `keepalive:true` = la request continue même si le document
-					// est en train de disparaître. On ne peut pas awaiter le
-					// résultat (l'onglet ferme) — on catch pour ne pas leak.
-					fetch(url, {
-						method: "PUT",
-						credentials: "include",
-						headers: { "Content-Type": "application/json" },
-						body,
-						keepalive: true
-					}).catch(() => {
-						// Silencieux : rien à faire, l'onglet part.
-					});
+					// Même chemin que le push débouncé : sans la mise à jour de
+					// baseline au retour du PUT, un état ramené ensuite à celui
+					// d'avant le flush (ancre réinitialisée, table remise en
+					// place) passait pour déjà synchronisé et n'était jamais
+					// envoyé. Onglet fermé : la réponse n'arrive pas, rien à faire.
+					void doPushRef.current(pending, { keepalive: true });
 					return;
 				}
+
+				const url = `${window.CONTEXT.apiBaseUrl}/api/teams/${encodeURIComponent(teamSlug)}/canvas-state`;
 
 				// Payload > seuil keepalive : tenter sendBeacon si dispo. Notre
 				// backend attend PUT, sendBeacon force POST — la request

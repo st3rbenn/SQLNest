@@ -58,17 +58,21 @@ export async function fetchCanvasState(
  *
  * Le payload est envoyé opaque — sérialisation gérée par `canvasPayload.ts`
  * en amont. Retourne `updatedAt` pour l'UI `sauvegardé il y a X secondes`.
+ * `keepalive` : la requête survit à la fermeture de l'onglet (flush
+ * pagehide / visibilitychange de `useCanvasSync`).
  */
 export async function putCanvasState(
 	connectionId: string,
 	payload: Record<string, unknown>,
-	teamSlug: string
+	teamSlug: string,
+	options: { readonly keepalive?: boolean } = {}
 ): Promise<CanvasStatePutResponse> {
 	const res = await fetch(endpoint(teamSlug), {
 		method: "PUT",
 		credentials: "include",
 		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({ connectionId, payload })
+		body: JSON.stringify({ connectionId, payload }),
+		...(options.keepalive === true ? { keepalive: true } : {})
 	});
 	if (!res.ok) {
 		throw new Error(`canvas-state PUT failed: HTTP ${res.status}`);

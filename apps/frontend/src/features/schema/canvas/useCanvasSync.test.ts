@@ -374,6 +374,63 @@ describe("useCanvasSync", () => {
 		expect(flushBody.payload.positions).toEqual({ users: { x: 42, y: 42 } });
 	});
 
+	it("flush à l'onglet caché puis retour à l'état précédent → le retour est poussé", async () => {
+		// Ancre de FK déplacée, panneau caché (flush keepalive), puis
+		// double-clic qui réinitialise l'ancre : l'état revient à celui
+		// d'avant le flush, qui n'est plus celui du serveur.
+		fetchMock.mockResolvedValueOnce(mockResponse(404, {}));
+		fetchMock.mockResolvedValueOnce(
+			mockResponse(200, { updatedAt: "2026-01-01T00:00:04.000Z" })
+		);
+		fetchMock.mockResolvedValueOnce(
+			mockResponse(200, { updatedAt: "2026-01-01T00:00:05.000Z" })
+		);
+
+		const initialOpts = makeOpts();
+		const { rerender } = renderHook(
+			(props: UseCanvasSyncOptions) => useCanvasSync(props),
+			{ wrapper: makeWrapper(), initialProps: initialOpts }
+		);
+		await waitFor(() => {
+			expect(fetchMock).toHaveBeenCalledTimes(1);
+		});
+		await new Promise((r) => setTimeout(r, 0));
+
+		rerender({
+			...initialOpts,
+			edgeAnchors: { "e0-album-artist": { source: "bottom" } }
+		});
+		await new Promise((r) => setTimeout(r, 0));
+
+		Object.defineProperty(document, "visibilityState", {
+			configurable: true,
+			get: () => "hidden"
+		});
+		try {
+			await act(async () => {
+				document.dispatchEvent(new Event("visibilitychange"));
+				await new Promise((r) => setTimeout(r, 0));
+			});
+		} finally {
+			Reflect.deleteProperty(document, "visibilityState");
+		}
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+		expect(fetchMock.mock.calls[1]?.[1]?.keepalive).toBe(true);
+
+		vi.useFakeTimers();
+		rerender(initialOpts);
+		await act(async () => {
+			vi.advanceTimersByTime(CANVAS_SYNC_DEBOUNCE_MS);
+		});
+		vi.useRealTimers();
+
+		expect(fetchMock).toHaveBeenCalledTimes(3);
+		const resetBody = JSON.parse(
+			(fetchMock.mock.calls[2]?.[1]?.body as string) ?? "{}"
+		) as { readonly payload: { readonly edgeAnchors: AnchorMap } };
+		expect(resetBody.payload.edgeAnchors).toEqual({});
+	});
+
 	// ─── Race hydratation ↔ push (H1) ─────────────────────────────────
 	it("rerender pendant query.isFetching → gestes user préservés (replaceAll pas appelé si divergence détectée)", async () => {
 		// Contrôle manuel du resolve du fetch : on rend l'user actif AVANT
