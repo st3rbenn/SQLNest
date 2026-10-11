@@ -18,10 +18,6 @@ export interface Frame {
 	readonly rect?: FrameRect;
 	/** Frame parent (frames imbriqués). Absent : frame racine. */
 	readonly parentKey?: string;
-	/** Rogne ce qui dépasse. Absent : frame enregistré avant le rognage, où
-	 *  un membre pouvait déborder sans être caché — il grandit une fois au
-	 *  chargement pour contenir ses membres (`fitLegacyFrames`). */
-	readonly clips?: true;
 }
 
 /** Un rect contient un point (bounds inclusifs sur les 4 bords). */

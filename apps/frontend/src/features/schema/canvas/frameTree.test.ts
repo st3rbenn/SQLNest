@@ -6,7 +6,7 @@ import {
 	applyCanvasChanges,
 	canReparentNode,
 	deepestFrameContaining,
-	fitLegacyFrames,
+	fitFramesToMembers,
 	frameDescendants,
 	frameRectsFromContent,
 	growFramesToContain,
@@ -405,29 +405,39 @@ describe("géométrie des frames", () => {
 		).toBe(frames);
 	});
 
-	it("frame d'avant le rognage : grandit pour son membre qui dépasse, puis marqué", () => {
-		// t3 (1000, 0) membre de `legacy` mais hors de son rect.
-		const legacy = frame(
-			"legacy",
-			{ x: 900, y: 200, width: 400, height: 300 },
-			["t3"]
-		);
-		const [next] = fitLegacyFrames([legacy], tables, 24);
+	it("membre qui dépasse : le frame grandit pour le contenir", () => {
+		// t3 (1000, 0) membre de `old` mais hors de son rect.
+		const old = frame("old", { x: 900, y: 200, width: 400, height: 300 }, [
+			"t3"
+		]);
+		const [next] = fitFramesToMembers([old], tables, 24);
 		expect(next?.rect).toEqual({ x: 900, y: -24, width: 400, height: 524 });
-		expect(next?.clips).toBe(true);
 	});
 
-	it("membres déjà dedans : seulement marqué ; frame marqué : jamais regrandi", () => {
-		const inside = fitLegacyFrames(frames, tables, 24);
-		expect(inside.map((f) => f.rect)).toEqual(frames.map((f) => f.rect));
-		expect(inside.every((f) => f.clips)).toBe(true);
-		// Rétréci volontairement après coup : ce qui dépasse reste rogné.
-		const shrunk = inside.map((f) =>
-			f.key === "inner" && f.rect
-				? { ...f, rect: { ...f.rect, width: 20, height: 20 } }
-				: f
+	it("sous-frame qui dépasse : le parent grandit ; tout dedans : inchangé", () => {
+		expect(fitFramesToMembers(frames, tables, 24)).toBe(frames);
+		const out = frames.map((f) =>
+			f.key === "inner" && f.rect ? { ...f, rect: { ...f.rect, x: 700 } } : f
 		);
-		expect(fitLegacyFrames(shrunk, tables, 24)).toBe(shrunk);
+		const next = fitFramesToMembers(out, [], 24);
+		expect(next.find((f) => f.key === "outer")?.rect).toEqual({
+			x: 0,
+			y: 0,
+			width: 1024,
+			height: 600
+		});
+	});
+
+	it("taille mesurée prioritaire sur la taille par défaut", () => {
+		const measured = {
+			...table("m", 100, 100),
+			width: undefined,
+			measured: { width: 300, height: 50 }
+		} as unknown as TableNodeType;
+		const box = frame("box", { x: 0, y: 0, width: 500, height: 500 }, ["m"]);
+		expect(fitFramesToMembers([box], [measured], 24)[0]?.rect?.width).toBe(500);
+		const wide = { ...measured, measured: { width: 450, height: 50 } };
+		expect(fitFramesToMembers([box], [wide], 24)[0]?.rect?.width).toBe(574);
 	});
 
 	it("auto-layout : rects recalculés de bas en haut", () => {

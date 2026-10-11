@@ -93,8 +93,8 @@ export function frameDescendants(
 }
 
 const tableSize = (n: TableNodeType) => ({
-	width: n.width ?? NODE_WIDTH,
-	height: n.height ?? nodeHeight(n.data.collection)
+	width: n.measured?.width ?? n.width ?? NODE_WIDTH,
+	height: n.measured?.height ?? n.height ?? nodeHeight(n.data.collection)
 });
 
 // Même table, même frame au même endroit → même objet : le moteur ne re-rend
@@ -457,23 +457,22 @@ export function growFramesToContain(
 }
 
 /**
- * Frames enregistrés avant le rognage : un membre pouvait déborder sans être
- * caché. Chacun grandit une fois pour contenir ses membres, puis est marqué
- * `clips` — ce qu'un resize rogne ensuite reste rogné.
+ * Un frame ne cache pas ses membres : une table (visible) ou un sous-frame
+ * qui dépasse — payload enregistré avant que le resize s'arrête sur les
+ * enfants — fait grandir le frame pour le contenir (marge `pad`).
  */
-export function fitLegacyFrames(
+export function fitFramesToMembers(
 	frames: readonly Frame[],
 	tables: readonly TableNodeType[],
 	pad: number
 ): readonly Frame[] {
-	if (!frames.some((f) => f.rect && !f.clips)) return frames;
 	const byId = new Map(tables.map((t) => [t.id, t]));
 	let next = frames;
+	const rectOf = (key: string) => next.find((f) => f.key === key)?.rect;
 	for (const frame of frames) {
-		if (!frame.rect || frame.clips) continue;
 		for (const name of frame.collections) {
 			const table = byId.get(name);
-			const rect = next.find((f) => f.key === frame.key)?.rect;
+			const rect = rectOf(frame.key);
 			if (table === undefined || rect === undefined) continue;
 			const member = tableRect(table);
 			if (!containsRect(rect, member)) {
@@ -481,9 +480,15 @@ export function fitLegacyFrames(
 			}
 		}
 	}
-	return next.map((f) =>
-		f.rect && !f.clips ? { ...f, clips: true as const } : f
-	);
+	for (const frame of frames) {
+		if (frame.parentKey === undefined) continue;
+		const rect = rectOf(frame.key);
+		const parent = rectOf(frame.parentKey);
+		if (rect && parent && !containsRect(parent, rect)) {
+			next = growFramesToContain(next, frame.parentKey, rect, pad);
+		}
+	}
+	return next;
 }
 
 /** Rect absolu d'une table (taille par défaut si non mesurée). */
