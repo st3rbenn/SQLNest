@@ -11,7 +11,7 @@ export {
 } from "./components/NodeResizer";
 export { Panel, type PanelProps } from "./components/Panel";
 export { canvasClass } from "./constants";
-export { useNestStore, useNodeId } from "./context";
+export { useNestStore, useNodeId, useStoreApi } from "./context";
 export {
 	applyNodeChanges,
 	type NestCanvasInstance,

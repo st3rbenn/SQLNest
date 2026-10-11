@@ -1,4 +1,4 @@
-import { useNestCanvas } from "@sqlnest/canvas";
+import { useNestCanvas, useStoreApi } from "@sqlnest/canvas";
 import { showNotification } from "@sqlnest/design-system";
 import { useCallback, useRef } from "react";
 import type { CanvasTool } from "../CanvasToolbar";
@@ -31,9 +31,12 @@ export interface UseCanvasSelectionLassoReturn {
  *     englobées). Ça préserve la taille dessinée par l'utilisateur ET
  *     permet de créer un frame VIDE (utile comme conteneur à remplir plus
  *     tard).
- *   - Les tables touchées par le lasso sont lues via `getNodes()` (source
+ *   - Seules les tables entièrement dans le lasso entrent dans le frame (il
+ *     rogne ce qui dépasse). Elles sont lues via `getNodes()` (source
  *     directe du store) car notre state `selectedTables` n'est pas encore flushé
  *     au moment du release.
+ *   - Le lasso part du point d'appui : `onSelectionStart` ne survient qu'au
+ *     premier mouvement, déjà décalé.
  *   - Lasso < `MIN_FRAME_LASSO` (40 px) → no-op (évite les frames dégénérés
  *     d'un simple clic mal calibré).
  *   - Après création (ou échec silencieux), retour automatique à
@@ -44,18 +47,19 @@ export function useCanvasSelectionLasso(
 ): UseCanvasSelectionLassoReturn {
 	const { activeTool, setActiveTool, framesApi, history, clearSelection } =
 		opts;
-	const { getNodes, screenToFlowPosition } = useNestCanvas();
+	const { getNodes, getInternalNode, screenToFlowPosition } = useNestCanvas();
+	const store = useStoreApi();
 	const frameLassoStartRef = useRef<{ x: number; y: number } | null>(null);
 
 	const handleSelectionStart = useCallback(
 		(event: React.MouseEvent) => {
 			if (activeTool !== "frame") return;
-			frameLassoStartRef.current = screenToFlowPosition({
-				x: event.clientX,
-				y: event.clientY
-			});
+			const lasso = store.getState().userSelectionRect;
+			frameLassoStartRef.current = lasso
+				? { x: lasso.startX, y: lasso.startY }
+				: screenToFlowPosition({ x: event.clientX, y: event.clientY });
 		},
-		[activeTool, screenToFlowPosition]
+		[activeTool, store, screenToFlowPosition]
 	);
 
 	const handleSelectionEnd = useCallback(
@@ -83,8 +87,21 @@ export function useCanvasSelectionLasso(
 				width,
 				height
 			};
-			const selectedTableIds = getNodes()
-				.filter((n) => n.selected && n.type === "table")
+			const touched = getNodes().filter(
+				(n) => n.selected && n.type === "table"
+			);
+			const selectedTableIds = touched
+				.filter((n) => {
+					const node = getInternalNode(n.id);
+					if (node === undefined) return false;
+					const { x, y } = node.internals.positionAbsolute;
+					return (
+						x >= rect.x &&
+						y >= rect.y &&
+						x + (node.measured.width ?? 0) <= rect.x + rect.width &&
+						y + (node.measured.height ?? 0) <= rect.y + rect.height
+					);
+				})
 				.map((n) => n.id);
 			// Dessiné dans un frame : le nouveau frame s'y range.
 			const parent = deepestFrameContaining(framesApi.frames, rect);
@@ -102,13 +119,14 @@ export function useCanvasSelectionLasso(
 				autoClose: 2500
 			});
 			history.push();
-			if (selectedTableIds.length > 0) clearSelection();
+			if (touched.length > 0) clearSelection();
 			setActiveTool("select");
 		},
 		[
 			activeTool,
 			screenToFlowPosition,
 			getNodes,
+			getInternalNode,
 			framesApi,
 			history,
 			clearSelection,
