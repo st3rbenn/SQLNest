@@ -131,6 +131,8 @@ export function createResizer(
 	let bounds: DOMRect | null = null;
 	let prev: ResizeParams = { x: 0, y: 0, width: 0, height: 0 };
 	let start = { ...prev, pointerX: 0, pointerY: 0 };
+	/** Enfants directs : décalés à l'inverse quand le coin haut-gauche bouge. */
+	let children: { id: string; position: XYPosition }[] = [];
 
 	const flowPos = (e: MouseEvent | TouchEvent) => {
 		const { clientX, clientY } = clientPoint(e);
@@ -155,6 +157,13 @@ export function createResizer(
 			y: node.position.y ?? 0
 		};
 		start = { ...prev, pointerX: pointer.x, pointerY: pointer.y };
+		children = [];
+		for (const child of store
+			.getState()
+			.parentLookup.get(opts.nodeId)
+			?.values() ?? []) {
+			children.push({ id: child.id, position: { ...child.position } });
+		}
 		resized = false;
 		opts.onResizeStart?.(e as MouseEvent, { ...prev });
 	};
@@ -171,11 +180,23 @@ export function createResizer(
 		const yChanged = next.y !== prevY && heightChanged;
 		if (!xChanged && !yChanged && !widthChanged && !heightChanged) return;
 		const change: Partial<ResizeParams> = {};
+		const childChanges: NodeChange[] = [];
 		if (xChanged || yChanged) {
 			change.x = xChanged ? next.x : prev.x;
 			change.y = yChanged ? next.y : prev.y;
 			prev.x = change.x;
 			prev.y = change.y;
+			for (const child of children) {
+				child.position = {
+					x: child.position.x - (next.x - prevX),
+					y: child.position.y - (next.y - prevY)
+				};
+				childChanges.push({
+					id: child.id,
+					type: "position",
+					position: { ...child.position }
+				});
+			}
 		}
 		if (widthChanged || heightChanged) {
 			change.width = widthChanged ? next.width : prev.width;
@@ -207,6 +228,7 @@ export function createResizer(
 				dimensions: { width: change.width, height: change.height }
 			});
 		}
+		changes.push(...childChanges);
 		store.triggerNodeChanges(changes);
 	};
 

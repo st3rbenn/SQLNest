@@ -248,9 +248,10 @@ function NodeWrapperComponent({
 				.length > 0;
 		if (visible || panZoom === null) return;
 		const k = transform[2];
+		const { x, y } = node.internals.positionAbsolute;
 		panZoom.setViewport({
-			x: width / 2 - (node.position.x + dims.width / 2) * k,
-			y: height / 2 - (node.position.y + dims.height / 2) * k,
+			x: width / 2 - (x + dims.width / 2) * k,
+			y: height / 2 - (y + dims.height / 2) * k,
 			zoom: k
 		});
 	};

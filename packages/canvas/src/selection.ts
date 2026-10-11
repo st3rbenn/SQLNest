@@ -1,3 +1,4 @@
+import { calculateNodePosition } from "./parents";
 import type { CanvasStore, DragItem } from "./store";
 
 /**
@@ -38,15 +39,25 @@ export function moveSelectedNodes(
 	const items: DragItem[] = [];
 	const dx = direction.x * ARROW_STEP * factor;
 	const dy = direction.y * ARROW_STEP * factor;
-	for (const node of store.getState().nodeLookup.values()) {
+	const { nodeLookup } = store.getState();
+	for (const node of nodeLookup.values()) {
 		if (!node.selected || node.draggable === false) continue;
-		const next = {
-			x: node.internals.positionAbsolute.x + dx,
-			y: node.internals.positionAbsolute.y + dy
-		};
-		node.position = next;
-		node.internals.positionAbsolute = next;
-		items.push({ id: node.id, position: next, distance: { x: 0, y: 0 } });
+		const { position, positionAbsolute } = calculateNodePosition(
+			node,
+			{
+				x: node.internals.positionAbsolute.x + dx,
+				y: node.internals.positionAbsolute.y + dy
+			},
+			nodeLookup
+		);
+		node.position = position;
+		node.internals.positionAbsolute = positionAbsolute;
+		items.push({
+			id: node.id,
+			position,
+			positionAbsolute,
+			distance: { x: 0, y: 0 }
+		});
 	}
 	store.updateNodePositions(items, false);
 }

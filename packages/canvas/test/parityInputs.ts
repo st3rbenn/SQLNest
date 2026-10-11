@@ -304,7 +304,41 @@ export function parityInputs() {
 		return { node, handle, center: rand() > 0.5 };
 	});
 
+	// Forêts parent / enfant : parents toujours avant leurs enfants.
+	const forests = Array.from({ length: 30 }, () => {
+		const nodes: Node[] = [];
+		for (let i = 0; i < 25; i++) {
+			const parents = nodes.filter(() => rand() < 0.3);
+			const parent = rand() < 0.6 && parents.length > 0 ? pick(parents) : null;
+			nodes.push({
+				id: `n${i}`,
+				position: { x: between(-500, 1500), y: between(-500, 1500) },
+				data: {},
+				measured: { width: between(40, 600), height: between(40, 600) },
+				...(parent ? { parentId: parent.id } : {}),
+				...(rand() < 0.3 ? { zIndex: Math.floor(between(-3, 4)) } : {}),
+				...(rand() < 0.2 ? { selected: true } : {}),
+				...(rand() < 0.3 ? { expandParent: true } : {})
+			} as Node);
+		}
+		const moves = Array.from({ length: 6 }, () => ({
+			id: `n${Math.floor(between(0, 25))}`,
+			next: { x: between(-800, 1800), y: between(-800, 1800) }
+		}));
+		const expand = Array.from({ length: 4 }, () => ({
+			id: `n${Math.floor(between(0, 25))}`,
+			rect: {
+				x: between(-900, 1900),
+				y: between(-900, 1900),
+				width: between(40, 700),
+				height: between(40, 700)
+			}
+		}));
+		return { nodes, moves, expand };
+	});
+
 	return {
+		forests,
 		viewportForBounds,
 		points,
 		autoPan,

@@ -51,7 +51,10 @@ export type Node<
 	sourcePosition?: Position;
 	targetPosition?: Position;
 	dragHandle?: string;
+	/** Parent : `position` est alors relative à son coin haut-gauche. */
 	parentId?: string;
+	/** Poussé hors de son parent pendant un drag, l'enfant l'agrandit. */
+	expandParent?: boolean;
 	ariaLabel?: string;
 	ariaRole?: string;
 };

@@ -1,4 +1,5 @@
 import { autoPan, pointToFlow } from "./geometry";
+import { calculateNodePosition, isParentSelected } from "./parents";
 import type { CanvasStore, DragItem } from "./store";
 import type { Node, XYPosition } from "./types";
 
@@ -120,11 +121,19 @@ export function createNodeDrag(
 		const { nodeLookup } = store.getState();
 		let changed = false;
 		for (const [id, item] of dragItems) {
-			if (!nodeLookup.has(id)) continue;
-			const next = { x: pos.x - item.distance.x, y: pos.y - item.distance.y };
+			const node = nodeLookup.get(id);
+			if (node === undefined) continue;
+			const { position, positionAbsolute } = calculateNodePosition(
+				node,
+				{ x: pos.x - item.distance.x, y: pos.y - item.distance.y },
+				nodeLookup
+			);
 			changed =
-				changed || item.position.x !== next.x || item.position.y !== next.y;
-			item.position = next;
+				changed ||
+				item.position.x !== position.x ||
+				item.position.y !== position.y;
+			item.position = position;
+			item.positionAbsolute = positionAbsolute;
 		}
 		positionsChanged = positionsChanged || changed;
 		if (!changed) return;
@@ -156,12 +165,19 @@ export function createNodeDrag(
 		if (params.isSelectable) callbacks.onNodeMouseDown(params.nodeId);
 		lastPos = flowPos(e);
 		dragItems = new Map();
-		for (const [id, node] of store.getState().nodeLookup) {
-			if ((node.selected || id === params.nodeId) && node.draggable !== false) {
+		const { nodeLookup } = store.getState();
+		for (const [id, node] of nodeLookup) {
+			// Un enfant d'un parent sélectionné suit déjà son parent.
+			if (
+				(node.selected || id === params.nodeId) &&
+				(!node.parentId || !isParentSelected(node, nodeLookup)) &&
+				node.draggable !== false
+			) {
 				const abs = node.internals.positionAbsolute;
 				dragItems.set(id, {
 					id,
 					position: node.position,
+					positionAbsolute: abs,
 					distance: { x: lastPos.x - abs.x, y: lastPos.y - abs.y }
 				});
 			}

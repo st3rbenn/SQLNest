@@ -6,6 +6,13 @@ import {
 } from "./geometry";
 import { measureHandleBounds, renderedZoom } from "./handles";
 import type { PanZoom } from "./panZoom";
+import {
+	calculateZ,
+	type ExpandChild,
+	handleExpandParent,
+	type ParentLookup,
+	updateChildNode
+} from "./parents";
 import type {
 	ConnectionState,
 	Edge,
@@ -64,10 +71,14 @@ export type SelectionChangeHandler = (params: {
 	edges: Edge[];
 }) => void;
 
-/** Ce qu'un drag déplace : position courante + décalage pointeur → coin. */
+/**
+ * Ce qu'un drag déplace : position (relative au parent), position absolue
+ * et décalage pointeur → coin.
+ */
 export type DragItem = {
 	id: string;
 	position: XYPosition;
+	positionAbsolute: XYPosition;
 	distance: XYPosition;
 };
 
@@ -87,6 +98,8 @@ export type CanvasState = {
 	panZoom: PanZoom | null;
 	nodes: Node[];
 	nodeLookup: Map<string, InternalNode>;
+	/** Enfants directs par parent. */
+	parentLookup: ParentLookup;
 	nodesInitialized: boolean;
 	edges: Edge[];
 	edgeLookup: Map<string, Edge>;
@@ -143,25 +156,21 @@ const selectChange = (id: string, selected: boolean): NodeSelectionChange => ({
 	selected
 });
 
-function zFor(node: Node, elevate: boolean): number {
-	const zIndex =
-		typeof node.zIndex === "number" && Number.isFinite(node.zIndex)
-			? node.zIndex
-			: 0;
-	return zIndex + (node.selected && elevate ? SELECTED_NODE_Z : 0);
-}
-
 /**
  * Reconstruit le lookup interne depuis les nodes user. Un node user inchangé
- * (même référence) garde son node interne — et donc sa mesure.
+ * (même référence) garde son node interne — et donc sa mesure. Les enfants
+ * tirent position absolue et z de leur parent, adopté avant eux.
  */
 function adoptNodes(
 	nodes: Node[],
 	lookup: Map<string, InternalNode>,
+	parentLookup: ParentLookup,
 	elevate: boolean
 ): boolean {
 	const previous = new Map(lookup);
+	const selectedZ = elevate ? SELECTED_NODE_Z : 0;
 	lookup.clear();
+	parentLookup.clear();
 	let initialized = nodes.length > 0;
 	for (const userNode of nodes) {
 		const prev = previous.get(userNode.id);
@@ -179,7 +188,7 @@ function adoptNodes(
 								x: userNode.position.x,
 								y: userNode.position.y
 							},
-							z: zFor(userNode, elevate),
+							z: calculateZ(userNode, selectedZ),
 							userNode,
 							// Un node re-créé sans `measured` doit être re-mesuré.
 							...(prev?.internals.measuredOnce &&
@@ -194,6 +203,9 @@ function adoptNodes(
 						}
 					};
 		lookup.set(userNode.id, internal);
+		if (userNode.parentId) {
+			updateChildNode(internal, lookup, parentLookup, selectedZ);
+		}
 		if (
 			(internal.measured.width === undefined ||
 				internal.measured.height === undefined) &&
@@ -222,6 +234,7 @@ export function createCanvasStore(init: {
 		panZoom: null,
 		nodes: [],
 		nodeLookup: new Map(),
+		parentLookup: new Map(),
 		nodesInitialized: false,
 		edges: [],
 		edgeLookup: new Map(),
@@ -284,6 +297,7 @@ export function createCanvasStore(init: {
 		const initialized = adoptNodes(
 			nodes,
 			state.nodeLookup,
+			state.parentLookup,
 			state.elevateNodesOnSelect
 		);
 		const queued = state.fitViewQueued;
@@ -407,18 +421,44 @@ export function createCanvasStore(init: {
 		);
 	};
 
+	// Un enfant `expandParent` ne passe pas au-dessus / à gauche de son
+	// parent : c'est le parent qui s'agrandit (cf. `handleExpandParent`).
 	const updateNodePositions = (
 		items: Iterable<DragItem>,
 		dragging: boolean
 	) => {
-		const changes: NodePositionChange[] = [];
+		const { nodeLookup, parentLookup } = state;
+		const changes: NodeChange[] = [];
+		const expandChildren: ExpandChild[] = [];
 		for (const item of items) {
-			changes.push({
+			const node = nodeLookup.get(item.id);
+			const expandParent = Boolean(node?.expandParent && node?.parentId);
+			const change: NodePositionChange = {
 				id: item.id,
 				type: "position",
-				position: item.position,
+				position: expandParent
+					? { x: Math.max(0, item.position.x), y: Math.max(0, item.position.y) }
+					: item.position,
 				dragging
-			});
+			};
+			if (expandParent && node?.parentId) {
+				const { width, height } = node.measured;
+				expandChildren.push({
+					id: item.id,
+					parentId: node.parentId,
+					rect: {
+						...item.positionAbsolute,
+						width: width ?? 0,
+						height: height ?? 0
+					}
+				});
+			}
+			changes.push(change);
+		}
+		if (expandChildren.length > 0) {
+			changes.push(
+				...handleExpandParent(expandChildren, nodeLookup, parentLookup)
+			);
 		}
 		triggerNodeChanges(changes);
 	};
@@ -439,10 +479,19 @@ export function createCanvasStore(init: {
 		);
 	};
 
+	// Supprimer un parent emporte ses descendants supprimables.
 	const deleteSelectedNodes = () => {
-		const doomed = state.nodes.filter(
-			(n) => n.selected && n.deletable !== false
-		);
+		const doomed: Node[] = [];
+		const doomedIds = new Set<string>();
+		for (const n of state.nodes) {
+			if (n.deletable === false) continue;
+			const parentHit =
+				!n.selected && n.parentId !== undefined && doomedIds.has(n.parentId);
+			if (n.selected || parentHit) {
+				doomed.push(n);
+				doomedIds.add(n.id);
+			}
+		}
 		if (doomed.length === 0) return;
 		state.onNodesDelete?.(doomed);
 		triggerNodeChanges(
