@@ -1,4 +1,4 @@
-import { useReactFlow } from "@xyflow/react";
+import { canvasClass, useNestCanvas } from "../canvasEngine";
 import {
 	type RefObject,
 	startTransition,
@@ -85,7 +85,7 @@ export function useCanvasViewport(
 		consoleGap,
 		setFocusId
 	} = opts;
-	const { getViewport, setViewport } = useReactFlow();
+	const { getViewport, setViewport } = useNestCanvas();
 
 	const safeArea = useMemo<SafeArea>(
 		() => ({
@@ -149,7 +149,7 @@ export function useCanvasViewport(
 		const markPan = (e: PointerEvent) => {
 			const t = e.target as HTMLElement | null;
 			// Pan démarre depuis la pane vide (pas sur un nœud/edge/UI).
-			if (t?.classList.contains("react-flow__pane")) {
+			if (t?.classList.contains(canvasClass.pane)) {
 				userTouchedViewportRef.current = true;
 			}
 		};

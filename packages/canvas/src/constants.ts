@@ -1,0 +1,21 @@
+/** Classes DOM du moteur — base des surcharges CSS côté app. */
+export const canvasClass = {
+	root: "nest-canvas",
+	container: "nest-container",
+	renderer: "nest-renderer",
+	pane: "nest-pane",
+	viewport: "nest-viewport",
+	nodes: "nest-nodes",
+	node: "nest-node",
+	edges: "nest-edges",
+	edge: "nest-edge",
+	edgePath: "nest-edge-path",
+	edgeLabelRenderer: "nest-edgelabel-renderer",
+	viewportPortal: "nest-viewport-portal",
+	selection: "nest-selection",
+	background: "nest-background",
+	backgroundPattern: "nest-background-pattern",
+	panel: "nest-panel",
+	handle: "nest-handle",
+	resizeControl: "nest-resize-control"
+} as const;

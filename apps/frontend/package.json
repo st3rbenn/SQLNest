@@ -23,6 +23,7 @@
 		"@mantine/hooks": "^8.3.3",
 		"@mantine/notifications": "^8.3.3",
 		"@noble/curves": "^2.3.0",
+		"@sqlnest/canvas": "workspace:*",
 		"@sqlnest/design-system": "workspace:*",
 		"@sqlnest/snql": "workspace:*",
 		"@sqlnest/tunnel-protocol": "workspace:*",

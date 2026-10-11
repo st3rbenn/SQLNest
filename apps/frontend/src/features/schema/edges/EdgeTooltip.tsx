@@ -1,4 +1,4 @@
-import { EdgeLabelRenderer } from "@xyflow/react";
+import { EdgeLabelRenderer } from "../canvasEngine";
 import type { CSSProperties } from "react";
 import { humanFooter, humanRelation, joinPreview } from "../fkFormat";
 import type { Relation } from "../schema-model";

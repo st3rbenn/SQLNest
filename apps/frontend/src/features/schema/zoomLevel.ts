@@ -1,7 +1,7 @@
 /**
  * Niveau de détail (LOD) selon le zoom courant. À faible zoom la carte se
  * réduit — à très faible zoom seule la pastille reste. Le rendu de la table
- * lit ce niveau via `useStore((s) => levelForZoom(s.transform[2]))` :
+ * lit ce niveau via `useNestStore((s) => levelForZoom(s.transform[2]))` :
  * Zustand ne re-render la node que quand le NIVEAU change (pas à chaque
  * pixel de zoom).
  */

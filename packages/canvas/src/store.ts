@@ -1,0 +1,268 @@
+import {
+	getNodesInside,
+	hasDimensions,
+	internalNodesBounds,
+	viewportForBounds
+} from "./geometry";
+import type { PanZoom } from "./panZoom";
+import type {
+	Edge,
+	FitViewOptions,
+	InternalNode,
+	Node,
+	NodeChange,
+	NodeDimensionChange,
+	Transform
+} from "./types";
+
+export const SELECTED_NODE_Z = 1000;
+
+export type CanvasState = {
+	/** Préfixe des ids SVG (patterns, markers) — unique par instance. */
+	instanceId: string;
+	width: number;
+	height: number;
+	transform: Transform;
+	minZoom: number;
+	maxZoom: number;
+	/** Racine `.nest-canvas`, base des conversions écran → flow. */
+	domNode: HTMLDivElement | null;
+	viewportNode: HTMLDivElement | null;
+	panZoom: PanZoom | null;
+	nodes: Node[];
+	nodeLookup: Map<string, InternalNode>;
+	nodesInitialized: boolean;
+	edges: Edge[];
+	elevateNodesOnSelect: boolean;
+	onNodesChange: ((changes: NodeChange[]) => void) | null;
+	paneDragging: boolean;
+	fitViewQueued: FitViewOptions | null;
+};
+
+type Listener = () => void;
+type PartialState =
+	| Partial<CanvasState>
+	| ((s: CanvasState) => Partial<CanvasState>);
+
+export type CanvasStore = {
+	getState: () => CanvasState;
+	setState: (partial: PartialState) => void;
+	subscribe: (listener: Listener) => () => void;
+	setNodes: (nodes: Node[]) => void;
+	setEdges: (edges: Edge[]) => void;
+	updateNodeDimensions: (elements: Iterable<HTMLElement>) => void;
+	fitView: (options?: FitViewOptions) => Promise<boolean>;
+	triggerNodeChanges: (changes: NodeChange[]) => void;
+};
+
+let instanceCount = 0;
+
+function zFor(node: Node, elevate: boolean): number {
+	const zIndex =
+		typeof node.zIndex === "number" && Number.isFinite(node.zIndex)
+			? node.zIndex
+			: 0;
+	return zIndex + (node.selected && elevate ? SELECTED_NODE_Z : 0);
+}
+
+/**
+ * Reconstruit le lookup interne depuis les nodes user. Un node user inchangé
+ * (même référence) garde son node interne — et donc sa mesure.
+ */
+function adoptNodes(
+	nodes: Node[],
+	lookup: Map<string, InternalNode>,
+	elevate: boolean
+): boolean {
+	const previous = new Map(lookup);
+	lookup.clear();
+	let initialized = nodes.length > 0;
+	for (const userNode of nodes) {
+		const prev = previous.get(userNode.id);
+		const internal: InternalNode =
+			prev !== undefined && prev.internals.userNode === userNode
+				? prev
+				: {
+						...userNode,
+						measured: {
+							width: userNode.measured?.width,
+							height: userNode.measured?.height
+						},
+						internals: {
+							positionAbsolute: {
+								x: userNode.position.x,
+								y: userNode.position.y
+							},
+							z: zFor(userNode, elevate),
+							userNode,
+							// Un node re-créé sans `measured` doit être re-mesuré.
+							...(prev?.internals.measuredOnce &&
+							userNode.measured !== undefined
+								? { measuredOnce: true as const }
+								: {})
+						}
+					};
+		lookup.set(userNode.id, internal);
+		if (
+			(internal.measured.width === undefined ||
+				internal.measured.height === undefined) &&
+			!internal.hidden
+		) {
+			initialized = false;
+		}
+	}
+	return initialized;
+}
+
+export function createCanvasStore(init: {
+	minZoom: number;
+	maxZoom: number;
+	transform: Transform;
+}): CanvasStore {
+	instanceCount += 1;
+	let state: CanvasState = {
+		instanceId: String(instanceCount),
+		width: 0,
+		height: 0,
+		transform: init.transform,
+		minZoom: init.minZoom,
+		maxZoom: init.maxZoom,
+		domNode: null,
+		viewportNode: null,
+		panZoom: null,
+		nodes: [],
+		nodeLookup: new Map(),
+		nodesInitialized: false,
+		edges: [],
+		elevateNodesOnSelect: true,
+		onNodesChange: null,
+		paneDragging: false,
+		fitViewQueued: null
+	};
+	const listeners = new Set<Listener>();
+
+	const getState = () => state;
+	const setState = (partial: PartialState) => {
+		const next = typeof partial === "function" ? partial(state) : partial;
+		state = { ...state, ...next };
+		for (const l of listeners) l();
+	};
+	const subscribe = (listener: Listener) => {
+		listeners.add(listener);
+		return () => listeners.delete(listener);
+	};
+
+	const triggerNodeChanges = (changes: NodeChange[]) => {
+		if (changes.length > 0) state.onNodesChange?.(changes);
+	};
+
+	const runFitView = (options: FitViewOptions) => {
+		const { nodeLookup, width, height, minZoom, maxZoom, panZoom } = state;
+		if (panZoom === null || nodeLookup.size === 0) return;
+		const ids = options.nodes ? new Set(options.nodes.map((n) => n.id)) : null;
+		const toFit: InternalNode[] = [];
+		for (const n of nodeLookup.values()) {
+			const visible = options.includeHiddenNodes
+				? hasDimensions(n)
+				: Boolean(n.measured.width && n.measured.height && !n.hidden);
+			if (visible && (ids === null || ids.has(n.id))) toFit.push(n);
+		}
+		const viewport = viewportForBounds(
+			internalNodesBounds(toFit),
+			width,
+			height,
+			options.minZoom ?? minZoom,
+			options.maxZoom ?? maxZoom,
+			options.padding ?? 0.1
+		);
+		panZoom.setViewport(viewport, { duration: options.duration });
+	};
+
+	const setNodes = (nodes: Node[]) => {
+		const initialized = adoptNodes(
+			nodes,
+			state.nodeLookup,
+			state.elevateNodesOnSelect
+		);
+		const queued = state.fitViewQueued;
+		if (queued !== null && initialized) {
+			setState({ nodes, nodesInitialized: true, fitViewQueued: null });
+			runFitView(queued);
+		} else {
+			setState({ nodes, nodesInitialized: initialized });
+		}
+	};
+
+	const setEdges = (edges: Edge[]) => setState({ edges });
+
+	const updateNodeDimensions = (elements: Iterable<HTMLElement>) => {
+		const { nodeLookup } = state;
+		const changes: NodeDimensionChange[] = [];
+		let updated = false;
+		for (const el of elements) {
+			const id = el.getAttribute("data-id");
+			const node = id === null ? undefined : nodeLookup.get(id);
+			if (node === undefined || node.hidden) continue;
+			const width = el.offsetWidth;
+			const height = el.offsetHeight;
+			if (!width || !height) continue;
+			const changed =
+				node.measured.width !== width || node.measured.height !== height;
+			if (!changed && node.internals.measuredOnce) continue;
+			nodeLookup.set(node.id, {
+				...node,
+				measured: { width, height },
+				internals: { ...node.internals, measuredOnce: true }
+			});
+			updated = true;
+			if (changed)
+				changes.push({
+					id: node.id,
+					type: "dimensions",
+					dimensions: { width, height }
+				});
+		}
+		if (!updated) return;
+		const queued = state.fitViewQueued;
+		if (queued !== null) {
+			setState({ fitViewQueued: null });
+			runFitView(queued);
+		} else {
+			setState({});
+		}
+		triggerNodeChanges(changes);
+	};
+
+	// Différé à la frame suivante : les nodes posés dans le même tick sont
+	// adoptés d'abord. S'ils ne sont pas encore mesurés, la mesure déclenche
+	// le fit (cf. `updateNodeDimensions`).
+	const fitView = async (options: FitViewOptions = {}) => {
+		setState({ fitViewQueued: options });
+		requestAnimationFrame(() => {
+			if (state.fitViewQueued !== null) setNodes(state.nodes);
+		});
+		return true;
+	};
+
+	return {
+		getState,
+		setState,
+		subscribe,
+		setNodes,
+		setEdges,
+		updateNodeDimensions,
+		fitView,
+		triggerNodeChanges
+	};
+}
+
+/** Ids des nodes à rendre — tous, ou seulement ceux qui touchent l'écran. */
+export function visibleNodeIds(s: CanvasState, onlyVisible: boolean): string[] {
+	if (!onlyVisible) return Array.from(s.nodeLookup.keys());
+	return getNodesInside(
+		s.nodeLookup.values(),
+		{ x: 0, y: 0, width: s.width, height: s.height },
+		s.transform,
+		true
+	).map((n) => n.id);
+}

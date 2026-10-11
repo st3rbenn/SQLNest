@@ -1,5 +1,5 @@
 import { showNotification } from "@sqlnest/design-system";
-import { useReactFlow } from "@xyflow/react";
+import { useNestCanvas } from "../canvasEngine";
 import { useCallback, useRef } from "react";
 import type { CanvasTool } from "../CanvasToolbar";
 import type { FramesApi } from "../useFrames";
@@ -43,7 +43,7 @@ export function useCanvasSelectionLasso(
 ): UseCanvasSelectionLassoReturn {
 	const { activeTool, setActiveTool, framesApi, history, clearSelection } =
 		opts;
-	const { getNodes, screenToFlowPosition } = useReactFlow();
+	const { getNodes, screenToFlowPosition } = useNestCanvas();
 	const frameLassoStartRef = useRef<{ x: number; y: number } | null>(null);
 
 	const handleSelectionStart = useCallback(

@@ -1,4 +1,4 @@
-import type { Edge } from "@xyflow/react";
+import type { Edge } from "./canvasEngine";
 import ELK, {
 	type ElkExtendedEdge,
 	type ElkNode

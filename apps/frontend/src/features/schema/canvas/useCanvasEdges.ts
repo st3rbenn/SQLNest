@@ -1,4 +1,4 @@
-import type { Edge } from "@xyflow/react";
+import type { Edge } from "../canvasEngine";
 import { useMemo } from "react";
 import { bestHandles, type Side, spreadOffsets } from "../edgeRouting";
 import type { InteractiveEdgeData } from "../InteractiveEdge";

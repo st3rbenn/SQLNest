@@ -1,5 +1,5 @@
 import { IconBraces, IconChevronDown, IconChevronRight, IconPlus } from "@tabler/icons-react";
-import type { Node, NodeProps } from "@xyflow/react";
+import type { Node, NodeProps } from "../schema/canvasEngine";
 import { useState } from "react";
 import {
 	SYSTEM_BORDER,

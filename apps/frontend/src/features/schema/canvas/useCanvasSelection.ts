@@ -1,4 +1,4 @@
-import { type Node, useOnSelectionChange } from "@xyflow/react";
+import { type Node, useOnSelectionChange } from "../canvasEngine";
 import { useCallback, useRef, useState } from "react";
 
 export interface UseCanvasSelectionOptions<N extends Node> {

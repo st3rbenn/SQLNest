@@ -1,5 +1,5 @@
 import { IconLock } from "@tabler/icons-react";
-import { Handle, NodeResizer, Position } from "@xyflow/react";
+import { Handle, NodeResizer, Position } from "../canvasEngine";
 import { type CSSProperties, Fragment } from "react";
 
 /** Palette système — distincte des tables user (bleu declared / ambre

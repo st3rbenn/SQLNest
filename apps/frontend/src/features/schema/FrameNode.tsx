@@ -3,8 +3,8 @@ import {
 	type Node,
 	type NodeProps,
 	NodeResizer,
-	useStore
-} from "@xyflow/react";
+	useNestStore
+} from "./canvasEngine";
 import { useState } from "react";
 import type { Frame, FrameRect } from "./frames";
 
@@ -66,10 +66,10 @@ export function FrameNode({
 	const [draft, setDraft] = useState(frame.label);
 
 	// Zoom-invariance du badge : il doit garder une taille lisible EN
-	// PIXELS ÉCRAN quelle que soit la profondeur de zoom. `useStore` avec
+	// PIXELS ÉCRAN quelle que soit la profondeur de zoom. `useNestStore` avec
 	// un sélecteur scalaire ne re-render que si la valeur change → ok.
 	// Cappé à [0.5, 2.5] pour éviter les extrêmes.
-	const zoom = useStore((s) => s.transform[2]);
+	const zoom = useNestStore((s) => s.transform[2]);
 	const badgeScale = Math.max(0.5, Math.min(2.5, 1 / zoom));
 
 	const startEdit = () => {

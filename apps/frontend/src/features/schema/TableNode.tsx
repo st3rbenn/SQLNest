@@ -6,8 +6,8 @@ import {
 	type NodeProps,
 	NodeResizer,
 	Position,
-	useStore
-} from "@xyflow/react";
+	useNestStore
+} from "./canvasEngine";
 import { type CSSProperties, Fragment } from "react";
 import { colorFor } from "./colors";
 import type { Side } from "./edgeRouting";
@@ -136,7 +136,7 @@ export function TableNode({
 }: NodeProps<TableNodeType>) {
 	const { collection, dimmed, focused, matched, hoverHighlight, onResizeEnd } =
 		data;
-	const level = useStore(levelSelector);
+	const level = useNestStore(levelSelector);
 	const inferred = collection.source === "inferred";
 	const color = colorFor(collection.name);
 	const contentHeight = nodeHeight(collection);

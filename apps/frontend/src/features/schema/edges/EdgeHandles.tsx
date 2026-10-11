@@ -1,4 +1,4 @@
-import { EdgeLabelRenderer } from "@xyflow/react";
+import { EdgeLabelRenderer } from "../canvasEngine";
 import type { CSSProperties, MouseEvent, PointerEvent } from "react";
 import type { Side } from "../edgeRouting";
 

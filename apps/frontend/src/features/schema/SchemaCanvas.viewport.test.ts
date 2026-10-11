@@ -5,6 +5,7 @@ import {
 	overviewViewport,
 	tablesBounds
 } from "./canvas/viewport";
+import { canvasClass } from "./canvasEngine";
 import type { TableNodeType } from "./TableNode";
 
 function n(
@@ -114,7 +115,7 @@ describe("focusZoom", () => {
 
 describe("animateViewport", () => {
 	beforeEach(() => {
-		document.body.innerHTML = '<div class="react-flow__viewport"></div>';
+		document.body.innerHTML = `<div class="${canvasClass.viewport}"></div>`;
 	});
 
 	it("applies `from` then `to` on the viewport", () => {
@@ -133,7 +134,7 @@ describe("animateViewport", () => {
 			320,
 			() => {}
 		);
-		const vp = document.querySelector<HTMLElement>(".react-flow__viewport");
+		const vp = document.querySelector<HTMLElement>(`.${canvasClass.viewport}`);
 		expect(vp?.style.transition).toContain("transform 320ms");
 	});
 
@@ -145,7 +146,7 @@ describe("animateViewport", () => {
 			() => {}
 		);
 		handle.cancel();
-		const vp = document.querySelector<HTMLElement>(".react-flow__viewport");
+		const vp = document.querySelector<HTMLElement>(`.${canvasClass.viewport}`);
 		expect(vp?.style.transition).toBe("");
 	});
 

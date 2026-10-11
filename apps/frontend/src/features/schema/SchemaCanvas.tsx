@@ -4,14 +4,13 @@ import {
 	Background,
 	type Edge,
 	MarkerType,
+	NestCanvas,
+	NestCanvasProvider,
 	Panel,
-	ReactFlow,
-	ReactFlowProvider,
 	SelectionMode,
-	useNodesState,
-	useReactFlow
-} from "@xyflow/react";
-import "@xyflow/react/dist/style.css";
+	useNestCanvas,
+	useNodesState
+} from "./canvasEngine";
 import "./canvas-overrides.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useCurrentUser } from "../auth/sessionQuery";
@@ -165,7 +164,7 @@ function CanvasInner({
 	dbName,
 	teamSlug
 }: CanvasInnerProps) {
-	const rf = useReactFlow();
+	const rf = useNestCanvas();
 	// Layout ELK — async, mais caché par connectionId dans le queryClient
 	// TanStack. Sans ça, chaque re-mount (retour gallery → canvas) refait
 	// un compute ELK à froid (~500ms-1s) → flick visible avant le rendu
@@ -984,7 +983,7 @@ function CanvasInner({
 			{/* Pendant le calcul du layout ELK, on garde juste un fond
 			 * opaque (pas de texte) — le canvas apparaît d'un coup quand
 			 * ELK settle. Overlay z-index 3 = juste au-dessus du fond
-			 * ReactFlow, mais sous l'overlay canvasReady (z-index 100). */}
+			 * NestCanvas, mais sous l'overlay canvasReady (z-index 100). */}
 			{base === null ? (
 				<div
 					style={{
@@ -1012,7 +1011,7 @@ function CanvasInner({
 				/>
 			)}
 
-			<ReactFlow
+			<NestCanvas
 				nodes={displayNodes as unknown as TableNodeType[]}
 				edges={displayEdges}
 				onNodesChange={(changes) => {
@@ -1194,7 +1193,7 @@ function CanvasInner({
 						</button>
 					</Panel>
 				) : null}
-			</ReactFlow>
+			</NestCanvas>
 
 			<CanvasProviders
 				data={dataCtxValue}
@@ -1230,7 +1229,7 @@ export function SchemaCanvas({
 	const cols = schema.collections;
 	const key = `${schema.engine}:${cols.length}:${cols[0]?.name ?? ""}:${cols[cols.length - 1]?.name ?? ""}`;
 	return (
-		<ReactFlowProvider key={key}>
+		<NestCanvasProvider key={key}>
 			<CanvasInner
 				schema={schema}
 				schemaLabel={schemaLabel}
@@ -1238,6 +1237,6 @@ export function SchemaCanvas({
 				dbName={dbName}
 				teamSlug={teamSlug}
 			/>
-		</ReactFlowProvider>
+		</NestCanvasProvider>
 	);
 }

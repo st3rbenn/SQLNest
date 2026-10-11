@@ -1,4 +1,4 @@
-import { type Node, useNodesState } from "@xyflow/react";
+import { type Node, useNodesState } from "../canvasEngine";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { SYSTEM_NODE_CLASS } from "./SystemNodeShell";
 

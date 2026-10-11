@@ -34,7 +34,7 @@ import {
 	IconArrowsMinimize,
 	IconX
 } from "@tabler/icons-react";
-import { type Node, type NodeProps, NodeResizer } from "@xyflow/react";
+import { type Node, type NodeProps, NodeResizer } from "../canvasEngine";
 import type { CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { ConsoleShellInner } from "../../query/ConsoleShellInner";

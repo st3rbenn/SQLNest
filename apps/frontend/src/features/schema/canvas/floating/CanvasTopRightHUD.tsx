@@ -1,6 +1,6 @@
 import { Avatar, Menu, UnstyledButton } from "@mantine/core";
 import { IconChevronDown } from "@tabler/icons-react";
-import { useReactFlow, useViewport } from "@xyflow/react";
+import { useNestCanvas, useViewport } from "../../canvasEngine";
 import type { CSSProperties } from "react";
 import { useCurrentUser } from "../../../auth/sessionQuery";
 
@@ -15,7 +15,7 @@ import { useCurrentUser } from "../../../auth/sessionQuery";
  *     Le pourcentage est réactif via `useViewport()` de React Flow.
  *
  * Doit être monté DANS `<ReactFlow>` (typiquement via `<Panel position="top-right">`)
- * pour que `useViewport` et `useReactFlow` fonctionnent. L'UserMenu global
+ * pour que `useViewport` et `useNestCanvas` fonctionnent. L'UserMenu global
  * flottant est caché sur les routes canvas — voir `UserMenu.tsx`.
  */
 
@@ -128,7 +128,7 @@ function UserAvatarMenu(): React.ReactNode {
 
 function ZoomControl(): React.ReactNode {
 	const { zoom } = useViewport();
-	const { zoomIn, zoomOut, zoomTo, fitView } = useReactFlow();
+	const { zoomIn, zoomOut, zoomTo, fitView } = useNestCanvas();
 	const percent = Math.round(zoom * 100);
 	return (
 		<Menu

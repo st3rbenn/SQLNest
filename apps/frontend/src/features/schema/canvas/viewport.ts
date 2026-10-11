@@ -1,3 +1,4 @@
+import { canvasClass } from "../canvasEngine";
 import { NODE_WIDTH, type TableNodeType } from "../TableNode";
 
 /**
@@ -59,7 +60,7 @@ export function initialZoom(collectionCount: number): number {
 
 /**
  * Anime le viewport en confiant le tween au moteur CSS via une transition
- * sur la transform de `.react-flow__viewport` — plutôt que du JS
+ * sur la transform du viewport du moteur — plutôt que du JS
  * frame-par-frame. Robuste face au throttling (embedded browsers, onglets
  * inactifs) car le composeur CSS tourne au niveau du navigateur, pas de
  * `setInterval`/`requestAnimationFrame`. Un handle `cancel()` retire la
@@ -75,7 +76,9 @@ export function animateViewport(
 		apply(to);
 		return { cancel: () => {} };
 	}
-	const vp = document.querySelector<HTMLElement>(".react-flow__viewport");
+	const vp = document.querySelector<HTMLElement>(
+		`.${canvasClass.viewport}`
+	);
 	// Pas de viewport = pas de canvas rendu → applique direct, pas d'animation.
 	if (vp === null) {
 		apply(to);

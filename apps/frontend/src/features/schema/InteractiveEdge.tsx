@@ -1,9 +1,10 @@
 import {
+	canvasClass,
 	type EdgeProps,
 	getSmoothStepPath,
 	Position,
-	useReactFlow
-} from "@xyflow/react";
+	useNestCanvas
+} from "./canvasEngine";
 import {
 	type MouseEvent,
 	type PointerEvent,
@@ -121,7 +122,7 @@ export function InteractiveEdge(props: EdgeProps) {
 		markerEnd,
 		data
 	} = props;
-	const { screenToFlowPosition, getNode } = useReactFlow();
+	const { screenToFlowPosition, getNode } = useNestCanvas();
 	const api = data as InteractiveEdgeData | undefined;
 
 	const [hovered, setHovered] = useState(false);
@@ -299,7 +300,7 @@ export function InteractiveEdge(props: EdgeProps) {
 		<>
 			<path
 				d={edgePath}
-				className="react-flow__edge-path"
+				className={canvasClass.edgePath}
 				style={style}
 				markerEnd={markerEnd}
 				fill="none"

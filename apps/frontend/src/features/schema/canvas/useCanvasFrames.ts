@@ -1,5 +1,5 @@
 import { showNotification } from "@sqlnest/design-system";
-import type { Node } from "@xyflow/react";
+import type { Node } from "../canvasEngine";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { FrameNodeType } from "../FrameNode";
 import { type Frame, type FrameRect, rectContainsPoint } from "../frames";

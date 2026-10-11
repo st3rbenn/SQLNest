@@ -1,0 +1,140 @@
+.nest-canvas {
+	direction: ltr;
+	--nest-background-color-default: transparent;
+	--nest-background-pattern-dots-color-default: #91919a;
+	--nest-selection-background-color-default: rgba(150, 150, 180, 0.1);
+	--nest-selection-border-default: 1px dotted rgba(155, 155, 155, 0.8);
+	--nest-resize-background-color-default: #3367d9;
+	--nest-handle-background-color-default: #333;
+	--nest-edge-stroke-default: #b1b1b7;
+	--nest-edge-stroke-width-default: 1;
+	--nest-edge-stroke-selected-default: #555;
+	background-color: var(
+		--nest-background-color,
+		var(--nest-background-color-default)
+	);
+}
+
+.nest-container {
+	position: absolute;
+	width: 100%;
+	height: 100%;
+	top: 0;
+	left: 0;
+}
+
+.nest-background {
+	background-color: var(
+		--nest-background-color-props,
+		var(--nest-background-color, var(--nest-background-color-default))
+	);
+	pointer-events: none;
+	z-index: -1;
+}
+.nest-background-pattern.dots {
+	fill: var(
+		--nest-background-pattern-color-props,
+		var(
+			--nest-background-pattern-color,
+			var(--nest-background-pattern-dots-color-default)
+		)
+	);
+}
+
+.nest-renderer {
+	z-index: 4;
+}
+
+.nest-pane {
+	z-index: 1;
+	touch-action: none;
+}
+.nest-pane.draggable {
+	cursor: grab;
+}
+.nest-pane.dragging {
+	cursor: grabbing;
+}
+.nest-pane.selection {
+	cursor: pointer;
+}
+
+.nest-viewport {
+	transform-origin: 0 0;
+	z-index: 2;
+	pointer-events: none;
+}
+
+.nest-nodes {
+	pointer-events: none;
+	transform-origin: 0 0;
+}
+
+.nest-node {
+	position: absolute;
+	user-select: none;
+	pointer-events: all;
+	transform-origin: 0 0;
+	box-sizing: border-box;
+	cursor: default;
+}
+.nest-node.selectable {
+	cursor: pointer;
+}
+.nest-node.draggable {
+	cursor: grab;
+	pointer-events: all;
+}
+.nest-node.draggable.dragging {
+	cursor: grabbing;
+}
+
+.nest-edgelabel-renderer {
+	position: absolute;
+	width: 100%;
+	height: 100%;
+	pointer-events: none;
+	user-select: none;
+	left: 0;
+	top: 0;
+}
+
+.nest-viewport-portal {
+	position: absolute;
+	width: 100%;
+	height: 100%;
+	left: 0;
+	top: 0;
+	user-select: none;
+}
+
+.nest-panel {
+	position: absolute;
+	z-index: 5;
+	margin: 15px;
+}
+.nest-panel.top {
+	top: 0;
+}
+.nest-panel.bottom {
+	bottom: 0;
+}
+.nest-panel.top.center,
+.nest-panel.bottom.center {
+	left: 50%;
+	transform: translateX(-15px) translateX(-50%);
+}
+.nest-panel.left {
+	left: 0;
+}
+.nest-panel.right {
+	right: 0;
+}
+.nest-panel.left.center,
+.nest-panel.right.center {
+	top: 50%;
+	transform: translateY(-15px) translateY(-50%);
+}
+.nest-pane.selection .nest-panel {
+	pointer-events: none;
+}

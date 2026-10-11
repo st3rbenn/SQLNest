@@ -1,4 +1,4 @@
-import { type NodeChange, useNodesState } from "@xyflow/react";
+import { type NodeChange, useNodesState } from "../canvasEngine";
 import { useCallback, useEffect, useRef } from "react";
 import type { LayoutResult } from "../layout";
 import type { TableNodeType } from "../TableNode";
