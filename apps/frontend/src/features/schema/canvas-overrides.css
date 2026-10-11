@@ -45,6 +45,40 @@
 	opacity: 0.6;
 	pointer-events: auto;
 }
+/*
+ * Zone de saisie des bords d'une table : 8 px à l'écran quel que soit le
+ * zoom (le trait visible ne change pas). Vers l'intérieur seulement : la
+ * carte rogne ce qui dépasse, et le bord d'un frame collé reste saisissable.
+ */
+.nest-node-table .nest-resize-control.line::before {
+	content: "";
+	position: absolute;
+	--hit: calc(8px / var(--canvas-zoom, 1));
+}
+.nest-node-table .nest-resize-control.line.left::before,
+.nest-node-table .nest-resize-control.line.right::before {
+	top: 0;
+	bottom: 0;
+	width: var(--hit);
+}
+.nest-node-table .nest-resize-control.line.left::before {
+	left: 0;
+}
+.nest-node-table .nest-resize-control.line.right::before {
+	right: 0;
+}
+.nest-node-table .nest-resize-control.line.top::before,
+.nest-node-table .nest-resize-control.line.bottom::before {
+	left: 0;
+	right: 0;
+	height: var(--hit);
+}
+.nest-node-table .nest-resize-control.line.top::before {
+	top: 0;
+}
+.nest-node-table .nest-resize-control.line.bottom::before {
+	bottom: 0;
+}
 
 /*
  * Mode « frame » (toolbar) — cursor crosshair sur le pane pour signaler

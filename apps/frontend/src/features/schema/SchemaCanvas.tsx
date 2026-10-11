@@ -17,6 +17,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useCurrentUser } from "../auth/sessionQuery";
 import type { CanvasTool } from "./CanvasToolbar";
 import { CanvasProviders } from "./canvas/CanvasContext";
+import { CanvasZoomVariable } from "./canvas/CanvasZoomVariable";
 import { useResizableDrawer } from "./canvas/DrawerPane";
 import { CanvasBottomBar } from "./canvas/floating/CanvasBottomBar";
 import { CanvasLeftPanel } from "./canvas/floating/CanvasLeftPanel";
@@ -1163,6 +1164,7 @@ function CanvasInner({
 				 * `gap` conservé à 20 px : trop fin devient trop sale au zoom
 				 * large, trop large casse la sensation de « papier millimétré ». */}
 				<Background color="var(--sqlnest-canvas-dot)" gap={20} />
+				<CanvasZoomVariable />
 				<Panel
 					position="top-right"
 					style={{ top: 12, right: 12, margin: 0 }}
