@@ -187,6 +187,41 @@ describe("NestCanvas", () => {
 	});
 });
 
+describe("structure DOM", () => {
+	it("calques et classes dans l'ordre de React Flow", () => {
+		const { container } = render(
+			<NestCanvas
+				nodes={nodes}
+				nodeTypes={nodeTypes}
+				selectionOnDrag
+				panOnDrag={[1]}
+			>
+				<Background />
+				<Probe />
+			</NestCanvas>
+		);
+		const root = container.firstElementChild as HTMLElement;
+		expect(root.className).toBe("nest-canvas");
+		expect(root.getAttribute("role")).toBe("application");
+		const renderer = root.querySelector(".nest-renderer") as HTMLElement;
+		const pane = renderer.firstElementChild as HTMLElement;
+		// Pas de classe conteneur sur le pane : sa géométrie est en style inline.
+		expect(pane.className).toBe("nest-pane selection");
+		expect(pane.style.position).toBe("absolute");
+		expect(pane.style.width).toBe("100%");
+		const viewport = pane.firstElementChild as HTMLElement;
+		expect(viewport.className).toBe("nest-viewport nest-container");
+		expect(Array.from(viewport.children).map((c) => c.className)).toEqual([
+			"nest-edges",
+			"nest-edgelabel-renderer",
+			"nest-nodes",
+			"nest-viewport-portal"
+		]);
+		const pattern = root.querySelector("pattern") as SVGPatternElement;
+		expect(pattern.id).toBe(`pattern-${api().store.getState().instanceId}`);
+	});
+});
+
 function ZoomLabel() {
 	const { zoom } = useViewport();
 	return <span data-testid="zoom">{zoom}</span>;

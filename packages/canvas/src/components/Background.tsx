@@ -25,7 +25,7 @@ export function Background({
 	const { transform, patternId } = useNestStore(
 		(s) => ({
 			transform: s.transform,
-			patternId: `nest-pattern-${s.instanceId}`
+			patternId: `pattern-${s.instanceId}`
 		}),
 		shallow
 	);

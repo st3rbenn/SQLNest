@@ -17,6 +17,14 @@ import { SelectionMode, type XYPosition } from "../types";
 
 const AUTO_PAN_SPEED = 15;
 
+const containerStyle = {
+	position: "absolute",
+	width: "100%",
+	height: "100%",
+	top: 0,
+	left: 0
+} as const;
+
 export type PaneProps = {
 	panOnDrag: boolean | number[];
 	isSelecting: boolean;
@@ -245,7 +253,7 @@ export function Pane({
 			if (event.target === container.current) handler(event);
 		};
 
-	const classes: string[] = [canvasClass.pane, canvasClass.container];
+	const classes: string[] = [canvasClass.pane];
 	if (
 		panOnDrag === true ||
 		(Array.isArray(panOnDrag) && panOnDrag.includes(0))
@@ -269,6 +277,7 @@ export function Pane({
 				isSelectionEnabled ? onPointerDownCapture : undefined
 			}
 			onClickCapture={isSelectionEnabled ? onClickCapture : undefined}
+			style={containerStyle}
 		>
 			{children}
 			<UserSelection />
