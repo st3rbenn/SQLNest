@@ -1,9 +1,9 @@
 /**
  * Point d'entrée unique du moteur canvas pour toute l'app (ADR-033).
  *
- * Transitoire : sert React Flow ou `@sqlnest/canvas` selon `?engine=rf|nest`
- * (mémorisé dans le navigateur, React Flow par défaut) pour comparer les deux
- * sur le même canvas. Une fois la parité atteinte, ce fichier disparaît et
+ * Transitoire : sert `@sqlnest/canvas` ou React Flow selon `?engine=nest|rf`
+ * (mémorisé dans le navigateur, `@sqlnest/canvas` par défaut) pour comparer
+ * les deux sur le même canvas. Une fois la parité atteinte, ce fichier disparaît et
  * les imports pointent directement sur `@sqlnest/canvas`.
  */
 import * as nest from "@sqlnest/canvas";
@@ -14,7 +14,7 @@ import "@xyflow/react/dist/style.css";
 const ENGINE_KEY = "sqlnest.canvasEngine";
 
 function readEngine(): "nest" | "rf" {
-	if (typeof window === "undefined") return "rf";
+	if (typeof window === "undefined") return "nest";
 	const fromUrl = new URLSearchParams(window.location.search).get("engine");
 	if (fromUrl === "nest" || fromUrl === "rf") {
 		try {
@@ -23,9 +23,9 @@ function readEngine(): "nest" | "rf" {
 		return fromUrl;
 	}
 	try {
-		return window.localStorage.getItem(ENGINE_KEY) === "nest" ? "nest" : "rf";
+		return window.localStorage.getItem(ENGINE_KEY) === "rf" ? "rf" : "nest";
 	} catch {
-		return "rf";
+		return "nest";
 	}
 }
 
