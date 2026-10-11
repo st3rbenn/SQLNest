@@ -16,12 +16,12 @@
  */
 
 /*
- * Handles NodeResizer des tables : masqués par défaut, révélés au hover
- * quand la table n'est PAS déjà sélectionnée. Quand la table est
- * `.selected`, l'outline CSS ci-dessus fait le contour → afficher aussi la
- * `line` du NodeResizer donnerait un double contour parallèle (chevauchement
- * de 2 lignes à ~3 px d'écart) — visuellement bruité. Un seul indicateur à
- * la fois : hover OU selection.
+ * Handles NodeResizer des tables : masqués par défaut, révélés au hover.
+ * Quand la table est `.selected`, son contour de sélection fait le bord →
+ * afficher aussi la `line` du NodeResizer donnerait un double contour
+ * parallèle (2 lignes à ~3 px d'écart). Les traits restent donc invisibles
+ * mais saisissables, et les coins s'affichent : on clique une table puis on
+ * la redimensionne sans la désélectionner.
  *
  * Les frames gardent leurs handles toujours visibles (règle plus spécifique
  * ciblée sur `.nest-node-table` uniquement).
@@ -43,6 +43,13 @@
 }
 .nest-node-table:not(.selected):hover .nest-resize-control.line {
 	opacity: 0.6;
+	pointer-events: auto;
+}
+.nest-node-table.selected .nest-resize-control.handle {
+	opacity: 1;
+}
+.nest-node-table.selected:hover .nest-resize-control.handle,
+.nest-node-table.selected:hover .nest-resize-control.line {
 	pointer-events: auto;
 }
 /*
