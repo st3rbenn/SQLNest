@@ -1,4 +1,4 @@
-import { EdgeLabelRenderer } from "../canvasEngine";
+import { EdgeLabelRenderer } from "@sqlnest/canvas";
 import type { CSSProperties, MouseEvent, PointerEvent } from "react";
 import type { Side } from "../edgeRouting";
 

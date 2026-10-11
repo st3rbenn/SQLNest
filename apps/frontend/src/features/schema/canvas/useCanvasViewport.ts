@@ -1,4 +1,4 @@
-import { canvasClass, useNestCanvas } from "../canvasEngine";
+import { canvasClass, useNestCanvas } from "@sqlnest/canvas";
 import {
 	type RefObject,
 	startTransition,

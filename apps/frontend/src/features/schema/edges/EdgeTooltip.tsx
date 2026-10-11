@@ -1,4 +1,4 @@
-import { EdgeLabelRenderer } from "../canvasEngine";
+import { EdgeLabelRenderer } from "@sqlnest/canvas";
 import type { CSSProperties } from "react";
 import { humanFooter, humanRelation, joinPreview } from "../fkFormat";
 import type { Relation } from "../schema-model";

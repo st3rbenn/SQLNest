@@ -1,4 +1,4 @@
-import type { Edge } from "../canvasEngine";
+import type { Edge } from "@sqlnest/canvas";
 import { useMemo } from "react";
 import { bestHandles, type Side, spreadOffsets } from "../edgeRouting";
 import type { InteractiveEdgeData } from "../InteractiveEdge";

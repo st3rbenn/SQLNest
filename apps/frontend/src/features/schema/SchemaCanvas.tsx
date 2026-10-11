@@ -1,5 +1,4 @@
 import { useHotkeys } from "@mantine/hooks";
-import { useQuery } from "@tanstack/react-query";
 import {
 	Background,
 	type Edge,
@@ -10,7 +9,9 @@ import {
 	SelectionMode,
 	useNestCanvas,
 	useNodesState
-} from "./canvasEngine";
+} from "@sqlnest/canvas";
+import { useQuery } from "@tanstack/react-query";
+import "@sqlnest/canvas/style.css";
 import "./canvas-overrides.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useCurrentUser } from "../auth/sessionQuery";
@@ -1159,7 +1160,6 @@ function CanvasInner({
 				minZoom={0.02}
 				maxZoom={1.75}
 				onlyRenderVisibleElements
-				proOptions={{ hideAttribution: true }}
 			>
 				{/* Grille de points fine sur bg #1E1E1E — couleur pilotée par
 				 * `--sqlnest-canvas-dot` (rgba blanc à 8% pour rester discrète).

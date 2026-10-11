@@ -1,5 +1,5 @@
+import type { Node, NodeProps } from "@sqlnest/canvas";
 import { IconChevronDown, IconChevronRight, IconClockHour3, IconServer } from "@tabler/icons-react";
-import type { Node, NodeProps } from "../schema/canvasEngine";
 import { useEffect, useState } from "react";
 import {
 	SYSTEM_BORDER,

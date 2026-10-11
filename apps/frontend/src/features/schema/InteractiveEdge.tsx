@@ -4,7 +4,7 @@ import {
 	getSmoothStepPath,
 	Position,
 	useNestCanvas
-} from "./canvasEngine";
+} from "@sqlnest/canvas";
 import {
 	type MouseEvent,
 	type PointerEvent,

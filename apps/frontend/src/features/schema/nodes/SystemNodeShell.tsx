@@ -1,5 +1,5 @@
+import { Handle, NodeResizer, Position } from "@sqlnest/canvas";
 import { IconLock } from "@tabler/icons-react";
-import { Handle, NodeResizer, Position } from "../canvasEngine";
 import { type CSSProperties, Fragment } from "react";
 
 /** Palette système — distincte des tables user (bleu declared / ambre

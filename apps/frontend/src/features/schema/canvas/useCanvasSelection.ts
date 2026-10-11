@@ -1,4 +1,4 @@
-import { type Node, useOnSelectionChange } from "../canvasEngine";
+import { type Node, useOnSelectionChange } from "@sqlnest/canvas";
 import { useCallback, useRef, useState } from "react";
 
 export interface UseCanvasSelectionOptions<N extends Node> {

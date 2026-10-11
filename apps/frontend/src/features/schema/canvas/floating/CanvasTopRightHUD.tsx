@@ -1,6 +1,6 @@
 import { Avatar, Menu, UnstyledButton } from "@mantine/core";
+import { useNestCanvas, useViewport } from "@sqlnest/canvas";
 import { IconChevronDown } from "@tabler/icons-react";
-import { useNestCanvas, useViewport } from "../../canvasEngine";
 import type { CSSProperties } from "react";
 import { useCurrentUser } from "../../../auth/sessionQuery";
 
@@ -12,9 +12,9 @@ import { useCurrentUser } from "../../../auth/sessionQuery";
  * Contenu :
  *   - Avatar user → dropdown : « Retour aux canvas », plus tard settings.
  *   - Indicateur `<zoom>%` → dropdown : Zoom in/out, Fit, presets 50/100/200%.
- *     Le pourcentage est réactif via `useViewport()` de React Flow.
+ *     Le pourcentage est réactif via `useViewport()`.
  *
- * Doit être monté DANS `<ReactFlow>` (typiquement via `<Panel position="top-right">`)
+ * Doit être monté DANS `<NestCanvas>` (typiquement via `<Panel position="top-right">`)
  * pour que `useViewport` et `useNestCanvas` fonctionnent. L'UserMenu global
  * flottant est caché sur les routes canvas — voir `UserMenu.tsx`.
  */

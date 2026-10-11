@@ -1,4 +1,4 @@
-import { type NodeChange, useNodesState } from "../canvasEngine";
+import { type NodeChange, useNodesState } from "@sqlnest/canvas";
 import { useCallback, useEffect, useRef } from "react";
 import type { LayoutResult } from "../layout";
 import type { TableNodeType } from "../TableNode";
@@ -15,20 +15,20 @@ export interface UseCanvasNodesOptions {
 }
 
 export interface UseCanvasNodesReturn {
-	/** State React Flow — filtré + décoré par le parent avant d'être passé
-	 * à `<ReactFlow>`. */
+	/** State des nodes — filtré + décoré par le parent avant d'être passé
+	 * à `<NestCanvas>`. */
 	readonly nodes: TableNodeType[];
 	/** Setter direct — exposé car `useCanvasSync.replaceAll.{positions,sizes}`
-	 * et `useCanvasSelection` en ont besoin pour repush le state RF à
+	 * et `useCanvasSelection` en ont besoin pour repush le state à
 	 * l'hydratation server ou au multi-select. */
 	readonly setNodes: React.Dispatch<React.SetStateAction<TableNodeType[]>>;
 	/** Version RAF de nodes — pour les closures qui ont besoin de la dernière
 	 * position sans se refermer sur une snapshot obsolète (`handleFrameResize`
 	 * qui inspecte les centres des tables membres, `handleSelectionEnd`, …). */
 	readonly nodesRef: React.MutableRefObject<TableNodeType[]>;
-	/** Handler à passer à `<ReactFlow onNodesChange={...}>`. Wrapper qui
+	/** Handler à passer à `<NestCanvas onNodesChange={...}>`. Wrapper qui
 	 * intercepte les NodeChange concernant les frames et route vers
-	 * `framesApi.setFrameRect` ; forward le reste à `onNodesChange` natif RF. */
+	 * `framesApi.setFrameRect` ; forward le reste à `onNodesChange`. */
 	readonly handleNodesChange: (changes: NodeChange<TableNodeType>[]) => void;
 	/** Callback pour `TableNode.onResizeEnd` — persist width/height ET
 	 * position au release du NodeResizer (les corners top/left déplacent

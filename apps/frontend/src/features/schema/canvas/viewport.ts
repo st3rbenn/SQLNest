@@ -1,4 +1,4 @@
-import { canvasClass } from "../canvasEngine";
+import { canvasClass } from "@sqlnest/canvas";
 import { NODE_WIDTH, type TableNodeType } from "../TableNode";
 
 /**

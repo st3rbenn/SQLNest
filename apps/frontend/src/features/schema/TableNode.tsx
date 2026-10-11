@@ -1,5 +1,4 @@
 import { Tooltip } from "@mantine/core";
-import { KindBadge, TypePill } from "@sqlnest/design-system";
 import {
 	Handle,
 	type Node,
@@ -7,7 +6,8 @@ import {
 	NodeResizer,
 	Position,
 	useNestStore
-} from "./canvasEngine";
+} from "@sqlnest/canvas";
+import { KindBadge, TypePill } from "@sqlnest/design-system";
 import { type CSSProperties, Fragment } from "react";
 import { colorFor } from "./colors";
 import type { Side } from "./edgeRouting";
@@ -212,7 +212,7 @@ export function TableNode({
 		<div style={shellStyle}>
 			<AllHandles />
 			{/* NodeResizer complet : 4 sides + 4 corners. Handles invisibles
-			 * par défaut (opacité 0 via `.react-flow__node-table` override CSS
+			 * par défaut (opacité 0 via `.nest-node-table` override CSS
 			 * dans canvas-overrides.css), apparaissent au hover du node — évite
 			 * la pollution visuelle quand plein de tables sont à l'écran. La
 			 * bordure line reste visible pour signaler la cible du drag. */}

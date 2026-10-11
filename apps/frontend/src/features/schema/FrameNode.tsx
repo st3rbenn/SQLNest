@@ -1,10 +1,10 @@
-import { FrameBadge } from "@sqlnest/design-system";
 import {
 	type Node,
 	type NodeProps,
 	NodeResizer,
 	useNestStore
-} from "./canvasEngine";
+} from "@sqlnest/canvas";
+import { FrameBadge } from "@sqlnest/design-system";
 import { useState } from "react";
 import type { Frame, FrameRect } from "./frames";
 

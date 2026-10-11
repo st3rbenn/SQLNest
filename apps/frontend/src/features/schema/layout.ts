@@ -1,4 +1,4 @@
-import type { Edge } from "./canvasEngine";
+import type { Edge } from "@sqlnest/canvas";
 import ELK, {
 	type ElkExtendedEdge,
 	type ElkNode

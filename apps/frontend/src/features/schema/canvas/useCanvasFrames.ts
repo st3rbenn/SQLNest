@@ -1,5 +1,5 @@
+import type { Node } from "@sqlnest/canvas";
 import { showNotification } from "@sqlnest/design-system";
-import type { Node } from "../canvasEngine";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { FrameNodeType } from "../FrameNode";
 import { type Frame, type FrameRect, rectContainsPoint } from "../frames";
@@ -33,7 +33,7 @@ export interface UseCanvasFramesReturn {
 	readonly handleFrameRename: (key: string, label: string) => void;
 	/** Right-click sur le badge d'un frame OU depuis le drawer `FrameDetails`. */
 	readonly handleFrameDelete: (key: string) => void;
-	/** Handlers React Flow — à passer tel quel à `<ReactFlow>`.
+	/** Handlers de drag — à passer tels quels à `<NestCanvas>`.
 	 * Ils gèrent DEUX chemins (frame drag vs table drag) selon `node.type`. */
 	readonly onNodeDragStart: (_: unknown, node: Node) => void;
 	readonly onNodeDrag: (_: unknown, node: Node) => void;

@@ -32,7 +32,6 @@
 		"@tanstack/react-router": "catalog:",
 		"@tanstack/react-router-devtools": "^1.132.37",
 		"@tanstack/react-virtual": "^3.14.9",
-		"@xyflow/react": "^12.11.2",
 		"better-auth": "^1.2.0",
 		"elkjs": "^0.12.0",
 		"msgpackr": "^1.11.2",

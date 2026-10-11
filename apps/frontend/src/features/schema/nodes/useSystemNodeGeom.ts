@@ -1,4 +1,4 @@
-import { type Node, useNodesState } from "../canvasEngine";
+import { type Node, useNodesState } from "@sqlnest/canvas";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { SYSTEM_NODE_CLASS } from "./SystemNodeShell";
 

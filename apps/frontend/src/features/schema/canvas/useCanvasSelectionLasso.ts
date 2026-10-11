@@ -1,5 +1,5 @@
+import { useNestCanvas } from "@sqlnest/canvas";
 import { showNotification } from "@sqlnest/design-system";
-import { useNestCanvas } from "../canvasEngine";
 import { useCallback, useRef } from "react";
 import type { CanvasTool } from "../CanvasToolbar";
 import type { FramesApi } from "../useFrames";
@@ -15,10 +15,10 @@ export interface UseCanvasSelectionLassoOptions {
 }
 
 export interface UseCanvasSelectionLassoReturn {
-	/** Handler `<ReactFlow onSelectionStart>` — snapshot du point de départ
+	/** Handler `<NestCanvas onSelectionStart>` — snapshot du point de départ
 	 * du lasso quand `activeTool === "frame"`. No-op sinon. */
 	readonly handleSelectionStart: (event: React.MouseEvent) => void;
-	/** Handler `<ReactFlow onSelectionEnd>` — crée un frame dont le rect
+	/** Handler `<NestCanvas onSelectionEnd>` — crée un frame dont le rect
 	 * correspond au lasso (pas au bounds des tables) quand `activeTool ===
 	 * "frame"`. Sort ensuite du mode frame (retour à `select`). */
 	readonly handleSelectionEnd: (event: React.MouseEvent) => void;

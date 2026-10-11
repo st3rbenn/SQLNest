@@ -1,3 +1,4 @@
+import { canvasClass } from "@sqlnest/canvas";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	animateViewport,
@@ -5,7 +6,6 @@ import {
 	overviewViewport,
 	tablesBounds
 } from "./canvas/viewport";
-import { canvasClass } from "./canvasEngine";
 import type { TableNodeType } from "./TableNode";
 
 function n(
