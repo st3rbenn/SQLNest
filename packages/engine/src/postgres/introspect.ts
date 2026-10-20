@@ -10,9 +10,11 @@ import type {
 import type { Pool as PgPool, QueryResultRow } from "pg";
 import { EngineIntrospectionError } from "../errors";
 import {
+	buildIndexesFromRows,
 	buildRefsFromFkRows,
 	buildRelationsFromFkRows,
-	type RelationalFkRow
+	type RelationalFkRow,
+	type RelationalIndexRow
 } from "../relational-refs";
 
 // --- Lignes brutes renvoyées par le catalogue ---
@@ -124,6 +126,21 @@ const FK_SQL = `
 		AND tons.nspname = $1
 	ORDER BY con.oid, cols.ord`;
 
+// Index hors clé primaire, colonnes de clé dans l'ordre (`indnkeyatts` écarte
+// les INCLUDE). Un index sur expression n'a pas de colonnes nommables : exclu.
+const INDEXES_SQL = `
+	SELECT t.relname AS table_name, i.relname AS index_name,
+		ix.indisunique AS is_unique, a.attname AS column_name
+	FROM pg_index ix
+	JOIN pg_class t ON t.oid = ix.indrelid
+	JOIN pg_class i ON i.oid = ix.indexrelid
+	JOIN pg_namespace ns ON ns.oid = t.relnamespace
+	JOIN LATERAL unnest(ix.indkey::int2[]) WITH ORDINALITY AS k(attnum, ord) ON true
+	JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
+	WHERE ns.nspname = $1 AND NOT ix.indisprimary AND ix.indexprs IS NULL
+		AND k.ord <= ix.indnkeyatts
+	ORDER BY t.relname, i.relname, k.ord`;
+
 /** Type Postgres (`information_schema.data_type`) → type unifié SNQL. */
 export function mapPgType(dataType: string): SnqlType {
 	switch (dataType) {
@@ -172,7 +189,8 @@ export function buildSchemaModel(
 	columns: readonly ColumnRow[],
 	pks: readonly PkRow[],
 	fks: readonly FkRow[],
-	enums: readonly EnumRow[] = []
+	enums: readonly EnumRow[] = [],
+	indexRows: readonly RelationalIndexRow[] = []
 ): SchemaModel {
 	const enumLabelsByType = new Map<string, string[]>();
 	for (const e of enums) {
@@ -211,12 +229,20 @@ export function buildSchemaModel(
 		pkByTable.set(pk.table_name, list);
 	}
 
+	const indexesByTable = buildIndexesFromRows(indexRows);
 	const collections: Collection[] = tables.map((name) => {
 		const fields = fieldsByTable.get(name) ?? [];
 		const primaryKey = pkByTable.get(name);
-		return primaryKey !== undefined && primaryKey.length > 0
-			? { name, fields, primaryKey, source: "declared" }
-			: { name, fields, source: "declared" };
+		const indexes = indexesByTable.get(name);
+		return {
+			name,
+			fields,
+			...(primaryKey !== undefined && primaryKey.length > 0
+				? { primaryKey }
+				: {}),
+			...(indexes !== undefined ? { indexes } : {}),
+			source: "declared"
+		};
 	});
 
 	// enums root : dérivé du même lookup que Field.enumValues, mais indexé par
@@ -261,7 +287,7 @@ function normalizePgFkRow(fk: FkRow): RelationalFkRow {
 
 /**
  * Introspecte une base Postgres et produit le SchemaModel pour le `schema` cible
- * (bindé en $1). Les 4 requêtes catalogue tournent en parallèle via `pool.query`
+ * (bindé en $1). Les requêtes catalogue tournent en parallèle via `pool.query`
  * (un client par appel — un même client ne peut pas exécuter de requêtes
  * concurrentes).
  */
@@ -287,17 +313,19 @@ export async function introspectPostgres(
 			{ cause }
 		);
 	}
-	const [pks, fks, enums] = await Promise.all([
+	const [pks, fks, enums, indexes] = await Promise.all([
 		softQuery<PkRow>(pool, PK_SQL, params, "primary keys"),
 		softQuery<FkRow>(pool, FK_SQL, params, "foreign keys"),
-		softQuery<EnumRow>(pool, ENUMS_SQL, params, "enums")
+		softQuery<EnumRow>(pool, ENUMS_SQL, params, "enums"),
+		softQuery<RelationalIndexRow>(pool, INDEXES_SQL, params, "indexes")
 	]);
 	return buildSchemaModel(
 		tables.rows.map((row) => row.table_name),
 		columns.rows,
 		pks,
 		fks,
-		enums
+		enums,
+		indexes
 	);
 }
 

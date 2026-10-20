@@ -1,3 +1,10 @@
+import {
+	type DDLStatement,
+	getMapper,
+	lowerDDL,
+	parse,
+	tokenize
+} from "@sqlnest/snql";
 import { describe, expect, it } from "vitest";
 import { EngineExecutionError } from "../errors";
 import { runQuery } from "../run";
@@ -836,6 +843,102 @@ describe.skipIf(!hasMssql)("mssql DDL Tier-2 (intégration M/6)", () => {
 				expect(fields?.find((f) => f.name === "tier")?.hasDefault).toBeUndefined();
 			} finally {
 				await runQuery(conn, `raw "DROP TABLE IF EXISTS e1d_t"`);
+			}
+		});
+	});
+
+	it("profil prisma : noms de Prisma, rename column fait suivre index, FK et défaut (ADR-036 E/1e)", async () => {
+		await withConn(async (conn) => {
+			const ddl = async (source: string) => {
+				const plan = lowerDDL(
+					parse(tokenize(source)) as DDLStatement,
+					await conn.introspect(),
+					{ ormProfile: "prisma" }
+				);
+				const mapDDL = getMapper("mssql").mapDDL;
+				if (mapDDL === undefined) throw new Error("mapDDL manquant");
+				return conn.execute(mapDDL(plan, { namespace: "dbo" }));
+			};
+			const names = async () =>
+				(
+					await runQuery(
+						conn,
+						`raw "SELECT name FROM sys.objects WHERE parent_object_id IN (OBJECT_ID('e1e_par'), OBJECT_ID('e1e_kid')) UNION SELECT name FROM sys.indexes WHERE object_id IN (OBJECT_ID('e1e_par'), OBJECT_ID('e1e_kid')) AND name IS NOT NULL"`
+					)
+				).rows
+					.map((r) => String(r.name))
+					.sort();
+			const drop = `raw "DROP TABLE IF EXISTS e1e_kid; DROP TABLE IF EXISTS e1e_par"`;
+			await runQuery(conn, drop);
+			try {
+				await ddl(
+					"create table e1e_par { id: int, code: text unique, primary key (id) }"
+				);
+				await ddl(
+					'create table e1e_kid { id: int, par_id: int ref e1e_par.id, slot: int, tier: text default "free", primary key (id) }'
+				);
+				await ddl("add index (par_id, slot) into e1e_kid");
+				expect(await names()).toEqual([
+					"e1e_kid_par_id_fkey",
+					"e1e_kid_par_id_slot_idx",
+					"e1e_kid_pkey",
+					"e1e_kid_tier_df",
+					"e1e_par_code_key",
+					"e1e_par_pkey"
+				]);
+
+				await ddl("rename column e1e_kid.par_id to parent_id");
+				await ddl("rename column e1e_kid.slot to seat");
+				await ddl("rename column e1e_kid.tier to plan");
+				await ddl("rename column e1e_par.code to slug");
+				expect(await names()).toEqual([
+					"e1e_kid_parent_id_fkey",
+					"e1e_kid_parent_id_seat_idx",
+					"e1e_kid_pkey",
+					"e1e_kid_plan_df",
+					"e1e_par_pkey",
+					"e1e_par_slug_key"
+				]);
+
+				// Les objets renommés s'appliquent toujours.
+				await runQuery(conn, 'add { id: 1, slug: "a" } into e1e_par');
+				await runQuery(
+					conn,
+					"add { id: 1, parent_id: 1, seat: 4 } into e1e_kid"
+				);
+				expect(
+					(await runQuery(conn, "find e1e_kid pick plan")).rows[0]?.plan
+				).toBe("free");
+				await expect(
+					runQuery(conn, 'add { id: 2, slug: "a" } into e1e_par')
+				).rejects.toThrow();
+				await expect(
+					runQuery(conn, "add { id: 2, parent_id: 9, seat: 4 } into e1e_kid")
+				).rejects.toThrow();
+
+				const schema = await conn.introspect();
+				expect(
+					schema.collections.find((c) => c.name === "e1e_kid")?.indexes
+				).toEqual([
+					{
+						name: "e1e_kid_parent_id_seat_idx",
+						columns: ["parent_id", "seat"],
+						unique: false
+					}
+				]);
+				expect(
+					schema.collections.find((c) => c.name === "e1e_par")?.indexes
+				).toEqual([
+					{ name: "e1e_par_slug_key", columns: ["slug"], unique: true }
+				]);
+				expect(
+					schema.refs?.find((r) => r.fromCollection === "e1e_kid")
+				).toMatchObject({
+					name: "e1e_kid_parent_id_fkey",
+					onUpdate: "cascade"
+				});
+			} finally {
+				await runQuery(conn, drop);
 			}
 		});
 	});

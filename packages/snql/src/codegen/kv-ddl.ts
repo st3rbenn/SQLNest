@@ -98,7 +98,8 @@ export function mapKvDDL(plan: DDLPlan): KvDDLQuery {
 			operation: "rename-column",
 			collection: plan.target,
 			column: plan.column,
-			newName: plan.newName
+			newName: plan.newName,
+			...(plan.renames !== undefined ? { renames: plan.renames } : {})
 		};
 	}
 	if (plan.kind === "add-ref") {

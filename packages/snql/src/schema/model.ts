@@ -68,10 +68,24 @@ export interface Field {
 	readonly enumTypeName?: string;
 }
 
+/**
+ * Index secondaire, clé primaire exclue : index simple, unique, ou contrainte
+ * d'unicité. Lu pour qu'un renommage de colonne fasse suivre les noms qui
+ * suivent la convention d'un ORM (ADR-036 D6).
+ */
+export interface CollectionIndex {
+	readonly name: string;
+	/** Colonnes de la clé, dans l'ordre de l'index. */
+	readonly columns: readonly string[];
+	readonly unique: boolean;
+}
+
 export interface Collection {
 	readonly name: string;
 	readonly fields: readonly Field[];
 	readonly primaryKey?: readonly string[];
+	/** Absent = aucun index connu : la table n'en a pas, ou l'introspection ne les lit pas. */
+	readonly indexes?: readonly CollectionIndex[];
 	readonly source: SchemaSource;
 }
 

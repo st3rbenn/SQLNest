@@ -1,5 +1,6 @@
 import type {
 	Collection,
+	CollectionIndex,
 	EnumTypeDef,
 	Field,
 	RefDef,
@@ -7,7 +8,7 @@ import type {
 	SchemaModel,
 	SnqlType
 } from "@sqlnest/snql";
-import type { Db } from "mongodb";
+import type { Db, Document } from "mongodb";
 import { EngineIntrospectionError } from "../errors";
 import { inferNamingRelations } from "../naming-relations";
 
@@ -199,7 +200,12 @@ export async function introspectMongo(
 					.aggregate([{ $sample: { size: sampleSize } }])
 					.toArray();
 				const inferred = inferCollection(name, docs as SampledDoc[]);
-				return mergeValidatorFields(inferred, validatorByName.get(name));
+				const merged = mergeValidatorFields(
+					inferred,
+					validatorByName.get(name)
+				);
+				const indexes = await readIndexes(db, name);
+				return indexes.length > 0 ? { ...merged, indexes } : merged;
 			})
 		);
 
@@ -289,6 +295,28 @@ export async function introspectMongo(
 		throw new EngineIntrospectionError("Introspection MongoDB échouée", {
 			cause
 		});
+	}
+}
+
+/**
+ * Index d'une collection hors `_id_` (ADR-036 D6). Un index texte n'a pas de
+ * colonnes nommables : écarté. Best-effort : droits manquants → aucun.
+ */
+async function readIndexes(db: Db, name: string): Promise<CollectionIndex[]> {
+	try {
+		const indexes: CollectionIndex[] = [];
+		for (const index of await db.collection(name).listIndexes().toArray()) {
+			const keys = Object.keys((index as { key?: Document }).key ?? {});
+			if (index.name === "_id_" || keys.includes("_fts")) continue;
+			indexes.push({
+				name: String(index.name),
+				columns: keys,
+				unique: (index as { unique?: unknown }).unique === true
+			});
+		}
+		return indexes;
+	} catch {
+		return [];
 	}
 }
 

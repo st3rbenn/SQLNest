@@ -24,7 +24,7 @@ import type {
 	RenameColumnStmt
 } from "../parser/ast";
 import { DDL_DEFAULT_FUNCTIONS } from "../parser/parser";
-import type { SchemaModel, SnqlType } from "../schema/model";
+import type { OnUpdateRule, SchemaModel, SnqlType } from "../schema/model";
 import type {
 	AddColumnPlan,
 	AddEnumMemberPlan,
@@ -35,6 +35,7 @@ import type {
 	CreateTableField,
 	CreateTablePlan,
 	DdlDefault,
+	DdlObjectRename,
 	DDLPlan,
 	DropColumnPlan,
 	DropEnumPlan,
@@ -54,18 +55,74 @@ import type {
  */
 const IDENT_REGEX = /^[A-Za-z_][A-Za-z0-9_]{0,62}$/;
 
+/** Options de compilation du DDL (ADR-036 D6). Absentes = comportement par défaut. */
+export interface DdlLowerOptions {
+	/**
+	 * Conventions de l'ORM qui gère la base : noms des clés, index et
+	 * contraintes, `on update` par défaut. La longueur maximale d'un nom vient
+	 * du moteur du schéma.
+	 */
+	readonly ormProfile?: "prisma";
+	/** `false` : index sans `CONCURRENTLY`, pour un runner qui exécute tout en transaction. */
+	readonly concurrentIndex?: boolean;
+}
+
+/**
+ * Conventions appliquées par le lower. Le profil `prisma` reproduit les noms
+ * que Prisma écrit lui-même : `<table>_<colonnes>_<suffixe>`, la base tronquée
+ * pour que le nom tienne dans la limite du moteur, suffixe gardé.
+ */
+interface DdlNaming {
+	readonly prisma: boolean;
+	readonly maxLength: number;
+	readonly onUpdate: OnUpdateRule;
+}
+
+function ddlNaming(options: DdlLowerOptions, schema?: SchemaModel): DdlNaming {
+	const prisma = options.ormProfile === "prisma";
+	return {
+		prisma,
+		// Prisma tronque à la limite du moteur : 63 en Postgres, 128 en SQL Server.
+		maxLength: schema?.engine === "mssql" ? 128 : 63,
+		// `@relation` met `onUpdate: Cascade` quand rien n'est écrit.
+		onUpdate: prisma ? "cascade" : "restrict"
+	};
+}
+
+function prismaName(
+	naming: DdlNaming,
+	table: string,
+	columns: readonly string[],
+	suffix: string
+): string {
+	const base = [table, ...columns].join("_");
+	return `${base.slice(0, naming.maxLength - suffix.length - 1)}_${suffix}`;
+}
+
+/** Nom imposé par le profil ; `undefined` = le moteur nomme l'objet. */
+function profileName(
+	naming: DdlNaming,
+	table: string,
+	columns: readonly string[],
+	suffix: string
+): string | undefined {
+	return naming.prisma ? prismaName(naming, table, columns, suffix) : undefined;
+}
+
 export function lowerDDL(
 	statement: DDLStatement,
-	schema?: SchemaModel
+	schema?: SchemaModel,
+	options: DdlLowerOptions = {}
 ): DDLPlan {
+	const naming = ddlNaming(options, schema);
 	if (statement.kind === "create-table") {
-		return lowerCreateTable(statement, schema);
+		return lowerCreateTable(statement, schema, naming);
 	}
 	if (statement.kind === "add-column") {
-		return lowerAddColumn(statement, schema);
+		return lowerAddColumn(statement, schema, naming);
 	}
 	if (statement.kind === "add-index" || statement.kind === "add-unique-index") {
-		return lowerAddIndex(statement);
+		return lowerAddIndex(statement, naming, options.concurrentIndex ?? true);
 	}
 	if (statement.kind === "drop-index") {
 		return lowerDropIndex(statement);
@@ -89,13 +146,13 @@ export function lowerDDL(
 		return lowerDropRef(statement, schema);
 	}
 	if (statement.kind === "add-ref") {
-		return lowerAddRef(statement, schema);
+		return lowerAddRef(statement, schema, naming);
 	}
 	if (statement.kind === "rename-column") {
-		return lowerRenameColumn(statement, schema);
+		return lowerRenameColumn(statement, schema, naming);
 	}
 	if (statement.kind === "alter-column") {
-		return lowerAlterColumn(statement, schema);
+		return lowerAlterColumn(statement, schema, naming);
 	}
 	throw new SnqlError(
 		`DDL kind '${(statement as { kind: string }).kind}' non supporté au lower`,
@@ -280,19 +337,28 @@ function lowerDropColumn(stmt: DropColumnStmt): DropColumnPlan {
  * Longueur cap : 63 chars WiredTiger — un index sur 5+ fields long-named peut
  * dépasser. On tronque hard à 63 pour éviter un fail Mongo tardif ; l'user peut
  * override en passant `name` explicite (v-next parser).
+ * Profil `prisma` : `<table>_<fields>_idx` / `_key` (ADR-036 D6).
  */
 function generateIndexName(
 	target: string,
 	fields: readonly string[],
-	unique: boolean
+	unique: boolean,
+	naming: DdlNaming
 ): string {
+	if (naming.prisma) {
+		return prismaName(naming, target, fields, unique ? "key" : "idx");
+	}
 	const prefix = unique ? "unique" : "idx";
 	const joined = fields.join("_");
 	const full = `${prefix}_${target}_${joined}`;
 	return full.length <= 63 ? full : full.slice(0, 63);
 }
 
-function lowerAddIndex(stmt: AddIndexStmt): AddIndexPlan {
+function lowerAddIndex(
+	stmt: AddIndexStmt,
+	naming: DdlNaming,
+	concurrently: boolean
+): AddIndexPlan {
 	assertIdent(stmt.target, "target");
 	if (stmt.fields.length === 0) {
 		throw new SnqlError(
@@ -315,7 +381,8 @@ function lowerAddIndex(stmt: AddIndexStmt): AddIndexPlan {
 		seen.add(f);
 	}
 	const unique = stmt.kind === "add-unique-index";
-	const name = stmt.name ?? generateIndexName(stmt.target, stmt.fields, unique);
+	const name =
+		stmt.name ?? generateIndexName(stmt.target, stmt.fields, unique, naming);
 	return {
 		op: "ddl",
 		kind: stmt.kind,
@@ -323,6 +390,7 @@ function lowerAddIndex(stmt: AddIndexStmt): AddIndexPlan {
 		fields: stmt.fields,
 		name,
 		ifNotExists: stmt.ifNotExists ?? false,
+		...(concurrently ? {} : { concurrently: false as const }),
 		...(stmt.span !== undefined ? { span: stmt.span } : {})
 	};
 }
@@ -342,7 +410,8 @@ function lowerDropIndex(stmt: DropIndexStmt): DropIndexPlan {
 
 function lowerAddColumn(
 	stmt: AddColumnStmt,
-	schema?: SchemaModel
+	schema: SchemaModel | undefined,
+	naming: DdlNaming
 ): AddColumnPlan {
 	assertIdent(stmt.target, "target");
 	assertIdent(stmt.column.name, "field");
@@ -363,7 +432,8 @@ function lowerAddColumn(
 					resolved.type,
 					nullable,
 					schema,
-					[{ name: stmt.column.name, type: resolved.type }]
+					[{ name: stmt.column.name, type: resolved.type }],
+					naming
 				)
 			: undefined;
 	const base: CreateTableField = {
@@ -371,6 +441,10 @@ function lowerAddColumn(
 		type: resolved.type,
 		nullable,
 		unique,
+		...constraintNames(naming, stmt.target, stmt.column.name, {
+			unique,
+			hasDefault: stmt.column.defaultExpr !== undefined
+		}),
 		...(ref !== undefined ? { ref } : {}),
 		...(resolved.enumTypeName !== undefined
 			? { enumTypeName: resolved.enumTypeName }
@@ -403,7 +477,8 @@ function lowerAddColumn(
 
 function lowerCreateTable(
 	stmt: CreateTableStmt,
-	schema?: SchemaModel
+	schema: SchemaModel | undefined,
+	naming: DdlNaming
 ): CreateTablePlan {
 	assertIdent(stmt.target, "target");
 	if (stmt.fields.length === 0) {
@@ -437,7 +512,8 @@ function lowerCreateTable(
 							type,
 							nullable,
 							schema,
-							currentFieldTypes
+							currentFieldTypes,
+							naming
 						)
 					: undefined;
 			const base: CreateTableField = {
@@ -445,6 +521,10 @@ function lowerCreateTable(
 				type,
 				nullable,
 				unique,
+				...constraintNames(naming, stmt.target, f.name, {
+					unique,
+					hasDefault: f.defaultExpr !== undefined
+				}),
 				...(resolved.enumTypeName !== undefined
 					? { enumTypeName: resolved.enumTypeName }
 					: {}),
@@ -462,6 +542,10 @@ function lowerCreateTable(
 	if (stmt.primaryKey !== undefined) {
 		assertPrimaryKey(stmt.primaryKey, fields, stmt.span);
 	}
+	const primaryKeyName =
+		stmt.primaryKey !== undefined
+			? profileName(naming, stmt.target, [], "pkey")
+			: undefined;
 	const plan: CreateTablePlan = {
 		op: "ddl",
 		kind: "create-table",
@@ -469,20 +553,45 @@ function lowerCreateTable(
 		ifNotExists: stmt.ifNotExists ?? false,
 		fields,
 		...(stmt.primaryKey !== undefined ? { primaryKey: stmt.primaryKey } : {}),
+		...(primaryKeyName !== undefined ? { primaryKeyName } : {}),
 		...(stmt.span !== undefined ? { span: stmt.span } : {})
 	};
 	return plan;
 }
 
+/** Noms d'unicité et de défaut d'une colonne imposés par le profil ORM. */
+function constraintNames(
+	naming: DdlNaming,
+	table: string,
+	column: string,
+	has: { unique: boolean; hasDefault: boolean }
+): { uniqueName?: string; defaultName?: string } {
+	const uniqueName = has.unique
+		? profileName(naming, table, [column], "key")
+		: undefined;
+	const defaultName = has.hasDefault
+		? profileName(naming, table, [column], "df")
+		: undefined;
+	return {
+		...(uniqueName !== undefined ? { uniqueName } : {}),
+		...(defaultName !== undefined ? { defaultName } : {})
+	};
+}
+
 /**
  * Nom auto-généré d'une FK (ADR-031 D4). Pattern `fk_<table>_<col>_<target>`,
  * tronqué à 63 chars (PG NAMEDATALEN + WiredTiger). Override via `as`.
+ * Profil `prisma` : `<table>_<col>_fkey` (ADR-036 D6).
  */
 function generateRefName(
 	fromCollection: string,
 	fromColumn: string,
-	targetCollection: string
+	targetCollection: string,
+	naming: DdlNaming
 ): string {
+	if (naming.prisma) {
+		return prismaName(naming, fromCollection, [fromColumn], "fkey");
+	}
 	const full = `fk_${fromCollection}_${fromColumn}_${targetCollection}`;
 	return full.length <= 63 ? full : full.slice(0, 63);
 }
@@ -495,7 +604,8 @@ function generateRefName(
  *    colonne cible doit exister, et le type doit être compatible (léger : même
  *    SnqlType, ou les deux entiers-like uuid/int/bigint).
  *  - `on delete set null` exige que la colonne portante soit nullable.
- *  - Défaut D2 : `restrict` sur delete ET update.
+ *  - Défaut D2 : `restrict` sur delete ET update ; `on update cascade` sous
+ *    le profil `prisma` (ADR-036 D6).
  */
 /**
  * `add ref` (ADR-036 E/1a) : la colonne portante existe déjà — son type et sa
@@ -503,7 +613,11 @@ function generateRefName(
  * tout le schéma : Mongo indexe `_snql_refs` par nom. Sans schéma, seuls les
  * identifiants sont vérifiés (le moteur tranche).
  */
-function lowerAddRef(stmt: AddRefStmt, schema?: SchemaModel): AddRefPlan {
+function lowerAddRef(
+	stmt: AddRefStmt,
+	schema: SchemaModel | undefined,
+	naming: DdlNaming
+): AddRefPlan {
 	assertIdent(stmt.target, "target");
 	assertIdent(stmt.column, "field");
 	let fromType: SnqlType = "unknown";
@@ -538,7 +652,8 @@ function lowerAddRef(stmt: AddRefStmt, schema?: SchemaModel): AddRefPlan {
 		fromType,
 		fromNullable,
 		schema,
-		schema?.collections.find((c) => c.name === stmt.target)?.fields ?? []
+		schema?.collections.find((c) => c.name === stmt.target)?.fields ?? [],
+		naming
 	);
 	const taken = schema?.refs?.find((r) => r.name === ref.name);
 	if (taken !== undefined) {
@@ -564,7 +679,8 @@ function lowerAddRef(stmt: AddRefStmt, schema?: SchemaModel): AddRefPlan {
  */
 function lowerRenameColumn(
 	stmt: RenameColumnStmt,
-	schema?: SchemaModel
+	schema: SchemaModel | undefined,
+	naming: DdlNaming
 ): RenameColumnPlan {
 	assertIdent(stmt.target, "target");
 	assertIdent(stmt.column, "field");
@@ -610,14 +726,76 @@ function lowerRenameColumn(
 			);
 		}
 	}
+	const renames = naming.prisma
+		? conventionalRenames(
+				naming,
+				schema,
+				stmt.target,
+				stmt.column,
+				stmt.newName
+			)
+		: [];
 	return {
 		op: "ddl",
 		kind: "rename-column",
 		target: stmt.target,
 		column: stmt.column,
 		newName: stmt.newName,
+		...(renames.length > 0 ? { renames } : {}),
 		...(stmt.span !== undefined ? { span: stmt.span } : {})
 	};
+}
+
+/**
+ * Index et FK nommés d'après la colonne renommée selon la convention du
+ * profil : Prisma les renomme lui-même et verrait sinon un écart (ADR-036 D6).
+ * Un nom hors convention (`map:` dans le modèle) ne bouge pas. Index et FK
+ * viennent du schéma ; la contrainte de défaut, que seul MSSQL nomme, est
+ * renommée par le moteur si elle existe.
+ */
+function conventionalRenames(
+	naming: DdlNaming,
+	schema: SchemaModel | undefined,
+	table: string,
+	from: string,
+	to: string
+): DdlObjectRename[] {
+	const swap = (columns: readonly string[]) =>
+		columns.map((c) => (c === from ? to : c));
+	const renames: DdlObjectRename[] = [];
+	const push = (
+		kind: DdlObjectRename["kind"],
+		before: string,
+		after: string
+	) => {
+		if (before !== after) renames.push({ kind, from: before, to: after });
+	};
+	const collection = schema?.collections.find((c) => c.name === table);
+	for (const index of collection?.indexes ?? []) {
+		if (!index.columns.includes(from)) continue;
+		const suffix = index.unique ? "key" : "idx";
+		if (index.name !== prismaName(naming, table, index.columns, suffix))
+			continue;
+		push(
+			"index",
+			index.name,
+			prismaName(naming, table, swap(index.columns), suffix)
+		);
+	}
+	for (const ref of schema?.refs ?? []) {
+		if (ref.fromCollection !== table || ref.fromColumn !== from) continue;
+		if (ref.name !== prismaName(naming, table, [from], "fkey")) continue;
+		push("foreign-key", ref.name, prismaName(naming, table, [to], "fkey"));
+	}
+	const field = collection?.fields.find((f) => f.name === from);
+	if (field === undefined || field.hasDefault === true) {
+		push(
+			"default",
+			prismaName(naming, table, [from], "df"),
+			prismaName(naming, table, [to], "df")
+		);
+	}
+	return renames;
 }
 
 /**
@@ -627,7 +805,8 @@ function lowerRenameColumn(
  */
 function lowerAlterColumn(
 	stmt: AlterColumnStmt,
-	schema?: SchemaModel
+	schema: SchemaModel | undefined,
+	naming: DdlNaming
 ): AlterColumnPlan {
 	assertIdent(stmt.target, "target");
 	assertIdent(stmt.column, "field");
@@ -659,6 +838,7 @@ function lowerAlterColumn(
 		};
 	}
 	if (stmt.action.kind === "set-default") {
+		const name = profileName(naming, stmt.target, [stmt.column], "df");
 		return {
 			op: "ddl",
 			kind: "alter-column",
@@ -666,7 +846,12 @@ function lowerAlterColumn(
 			column: stmt.column,
 			action: {
 				kind: "set-default",
-				value: lowerDefault(stmt.action.expr, stmt.column, current?.type ?? "unknown")
+				value: lowerDefault(
+					stmt.action.expr,
+					stmt.column,
+					current?.type ?? "unknown"
+				),
+				...(name !== undefined ? { name } : {})
 			},
 			...(current !== undefined ? { current } : {}),
 			...(stmt.span !== undefined ? { span: stmt.span } : {})
@@ -734,7 +919,8 @@ function resolveFieldRef(
 	fromType: SnqlType,
 	fromNullable: boolean,
 	schema: SchemaModel | undefined,
-	currentFields: readonly { name: string; type: SnqlType }[]
+	currentFields: readonly { name: string; type: SnqlType }[],
+	naming: DdlNaming
 ): import("./plan").FieldRefPlan {
 	const targetCollection =
 		mod.targetCollection === "self" ? fromCollection : mod.targetCollection;
@@ -743,7 +929,7 @@ function resolveFieldRef(
 	if (mod.name !== undefined) assertIdent(mod.name, "field");
 
 	const onDelete = mod.onDelete ?? "restrict";
-	const onUpdate = mod.onUpdate ?? "restrict";
+	const onUpdate = mod.onUpdate ?? naming.onUpdate;
 
 	const setNullOn =
 		onDelete === "set-null"
@@ -811,7 +997,7 @@ function resolveFieldRef(
 	return {
 		name:
 			mod.name ??
-			generateRefName(fromCollection, fromColumn, targetCollection),
+			generateRefName(fromCollection, fromColumn, targetCollection, naming),
 		fromColumn,
 		targetCollection,
 		targetColumn: mod.targetColumn,

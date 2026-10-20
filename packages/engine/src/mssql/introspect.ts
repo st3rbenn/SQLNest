@@ -14,9 +14,11 @@ import {
 	relationPairKey
 } from "../naming-relations";
 import {
+	buildIndexesFromRows,
 	buildRefsFromFkRows,
 	buildRelationsFromFkRows,
-	type RelationalFkRow
+	type RelationalFkRow,
+	type RelationalIndexRow
 } from "../relational-refs";
 
 /**
@@ -106,6 +108,20 @@ const ENUMS_SQL = `
 	SELECT [name], [members]
 	FROM [_snql_enums]
 	ORDER BY [name]`;
+
+// Index hors clé primaire (contraintes UNIQUE comprises), colonnes de clé dans
+// l'ordre ; les colonnes INCLUDE et les tables metadata sont écartées.
+const INDEXES_SQL = `
+	SELECT t.name AS table_name, i.name AS index_name,
+		i.is_unique AS is_unique, c.name AS column_name
+	FROM sys.indexes i
+	JOIN sys.tables t ON t.object_id = i.object_id
+	JOIN sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
+	JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+	WHERE SCHEMA_NAME(t.schema_id) = @p1 AND i.is_primary_key = 0 AND i.type > 0
+		AND ic.is_included_column = 0
+		AND t.name NOT LIKE '\\_snql\\_%' ESCAPE '\\'
+	ORDER BY t.name, i.name, ic.key_ordinal`;
 
 // Les DEUX côtés bornés au schéma cible (@p1) : une FK cross-schema donnerait
 // une relation pendante vers une table non introspectée — même politique que PG.
@@ -200,7 +216,8 @@ export function buildMssqlSchemaModel(
 	columns: readonly MssqlColumnRow[],
 	pks: readonly MssqlPkRow[],
 	fks: readonly MssqlFkRow[],
-	enums: readonly MssqlEnumRow[] = []
+	enums: readonly MssqlEnumRow[] = [],
+	indexRows: readonly RelationalIndexRow[] = []
 ): SchemaModel {
 	const fieldsByTable = new Map<string, Field[]>();
 	for (const col of columns) {
@@ -226,12 +243,20 @@ export function buildMssqlSchemaModel(
 		pkByTable.set(pk.table_name, list);
 	}
 
+	const indexesByTable = buildIndexesFromRows(indexRows);
 	const collections: Collection[] = tables.map((name) => {
 		const fields = fieldsByTable.get(name) ?? [];
 		const primaryKey = pkByTable.get(name);
-		return primaryKey !== undefined && primaryKey.length > 0
-			? { name, fields, primaryKey, source: "declared" }
-			: { name, fields, source: "declared" };
+		const indexes = indexesByTable.get(name);
+		return {
+			name,
+			fields,
+			...(primaryKey !== undefined && primaryKey.length > 0
+				? { primaryKey }
+				: {}),
+			...(indexes !== undefined ? { indexes } : {}),
+			source: "declared"
+		};
 	});
 
 	// Enums compensés — members JSON parsés defensivement (une ligne
@@ -318,20 +343,22 @@ export async function introspectMssql(
 			{ cause }
 		);
 	}
-	const [pks, fks, enums] = await Promise.all([
+	const [pks, fks, enums, indexes] = await Promise.all([
 		softQuery(run, PK_SQL, params, "primary keys"),
 		softQuery(run, FK_SQL, params, "foreign keys"),
 		// Enums compensés (M/6) : la table metadata `_snql_enums` n'existe
 		// qu'après le premier `create enum` — 208 (invalid object) est déjà
 		// dans les codes soft → 0 enum, jamais un blocage.
-		softQuery(run, ENUMS_SQL, params, "enums")
+		softQuery(run, ENUMS_SQL, params, "enums"),
+		softQuery(run, INDEXES_SQL, params, "indexes")
 	]);
 	return buildMssqlSchemaModel(
 		tables.rows.map((row) => String(row["table_name"])),
 		columns.rows as unknown as MssqlColumnRow[],
 		pks as unknown as MssqlPkRow[],
 		fks as unknown as MssqlFkRow[],
-		enums as unknown as MssqlEnumRow[]
+		enums as unknown as MssqlEnumRow[],
+		indexes as unknown as RelationalIndexRow[]
 	);
 }
 

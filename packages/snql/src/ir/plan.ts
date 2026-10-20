@@ -596,7 +596,11 @@ export interface CreateTableField {
 	readonly type: import("../schema/model").SnqlType;
 	readonly nullable: boolean;
 	readonly unique: boolean;
+	/** Nom de la contrainte d'unicité, imposé par un profil ORM (ADR-036 D6). Absent = nom du moteur. */
+	readonly uniqueName?: string;
 	readonly defaultValue?: DdlDefault;
+	/** Nom de la contrainte de défaut, là où le moteur en nomme une (MSSQL) — profil ORM. */
+	readonly defaultName?: string;
 	// Enum info — présent uniquement si `type === "enum"` résolu depuis
 	// `schema.enums[]` (ADR-030 Enum/2). Snapshot des members au moment du
 	// lower : PG codegen émet `enumTypeName` unquoted, Mongo codegen inline
@@ -616,6 +620,8 @@ export interface CreateTablePlan {
 	readonly ifNotExists: boolean;
 	readonly fields: readonly CreateTableField[];
 	readonly primaryKey?: readonly string[];
+	/** Nom de la contrainte de clé primaire, imposé par un profil ORM (ADR-036 D6). */
+	readonly primaryKeyName?: string;
 	readonly span?: Span;
 }
 
@@ -656,6 +662,11 @@ export interface AddIndexPlan {
 	readonly fields: readonly string[];
 	readonly name: string;
 	readonly ifNotExists: boolean;
+	/**
+	 * `false` : index posé sans `CONCURRENTLY`, pour un runner qui exécute tout
+	 * en transaction (ADR-036 D6). Absent = D11.
+	 */
+	readonly concurrently?: false;
 	readonly span?: Span;
 }
 
@@ -779,9 +790,21 @@ export interface AddRefPlan {
 }
 
 /**
+ * Objet dont le nom suit la convention d'un profil ORM et qui doit suivre un
+ * renommage de colonne (ADR-036 D6). `default` : contrainte de défaut, là où
+ * le moteur en nomme une (MSSQL), renommée seulement si elle existe.
+ */
+export interface DdlObjectRename {
+	readonly kind: "index" | "foreign-key" | "default";
+	readonly from: string;
+	readonly to: string;
+}
+
+/**
  * `rename column <table>.<col> to <nouveau>` résolu (ADR-036 E/1b). PG / MSSQL
  * natifs (index et FK suivent) ; Mongo compensé : validateur, `$rename` par
- * lots, index recréés, `_snql_refs` réécrit.
+ * lots, index recréés, `_snql_refs` réécrit. Sous un profil ORM, `renames`
+ * liste les noms conventionnels à faire suivre.
  */
 export interface RenameColumnPlan {
 	readonly op: "ddl";
@@ -789,6 +812,7 @@ export interface RenameColumnPlan {
 	readonly target: string;
 	readonly column: string;
 	readonly newName: string;
+	readonly renames?: readonly DdlObjectRename[];
 	readonly span?: Span;
 }
 
@@ -796,7 +820,12 @@ export interface RenameColumnPlan {
 export type AlterColumnPlanAction =
 	| { readonly kind: "set-nullable" }
 	| { readonly kind: "set-not-null" }
-	| { readonly kind: "set-default"; readonly value: DdlDefault }
+	| {
+			readonly kind: "set-default";
+			readonly value: DdlDefault;
+			/** Nom de la contrainte de défaut imposé par un profil ORM (MSSQL). */
+			readonly name?: string;
+	  }
 	| { readonly kind: "drop-default" }
 	| {
 			readonly kind: "set-type";

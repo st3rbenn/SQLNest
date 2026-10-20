@@ -768,3 +768,89 @@ describe("codegen PG — drop ref (ADR-031 FK/3)", () => {
 		).toThrow(/Identifiant invalide/);
 	});
 });
+
+describe("codegen PG — profil ORM (ADR-036 E/1e)", () => {
+	it("clé primaire et unique nommés quand le plan porte leur nom", () => {
+		const q = mapDDL({
+			...uuidPk,
+			primaryKeyName: "users_pkey",
+			fields: [
+				{ name: "id", type: "uuid", nullable: false, unique: false },
+				{
+					name: "email",
+					type: "string",
+					nullable: false,
+					unique: true,
+					uniqueName: "users_email_key"
+				}
+			]
+		});
+		if (q.kind !== "sql") throw new Error("attendu sql");
+		expect(q.text).toBe(
+			`CREATE TABLE "users" ("id" uuid NOT NULL, "email" text NOT NULL CONSTRAINT "users_email_key" UNIQUE, CONSTRAINT "users_pkey" PRIMARY KEY ("id"))`
+		);
+	});
+
+	it("add column unique nommé", () => {
+		const q = mapDDL({
+			op: "ddl",
+			kind: "add-column",
+			target: "users",
+			ifNotExists: false,
+			column: {
+				name: "slug",
+				type: "string",
+				nullable: true,
+				unique: true,
+				uniqueName: "users_slug_key"
+			}
+		});
+		if (q.kind !== "sql") throw new Error("attendu sql");
+		expect(q.text).toBe(
+			`ALTER TABLE "users" ADD COLUMN "slug" text CONSTRAINT "users_slug_key" UNIQUE`
+		);
+	});
+
+	it("concurrently: false → CREATE INDEX simple", () => {
+		const q = mapDDL({
+			op: "ddl",
+			kind: "add-index",
+			target: "agency",
+			fields: ["city"],
+			name: "agency_city_idx",
+			ifNotExists: false,
+			concurrently: false
+		});
+		if (q.kind !== "sql") throw new Error("attendu sql");
+		expect(q.text).toBe(`CREATE INDEX "agency_city_idx" ON "agency" ("city")`);
+	});
+
+	it("rename column : index et FK conventionnels renommés dans la même transaction, défaut ignoré", () => {
+		const q = mapDDL({
+			op: "ddl",
+			kind: "rename-column",
+			target: "agency",
+			column: "code",
+			newName: "slug",
+			renames: [
+				{ kind: "index", from: "agency_code_key", to: "agency_slug_key" },
+				{
+					kind: "foreign-key",
+					from: "agency_code_fkey",
+					to: "agency_slug_fkey"
+				},
+				{ kind: "default", from: "agency_code_df", to: "agency_slug_df" }
+			]
+		});
+		if (q.kind !== "transaction") throw new Error("attendu transaction");
+		expect(
+			q.steps.map((s) =>
+				s.kind === "statement" && s.query.kind === "sql" ? s.query.text : ""
+			)
+		).toEqual([
+			`ALTER TABLE "agency" RENAME COLUMN "code" TO "slug"`,
+			`ALTER INDEX "agency_code_key" RENAME TO "agency_slug_key"`,
+			`ALTER TABLE "agency" RENAME CONSTRAINT "agency_code_fkey" TO "agency_slug_fkey"`
+		]);
+	});
+});

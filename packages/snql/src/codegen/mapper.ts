@@ -483,6 +483,7 @@ export interface MongoDDLAddRefQuery {
  * validateur qui accepte les deux noms, `$rename` par lots, index recréés,
  * validateur final, `_snql_refs` réécrit. Chaque temps ne touche que ce qui
  * porte encore l'ancien nom : une interruption se reprend en relançant.
+ * `renames` (profil ORM, ADR-036 D6) : noms d'index et de FK imposés.
  */
 export interface MongoDDLRenameColumnQuery {
 	readonly engine: string;
@@ -491,6 +492,7 @@ export interface MongoDDLRenameColumnQuery {
 	readonly collection: string;
 	readonly column: string;
 	readonly newName: string;
+	readonly renames?: readonly import("../ir/plan").DdlObjectRename[];
 }
 
 /**
@@ -771,6 +773,7 @@ export interface KvDDLRenameColumnQuery {
 	readonly collection: string;
 	readonly column: string;
 	readonly newName: string;
+	readonly renames?: readonly import("../ir/plan").DdlObjectRename[];
 }
 
 /**

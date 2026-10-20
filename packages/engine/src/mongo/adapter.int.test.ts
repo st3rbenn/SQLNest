@@ -1,3 +1,10 @@
+import {
+	type DDLStatement,
+	getMapper,
+	lowerDDL,
+	parse,
+	tokenize
+} from "@sqlnest/snql";
 import { describe, expect, it } from "vitest";
 import { ConnectionClosedError } from "../errors";
 import { runQuery } from "../run";
@@ -717,6 +724,77 @@ describe.skipIf(!hasMongo)("mongodb adapter — défauts (ADR-036 E/1d)", () => 
 		}
 	}, 60_000);
 });
+
+describe.skipIf(!hasMongo)(
+	"mongodb adapter — profil ORM prisma (ADR-036 E/1e)",
+	() => {
+		it("noms du profil, rename column fait suivre index et FK, index introspectés", async () => {
+			const conn = await mongoAdapter.connect(loadConfig());
+			const ddl = async (source: string) => {
+				const plan = lowerDDL(
+					parse(tokenize(source)) as DDLStatement,
+					await conn.introspect(),
+					{ ormProfile: "prisma" }
+				);
+				const mapDDL = getMapper("mongodb").mapDDL;
+				if (mapDDL === undefined) throw new Error("mapDDL manquant");
+				return conn.execute(mapDDL(plan));
+			};
+			const drop = async () => {
+				await runQuery(conn, "drop table e1e_kid if exists");
+				await runQuery(conn, "drop table e1e_par if exists");
+			};
+			try {
+				await drop();
+				await ddl(
+					"create table e1e_par { code: text unique, label: text nullable }"
+				);
+				await ddl(
+					"create table e1e_kid { par_code: text ref e1e_par.code, slot: int }"
+				);
+				await ddl("add index (par_code, slot) into e1e_kid");
+				let schema = await conn.introspect();
+				expect(
+					schema.collections.find((c) => c.name === "e1e_par")?.indexes
+				).toEqual([
+					{ name: "e1e_par_code_key", columns: ["code"], unique: true }
+				]);
+				expect(
+					schema.refs?.find((r) => r.fromCollection === "e1e_kid")
+				).toMatchObject({
+					name: "e1e_kid_par_code_fkey",
+					onUpdate: "cascade"
+				});
+
+				await runQuery(conn, 'add {code: "a"} into e1e_par');
+				await runQuery(conn, 'add {par_code: "a", slot: 1} into e1e_kid');
+				await ddl("rename column e1e_kid.par_code to parent_code");
+				schema = await conn.introspect();
+				expect(
+					schema.collections.find((c) => c.name === "e1e_kid")?.indexes
+				).toEqual([
+					{
+						name: "e1e_kid_parent_code_slot_idx",
+						columns: ["parent_code", "slot"],
+						unique: false
+					}
+				]);
+				expect(
+					schema.refs?.filter((r) => r.fromCollection === "e1e_kid")
+				).toMatchObject([
+					{ name: "e1e_kid_parent_code_fkey", fromColumn: "parent_code" }
+				]);
+				// La FK renommée s'applique toujours.
+				await expect(
+					runQuery(conn, 'add {parent_code: "zz", slot: 2} into e1e_kid')
+				).rejects.toThrow();
+			} finally {
+				await drop();
+				await conn.close();
+			}
+		}, 60_000);
+	}
+);
 
 describe.skipIf(!hasMongo)("mongodb adapter — on update (ADR-031)", () => {
 	it("restrict : refus typé si un enfant référence l'ancienne valeur, rien n'est écrit", async () => {

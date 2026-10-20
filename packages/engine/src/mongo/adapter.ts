@@ -348,11 +348,13 @@ function renameKeysDeep(value: unknown, from: string, to: string): unknown {
  * `unique_phone`, `idx_agency_phone`) : le nouvel index existe avant que
  * l'ancien disparaisse. Un nom sans le champ est gardé : l'ancien est alors
  * supprimé juste avant. Les index texte (créés hors SNQL) ne sont pas recréés.
+ * `names` : noms imposés par un profil ORM (ADR-036 D6), prioritaires.
  */
 async function renameFieldInIndexes(
 	col: Collection,
 	from: string,
-	to: string
+	to: string,
+	names: ReadonlyMap<string, string>
 ): Promise<void> {
 	for (const index of await col.listIndexes().toArray()) {
 		const { v: _v, key, name, ns: _ns, ...options } = index as Document;
@@ -371,10 +373,9 @@ async function renameFieldInIndexes(
 				to
 			);
 		}
-		const newName = String(name).replace(
-			new RegExp(`(^|_)${from}(?=_|$)`, "g"),
-			`$1${to}`
-		);
+		const newName =
+			names.get(String(name)) ??
+			String(name).replace(new RegExp(`(^|_)${from}(?=_|$)`, "g"), `$1${to}`);
 		if (newName !== name) {
 			await col.createIndex(newKeys, { ...options, name: newName });
 			await col.dropIndex(name);
@@ -2307,7 +2308,8 @@ class MongoConnection implements Connection {
 	 *  2. Copie de l'ancien champ vers le nouveau, par lots.
 	 *  3. Index recréés sur le nouveau champ, puis anciens supprimés.
 	 *  4. Ancien champ retiré, par lots.
-	 *  5. Validateur final sans l'ancien nom, `_snql_refs` réécrit.
+	 *  5. Validateur final sans l'ancien nom, `_snql_refs` réécrit (et les FK
+	 *     renommées par un profil ORM).
 	 * Un document dont les deux champs ont des valeurs différentes est refusé :
 	 * la copie écraserait la valeur du nouveau.
 	 */
@@ -2380,7 +2382,15 @@ class MongoConnection implements Connection {
 				[{ $set: { [to]: `$${from}` } }],
 				capMessage
 			);
-			await renameFieldInIndexes(col, from, to);
+			const renames = query.renames ?? [];
+			await renameFieldInIndexes(
+				col,
+				from,
+				to,
+				new Map(
+					renames.filter((r) => r.kind === "index").map((r) => [r.from, r.to])
+				)
+			);
 			await updateInBatches(
 				col,
 				{ [from]: { $exists: true } },
@@ -2423,6 +2433,18 @@ class MongoConnection implements Connection {
 				{ toCollection: query.collection, toColumn: from },
 				{ $set: { toColumn: to } }
 			);
+			// FK nommées par le profil ORM : `_id` = nom, réinséré sous le nouveau.
+			for (const r of renames) {
+				if (r.kind !== "foreign-key") continue;
+				const ref = await refs.findOne({ _id: r.from as unknown as ObjectId });
+				if (ref === null) continue;
+				await refs.replaceOne(
+					{ _id: r.to as unknown as ObjectId },
+					{ ...ref, _id: r.to },
+					{ upsert: true }
+				);
+				await refs.deleteOne({ _id: r.from as unknown as ObjectId });
+			}
 			return { columns: [], rows: [], rowCount: 0 };
 		} catch (cause) {
 			if (cause instanceof EngineExecutionError) throw cause;

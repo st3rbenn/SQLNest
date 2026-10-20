@@ -137,7 +137,7 @@ export {
 	lowerRaw,
 	lowerTransaction
 } from "./ir/lower";
-export { lowerDDL } from "./ir/lower-ddl";
+export { type DdlLowerOptions, lowerDDL } from "./ir/lower-ddl";
 export type {
 	AddColumnPlan,
 	AddIndexPlan,
@@ -148,6 +148,7 @@ export type {
 	CompareOp,
 	CreateTableField,
 	CreateTablePlan,
+	DdlObjectRename,
 	DDLPlan,
 	DropColumnPlan,
 	DropIndexPlan,
@@ -269,6 +270,7 @@ export { inferResultColumns } from "./runtime/infer-column-types";
 export type { ResultColumn, ResultSet } from "./runtime/result";
 export type {
 	Collection,
+	CollectionIndex,
 	EnumTypeDef,
 	Field,
 	FieldRef,

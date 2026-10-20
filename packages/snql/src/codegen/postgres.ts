@@ -5,6 +5,7 @@ import type {
 	AddIndexPlan,
 	CastTarget,
 	CreateEnumPlan,
+	CreateTableField,
 	CreateTablePlan,
 	DDLPlan,
 	DdlDefault,
@@ -20,6 +21,7 @@ import type {
 	PlanExpr,
 	PlanRowValue,
 	RawPlan,
+	RenameColumnPlan,
 	TransactionPlan
 } from "../ir/plan";
 import { isDdlDefaultFn, isSqlDecimal, isSqlJsonLiteral } from "../ir/plan";
@@ -280,15 +282,7 @@ export const postgresMapper: Mapper = {
 		if (plan.kind === "drop-ref") return renderDropRef(plan);
 		if (plan.kind === "add-ref") return renderAddRef(plan);
 		if (plan.kind === "alter-column") return renderAlterColumn(plan);
-		if (plan.kind === "rename-column") {
-			return {
-				engine: "postgres",
-				kind: "sql",
-				text: `ALTER TABLE ${quoteIdent(plan.target)} RENAME COLUMN ${quoteIdent(plan.column)} TO ${quoteIdent(plan.newName)}`,
-				params: [],
-				paramSpans: []
-			};
-		}
+		if (plan.kind === "rename-column") return renderRenameColumn(plan);
 		throw new SnqlError(
 			`DDL kind '${(plan as { kind: string }).kind}' non supporté par le codegen Postgres V1`,
 			"codegen_ddl_unsupported"
@@ -673,7 +667,7 @@ function renderCreateTable(plan: CreateTablePlan): NativeQuery {
 	for (const f of plan.fields) {
 		const parts: string[] = [quoteIdent(f.name), pgFieldTypeSql(f)];
 		if (!f.nullable) parts.push("NOT NULL");
-		if (f.unique) parts.push("UNIQUE");
+		if (f.unique) parts.push(pgUniqueClause(f));
 		if (f.defaultValue !== undefined) {
 			parts.push(`DEFAULT ${pgInlineDefault(f.defaultValue)}`);
 		}
@@ -681,8 +675,12 @@ function renderCreateTable(plan: CreateTablePlan): NativeQuery {
 		cols.push(parts.join(" "));
 	}
 	if (plan.primaryKey !== undefined && plan.primaryKey.length > 0) {
+		const named =
+			plan.primaryKeyName !== undefined
+				? `CONSTRAINT ${quoteIdent(plan.primaryKeyName)} `
+				: "";
 		cols.push(
-			`PRIMARY KEY (${plan.primaryKey.map(quoteIdent).join(", ")})`
+			`${named}PRIMARY KEY (${plan.primaryKey.map(quoteIdent).join(", ")})`
 		);
 	}
 	const ifNotExists = plan.ifNotExists ? "IF NOT EXISTS " : "";
@@ -732,7 +730,7 @@ function renderAddColumn(plan: AddColumnPlan): NativeQuery {
 	const f = plan.column;
 	const parts: string[] = [quoteIdent(f.name), pgFieldTypeSql(f)];
 	if (!f.nullable) parts.push("NOT NULL");
-	if (f.unique) parts.push("UNIQUE");
+	if (f.unique) parts.push(pgUniqueClause(f));
 	if (f.defaultValue !== undefined) {
 		parts.push(`DEFAULT ${pgInlineDefault(f.defaultValue)}`);
 	}
@@ -748,6 +746,13 @@ function renderAddColumn(plan: AddColumnPlan): NativeQuery {
 	};
 }
 
+/** `UNIQUE` de colonne, nommé quand un profil ORM impose le nom (ADR-036 D6). */
+function pgUniqueClause(f: CreateTableField): string {
+	return f.uniqueName !== undefined
+		? `CONSTRAINT ${quoteIdent(f.uniqueName)} UNIQUE`
+		: "UNIQUE";
+}
+
 /**
  * Rend `add [unique] index (fields) into T` en `CREATE [UNIQUE] INDEX
  * CONCURRENTLY [IF NOT EXISTS] "name" ON "T" ("f1", "f2")` (ADR-029 D11).
@@ -757,13 +762,15 @@ function renderAddColumn(plan: AddColumnPlan): NativeQuery {
  * refus explicit du parser V1 qui refuse tout DDL dans transaction).
  *
  * Pas de params bindés (feedback pg-ddl-inline-defaults) — les idents sont
- * quoted via quoteIdent.
+ * quoted via quoteIdent. `concurrently: false` (runner tout-en-transaction,
+ * ADR-036 D6) → index simple.
  */
 function renderAddIndex(plan: AddIndexPlan): NativeQuery {
 	const unique = plan.kind === "add-unique-index" ? "UNIQUE " : "";
+	const concurrently = plan.concurrently === false ? "" : "CONCURRENTLY ";
 	const ifNotExists = plan.ifNotExists ? "IF NOT EXISTS " : "";
 	const cols = plan.fields.map(quoteIdent).join(", ");
-	const text = `CREATE ${unique}INDEX CONCURRENTLY ${ifNotExists}${quoteIdent(plan.name)} ON ${quoteIdent(plan.target)} (${cols})`;
+	const text = `CREATE ${unique}INDEX ${concurrently}${ifNotExists}${quoteIdent(plan.name)} ON ${quoteIdent(plan.target)} (${cols})`;
 	return {
 		engine: "postgres",
 		kind: "sql",
@@ -790,12 +797,6 @@ function renderDropIndex(plan: DropIndexPlan): NativeQuery {
 	};
 }
 
-/**
- * Rend `drop ref NAME from T` en `ALTER TABLE "T" DROP CONSTRAINT [IF EXISTS]
- * "name"` (ADR-031 FK/3). Pas de CASCADE : une contrainte FK n'a pas de
- * dépendants. Le frontend applique D7 typing UI gate avant Execute (retirer
- * une FK relâche silencieusement l'intégrité référentielle).
- */
 /**
  * `alter column` (ADR-036 E/1c). PG reconstruit index et contraintes. Un
  * défaut existant n'est pas converti par `USING` : quand le schéma en signale
@@ -858,6 +859,49 @@ function renderAddRef(plan: import("../ir/plan").AddRefPlan): NativeQuery {
 	};
 }
 
+/**
+ * `rename column` (ADR-036 E/1b) : index et FK suivent la colonne, leurs noms
+ * restent. Sous un profil ORM, les noms conventionnels suivent aussi, dans la
+ * même transaction : ce que l'ORM écrirait lui-même (ADR-036 D6). Postgres ne
+ * nomme pas les défauts.
+ */
+function renderRenameColumn(plan: RenameColumnPlan): NativeQuery {
+	const table = quoteIdent(plan.target);
+	const statements = [
+		`ALTER TABLE ${table} RENAME COLUMN ${quoteIdent(plan.column)} TO ${quoteIdent(plan.newName)}`
+	];
+	for (const r of plan.renames ?? []) {
+		if (r.kind === "index") {
+			statements.push(
+				`ALTER INDEX ${quoteIdent(r.from)} RENAME TO ${quoteIdent(r.to)}`
+			);
+		} else if (r.kind === "foreign-key") {
+			statements.push(
+				`ALTER TABLE ${table} RENAME CONSTRAINT ${quoteIdent(r.from)} TO ${quoteIdent(r.to)}`
+			);
+		}
+	}
+	const queries: SqlQuery[] = statements.map((text) => ({
+		engine: "postgres",
+		kind: "sql",
+		text,
+		params: [],
+		paramSpans: []
+	}));
+	if (queries.length === 1) return queries[0] as SqlQuery;
+	return {
+		engine: "postgres",
+		kind: "transaction",
+		steps: queries.map((query) => ({ kind: "statement" as const, query }))
+	};
+}
+
+/**
+ * Rend `drop ref NAME from T` en `ALTER TABLE "T" DROP CONSTRAINT [IF EXISTS]
+ * "name"` (ADR-031 FK/3). Pas de CASCADE : une contrainte FK n'a pas de
+ * dépendants. Le frontend applique D7 typing UI gate avant Execute (retirer
+ * une FK relâche silencieusement l'intégrité référentielle).
+ */
 function renderDropRef(plan: DropRefPlan): NativeQuery {
 	const ifExists = plan.ifExists ? "IF EXISTS " : "";
 	const text = `ALTER TABLE ${quoteIdent(plan.target)} DROP CONSTRAINT ${ifExists}${quoteIdent(plan.name)}`;

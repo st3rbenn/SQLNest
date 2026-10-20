@@ -920,6 +920,12 @@ function enumCheckClause(
 	return `CONSTRAINT ${checkName} CHECK (${quoteIdent(f.name)} IN (${members}))`;
 }
 
+/** `CONSTRAINT [n] ` quand un profil ORM impose le nom (ADR-036 D6), sinon
+ *  le moteur nomme. */
+function constraintPrefix(name: string | undefined): string {
+	return name !== undefined ? `CONSTRAINT ${quoteIdent(name)} ` : "";
+}
+
 function renderFieldDef(
 	f: import("../ir/plan").CreateTableField,
 	table: string,
@@ -928,9 +934,11 @@ function renderFieldDef(
 	const inPk = primaryKey?.includes(f.name) ?? false;
 	const parts: string[] = [quoteIdent(f.name), mssqlFieldTypeSql(f, inPk)];
 	if (!f.nullable) parts.push("NOT NULL");
-	if (f.unique) parts.push("UNIQUE");
+	if (f.unique) parts.push(`${constraintPrefix(f.uniqueName)}UNIQUE`);
 	if (f.defaultValue !== undefined) {
-		parts.push(`DEFAULT ${mssqlInlineDefault(f.defaultValue)}`);
+		parts.push(
+			`${constraintPrefix(f.defaultName)}DEFAULT ${mssqlInlineDefault(f.defaultValue)}`
+		);
 	}
 	const check = enumCheckClause(table, f);
 	if (check !== undefined) parts.push(check);
@@ -963,7 +971,9 @@ function renderCreateTable(
 		renderFieldDef(f, plan.target, plan.primaryKey)
 	);
 	if (plan.primaryKey !== undefined && plan.primaryKey.length > 0) {
-		cols.push(`PRIMARY KEY (${plan.primaryKey.map(quoteIdent).join(", ")})`);
+		cols.push(
+			`${constraintPrefix(plan.primaryKeyName)}PRIMARY KEY (${plan.primaryKey.map(quoteIdent).join(", ")})`
+		);
 	}
 	const createText = `CREATE TABLE ${quoteIdent(plan.target)} (${cols.join(", ")})`;
 	if (!plan.ifNotExists) return ddlQuery(createText);
@@ -1119,22 +1129,51 @@ function renderDropColumn(
 	);
 }
 
-/** `rename column` → `sp_rename` : le nouveau nom passe sans crochets (ils
- *  feraient partie du nom). FK, index et CHECK suivent la colonne. */
+/**
+ * `rename column` → `sp_rename` : le nouveau nom passe sans crochets (ils
+ * feraient partie du nom). FK, index et CHECK suivent la colonne. Sous un
+ * profil ORM, les noms conventionnels suivent aussi, dans la même
+ * transaction ; la contrainte de défaut seulement si elle existe sous ce nom
+ * (ADR-036 D6).
+ */
 function renderRenameColumn(
 	plan: import("../ir/plan").RenameColumnPlan,
 	namespace: string
 ): NativeQuery {
-	const column = `${quoteIdent(namespace)}.${quoteIdent(plan.target)}.${quoteIdent(plan.column)}`;
-	return ddlQuery(
-		`EXEC sp_rename ${nstr(column)}, ${nstr(plan.newName)}, N'COLUMN'`
-	);
+	const schema = quoteIdent(namespace);
+	const table = `${schema}.${quoteIdent(plan.target)}`;
+	const renameColumn = `EXEC sp_rename ${nstr(`${table}.${quoteIdent(plan.column)}`)}, ${nstr(plan.newName)}, N'COLUMN'`;
+	const renames = plan.renames ?? [];
+	if (renames.length === 0) return ddlQuery(renameColumn);
+	const lines = [
+		"SET NOCOUNT ON;",
+		"SET XACT_ABORT ON;",
+		"BEGIN TRAN;",
+		`${renameColumn};`
+	];
+	for (const r of renames) {
+		if (r.kind === "index") {
+			lines.push(
+				`EXEC sp_rename ${nstr(`${table}.${quoteIdent(r.from)}`)}, ${nstr(r.to)}, N'INDEX';`
+			);
+		} else if (r.kind === "foreign-key") {
+			lines.push(
+				`EXEC sp_rename ${nstr(`${schema}.${quoteIdent(r.from)}`)}, ${nstr(r.to)}, N'OBJECT';`
+			);
+		} else {
+			lines.push(
+				`IF EXISTS (SELECT 1 FROM sys.default_constraints WHERE name = ${nstr(r.from)} AND parent_object_id = OBJECT_ID(${nstr(table)})) EXEC sp_rename ${nstr(`${schema}.${quoteIdent(r.from)}`)}, ${nstr(r.to)}, N'OBJECT';`
+			);
+		}
+	}
+	lines.push("COMMIT;");
+	return ddlQuery(lines.join("\n"));
 }
 
 /**
  * `set default` / `drop default` (ADR-036 E/1d). En T-SQL, un défaut est une
  * contrainte nommée : l'existante, quel que soit son nom, est retirée, puis la
- * nouvelle est posée sous `df_<t>_<c>`.
+ * nouvelle est posée sous `df_<t>_<c>`, ou le nom du profil ORM.
  */
 function renderColumnDefault(
 	plan: import("../ir/plan").AlterColumnPlan,
@@ -1154,7 +1193,7 @@ function renderColumnDefault(
 		"EXEC (@drop);",
 		...(action.kind === "set-default"
 			? [
-					`ALTER TABLE ${table} ADD CONSTRAINT ${quoteIdent(`df_${plan.target}_${plan.column}`)} DEFAULT ${mssqlInlineDefault(action.value)} FOR ${quoteIdent(plan.column)};`
+					`ALTER TABLE ${table} ADD CONSTRAINT ${quoteIdent(action.name ?? `df_${plan.target}_${plan.column}`)} DEFAULT ${mssqlInlineDefault(action.value)} FOR ${quoteIdent(plan.column)};`
 				]
 			: []),
 		"COMMIT;"

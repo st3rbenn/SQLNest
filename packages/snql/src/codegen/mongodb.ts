@@ -251,7 +251,8 @@ export const mongoMapper: Mapper = {
 				operation: "rename-column",
 				collection: plan.target,
 				column: plan.column,
-				newName: plan.newName
+				newName: plan.newName,
+				...(plan.renames !== undefined ? { renames: plan.renames } : {})
 			};
 		}
 		if (plan.kind === "add-ref") {
@@ -2987,7 +2988,10 @@ function renderMongoCreateTable(
 		for (const k of pk) keys[k] = 1;
 		indexes.push({
 			keys,
-			options: { unique: true, name: `pk_${pk.join("_")}` }
+			options: {
+				unique: true,
+				name: plan.primaryKeyName ?? `pk_${pk.join("_")}`
+			}
 		});
 	}
 	for (const f of plan.fields) {
@@ -2996,7 +3000,7 @@ function renderMongoCreateTable(
 		if (primaryKeyAlias !== undefined && f.name === primaryKeyAlias) continue;
 		indexes.push({
 			keys: { [f.name]: 1 },
-			options: { unique: true, name: `unique_${f.name}` }
+			options: { unique: true, name: f.uniqueName ?? `unique_${f.name}` }
 		});
 	}
 
@@ -3254,7 +3258,10 @@ function renderMongoAddColumn(plan: AddColumnPlan): MongoDDLAddColumnQuery {
 			: {})
 	};
 	const index: MongoIndexSpec | undefined = f.unique
-		? { keys: { [f.name]: 1 }, options: { unique: true, name: `unique_${f.name}` } }
+		? {
+				keys: { [f.name]: 1 },
+				options: { unique: true, name: f.uniqueName ?? `unique_${f.name}` }
+			}
 		: undefined;
 	return {
 		engine: "mongodb",

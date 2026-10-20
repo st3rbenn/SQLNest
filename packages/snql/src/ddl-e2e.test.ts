@@ -938,3 +938,61 @@ describe("FK/3 E2E — drop ref cross-engine (ADR-031)", () => {
 		expect(kvDropRef(src).ifExists).toBe(true);
 	});
 });
+
+describe("E/1e E2E — profil ORM prisma (ADR-036 D6)", () => {
+	const prisma = { ormProfile: "prisma" } as const;
+	const mongo = (source: string) => {
+		if (mongoMapper.mapDDL === undefined) throw new Error("mapDDL manquant");
+		return mongoMapper.mapDDL(
+			lowerDDL(parse(tokenize(source)) as DDLStatement, undefined, prisma)
+		);
+	};
+
+	it("Mongo : index uniques et clé composée nommés comme le profil, FK `_fkey` cascade", () => {
+		expect(
+			mongo(
+				"create table seat { room: int, slot: int, code: text unique, owner_id: uuid ref self.code, primary key (room, slot) }"
+			)
+		).toMatchObject({
+			operation: "create-collection",
+			indexes: [
+				{
+					keys: { room: 1, slot: 1 },
+					options: { unique: true, name: "seat_pkey" }
+				},
+				{ keys: { code: 1 }, options: { unique: true, name: "seat_code_key" } }
+			],
+			refs: [{ name: "seat_owner_id_fkey", onUpdate: "cascade" }]
+		});
+	});
+
+	it("Mongo : rename column transmet les noms à faire suivre", () => {
+		const schema: import("./schema/model").SchemaModel = {
+			engine: "mongodb",
+			collections: [
+				{
+					name: "seat",
+					source: "declared",
+					fields: [
+						{ name: "code", type: "string", nullable: true, source: "declared" }
+					],
+					indexes: [{ name: "seat_code_key", columns: ["code"], unique: true }]
+				}
+			],
+			relations: []
+		};
+		if (mongoMapper.mapDDL === undefined) throw new Error("mapDDL manquant");
+		expect(
+			mongoMapper.mapDDL(
+				lowerDDL(
+					parse(tokenize("rename column seat.code to label")) as DDLStatement,
+					schema,
+					prisma
+				)
+			)
+		).toMatchObject({
+			operation: "rename-column",
+			renames: [{ kind: "index", from: "seat_code_key", to: "seat_label_key" }]
+		});
+	});
+});

@@ -1160,3 +1160,222 @@ describe("lower DDL — ref modifier FK (ADR-031 FK/1)", () => {
 		});
 	});
 });
+
+describe("lower DDL — profil ORM prisma (ADR-036 E/1e)", () => {
+	const field = (
+		name: string,
+		type: import("../schema/model").SnqlType,
+		extra: Partial<import("../schema/model").Field> = {}
+	): import("../schema/model").Field => ({
+		name,
+		type,
+		nullable: true,
+		source: "declared",
+		...extra
+	});
+	const schema: import("../schema/model").SchemaModel = {
+		engine: "postgres",
+		collections: [
+			{
+				name: "agency",
+				source: "declared",
+				primaryKey: ["id"],
+				fields: [
+					field("id", "uuid", { nullable: false }),
+					field("code", "string"),
+					field("city", "string"),
+					field("tier", "string", {
+						hasDefault: true,
+						defaultExpr: "'free'::text"
+					})
+				],
+				indexes: [
+					{ name: "agency_code_key", columns: ["code"], unique: true },
+					{
+						name: "agency_city_code_idx",
+						columns: ["city", "code"],
+						unique: false
+					},
+					{ name: "agency_code_legacy", columns: ["code"], unique: false }
+				]
+			},
+			{
+				name: "booking",
+				source: "declared",
+				primaryKey: ["id"],
+				fields: [
+					field("id", "uuid", { nullable: false }),
+					field("agency_id", "uuid", { nullable: false }),
+					field("referrer_id", "uuid")
+				]
+			}
+		],
+		relations: [],
+		refs: [
+			{
+				name: "booking_agency_id_fkey",
+				fromCollection: "booking",
+				fromColumn: "agency_id",
+				toCollection: "agency",
+				toColumn: "id",
+				onDelete: "restrict",
+				onUpdate: "cascade",
+				source: "declared"
+			},
+			{
+				name: "fk_booking_referrer_id_agency",
+				fromCollection: "booking",
+				fromColumn: "referrer_id",
+				toCollection: "agency",
+				toColumn: "id",
+				onDelete: "set-null",
+				onUpdate: "restrict",
+				source: "declared"
+			}
+		]
+	};
+	const prisma = { ormProfile: "prisma" } as const;
+	const lowerWith = (
+		source: string,
+		options: import("./lower-ddl").DdlLowerOptions = prisma,
+		withSchema: import("../schema/model").SchemaModel | undefined = schema
+	): DDLPlan =>
+		lowerDDL(parse(tokenize(source)) as DDLStatement, withSchema, options);
+
+	it("create table : clé primaire, unique, défaut et FK nommés comme Prisma, on update cascade", () => {
+		const plan = lowerWith(
+			'create table agency_note { id: uuid, agency_id: uuid ref agency.id, slug: text unique, kind: text default "memo", primary key (id) }'
+		) as CreateTablePlan;
+		expect(plan.primaryKeyName).toBe("agency_note_pkey");
+		const byName = new Map(plan.fields.map((f) => [f.name, f]));
+		expect(byName.get("slug")?.uniqueName).toBe("agency_note_slug_key");
+		expect(byName.get("kind")?.defaultName).toBe("agency_note_kind_df");
+		expect(byName.get("agency_id")?.ref).toMatchObject({
+			name: "agency_note_agency_id_fkey",
+			onDelete: "restrict",
+			onUpdate: "cascade"
+		});
+		expect(byName.get("id")?.uniqueName).toBeUndefined();
+	});
+
+	it("une action ou un nom écrits en SNQL sont gardés", () => {
+		const plan = lowerWith(
+			"add ref (referrer_id) references agency.id on delete set null on update restrict as booking_referrer into booking"
+		);
+		expect(plan).toMatchObject({
+			kind: "add-ref",
+			ref: {
+				name: "booking_referrer",
+				onDelete: "set-null",
+				onUpdate: "restrict"
+			}
+		});
+	});
+
+	it("add ref / add column : FK `<t>_<c>_fkey`", () => {
+		expect(
+			lowerWith(
+				"add ref (referrer_id) references agency.id on delete set null into booking"
+			)
+		).toMatchObject({
+			ref: { name: "booking_referrer_id_fkey", onUpdate: "cascade" }
+		});
+		const plan = lowerWith(
+			"add column manager_id uuid nullable unique ref agency.id on delete set null into booking"
+		) as AddColumnPlan;
+		expect(plan.column).toMatchObject({
+			uniqueName: "booking_manager_id_key",
+			ref: { name: "booking_manager_id_fkey" }
+		});
+	});
+
+	it("add index : `_idx` / `_key`, nom explicite gardé", () => {
+		expect(
+			(lowerWith("add index (city, code) into agency") as AddIndexPlan).name
+		).toBe("agency_city_code_idx");
+		expect(
+			(lowerWith("add unique index (city) into agency") as AddIndexPlan).name
+		).toBe("agency_city_key");
+	});
+
+	it("noms longs : base tronquée, suffixe gardé — 63 en Postgres, 128 en SQL Server", () => {
+		const table =
+			"abcdefghij_abcdefghij_abcdefghij_abcdefghij_abcdefghij_abcdefgh";
+		const src = `create table ${table} { id: int, a_fairly_long_column: text unique, primary key (id) }`;
+		const pg = lowerWith(src, prisma, undefined) as CreateTablePlan;
+		expect(pg.primaryKeyName).toBe(
+			"abcdefghij_abcdefghij_abcdefghij_abcdefghij_abcdefghij_abc_pkey"
+		);
+		expect(pg.fields[1]?.uniqueName).toBe(
+			"abcdefghij_abcdefghij_abcdefghij_abcdefghij_abcdefghij_abcd_key"
+		);
+		const mssql = lowerWith(src, prisma, {
+			engine: "mssql",
+			collections: [],
+			relations: []
+		}) as CreateTablePlan;
+		expect(mssql.primaryKeyName).toBe(`${table}_pkey`);
+		expect(mssql.fields[1]?.uniqueName).toBe(
+			`${table}_a_fairly_long_column_key`
+		);
+	});
+
+	it("concurrentIndex: false → index posé sans CONCURRENTLY", () => {
+		expect(
+			lowerWith("add index (city) into agency", { concurrentIndex: false })
+		).toMatchObject({ name: "idx_agency_city", concurrently: false });
+		expect(lowerWith("add index (city) into agency", {})).not.toHaveProperty(
+			"concurrently"
+		);
+	});
+
+	it("rename column : index, FK et défaut conventionnels suivent, les autres gardent leur nom", () => {
+		expect(lowerWith("rename column agency.code to slug")).toMatchObject({
+			renames: [
+				{ kind: "index", from: "agency_code_key", to: "agency_slug_key" },
+				{
+					kind: "index",
+					from: "agency_city_code_idx",
+					to: "agency_city_slug_idx"
+				}
+			]
+		});
+		expect(
+			lowerWith("rename column booking.agency_id to office_id")
+		).toMatchObject({
+			renames: [
+				{
+					kind: "foreign-key",
+					from: "booking_agency_id_fkey",
+					to: "booking_office_id_fkey"
+				}
+			]
+		});
+		// FK hors convention (`fk_…`, un `map:` dans le modèle) : rien à suivre.
+		expect(
+			lowerWith("rename column booking.referrer_id to sponsor_id")
+		).not.toHaveProperty("renames");
+		expect(lowerWith("rename column agency.tier to plan")).toMatchObject({
+			renames: [
+				{ kind: "default", from: "agency_tier_df", to: "agency_plan_df" }
+			]
+		});
+	});
+
+	it("rename column sans profil : aucun renommage associé", () => {
+		expect(
+			lowerWith("rename column agency.code to slug", {})
+		).not.toHaveProperty("renames");
+	});
+
+	it("set default : contrainte `<t>_<c>_df`", () => {
+		expect(
+			lowerWith('alter column agency.tier set default "pro"')
+		).toMatchObject({
+			action: { kind: "set-default", value: "pro", name: "agency_tier_df" }
+		});
+		expect(
+			lowerWith('alter column agency.tier set default "pro"', {})
+		).not.toHaveProperty("action.name");
+	});
+});

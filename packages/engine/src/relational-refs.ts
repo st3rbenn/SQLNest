@@ -1,12 +1,52 @@
-import type { OnDeleteRule, OnUpdateRule, RefDef, Relation } from "@sqlnest/snql";
+import type {
+	CollectionIndex,
+	OnDeleteRule,
+	OnUpdateRule,
+	RefDef,
+	Relation
+} from "@sqlnest/snql";
 
 /**
- * Construction des `RefDef` / `Relation` d'un SchemaModel depuis les lignes FK
- * d'un catalogue relationnel — partagé PG (pg_constraint) / MSSQL
- * (sys.foreign_keys). Chaque source normalise ses lignes vers
- * `RelationalFkRow` (identité de contrainte + règles déjà mappées) ; le
- * grouping, le skip composite et le shape de sortie vivent ici, une fois.
+ * Construction des `RefDef` / `Relation` et des index d'un SchemaModel depuis
+ * les lignes d'un catalogue relationnel — partagé PG (pg_constraint,
+ * pg_index) / MSSQL (sys.foreign_keys, sys.indexes). Chaque source normalise
+ * ses lignes FK vers `RelationalFkRow` (identité de contrainte + règles déjà
+ * mappées) ; le grouping, le skip composite et le shape de sortie vivent ici,
+ * une fois.
  */
+
+/** Une colonne d'index, lignes triées par table, index, rang dans la clé. */
+export interface RelationalIndexRow {
+	readonly table_name: string;
+	readonly index_name: string;
+	readonly is_unique: boolean;
+	readonly column_name: string;
+}
+
+/** Lignes d'index → index par table (ADR-036 D6). */
+export function buildIndexesFromRows(
+	rows: readonly RelationalIndexRow[]
+): Map<string, CollectionIndex[]> {
+	const byTable = new Map<string, CollectionIndex[]>();
+	for (const row of rows) {
+		const list = byTable.get(row.table_name) ?? [];
+		const last = list[list.length - 1];
+		if (last?.name === row.index_name) {
+			list[list.length - 1] = {
+				...last,
+				columns: [...last.columns, row.column_name]
+			};
+		} else {
+			list.push({
+				name: row.index_name,
+				columns: [row.column_name],
+				unique: Boolean(row.is_unique)
+			});
+		}
+		byTable.set(row.table_name, list);
+	}
+	return byTable;
+}
 
 export interface RelationalFkRow {
 	/**

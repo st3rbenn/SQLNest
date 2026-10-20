@@ -114,6 +114,53 @@ describe("buildSchemaModel", () => {
 		expect(model.collections[0]?.primaryKey).toBeUndefined();
 	});
 
+	it("index : une ligne par colonne regroupée par index, dans l'ordre (ADR-036 D6)", () => {
+		const column = (column_name: string) => ({
+			table_name: "users",
+			column_name,
+			data_type: "text",
+			is_nullable: "YES",
+			column_default: null,
+			udt_name: "text"
+		});
+		const model = buildSchemaModel(
+			["users", "logs"],
+			[column("email"), column("org_id"), column("slot")],
+			[],
+			[],
+			[],
+			[
+				{
+					table_name: "users",
+					index_name: "users_email_key",
+					is_unique: true,
+					column_name: "email"
+				},
+				{
+					table_name: "users",
+					index_name: "users_org_id_slot_idx",
+					is_unique: false,
+					column_name: "org_id"
+				},
+				{
+					table_name: "users",
+					index_name: "users_org_id_slot_idx",
+					is_unique: false,
+					column_name: "slot"
+				}
+			]
+		);
+		expect(model.collections[0]?.indexes).toEqual([
+			{ name: "users_email_key", columns: ["email"], unique: true },
+			{
+				name: "users_org_id_slot_idx",
+				columns: ["org_id", "slot"],
+				unique: false
+			}
+		]);
+		expect(model.collections[1]?.indexes).toBeUndefined();
+	});
+
 	it("FK composite : colonnes alignées dans l'ordre", () => {
 		const model = buildSchemaModel(
 			["a", "b"],

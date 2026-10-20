@@ -857,3 +857,79 @@ describe("codegen mssql — transaction (M/4)", () => {
 		);
 	});
 });
+
+describe("codegen mssql — profil ORM (ADR-036 E/1e)", () => {
+	it("clé primaire, unique et défaut nommés quand le plan porte leur nom", () => {
+		expect(
+			ddlText({
+				op: "ddl",
+				kind: "create-table",
+				target: "agency",
+				ifNotExists: false,
+				primaryKey: ["id"],
+				primaryKeyName: "agency_pkey",
+				fields: [
+					{ name: "id", type: "int", nullable: false, unique: false },
+					{
+						name: "code",
+						type: "string",
+						nullable: false,
+						unique: true,
+						uniqueName: "agency_code_key"
+					},
+					{
+						name: "tier",
+						type: "string",
+						nullable: false,
+						unique: false,
+						defaultValue: "free",
+						defaultName: "agency_tier_df"
+					}
+				]
+			}).text
+		).toBe(
+			"CREATE TABLE [agency] ([id] int NOT NULL, [code] nvarchar(450) NOT NULL CONSTRAINT [agency_code_key] UNIQUE, [tier] nvarchar(max) NOT NULL CONSTRAINT [agency_tier_df] DEFAULT N'free', CONSTRAINT [agency_pkey] PRIMARY KEY ([id]))"
+		);
+	});
+
+	it("set default : contrainte posée sous le nom du profil", () => {
+		expect(
+			ddlText({
+				op: "ddl",
+				kind: "alter-column",
+				target: "agency",
+				column: "tier",
+				action: { kind: "set-default", value: "pro", name: "agency_tier_df" }
+			}).text
+		).toContain("ADD CONSTRAINT [agency_tier_df] DEFAULT N'pro' FOR [tier];");
+	});
+
+	it("rename column : index, FK et défaut conventionnels renommés dans la même transaction", () => {
+		const { text } = ddlText({
+			op: "ddl",
+			kind: "rename-column",
+			target: "agency",
+			column: "code",
+			newName: "slug",
+			renames: [
+				{ kind: "index", from: "agency_code_key", to: "agency_slug_key" },
+				{
+					kind: "foreign-key",
+					from: "agency_code_fkey",
+					to: "agency_slug_fkey"
+				},
+				{ kind: "default", from: "agency_code_df", to: "agency_slug_df" }
+			]
+		});
+		expect(text.split("\n")).toEqual([
+			"SET NOCOUNT ON;",
+			"SET XACT_ABORT ON;",
+			"BEGIN TRAN;",
+			"EXEC sp_rename N'[dbo].[agency].[code]', N'slug', N'COLUMN';",
+			"EXEC sp_rename N'[dbo].[agency].[agency_code_key]', N'agency_slug_key', N'INDEX';",
+			"EXEC sp_rename N'[dbo].[agency_code_fkey]', N'agency_slug_fkey', N'OBJECT';",
+			"IF EXISTS (SELECT 1 FROM sys.default_constraints WHERE name = N'agency_code_df' AND parent_object_id = OBJECT_ID(N'[dbo].[agency]')) EXEC sp_rename N'[dbo].[agency_code_df]', N'agency_slug_df', N'OBJECT';",
+			"COMMIT;"
+		]);
+	});
+});
