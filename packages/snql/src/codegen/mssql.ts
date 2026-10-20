@@ -365,7 +365,7 @@ export const mssqlMapper: Mapper = {
 		if (plan.kind === "create-table") return renderCreateTable(plan, namespace);
 		if (plan.kind === "add-column") return renderAddColumn(plan, namespace);
 		if (plan.kind === "add-index" || plan.kind === "add-unique-index") {
-			return renderAddIndex(plan);
+			return renderAddIndex(plan, namespace);
 		}
 		if (plan.kind === "drop-index") return renderDropIndex(plan);
 		if (plan.kind === "drop-table") return renderDropTable(plan, namespace);
@@ -819,7 +819,8 @@ function renderValue(
  * décisions PG_DDL_TYPE, adaptés aux contraintes T-SQL) :
  *  - `string → nvarchar(max)` SAUF en position clé (PK/UNIQUE) ou enum →
  *    `nvarchar(450)` : nvarchar(max) est invalide comme colonne de clé
- *    d'index (900 bytes max → 450 chars), PG text n'a pas cette limite.
+ *    d'index (900 bytes max → 450 chars), PG text n'a pas cette limite. Un
+ *    index posé plus tard rétrécit la colonne (`renderAddIndex`).
  *  - `decimal → decimal(38, 10)` (T-SQL exige precision/scale fixes).
  *  - `date → datetimeoffset` (préserve l'instant UTC, miroir timestamptz).
  *  - `json`/`array → nvarchar(max)` (pas de type json T-SQL, porteur JSON).
@@ -839,6 +840,9 @@ const MSSQL_DDL_TYPE: Readonly<Record<import("../schema/model").SnqlType, string
 	enum: "nvarchar(450)",
 	unknown: "nvarchar(max)"
 };
+
+/** Taille maximale d'une clé d'index clustered, et de toute clé avant 2016. */
+const MSSQL_INDEX_KEY_BYTES = 900;
 
 const KEYABLE_STRING_TYPE = "nvarchar(450)";
 
@@ -1007,19 +1011,71 @@ function renderAddColumn(
 	);
 }
 
-/** `add [unique] index` → `CREATE [UNIQUE] INDEX … ON …`. Pas d'ONLINE=ON
- *  (Enterprise-only — un Standard refuserait) : lock court assumé, miroir
- *  du choix CONCURRENTLY documenté côté PG. */
+/**
+ * `add [unique] index` → `CREATE [UNIQUE] INDEX … ON …`. Pas d'ONLINE=ON
+ * (Enterprise-only — un Standard refuserait) : lock court assumé, miroir du
+ * choix CONCURRENTLY documenté côté PG.
+ *
+ * T-SQL refuse un type `(max)` comme colonne de clé d'index (1919), or un
+ * texte créé hors position de clé est en `nvarchar(max)`. Dans la même
+ * transaction (ADR-029 D14), une telle colonne passe au plus large type
+ * indexable, 900 octets (`nvarchar(450)`, `varchar(900)`, `varbinary(900)`),
+ * en gardant nullabilité et collation, ses dépendants retirés puis recréés
+ * (D9 d'ADR-036). Une valeur plus longue est d'abord refusée, avec le nombre
+ * de lignes : mesurée en octets, car le rétrécissement rognerait sans erreur
+ * les espaces finaux que `LEN` ignore.
+ */
 function renderAddIndex(
-	plan: import("../ir/plan").AddIndexPlan
+	plan: import("../ir/plan").AddIndexPlan,
+	namespace: string
 ): NativeQuery {
+	const table = `${quoteIdent(namespace)}.${quoteIdent(plan.target)}`;
 	const unique = plan.kind === "add-unique-index" ? "UNIQUE " : "";
 	const cols = plan.fields.map(quoteIdent).join(", ");
-	const createText = `CREATE ${unique}INDEX ${quoteIdent(plan.name)} ON ${quoteIdent(plan.target)} (${cols})`;
-	if (!plan.ifNotExists) return ddlQuery(createText);
-	return ddlQuery(
-		`IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = ${nstr(plan.name)} AND object_id = OBJECT_ID(${nstr(quoteIdent(plan.target))})) ${createText}`
-	);
+	const lines = [
+		"SET NOCOUNT ON;",
+		"SET XACT_ABORT ON;",
+		`DECLARE @obj int = OBJECT_ID(${nstr(table)});`,
+		...(plan.ifNotExists
+			? [
+					`IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = ${nstr(plan.name)} AND object_id = @obj) RETURN;`
+				]
+			: []),
+		"BEGIN TRAN;",
+		MSSQL_ALTER_TARGETS,
+		`INSERT @targets SELECT c.object_id, c.column_id, N'ALTER TABLE ' + ${mssqlQualified("c.object_id")} + N' ALTER COLUMN ' + QUOTENAME(c.name) + CASE ty.name WHEN N'nvarchar' THEN N' ${KEYABLE_STRING_TYPE}' WHEN N'varchar' THEN N' varchar(${MSSQL_INDEX_KEY_BYTES})' ELSE N' varbinary(${MSSQL_INDEX_KEY_BYTES})' END + ISNULL(N' COLLATE ' + c.collation_name, N'') + CASE WHEN c.is_nullable = 1 THEN N' NULL' ELSE N' NOT NULL' END
+FROM sys.columns c JOIN sys.types ty ON ty.user_type_id = c.user_type_id
+WHERE c.object_id = @obj AND c.max_length = -1 AND ty.name IN (N'nvarchar', N'varchar', N'varbinary') AND c.name IN (${plan.fields.map(nstr).join(", ")});`,
+		"DECLARE @long int, @unicode bit, @msg nvarchar(2048);",
+		...plan.fields.map((field) => indexKeyPreflight(plan.target, table, field)),
+		...mssqlAlterTargets(),
+		`CREATE ${unique}INDEX ${quoteIdent(plan.name)} ON ${table} (${cols});`,
+		"COMMIT;"
+	];
+	return ddlQuery(lines.join("\n"));
+}
+
+/**
+ * Refus d'un `add index` dont la colonne `(max)` à rétrécir porte des valeurs
+ * de plus de 900 octets : leur nombre, et pour un texte unicode la commande
+ * qui les retrouve (`length` compte les espaces finaux, comme `DATALENGTH`).
+ */
+function indexKeyPreflight(
+	target: string,
+	table: string,
+	field: string
+): string {
+	const find = `find ${target} where length(${field}) > ${MSSQL_INDEX_KEY_BYTES / 2}`;
+	return `IF EXISTS (SELECT 1 FROM @targets WHERE col = COLUMNPROPERTY(@obj, ${nstr(field)}, 'ColumnId'))
+BEGIN
+	SELECT @long = COUNT(*) FROM ${table} WHERE DATALENGTH(${quoteIdent(field)}) > ${MSSQL_INDEX_KEY_BYTES};
+	IF @long > 0
+	BEGIN
+		SELECT @unicode = CASE WHEN TYPE_NAME(c.system_type_id) = N'nvarchar' THEN 1 ELSE 0 END FROM sys.columns c WHERE c.object_id = @obj AND c.name = ${nstr(field)};
+		SET @msg = CONCAT(${nstr(`'${field}' dépasse `)}, CASE WHEN @unicode = 1 THEN N'${MSSQL_INDEX_KEY_BYTES / 2} caractères' ELSE N'${MSSQL_INDEX_KEY_BYTES} octets' END, N' sur ', @long, CASE WHEN @long > 1 THEN N' lignes' ELSE N' ligne' END, ${nstr(` de '${target}', la limite d'une clé d'index MSSQL — à raccourcir avant l'index`)}, CASE WHEN @unicode = 1 THEN ${nstr(` : ${find}`)} ELSE N'' END);
+		THROW 50000, @msg, 1;
+	END
+END`;
 }
 
 /** `drop index NAME from T` → `DROP INDEX [n] ON [t]` — T-SQL exige la
@@ -1126,26 +1182,19 @@ function mssqlQualified(objectId: string): string {
 	return `QUOTENAME(OBJECT_SCHEMA_NAME(${objectId})) + N'.' + QUOTENAME(OBJECT_NAME(${objectId}))`;
 }
 
+/** Colonnes à modifier : objet, colonne, `ALTER TABLE … ALTER COLUMN` complet. */
+const MSSQL_ALTER_TARGETS =
+	"DECLARE @targets TABLE (obj int, col int, sql nvarchar(max));";
+
 /**
- * `alter column` (ADR-036 E/1c). T-SQL refuse un `ALTER COLUMN` dès qu'un
- * index, une contrainte (PK, UNIQUE, CHECK, DEFAULT) ou une FK dépend de la
- * colonne (5074) : compensation dans une transaction, en relisant le
- * catalogue à l'exécution — retrait des dépendants, `ALTER COLUMN`,
- * recréation à l'identique. Une FK exige des types identiques des deux
- * côtés : `set type` emmène les colonnes partenaires des FK de la colonne.
- * Le CHECK d'enum `ck_<t>_<c>_enum` suit le type : retiré, puis reposé si la
- * cible est un enum. Une valeur non convertible fait échouer la transaction,
- * rien n'est modifié.
+ * `ALTER COLUMN` des colonnes de `@targets` (ADR-036 D9). T-SQL le refuse dès
+ * qu'un index, une contrainte (PK, UNIQUE, CHECK, DEFAULT) ou une FK dépend
+ * de la colonne (5074) : les dépendants, relus au catalogue à l'exécution,
+ * sont retirés, puis recréés à l'identique après les `ALTER COLUMN`.
+ * `droppedCheck` est retiré sans être reposé. S'exécute dans la transaction
+ * de l'appelant, une fois `@targets` rempli.
  */
-function renderAlterColumn(
-	plan: import("../ir/plan").AlterColumnPlan,
-	namespace: string
-): NativeQuery {
-	const table = `${quoteIdent(namespace)}.${quoteIdent(plan.target)}`;
-	const column = quoteIdent(plan.column);
-	const enumCheck = `ck_${plan.target}_${plan.column}_enum`;
-	const { action } = plan;
-	const isTypeChange = action.kind === "set-type";
+function mssqlAlterTargets(droppedCheck?: string): string[] {
 	const onTarget = (objectId: string, columnId: string): string =>
 		`EXISTS (SELECT 1 FROM @targets tg WHERE tg.obj = ${objectId} AND tg.col = ${columnId})`;
 	const keyCols = (filter: string): string =>
@@ -1156,6 +1205,56 @@ function renderAlterColumn(
 		mssqlColumnList(
 			`SELECT N',' + QUOTENAME(COL_NAME(fkc.${side}_object_id, fkc.${side}_column_id)) FROM sys.foreign_key_columns fkc WHERE fkc.constraint_object_id = fk.object_id ORDER BY fkc.constraint_column_id`
 		);
+	return [
+		"DECLARE @dropFk nvarchar(max) = N'', @addFk nvarchar(max) = N'';",
+		"DECLARE @dropIdx nvarchar(max) = N'', @addIdx nvarchar(max) = N'';",
+		"DECLARE @dropChk nvarchar(max) = N'', @addChk nvarchar(max) = N'';",
+		"DECLARE @dropDf nvarchar(max) = N'', @addDf nvarchar(max) = N'';",
+		"DECLARE @alter nvarchar(max) = N'';",
+		`SELECT @dropFk = @dropFk + N'ALTER TABLE ' + ${mssqlQualified("fk.parent_object_id")} + N' DROP CONSTRAINT ' + QUOTENAME(fk.name) + N';',
+	@addFk = @addFk + N'ALTER TABLE ' + ${mssqlQualified("fk.parent_object_id")} + N' WITH CHECK ADD CONSTRAINT ' + QUOTENAME(fk.name) + N' FOREIGN KEY (' + ${fkCols("parent")} + N') REFERENCES ' + ${mssqlQualified("fk.referenced_object_id")} + N' (' + ${fkCols("referenced")} + N') ON DELETE ' + REPLACE(fk.delete_referential_action_desc, N'_', N' ') + N' ON UPDATE ' + REPLACE(fk.update_referential_action_desc, N'_', N' ') + N';'
+FROM sys.foreign_keys fk
+WHERE EXISTS (SELECT 1 FROM sys.foreign_key_columns fkc WHERE fkc.constraint_object_id = fk.object_id AND (${onTarget("fkc.parent_object_id", "fkc.parent_column_id")} OR ${onTarget("fkc.referenced_object_id", "fkc.referenced_column_id")}));`,
+		`SELECT @dropIdx = @dropIdx + CASE WHEN i.is_primary_key = 1 OR i.is_unique_constraint = 1 THEN N'ALTER TABLE ' + ${mssqlQualified("i.object_id")} + N' DROP CONSTRAINT ' + QUOTENAME(i.name) ELSE N'DROP INDEX ' + QUOTENAME(i.name) + N' ON ' + ${mssqlQualified("i.object_id")} END + N';',
+	@addIdx = @addIdx + CASE
+		WHEN i.is_primary_key = 1 THEN N'ALTER TABLE ' + ${mssqlQualified("i.object_id")} + N' ADD CONSTRAINT ' + QUOTENAME(i.name) + N' PRIMARY KEY ' + i.type_desc COLLATE DATABASE_DEFAULT + N' (' + ${keyCols("ic.is_included_column = 0")} + N')'
+		WHEN i.is_unique_constraint = 1 THEN N'ALTER TABLE ' + ${mssqlQualified("i.object_id")} + N' ADD CONSTRAINT ' + QUOTENAME(i.name) + N' UNIQUE ' + i.type_desc COLLATE DATABASE_DEFAULT + N' (' + ${keyCols("ic.is_included_column = 0")} + N')'
+		ELSE N'CREATE ' + CASE WHEN i.is_unique = 1 THEN N'UNIQUE ' ELSE N'' END + i.type_desc COLLATE DATABASE_DEFAULT + N' INDEX ' + QUOTENAME(i.name) + N' ON ' + ${mssqlQualified("i.object_id")} + N' (' + ${keyCols("ic.is_included_column = 0")} + N')' + ISNULL(N' INCLUDE (' + ${keyCols("ic.is_included_column = 1")} + N')', N'') + ISNULL(N' WHERE ' + i.filter_definition, N'')
+	END + N';'
+FROM sys.indexes i
+WHERE i.type IN (1, 2) AND EXISTS (SELECT 1 FROM sys.index_columns ic WHERE ic.object_id = i.object_id AND ic.index_id = i.index_id AND ${onTarget("ic.object_id", "ic.column_id")});`,
+		`SELECT @dropChk = @dropChk + N'ALTER TABLE ' + ${mssqlQualified("cc.parent_object_id")} + N' DROP CONSTRAINT ' + QUOTENAME(cc.name) + N';',
+	@addChk = @addChk + CASE WHEN ${droppedCheck !== undefined ? `cc.name = ${nstr(droppedCheck)}` : "1 = 0"} THEN N'' ELSE N'ALTER TABLE ' + ${mssqlQualified("cc.parent_object_id")} + N' WITH CHECK ADD CONSTRAINT ' + QUOTENAME(cc.name) + N' CHECK ' + cc.definition + N';' END
+FROM sys.check_constraints cc
+WHERE EXISTS (SELECT 1 FROM @targets tg WHERE tg.obj = cc.parent_object_id AND (cc.parent_column_id = tg.col OR cc.definition LIKE N'%[[]' + COL_NAME(tg.obj, tg.col) + N']%'));`,
+		`SELECT @dropDf = @dropDf + N'ALTER TABLE ' + ${mssqlQualified("dc.parent_object_id")} + N' DROP CONSTRAINT ' + QUOTENAME(dc.name) + N';',
+	@addDf = @addDf + N'ALTER TABLE ' + ${mssqlQualified("dc.parent_object_id")} + N' ADD CONSTRAINT ' + QUOTENAME(dc.name) + N' DEFAULT ' + dc.definition + N' FOR ' + QUOTENAME(COL_NAME(dc.parent_object_id, dc.parent_column_id)) + N';'
+FROM sys.default_constraints dc
+WHERE ${onTarget("dc.parent_object_id", "dc.parent_column_id")};`,
+		"SELECT @alter = @alter + sql + N';' FROM @targets;",
+		"EXEC (@dropFk); EXEC (@dropIdx); EXEC (@dropChk); EXEC (@dropDf);",
+		"EXEC (@alter);",
+		"EXEC (@addDf); EXEC (@addChk); EXEC (@addIdx); EXEC (@addFk);"
+	];
+}
+
+/**
+ * `alter column` (ADR-036 E/1c), dépendants retirés puis recréés autour de
+ * l'`ALTER COLUMN` (D9). Une FK exige des types identiques des deux côtés :
+ * `set type` emmène les colonnes partenaires des FK de la colonne. Le CHECK
+ * d'enum `ck_<t>_<c>_enum` suit le type : retiré, puis reposé si la cible
+ * est un enum. Une valeur non convertible fait échouer la transaction, rien
+ * n'est modifié.
+ */
+function renderAlterColumn(
+	plan: import("../ir/plan").AlterColumnPlan,
+	namespace: string
+): NativeQuery {
+	const table = `${quoteIdent(namespace)}.${quoteIdent(plan.target)}`;
+	const column = quoteIdent(plan.column);
+	const enumCheck = `ck_${plan.target}_${plan.column}_enum`;
+	const { action } = plan;
+	const isTypeChange = action.kind === "set-type";
 	// Type cible : un texte qui reste indexé passe en nvarchar(450).
 	const newType = (obj: string, col: string): string =>
 		action.kind !== "set-type"
@@ -1184,7 +1283,7 @@ function renderAlterColumn(
 		`DECLARE @obj int = OBJECT_ID(${nstr(table)});`,
 		`DECLARE @col int = COLUMNPROPERTY(@obj, ${nstr(plan.column)}, 'ColumnId');`,
 		`IF @col IS NULL THROW 50000, ${nstr(`colonne '${plan.target}.${plan.column}' inconnue`)}, 1;`,
-		"DECLARE @targets TABLE (obj int, col int, sql nvarchar(max));",
+		MSSQL_ALTER_TARGETS,
 		`INSERT @targets SELECT c.object_id, c.column_id, N'ALTER TABLE ' + ${mssqlQualified("c.object_id")} + N' ALTER COLUMN ' + QUOTENAME(c.name) + N' ' + ${isTypeChange ? newType("c.object_id", "c.column_id") : MSSQL_CURRENT_TYPE} + ${nullability(action.kind)}
 FROM sys.columns c JOIN sys.types ty ON ty.user_type_id = c.user_type_id
 WHERE (c.object_id = @obj AND c.column_id = @col)${
@@ -1193,35 +1292,7 @@ WHERE (c.object_id = @obj AND c.column_id = @col)${
 	OR EXISTS (SELECT 1 FROM sys.foreign_key_columns fkc WHERE (fkc.referenced_object_id = @obj AND fkc.referenced_column_id = @col AND fkc.parent_object_id = c.object_id AND fkc.parent_column_id = c.column_id) OR (fkc.parent_object_id = @obj AND fkc.parent_column_id = @col AND fkc.referenced_object_id = c.object_id AND fkc.referenced_column_id = c.column_id))`
 				: ""
 		};`,
-		"DECLARE @dropFk nvarchar(max) = N'', @addFk nvarchar(max) = N'';",
-		"DECLARE @dropIdx nvarchar(max) = N'', @addIdx nvarchar(max) = N'';",
-		"DECLARE @dropChk nvarchar(max) = N'', @addChk nvarchar(max) = N'';",
-		"DECLARE @dropDf nvarchar(max) = N'', @addDf nvarchar(max) = N'';",
-		"DECLARE @alter nvarchar(max) = N'';",
-		`SELECT @dropFk = @dropFk + N'ALTER TABLE ' + ${mssqlQualified("fk.parent_object_id")} + N' DROP CONSTRAINT ' + QUOTENAME(fk.name) + N';',
-	@addFk = @addFk + N'ALTER TABLE ' + ${mssqlQualified("fk.parent_object_id")} + N' WITH CHECK ADD CONSTRAINT ' + QUOTENAME(fk.name) + N' FOREIGN KEY (' + ${fkCols("parent")} + N') REFERENCES ' + ${mssqlQualified("fk.referenced_object_id")} + N' (' + ${fkCols("referenced")} + N') ON DELETE ' + REPLACE(fk.delete_referential_action_desc, N'_', N' ') + N' ON UPDATE ' + REPLACE(fk.update_referential_action_desc, N'_', N' ') + N';'
-FROM sys.foreign_keys fk
-WHERE EXISTS (SELECT 1 FROM sys.foreign_key_columns fkc WHERE fkc.constraint_object_id = fk.object_id AND (${onTarget("fkc.parent_object_id", "fkc.parent_column_id")} OR ${onTarget("fkc.referenced_object_id", "fkc.referenced_column_id")}));`,
-		`SELECT @dropIdx = @dropIdx + CASE WHEN i.is_primary_key = 1 OR i.is_unique_constraint = 1 THEN N'ALTER TABLE ' + ${mssqlQualified("i.object_id")} + N' DROP CONSTRAINT ' + QUOTENAME(i.name) ELSE N'DROP INDEX ' + QUOTENAME(i.name) + N' ON ' + ${mssqlQualified("i.object_id")} END + N';',
-	@addIdx = @addIdx + CASE
-		WHEN i.is_primary_key = 1 THEN N'ALTER TABLE ' + ${mssqlQualified("i.object_id")} + N' ADD CONSTRAINT ' + QUOTENAME(i.name) + N' PRIMARY KEY ' + i.type_desc COLLATE DATABASE_DEFAULT + N' (' + ${keyCols("ic.is_included_column = 0")} + N')'
-		WHEN i.is_unique_constraint = 1 THEN N'ALTER TABLE ' + ${mssqlQualified("i.object_id")} + N' ADD CONSTRAINT ' + QUOTENAME(i.name) + N' UNIQUE ' + i.type_desc COLLATE DATABASE_DEFAULT + N' (' + ${keyCols("ic.is_included_column = 0")} + N')'
-		ELSE N'CREATE ' + CASE WHEN i.is_unique = 1 THEN N'UNIQUE ' ELSE N'' END + i.type_desc COLLATE DATABASE_DEFAULT + N' INDEX ' + QUOTENAME(i.name) + N' ON ' + ${mssqlQualified("i.object_id")} + N' (' + ${keyCols("ic.is_included_column = 0")} + N')' + ISNULL(N' INCLUDE (' + ${keyCols("ic.is_included_column = 1")} + N')', N'') + ISNULL(N' WHERE ' + i.filter_definition, N'')
-	END + N';'
-FROM sys.indexes i
-WHERE i.type IN (1, 2) AND EXISTS (SELECT 1 FROM sys.index_columns ic WHERE ic.object_id = i.object_id AND ic.index_id = i.index_id AND ${onTarget("ic.object_id", "ic.column_id")});`,
-		`SELECT @dropChk = @dropChk + N'ALTER TABLE ' + ${mssqlQualified("cc.parent_object_id")} + N' DROP CONSTRAINT ' + QUOTENAME(cc.name) + N';',
-	@addChk = @addChk + CASE WHEN ${isTypeChange ? `cc.name = ${nstr(enumCheck)}` : "1 = 0"} THEN N'' ELSE N'ALTER TABLE ' + ${mssqlQualified("cc.parent_object_id")} + N' WITH CHECK ADD CONSTRAINT ' + QUOTENAME(cc.name) + N' CHECK ' + cc.definition + N';' END
-FROM sys.check_constraints cc
-WHERE EXISTS (SELECT 1 FROM @targets tg WHERE tg.obj = cc.parent_object_id AND (cc.parent_column_id = tg.col OR cc.definition LIKE N'%[[]' + COL_NAME(tg.obj, tg.col) + N']%'));`,
-		`SELECT @dropDf = @dropDf + N'ALTER TABLE ' + ${mssqlQualified("dc.parent_object_id")} + N' DROP CONSTRAINT ' + QUOTENAME(dc.name) + N';',
-	@addDf = @addDf + N'ALTER TABLE ' + ${mssqlQualified("dc.parent_object_id")} + N' ADD CONSTRAINT ' + QUOTENAME(dc.name) + N' DEFAULT ' + dc.definition + N' FOR ' + QUOTENAME(COL_NAME(dc.parent_object_id, dc.parent_column_id)) + N';'
-FROM sys.default_constraints dc
-WHERE ${onTarget("dc.parent_object_id", "dc.parent_column_id")};`,
-		"SELECT @alter = @alter + sql + N';' FROM @targets;",
-		"EXEC (@dropFk); EXEC (@dropIdx); EXEC (@dropChk); EXEC (@dropDf);",
-		"EXEC (@alter);",
-		"EXEC (@addDf); EXEC (@addChk); EXEC (@addIdx); EXEC (@addFk);",
+		...mssqlAlterTargets(isTypeChange ? enumCheck : undefined),
 		...(enumAdd !== "" ? [`EXEC (${nstr(enumAdd)});`] : []),
 		"COMMIT;"
 	];

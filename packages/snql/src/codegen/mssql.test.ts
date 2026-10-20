@@ -567,7 +567,7 @@ describe("codegen mssql — DDL (M/6)", () => {
 		);
 	});
 
-	it("add unique index + if not exists guard sys.indexes", () => {
+	it("add unique index + if not exists : index existant → sortie avant toute modification", () => {
 		const { text } = ddlText({
 			op: "ddl",
 			kind: "add-unique-index",
@@ -576,8 +576,67 @@ describe("codegen mssql — DDL (M/6)", () => {
 			name: "unique_users_email",
 			ifNotExists: true
 		});
-		expect(text).toBe(
-			`IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'unique_users_email' AND object_id = OBJECT_ID(N'[users]')) CREATE UNIQUE INDEX [unique_users_email] ON [users] ([email])`
+		expect(text).toContain(
+			"DECLARE @obj int = OBJECT_ID(N'[dbo].[users]');\nIF EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'unique_users_email' AND object_id = @obj) RETURN;\nBEGIN TRAN;"
+		);
+		expect(text).toContain(
+			"CREATE UNIQUE INDEX [unique_users_email] ON [dbo].[users] ([email]);\nCOMMIT;"
+		);
+	});
+
+	it("add index sur une colonne (max) → rétrécie à 900 octets dans la transaction, puis CREATE INDEX", () => {
+		const { text } = ddlText({
+			op: "ddl",
+			kind: "add-index",
+			target: "e1e_kid",
+			fields: ["tier"],
+			name: "idx_e1e_kid_tier",
+			ifNotExists: false
+		});
+		expect(
+			text.startsWith(
+				"SET NOCOUNT ON;\nSET XACT_ABORT ON;\nDECLARE @obj int = OBJECT_ID(N'[dbo].[e1e_kid]');\nBEGIN TRAN;"
+			)
+		).toBe(true);
+		// Seules les colonnes (max) de l'index changent ; nullabilité et collation suivent.
+		expect(text).toContain(
+			"c.max_length = -1 AND ty.name IN (N'nvarchar', N'varchar', N'varbinary') AND c.name IN (N'tier')"
+		);
+		expect(text).toContain(
+			"CASE ty.name WHEN N'nvarchar' THEN N' nvarchar(450)' WHEN N'varchar' THEN N' varchar(900)' ELSE N' varbinary(900)' END + ISNULL(N' COLLATE ' + c.collation_name, N'') + CASE WHEN c.is_nullable = 1 THEN N' NULL' ELSE N' NOT NULL' END"
+		);
+		// Valeurs trop longues comptées en octets (espaces finaux compris) et refusées.
+		expect(text).toContain(
+			"SELECT @long = COUNT(*) FROM [dbo].[e1e_kid] WHERE DATALENGTH([tier]) > 900;"
+		);
+		expect(text).toContain("N' : find e1e_kid where length(tier) > 450'");
+		const steps = [
+			"THROW 50000, @msg, 1;",
+			"EXEC (@dropFk); EXEC (@dropIdx); EXEC (@dropChk); EXEC (@dropDf);",
+			"EXEC (@alter);",
+			"EXEC (@addDf); EXEC (@addChk); EXEC (@addIdx); EXEC (@addFk);",
+			"CREATE INDEX [idx_e1e_kid_tier] ON [dbo].[e1e_kid] ([tier]);",
+			"COMMIT;"
+		].map((step) => text.indexOf(step));
+		expect(
+			steps.every((at, i) => at >= 0 && (i === 0 || at > (steps[i - 1] ?? 0)))
+		).toBe(true);
+	});
+
+	it("add index composé → un contrôle de longueur par colonne", () => {
+		const { text } = ddlText({
+			op: "ddl",
+			kind: "add-unique-index",
+			target: "t",
+			fields: ["tier", "code"],
+			name: "unique_t_tier_code",
+			ifNotExists: false
+		});
+		expect(text).toContain("AND c.name IN (N'tier', N'code');");
+		expect(text).toContain("WHERE DATALENGTH([tier]) > 900;");
+		expect(text).toContain("WHERE DATALENGTH([code]) > 900;");
+		expect(text).toContain(
+			"CREATE UNIQUE INDEX [unique_t_tier_code] ON [dbo].[t] ([tier], [code]);"
 		);
 	});
 

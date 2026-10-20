@@ -862,10 +862,6 @@ describe.skipIf(!hasMssql)("mssql DDL Tier-2 (intégration M/6)", () => {
 		await withConn(async (conn) => {
 			await runQuery(conn, `raw "DROP TABLE IF EXISTS m6_idx"`);
 			try {
-				// Colonne d'index en int : un `add unique index` sur une colonne
-				// string non-clé serait refusé par T-SQL (nvarchar(max) invalide
-				// comme clé d'index — limite structurelle vs text PG, l'erreur
-				// moteur remonte claire ; noté vault/Capability Matrix).
 				await runQuery(
 					conn,
 					`create table m6_idx { id: int, code: int, primary key (id) }`
@@ -884,6 +880,108 @@ describe.skipIf(!hasMssql)("mssql DDL Tier-2 (intégration M/6)", () => {
 				expect(dup.rowCount).toBe(1);
 			} finally {
 				await runQuery(conn, `raw "DROP TABLE IF EXISTS m6_idx"`);
+			}
+		});
+	});
+
+	it("add index sur un texte nvarchar(max) : trop long refusé sans rien changer, puis colonne rétrécie, dépendants intacts", async () => {
+		await withConn(async (conn) => {
+			const cleanup = `raw "DROP TABLE IF EXISTS e1k_t"`;
+			const colLength = async (column: string): Promise<number> =>
+				Number(
+					(
+						await runQuery(
+							conn,
+							`raw "SELECT COL_LENGTH('e1k_t', '${column}') AS n"`
+						)
+					).rows[0]?.["n"]
+				);
+			await runQuery(conn, cleanup);
+			try {
+				await runQuery(
+					conn,
+					`create table e1k_t { id: int, tier: text nullable default "free", code: text, label: text nullable, primary key (id) }`
+				);
+				await runQuery(
+					conn,
+					`raw "ALTER TABLE e1k_t ADD CONSTRAINT ck_e1k_t_tier CHECK (tier <> N'zz')"`
+				);
+				await runQuery(
+					conn,
+					`raw "CREATE INDEX ix_e1k_t_inc ON e1k_t (id) INCLUDE (tier)"`
+				);
+				await runQuery(
+					conn,
+					`raw "ALTER TABLE e1k_t ADD blob varbinary(max) NULL"`
+				);
+				await runQuery(
+					conn,
+					`add { id: 1, tier: "a", code: "x", label: "dup" } into e1k_t`
+				);
+				await runQuery(
+					conn,
+					`add { id: 2, tier: "${"t".repeat(451)}", code: "y", label: "dup" } into e1k_t`
+				);
+				await runQuery(conn, `add { id: 3, code: "z" } into e1k_t`);
+				expect(await colLength("tier")).toBe(-1);
+
+				// Une valeur au-delà de 450 caractères : refus avec le nombre de
+				// lignes et la commande qui les retrouve, colonne inchangée.
+				await expect(
+					runQuery(conn, `add index (tier) into e1k_t`)
+				).rejects.toThrow(
+					"'tier' dépasse 450 caractères sur 1 ligne de 'e1k_t', la limite d'une clé d'index MSSQL — à raccourcir avant l'index : find e1k_t where length(tier) > 450"
+				);
+				expect(await colLength("tier")).toBe(-1);
+				const long = await runQuery(
+					conn,
+					`find e1k_t where length(tier) > 450 pick id`
+				);
+				expect(long.rows).toEqual([{ id: 2 }]);
+
+				await runQuery(conn, `update e1k_t where id = 2 set tier = "b"`);
+				await runQuery(conn, `add index (tier) into e1k_t`);
+				expect(await colLength("tier")).toBe(900);
+				const described = (await runQuery(conn, `describe e1k_t`)).rows;
+				expect(described.find((r) => r.name === "tier")).toMatchObject({
+					nullable: true
+				});
+				const indexes = (
+					await runQuery(conn, `list indexes on e1k_t`)
+				).rows.map((r) => r.name);
+				expect(indexes).toEqual(
+					expect.arrayContaining(["idx_e1k_t_tier", "ix_e1k_t_inc"])
+				);
+				// Défaut et CHECK recréés.
+				await runQuery(conn, `add { id: 4, code: "w" } into e1k_t`);
+				const four = await runQuery(conn, `find e1k_t where id = 4 pick tier`);
+				expect(four.rows).toEqual([{ tier: "free" }]);
+				await expect(
+					runQuery(conn, `add { id: 5, tier: "zz", code: "q" } into e1k_t`)
+				).rejects.toThrow();
+				await runQuery(conn, `add index (tier) if not exists into e1k_t`);
+
+				// Index unique : NOT NULL gardé ; un doublon annule tout, la
+				// colonne reste en (max).
+				await runQuery(conn, `add unique index (code) into e1k_t`);
+				expect(await colLength("code")).toBe(900);
+				const code = (await runQuery(conn, `describe e1k_t`)).rows.find(
+					(r) => r.name === "code"
+				);
+				expect(code).toMatchObject({ nullable: false });
+				await expect(
+					runQuery(conn, `add { id: 6, code: "x" } into e1k_t`)
+				).rejects.toThrow(/duplicate|dupliqu/i);
+				await expect(
+					runQuery(conn, `add unique index (label) into e1k_t`)
+				).rejects.toThrow();
+				expect(await colLength("label")).toBe(-1);
+
+				// varbinary(max), hors des types que SNQL crée : même compensation.
+				await runQuery(conn, `add index (blob) into e1k_t`);
+				expect(await colLength("blob")).toBe(900);
+			} finally {
+				await runQuery(conn, cleanup);
 			}
 		});
 	});
