@@ -54,6 +54,7 @@ import {
 	tokenize
 } from "@sqlnest/snql";
 import { useEffect, useState } from "react";
+import { ddlImpactHint } from "./ddlImpactHints";
 import type { LiveDiagnostic } from "./errorMarkers";
 import {
 	collectDivergenceHints,
@@ -126,6 +127,13 @@ export function useLiveDiagnostics(
 						diag: findingToDiagnostic(findings[0]!, findings.length),
 						rawStatementSpan
 					});
+					return;
+				}
+				// Étape 3 — impact d'un changement de schéma (renommage…), tous
+				// moteurs : ce qui s'appuie sur l'ancienne forme devra suivre.
+				const impact = ddlImpactHint(statement);
+				if (impact !== null) {
+					setState({ diag: hintToDiagnostic(impact, 1), rawStatementSpan });
 					return;
 				}
 				// Étape 3 — divergence hints INFO squiggly bleu discret.

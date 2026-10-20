@@ -460,6 +460,21 @@ export interface MongoDDLAddRefQuery {
 	readonly ref: MongoRefSpec;
 }
 
+/**
+ * `rename column` (ADR-036 E/1b), compensé en 5 temps par l'adapter :
+ * validateur qui accepte les deux noms, `$rename` par lots, index recréés,
+ * validateur final, `_snql_refs` réécrit. Chaque temps ne touche que ce qui
+ * porte encore l'ancien nom : une interruption se reprend en relançant.
+ */
+export interface MongoDDLRenameColumnQuery {
+	readonly engine: string;
+	readonly kind: "mongo-ddl";
+	readonly operation: "rename-column";
+	readonly collection: string;
+	readonly column: string;
+	readonly newName: string;
+}
+
 export type MongoDDLQuery =
 	| MongoDDLCreateCollectionQuery
 	| MongoDDLAddColumnQuery
@@ -471,7 +486,8 @@ export type MongoDDLQuery =
 	| MongoDDLAddEnumMemberQuery
 	| MongoDDLDropEnumQuery
 	| MongoDDLDropRefQuery
-	| MongoDDLAddRefQuery;
+	| MongoDDLAddRefQuery
+	| MongoDDLRenameColumnQuery;
 
 /**
  * DDL Tier-2 sur KV (ADR-029). Entièrement compensé — KV est schema-less,
@@ -700,6 +716,20 @@ export interface KvDDLAddRefQuery {
 	readonly ref: MongoRefSpec;
 }
 
+/**
+ * `rename column` sur KV (ADR-036 E/1b) : descriptor renommé dans
+ * `namespace:_schema:{collection}`, puis `SCAN` + `HGET`/`HSET`/`HDEL` de
+ * chaque hash.
+ */
+export interface KvDDLRenameColumnQuery {
+	readonly engine: string;
+	readonly kind: "kv-ddl";
+	readonly operation: "rename-column";
+	readonly collection: string;
+	readonly column: string;
+	readonly newName: string;
+}
+
 export type KvDDLQuery =
 	| KvDDLCreateTableQuery
 	| KvDDLAddColumnQuery
@@ -711,7 +741,8 @@ export type KvDDLQuery =
 	| KvDDLAddEnumMemberQuery
 	| KvDDLDropEnumQuery
 	| KvDDLDropRefQuery
-	| KvDDLAddRefQuery;
+	| KvDDLAddRefQuery
+	| KvDDLRenameColumnQuery;
 
 /**
  * native shape pour un `raw {...}` Mongo — command native

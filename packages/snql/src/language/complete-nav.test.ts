@@ -139,6 +139,24 @@ describe("add ref autocomplete (ADR-036 E/1a)", () => {
 	});
 });
 
+describe("rename column autocomplete (ADR-036 E/1b)", () => {
+	it("`rename ` propose `column`", () => {
+		expect(labels("rename ")).toEqual(["column"]);
+	});
+
+	it("`rename column ` propose les tables", () => {
+		expect(labels("rename column ")).toContain("users");
+	});
+
+	it("`rename column users.` propose ses colonnes", () => {
+		expect(labels("rename column users.")).toContain("email");
+	});
+
+	it("`rename column users.email ` propose `to`", () => {
+		expect(labels("rename column users.email ")).toEqual(["to"]);
+	});
+});
+
 describe("drop ref autocomplete (ADR-031 FK/3)", () => {
 	it("`drop ` propose `ref` parmi les cibles drop", () => {
 		expect(labels("drop ")).toContain("ref");

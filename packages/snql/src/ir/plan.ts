@@ -761,6 +761,20 @@ export interface AddRefPlan {
 }
 
 /**
+ * `rename column <table>.<col> to <nouveau>` résolu (ADR-036 E/1b). PG / MSSQL
+ * natifs (index et FK suivent) ; Mongo compensé : validateur, `$rename` par
+ * lots, index recréés, `_snql_refs` réécrit.
+ */
+export interface RenameColumnPlan {
+	readonly op: "ddl";
+	readonly kind: "rename-column";
+	readonly target: string;
+	readonly column: string;
+	readonly newName: string;
+	readonly span?: Span;
+}
+
+/**
  * Union des plans DDL. Corpus Tier-2 (create-table/add-column/[add-|drop-]
  * index/drop-table/drop-column) + Enum Tier-3+ (create-enum/add-enum-member/
  * drop-enum) + Relations FK/3 (drop-ref).
@@ -776,7 +790,8 @@ export type DDLPlan =
 	| AddEnumMemberPlan
 	| DropEnumPlan
 	| DropRefPlan
-	| AddRefPlan;
+	| AddRefPlan
+	| RenameColumnPlan;
 
 /** Un plan complet : lecture, mutation, transaction, introspect, raw, let/CTE ou DDL Tier-2. */
 export type Plan =

@@ -80,6 +80,16 @@ export function mapKvDDL(plan: DDLPlan): KvDDLQuery {
 	if (plan.kind === "add-enum-member") return renderKvAddEnumMember(plan);
 	if (plan.kind === "drop-enum") return renderKvDropEnum(plan);
 	if (plan.kind === "drop-ref") return renderKvDropRef(plan);
+	if (plan.kind === "rename-column") {
+		return {
+			engine: "kv",
+			kind: "kv-ddl",
+			operation: "rename-column",
+			collection: plan.target,
+			column: plan.column,
+			newName: plan.newName
+		};
+	}
 	if (plan.kind === "add-ref") {
 		const { ref } = plan;
 		return {

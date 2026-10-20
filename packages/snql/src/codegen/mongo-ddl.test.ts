@@ -803,6 +803,26 @@ describe("codegen Mongo — ref FK modifier (ADR-031 FK/1a)", () => {
 	});
 });
 
+describe("codegen Mongo — rename column (ADR-036 E/1b)", () => {
+	it("émet le shape rename-column (compensation en 5 temps côté adapter)", () => {
+		if (mongoMapper.mapDDL === undefined) throw new Error("mapDDL manquant");
+		expect(mongoMapper.mapDDL({
+			op: "ddl",
+			kind: "rename-column",
+			target: "agency",
+			column: "phone",
+			newName: "mobile"
+		})).toEqual({
+			engine: "mongodb",
+			kind: "mongo-ddl",
+			operation: "rename-column",
+			collection: "agency",
+			column: "phone",
+			newName: "mobile"
+		});
+	});
+});
+
 describe("codegen Mongo — add ref (ADR-036 E/1a)", () => {
 	it("émet le shape add-ref (préflight orphelins + _snql_refs côté adapter)", () => {
 		if (mongoMapper.mapDDL === undefined) throw new Error("mapDDL manquant");

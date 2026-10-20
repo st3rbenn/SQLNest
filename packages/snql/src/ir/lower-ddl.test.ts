@@ -711,6 +711,76 @@ describe("lower DDL — drop ref (ADR-031 FK/3)", () => {
 	});
 });
 
+describe("lower DDL — rename column (ADR-036 E/1b)", () => {
+	const schema: import("../schema/model").SchemaModel = {
+		engine: "postgres",
+		collections: [
+			{
+				name: "agency",
+				source: "declared",
+				fields: [
+					{ name: "id", type: "uuid", nullable: false, source: "declared" },
+					{ name: "phone", type: "string", nullable: false, source: "declared" },
+					{ name: "mail", type: "string", nullable: false, source: "declared" }
+				]
+			}
+		],
+		relations: []
+	};
+
+	function lowerRename(
+		source: string,
+		withSchema: import("../schema/model").SchemaModel | undefined = schema
+	): DDLPlan {
+		return lowerDDL(parse(tokenize(source)) as DDLStatement, withSchema);
+	}
+
+	it("abaisse rename column", () => {
+		expect(lowerRename("rename column agency.phone to mobile")).toEqual({
+			op: "ddl",
+			kind: "rename-column",
+			target: "agency",
+			column: "phone",
+			newName: "mobile",
+			span: expect.anything()
+		});
+	});
+
+	it("refuse une table inconnue", () => {
+		expect(() => lowerRename("rename column ghost.phone to mobile")).toThrow(
+			/table 'ghost' inconnue/
+		);
+	});
+
+	it("refuse une colonne inconnue en listant les colonnes", () => {
+		expect(() => lowerRename("rename column agency.fax to mobile")).toThrow(
+			/colonne 'fax' inconnue dans 'agency' — colonnes : id, phone, mail/
+		);
+	});
+
+	it("refuse un nom déjà pris", () => {
+		expect(() => lowerRename("rename column agency.phone to mail")).toThrow(
+			/'agency' a déjà une colonne 'mail'/
+		);
+	});
+
+	it("refuse un nom identique", () => {
+		expect(() => lowerRename("rename column agency.phone to phone")).toThrow(
+			/nouveau nom est identique/
+		);
+	});
+
+	it("refuse un identifiant invalide", () => {
+		expect(() => lowerRename("rename column agency.phone to 2fax", undefined)).toThrow();
+	});
+
+	it("Mongo : `_id` garde son nom (ADR-029 D13)", () => {
+		expect(() =>
+			lowerRename("rename column agency._id to key", { ...schema, engine: "mongodb" })
+		).toThrow(/clé primaire native de Mongo/);
+	});
+});
+
 describe("lower DDL — add ref (ADR-036 E/1a)", () => {
 	const schema: import("../schema/model").SchemaModel = {
 		engine: "postgres",

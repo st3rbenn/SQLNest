@@ -621,6 +621,18 @@ describe("codegen mssql — DDL (M/6)", () => {
 		).toBe(`ALTER TABLE [orders] DROP CONSTRAINT [fk_orders_user_id]`);
 	});
 
+	it("rename column → sp_rename, nouveau nom sans crochets", () => {
+		expect(ddlText({
+			op: "ddl",
+			kind: "rename-column",
+			target: "agency",
+			column: "phone",
+			newName: "mobile"
+		}).text).toBe(
+			`EXEC sp_rename N'[dbo].[agency].[phone]', N'mobile', N'COLUMN'`
+		);
+	});
+
 	it("add ref → WITH CHECK ADD CONSTRAINT (orphelins vérifiés)", () => {
 		expect(
 			ddlText({

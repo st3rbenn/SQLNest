@@ -618,6 +618,35 @@ describe("add ref DDL (ADR-036 E/1a)", () => {
 	});
 });
 
+// ─── E/1b — rename column (ADR-036) ────────────────────────────────────
+describe("rename column DDL (ADR-036 E/1b)", () => {
+	it("parse rename column t.c to n", () => {
+		expect(stmt("rename column agency.phone to mobile")).toMatchObject({
+			operation: "ddl",
+			kind: "rename-column",
+			target: "agency",
+			column: "phone",
+			newName: "mobile"
+		});
+	});
+
+	it("refuse une colonne sans table", () => {
+		expect(() => stmt("rename column phone to mobile")).toThrow(
+			/'rename column' attend '<table>.<colonne>'/
+		);
+	});
+
+	it("refuse l'absence de 'to'", () => {
+		expect(() => stmt("rename column agency.phone mobile")).toThrow(
+			/attend 'to <nouveau nom>'/
+		);
+	});
+
+	it("préserve `rename` comme nom de colonne ailleurs", () => {
+		expect(stmt("get t pick rename")).toMatchObject({ operation: "select" });
+	});
+});
+
 // ─── DDL/4 — drop table / drop column (ADR-029) ────────────────────────
 describe("drop table / drop column DDL (ADR-029 DDL/4)", () => {
 	it("parse drop table minimal", () => {

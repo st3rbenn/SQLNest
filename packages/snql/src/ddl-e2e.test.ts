@@ -777,6 +777,28 @@ describe("DDL/4 E2E — drop table / drop column cross-engine (ADR-029)", () => 
 	});
 });
 
+describe("E/1b E2E — rename column cross-engine (ADR-036)", () => {
+	const source = "rename column agency.phone to mobile";
+
+	it("PG : RENAME COLUMN natif", () => {
+		const q = pg(source);
+		if (q.kind !== "sql") throw new Error("attendu sql");
+		expect(q.text).toBe(`ALTER TABLE "agency" RENAME COLUMN "phone" TO "mobile"`);
+	});
+
+	it("Mongo + KV : shape rename-column", () => {
+		const plan = lowerDDL(parse(tokenize(source)) as DDLStatement);
+		if (mongoMapper.mapDDL === undefined) throw new Error("mapDDL manquant");
+		expect(mongoMapper.mapDDL(plan)).toMatchObject({
+			operation: "rename-column",
+			collection: "agency",
+			column: "phone",
+			newName: "mobile"
+		});
+		expect(mapKvDDL(plan)).toMatchObject({ operation: "rename-column" });
+	});
+});
+
 describe("E/1a E2E — add ref cross-engine (ADR-036)", () => {
 	const source =
 		"add ref (user_id) references users.id on delete cascade into orders";

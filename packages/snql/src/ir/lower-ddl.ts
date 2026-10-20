@@ -19,7 +19,8 @@ import type {
 	DropIndexStmt,
 	DropRefStmt,
 	DropTableStmt,
-	Expr
+	Expr,
+	RenameColumnStmt
 } from "../parser/ast";
 import type { SchemaModel, SnqlType } from "../schema/model";
 import type {
@@ -37,6 +38,7 @@ import type {
 	DropIndexPlan,
 	DropRefPlan,
 	DropTablePlan,
+	RenameColumnPlan,
 	SqlJsonLiteral,
 	SqlValue
 } from "./plan";
@@ -85,6 +87,9 @@ export function lowerDDL(
 	}
 	if (statement.kind === "add-ref") {
 		return lowerAddRef(statement, schema);
+	}
+	if (statement.kind === "rename-column") {
+		return lowerRenameColumn(statement, schema);
 	}
 	throw new SnqlError(
 		`DDL kind '${(statement as { kind: string }).kind}' non supporté au lower`,
@@ -542,6 +547,69 @@ function lowerAddRef(stmt: AddRefStmt, schema?: SchemaModel): AddRefPlan {
 		kind: "add-ref",
 		target: stmt.target,
 		ref,
+		...(stmt.span !== undefined ? { span: stmt.span } : {})
+	};
+}
+
+/**
+ * `rename column` (ADR-036 E/1b) : la colonne existe, le nouveau nom est libre
+ * dans la table. `_id` sous Mongo est la clé primaire native (ADR-029 D13) :
+ * son nom ne change pas.
+ */
+function lowerRenameColumn(
+	stmt: RenameColumnStmt,
+	schema?: SchemaModel
+): RenameColumnPlan {
+	assertIdent(stmt.target, "target");
+	assertIdent(stmt.column, "field");
+	assertIdent(stmt.newName, "field");
+	if (stmt.newName === stmt.column) {
+		throw new SnqlError(
+			`'rename column ${stmt.target}.${stmt.column}' : le nouveau nom est identique`,
+			"lower_ddl_rename_column_same_name",
+			stmt.newNameSpan
+		);
+	}
+	if (schema?.engine === "mongodb" && stmt.column === "_id") {
+		throw new SnqlError(
+			"'_id' est la clé primaire native de Mongo : son nom est fixe",
+			"lower_ddl_rename_column_mongo_id",
+			stmt.columnSpan
+		);
+	}
+	if (schema !== undefined) {
+		const table = schema.collections.find((c) => c.name === stmt.target);
+		if (table === undefined) {
+			const available =
+				schema.collections.map((c) => c.name).join(", ") || "(aucune)";
+			throw new SnqlError(
+				`'rename column' : table '${stmt.target}' inconnue — tables : ${available}`,
+				"lower_ddl_rename_column_unknown_table",
+				stmt.span
+			);
+		}
+		if (!table.fields.some((f) => f.name === stmt.column)) {
+			const available = table.fields.map((f) => f.name).join(", ") || "(aucune)";
+			throw new SnqlError(
+				`'rename column' : colonne '${stmt.column}' inconnue dans '${stmt.target}' — colonnes : ${available}`,
+				"lower_ddl_rename_column_unknown_column",
+				stmt.columnSpan
+			);
+		}
+		if (table.fields.some((f) => f.name === stmt.newName)) {
+			throw new SnqlError(
+				`'rename column' : '${stmt.target}' a déjà une colonne '${stmt.newName}'`,
+				"lower_ddl_rename_column_name_taken",
+				stmt.newNameSpan
+			);
+		}
+	}
+	return {
+		op: "ddl",
+		kind: "rename-column",
+		target: stmt.target,
+		column: stmt.column,
+		newName: stmt.newName,
 		...(stmt.span !== undefined ? { span: stmt.span } : {})
 	};
 }

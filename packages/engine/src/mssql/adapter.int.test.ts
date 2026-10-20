@@ -679,6 +679,42 @@ describe.skipIf(!hasMssql)("mssql DDL Tier-2 (intégration M/6)", () => {
 		});
 	});
 
+	it("rename column : données, FK et contrainte suivent le nouveau nom", async () => {
+		await withConn(async (conn) => {
+			await runQuery(conn, `raw "DROP TABLE IF EXISTS e1b_kid; DROP TABLE IF EXISTS e1b_par"`);
+			try {
+				await runQuery(conn, `create table e1b_par { id: int, code: int, primary key (id) }`);
+				await runQuery(conn, `add unique index (code) into e1b_par`);
+				await runQuery(
+					conn,
+					`create table e1b_kid { id: int, par_code: int nullable ref e1b_par.id, primary key (id) }`
+				);
+				await runQuery(conn, `add { id: 1, code: 10 } into e1b_par`);
+				await runQuery(conn, `add { id: 1, par_code: 1 } into e1b_kid`);
+
+				await runQuery(conn, `rename column e1b_par.code to slug`);
+				await runQuery(conn, `rename column e1b_kid.par_code to par_id`);
+
+				const par = await runQuery(conn, `find e1b_par pick id, slug`);
+				expect(par.rows).toEqual([{ id: 1, slug: 10 }]);
+				const schema = await conn.introspect();
+				expect(schema.refs?.find((r) => r.fromCollection === "e1b_kid")).toMatchObject({
+					fromColumn: "par_id",
+					toCollection: "e1b_par",
+					toColumn: "id"
+				});
+				await expect(
+					runQuery(conn, `add { id: 2, par_id: 99 } into e1b_kid`)
+				).rejects.toThrow();
+				await expect(
+					runQuery(conn, `add { id: 2, slug: 10 } into e1b_par`)
+				).rejects.toThrow();
+			} finally {
+				await runQuery(conn, `raw "DROP TABLE IF EXISTS e1b_kid; DROP TABLE IF EXISTS e1b_par"`);
+			}
+		});
+	});
+
 	it("create table if not exists ×2 → idempotent (sp_getapplock + guard)", async () => {
 		await withConn(async (conn) => {
 			await runQuery(conn, `raw "DROP TABLE IF EXISTS m6_idem"`);

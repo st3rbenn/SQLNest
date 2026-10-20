@@ -34,6 +34,7 @@ import type {
 	OnConflictClause,
 	Query,
 	RawStatement,
+	RenameColumnStmt,
 	SavepointStatement,
 	SortKey,
 	Source,
@@ -236,6 +237,15 @@ function parseStatement(cursor: TokenCursor): Statement {
 		peekIdent(cursor, "ref", 1)
 	) {
 		return parseDropRef(cursor);
+	}
+	// E/1b : `rename column <table>.<col> to <nouveau>`. `rename` reste
+	// soft-ident (une colonne nommée `rename` reste valide ailleurs).
+	if (
+		first.kind === "ident" &&
+		first.value.toLowerCase() === "rename" &&
+		peekIdent(cursor, "column", 1)
+	) {
+		return parseRenameColumn(cursor);
 	}
 	const verbTok = first;
 	if (verbTok.kind !== "verb") {
@@ -2481,6 +2491,61 @@ function parseAddRef(cursor: TokenCursor): AddRefStmt {
 		columnSpan: colTok.span,
 		ref,
 		span: { start: addTok.span.start, end: targetTok.span.end }
+	};
+}
+
+/**
+ * Colonne adressée par `<table>.<colonne>` (ADR-036) — `rename column`,
+ * `alter column`. `verb` alimente les messages d'erreur.
+ */
+function parseColumnPath(
+	cursor: TokenCursor,
+	verb: string
+): { table: Token; column: Token } {
+	const table = cursor.expect(
+		"ident",
+		`'<table>.<colonne>' après '${verb}' (ex. ${verb} agency.phone)`
+	);
+	if (cursor.peek().kind !== "dot") {
+		throw new SnqlError(
+			`'${verb}' attend '<table>.<colonne>' (ex. ${verb} agency.phone)`,
+			"parse_ddl_column_path_missing_dot",
+			cursor.peek().span
+		);
+	}
+	cursor.next(); // dot
+	const column = cursor.expect(
+		"ident",
+		`une colonne après '${table.value}.' (ex. ${verb} agency.phone)`
+	);
+	return { table, column };
+}
+
+/**
+ * `rename column <table>.<col> to <nouveau>` (ADR-036 E/1b).
+ */
+function parseRenameColumn(cursor: TokenCursor): RenameColumnStmt {
+	const renameTok = cursor.next(); // `rename` soft-ident
+	cursor.next(); // `column` soft-ident (déjà peeked au dispatch)
+	const { table, column } = parseColumnPath(cursor, "rename column");
+	if (!peekIdent(cursor, "to")) {
+		throw new SnqlError(
+			`'rename column ${table.value}.${column.value}' attend 'to <nouveau nom>'`,
+			"parse_ddl_rename_column_missing_to",
+			cursor.peek().span
+		);
+	}
+	cursor.next();
+	const newTok = cursor.expect("ident", "le nouveau nom de la colonne après 'to'");
+	return {
+		operation: "ddl",
+		kind: "rename-column",
+		target: table.value,
+		column: column.value,
+		columnSpan: column.span,
+		newName: newTok.value,
+		newNameSpan: newTok.span,
+		span: { start: renameTok.span.start, end: newTok.span.end }
 	};
 }
 

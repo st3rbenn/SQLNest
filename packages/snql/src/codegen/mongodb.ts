@@ -220,6 +220,16 @@ export const mongoMapper: Mapper = {
 		if (plan.kind === "add-enum-member") return renderMongoAddEnumMember(plan);
 		if (plan.kind === "drop-enum") return renderMongoDropEnum(plan);
 		if (plan.kind === "drop-ref") return renderMongoDropRef(plan);
+		if (plan.kind === "rename-column") {
+			return {
+				engine: "mongodb",
+				kind: "mongo-ddl",
+				operation: "rename-column",
+				collection: plan.target,
+				column: plan.column,
+				newName: plan.newName
+			};
+		}
 		if (plan.kind === "add-ref") {
 			return {
 				engine: "mongodb",

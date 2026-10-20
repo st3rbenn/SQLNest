@@ -427,3 +427,96 @@ describe.skipIf(!hasMongo)("mongodb adapter — add ref (ADR-036 E/1a)", () => {
 		}
 	}, 30_000);
 });
+
+describe.skipIf(!hasMongo)(
+	"mongodb adapter — rename column (ADR-036 E/1b)",
+	() => {
+		it("champ, validateur, index et FK suivent le nouveau nom ; reprise idempotente", async () => {
+			const conn = await mongoAdapter.connect(loadConfig());
+			const drop = async () => {
+				await runQuery(conn, "drop table e1b_kid if exists");
+				await runQuery(conn, "drop table e1b_par if exists");
+			};
+			try {
+				await drop();
+				await runQuery(
+					conn,
+					"create table e1b_par { id: string, code: string unique, phone: string, primary key (id) }"
+				);
+				await runQuery(
+					conn,
+					"create table e1b_kid { label: string, par_code: string nullable ref e1b_par.code }"
+				);
+				await runQuery(conn, "add index (phone) into e1b_par");
+				await runQuery(conn, 'add {code: "p1", phone: "01"} into e1b_par');
+				await runQuery(conn, 'add {code: "p2", phone: "02"} into e1b_par');
+				await runQuery(conn, 'add {label: "k1", par_code: "p1"} into e1b_kid');
+
+				// Reprise : un document déjà renommé (interruption simulée) ne gêne pas.
+				await runQuery(
+					conn,
+					'raw { "update": "e1b_par", "updates": [{ "q": { "code": "p2" }, "u": { "$rename": { "phone": "mobile" } } }], "bypassDocumentValidation": true }'
+				);
+				await runQuery(conn, "rename column e1b_par.phone to mobile");
+				await runQuery(conn, "rename column e1b_par.code to slug");
+				await runQuery(conn, "rename column e1b_kid.par_code to par_slug");
+
+				const par = await runQuery(
+					conn,
+					"find e1b_par pick slug, mobile sort slug"
+				);
+				expect(par.rows).toEqual([
+					{ slug: "p1", mobile: "01" },
+					{ slug: "p2", mobile: "02" }
+				]);
+				const schema = await conn.introspect();
+				const fields = schema.collections
+					.find((c) => c.name === "e1b_par")
+					?.fields.map((f) => f.name);
+				expect(fields).toEqual(expect.arrayContaining(["slug", "mobile"]));
+				expect(fields).not.toContain("phone");
+				expect(
+					schema.refs?.find((r) => r.fromCollection === "e1b_kid")
+				).toMatchObject({
+					fromColumn: "par_slug",
+					toCollection: "e1b_par",
+					toColumn: "slug"
+				});
+				const indexes = await runQuery(conn, "list indexes on e1b_par");
+				const names = indexes.rows.map((r) => r["name"]);
+				expect(names).toEqual(
+					expect.arrayContaining(["unique_slug", "idx_e1b_par_mobile"])
+				);
+				expect(names).not.toContain("unique_code");
+				// La FK renommée des deux côtés s'applique toujours.
+				await expect(
+					runQuery(conn, 'add {label: "k2", par_slug: "ghost"} into e1b_kid')
+				).rejects.toThrow(/viole la foreign key/);
+				await runQuery(conn, 'add {label: "k3", par_slug: "p2"} into e1b_kid');
+				// L'index unique suit le champ : un doublon de slug est refusé.
+				await expect(
+					runQuery(conn, 'add {slug: "p1", mobile: "03"} into e1b_par')
+				).rejects.toThrow();
+
+				// Conflit : un document porte déjà le nouveau nom.
+				await runQuery(
+					conn,
+					'add {label: "k4", par_slug: "p1", note: "a", memo: "b"} into e1b_kid'
+				);
+				await expect(
+					runQuery(conn, "rename column e1b_kid.note to memo")
+				).rejects.toThrow(
+					/1 docs de 'e1b_kid' ont déjà 'memo' en plus de 'note'/
+				);
+
+				// L'alias `id` de `_id` garde son nom.
+				await expect(
+					runQuery(conn, "rename column e1b_par.id to key")
+				).rejects.toThrow(/alias de '_id'/);
+			} finally {
+				await drop();
+				await conn.close();
+			}
+		}, 60_000);
+	}
+);

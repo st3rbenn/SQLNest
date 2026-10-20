@@ -78,7 +78,8 @@ const PRIMARY_VERBS: readonly {
 	// aussi pour `create table T {...}` — le peek `table` route en DDL. `drop`
 	// reste soft-ident (peekIdent au dispatch) — head-of-statement only.
 	{ label: "create", detail: "DDL create table", type: "keyword" },
-	{ label: "drop", detail: "DDL drop table/column/index (destructif)", type: "keyword" }
+	{ label: "drop", detail: "DDL drop table/column/index (destructif)", type: "keyword" },
+	{ label: "rename", detail: "DDL rename column", type: "keyword" }
 ];
 
 /**
@@ -338,6 +339,7 @@ function contextOptions(
 			// Tables + le sous-verbe `enum` (sprint EN : `describe enum <name>`).
 			return [...collections(schema), keyword("enum")];
 		}
+		if (lower === "rename") return [keyword("column")];
 		if (lower === "drop") {
 			// ADR-029 D7 destructive — WriteConfirmBar D7 typing gate au run.
 			// Enum/3 ajoute `enum` (D8), FK/3 ajoute `ref`.
@@ -518,6 +520,15 @@ function dottedPathOptions(
 	if (before?.kind === "ident") {
 		const kw = before.value.toLowerCase();
 		if (kw === "ref" || kw === "references") {
+			return refTargetColumns(schema, head.value);
+		}
+		// `rename column <t>.|` / `alter column <t>.|` (ADR-036).
+		const verb = toks[toks.length - 3];
+		if (
+			kw === "column" &&
+			verb?.kind === "ident" &&
+			["rename", "alter"].includes(verb.value.toLowerCase())
+		) {
 			return refTargetColumns(schema, head.value);
 		}
 	}
@@ -1613,6 +1624,12 @@ function ddlContextOptions(
 		return null;
 	}
 
+	// === rename column <t>.<c> to <n> === (ADR-036 E/1b)
+	if (head.kind === "ident" && headLower === "rename" && toks.length >= 2) {
+		if (toks[1]?.value.toLowerCase() !== "column") return null;
+		return renameColumnCompletions(toks, schema);
+	}
+
 	// === drop table / drop column / drop index / drop enum ===
 	// (soft-ident drop head) — Enum/3 étend ce dispatch.
 	if (head.kind === "ident" && headLower === "drop" && toks.length >= 2) {
@@ -1977,6 +1994,23 @@ function addRefCompletions(
 	if (clause !== null) return clause;
 	if (last.kind === "keyword" && last.value === "as") return [];
 	return [keyword("on"), keyword("as"), keyword("into")];
+}
+
+/**
+ * Complétions pour `rename column <t>.<c> to <n>` (ADR-036 E/1b). Les
+ * colonnes après `<t>.` passent par `dottedPathOptions`.
+ */
+function renameColumnCompletions(
+	toks: readonly Token[],
+	schema: SchemaModel
+): readonly SnqlCompletion[] {
+	const n = toks.length;
+	const last = toks[n - 1];
+	if (n === 2) return collections(schema);
+	if (n === 5 && last?.kind === "ident" && toks[3]?.kind === "dot") {
+		return [keyword("to")];
+	}
+	return [];
 }
 
 /** Complétions pour `drop table T [if exists]` (DDL/4). */

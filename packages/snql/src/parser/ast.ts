@@ -571,7 +571,8 @@ export type DDLKind =
 	| "add-enum-member"
 	| "drop-enum"
 	| "drop-ref"
-	| "add-ref";
+	| "add-ref"
+	| "rename-column";
 
 /**
  * Un type de field dans un body `create table` ou dans `add column`. Soit un
@@ -798,6 +799,21 @@ export interface AddRefStmt {
 }
 
 /**
+ * `rename column <table>.<col> to <nouveau>` (ADR-036 E/1b). La colonne est
+ * adressée par `table.colonne`, comme la cible d'une `ref`.
+ */
+export interface RenameColumnStmt {
+	readonly operation: "ddl";
+	readonly kind: "rename-column";
+	readonly target: string;
+	readonly column: string;
+	readonly columnSpan: Span;
+	readonly newName: string;
+	readonly newNameSpan: Span;
+	readonly span: Span;
+}
+
+/**
  * Union des statements DDL. Corpus Tier-2 (create-table/add-column/[add-|
  * drop-]index/drop-table/drop-column) + Enum Tier-3+ (create-enum/
  * add-enum-member/drop-enum) + Relations FK/3 (drop-ref).
@@ -813,7 +829,8 @@ export type DDLStatement =
 	| AddEnumMemberStmt
 	| DropEnumStmt
 	| DropRefStmt
-	| AddRefStmt;
+	| AddRefStmt
+	| RenameColumnStmt;
 
 /** Racine de l'AST : lecture (`Query`), mutation, transaction, introspection, raw, let/CTE ou DDL Tier-2. */
 export type Statement =

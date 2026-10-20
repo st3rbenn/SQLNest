@@ -375,6 +375,7 @@ export const mssqlMapper: Mapper = {
 		if (plan.kind === "drop-enum") return renderDropEnum(plan, namespace);
 		if (plan.kind === "drop-ref") return renderDropRef(plan);
 		if (plan.kind === "add-ref") return renderAddRef(plan);
+		if (plan.kind === "rename-column") return renderRenameColumn(plan, namespace);
 		throw new SnqlError(
 			`DDL kind '${(plan as { kind: string }).kind}' non supporté par le codegen MSSQL M/6`,
 			"codegen_ddl_unsupported"
@@ -1050,6 +1051,18 @@ function renderDropColumn(
 	const table = nstr(`${quoteIdent(namespace)}.${quoteIdent(plan.target)}`);
 	return ddlQuery(
 		`IF COL_LENGTH(${table}, ${nstr(plan.column)}) IS NOT NULL ${dropText}`
+	);
+}
+
+/** `rename column` → `sp_rename` : le nouveau nom passe sans crochets (ils
+ *  feraient partie du nom). FK, index et CHECK suivent la colonne. */
+function renderRenameColumn(
+	plan: import("../ir/plan").RenameColumnPlan,
+	namespace: string
+): NativeQuery {
+	const column = `${quoteIdent(namespace)}.${quoteIdent(plan.target)}.${quoteIdent(plan.column)}`;
+	return ddlQuery(
+		`EXEC sp_rename ${nstr(column)}, ${nstr(plan.newName)}, N'COLUMN'`
 	);
 }
 

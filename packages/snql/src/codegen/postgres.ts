@@ -279,6 +279,15 @@ export const postgresMapper: Mapper = {
 		if (plan.kind === "drop-enum") return renderDropEnum(plan);
 		if (plan.kind === "drop-ref") return renderDropRef(plan);
 		if (plan.kind === "add-ref") return renderAddRef(plan);
+		if (plan.kind === "rename-column") {
+			return {
+				engine: "postgres",
+				kind: "sql",
+				text: `ALTER TABLE ${quoteIdent(plan.target)} RENAME COLUMN ${quoteIdent(plan.column)} TO ${quoteIdent(plan.newName)}`,
+				params: [],
+				paramSpans: []
+			};
+		}
 		throw new SnqlError(
 			`DDL kind '${(plan as { kind: string }).kind}' non supporté par le codegen Postgres V1`,
 			"codegen_ddl_unsupported"

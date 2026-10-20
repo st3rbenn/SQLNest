@@ -7,7 +7,7 @@ import type {
 } from "@sqlnest/snql";
 import { createHash } from "node:crypto";
 import { isSqlDecimal, MONGODB_CAPABILITIES } from "@sqlnest/snql";
-import type { ClientSession, Db, Document } from "mongodb";
+import type { ClientSession, Collection, Db, Document } from "mongodb";
 import { Decimal128, Long, MongoClient, ObjectId } from "mongodb";
 import type {
 	Connection,
@@ -143,6 +143,103 @@ export function hydrateBson(
 		out[key] = hydrateBson(child, filter, childInId);
 	}
 	return out;
+}
+
+/**
+ * `updateMany` par lots de 10 000 `_id` (ADR-029 D10) : chaque update reste
+ * court, 50 ms entre deux lots, plafond de 10 M documents. `update` doit faire
+ * sortir le document de `filter`, sinon la boucle repasse dessus.
+ */
+async function updateInBatches(
+	col: Collection,
+	filter: Document,
+	update: Document | Document[],
+	capMessage: (max: number) => string
+): Promise<void> {
+	const BATCH_SIZE = 10_000;
+	const MAX_ROWS = 10_000_000;
+	const THROTTLE_MS = 50;
+	let total = 0;
+	for (;;) {
+		const batch = await col
+			.find(filter, { projection: { _id: 1 } })
+			.limit(BATCH_SIZE)
+			.toArray();
+		if (batch.length === 0) return;
+		const ids = batch.map(
+			(d) => (d as { readonly _id: unknown })._id
+		) as unknown as ObjectId[];
+		await col.updateMany({ _id: { $in: ids } }, update);
+		total += batch.length;
+		if (total >= MAX_ROWS) {
+			throw new EngineExecutionError(capMessage(MAX_ROWS));
+		}
+		await new Promise((resolve) => setTimeout(resolve, THROTTLE_MS));
+	}
+}
+
+/** `required` d'un `$jsonSchema` : Mongo refuse une liste vide, la clé saute. */
+function withRequired(schema: Document, required: readonly string[]): Document {
+	const { required: _previous, ...rest } = schema;
+	return required.length > 0 ? { ...rest, required: [...new Set(required)] } : rest;
+}
+
+function renameInList(list: unknown, from: string, to: string): string[] {
+	if (!Array.isArray(list)) return [];
+	return list.map((name) => (name === from ? to : String(name)));
+}
+
+/** Renomme récursivement les clés égales à `from` (clés d'index, filtre partiel). */
+function renameKeysDeep(value: unknown, from: string, to: string): unknown {
+	if (Array.isArray(value)) return value.map((v) => renameKeysDeep(v, from, to));
+	if (value === null || typeof value !== "object" || value instanceof Date) return value;
+	if ((value as { _bsontype?: unknown })._bsontype !== undefined) return value;
+	return Object.fromEntries(
+		Object.entries(value).map(([k, v]) => [k === from ? to : k, renameKeysDeep(v, from, to)])
+	);
+}
+
+/**
+ * Recrée sur `to` chaque index qui porte `from` (clé ou filtre partiel), avec
+ * les mêmes options. Le nom suit le champ quand il le contient (`phone_1`,
+ * `unique_phone`, `idx_agency_phone`) : le nouvel index existe avant que
+ * l'ancien disparaisse. Un nom sans le champ est gardé : l'ancien est alors
+ * supprimé juste avant. Les index texte (créés hors SNQL) ne sont pas recréés.
+ */
+async function renameFieldInIndexes(
+	col: Collection,
+	from: string,
+	to: string
+): Promise<void> {
+	for (const index of await col.listIndexes().toArray()) {
+		const { v: _v, key, name, ns: _ns, ...options } = index as Document;
+		const keys = key as Document;
+		if (Object.hasOwn(keys, "_fts")) continue;
+		const inFilter =
+			options.partialFilterExpression !== undefined &&
+			JSON.stringify(renameKeysDeep(options.partialFilterExpression, from, to)) !==
+				JSON.stringify(options.partialFilterExpression);
+		if (!Object.hasOwn(keys, from) && !inFilter) continue;
+		const newKeys = renameKeysDeep(keys, from, to) as Document;
+		if (options.partialFilterExpression !== undefined) {
+			options.partialFilterExpression = renameKeysDeep(
+				options.partialFilterExpression,
+				from,
+				to
+			);
+		}
+		const newName = String(name).replace(
+			new RegExp(`(^|_)${from}(?=_|$)`, "g"),
+			`$1${to}`
+		);
+		if (newName !== name) {
+			await col.createIndex(newKeys, { ...options, name: newName });
+			await col.dropIndex(name);
+		} else {
+			await col.dropIndex(name);
+			await col.createIndex(newKeys, { ...options, name });
+		}
+	}
 }
 
 /**
@@ -1154,6 +1251,9 @@ class MongoConnection implements Connection {
 		if (query.operation === "add-ref") {
 			return this.#executeDDLAddRef(query);
 		}
+		if (query.operation === "rename-column") {
+			return this.#executeDDLRenameColumn(query);
+		}
 		return this.#executeDDLDropRef(query);
 	}
 
@@ -1524,6 +1624,130 @@ class MongoConnection implements Connection {
 	}
 
 	/**
+	 * `rename column` Mongo (ADR-036 E/1b). Copier puis retirer plutôt que
+	 * `$rename` : un index unique sur l'ancien champ verrait sinon les
+	 * documents déjà renommés comme des doublons `null`. Chaque temps ne
+	 * touche que ce qui reste à faire : une interruption se reprend en
+	 * relançant la commande.
+	 *  1. Le validateur décrit les deux noms, `required` passe au nouveau.
+	 *  2. Copie de l'ancien champ vers le nouveau, par lots.
+	 *  3. Index recréés sur le nouveau champ, puis anciens supprimés.
+	 *  4. Ancien champ retiré, par lots.
+	 *  5. Validateur final sans l'ancien nom, `_snql_refs` réécrit.
+	 * Un document dont les deux champs ont des valeurs différentes est refusé :
+	 * la copie écraserait la valeur du nouveau.
+	 */
+	async #executeDDLRenameColumn(
+		query: Extract<NativeQuery, { kind: "mongo-ddl"; operation: "rename-column" }>
+	): Promise<ResultSet> {
+		const db = this.#requireDb();
+		const col = db.collection(query.collection);
+		const { column: from, newName: to } = query;
+		try {
+			const info = (await db.listCollections({ name: query.collection }).toArray())[0] as
+				| { readonly options?: { readonly validator?: Document } }
+				| undefined;
+			if (info === undefined) {
+				throw new EngineExecutionError(
+					`rename column échouée : collection '${query.collection}' inexistante`
+				);
+			}
+			const clash = await col.countDocuments({
+				[from]: { $exists: true },
+				[to]: { $exists: true },
+				$expr: { $ne: [`$${from}`, `$${to}`] }
+			});
+			if (clash > 0) {
+				throw new EngineExecutionError(
+					`${clash} docs de '${query.collection}' ont déjà '${to}' en plus de '${from}' — le renommage écraserait leur '${to}' ; vide l'un des deux d'abord, par exemple : update ${query.collection} where ${to} is not null set ${to} = null, puis relance rename column`
+				);
+			}
+
+			const validator = info.options?.validator;
+			const jsonSchema = validator?.$jsonSchema as Document | undefined;
+			// `primary key (id)` n'écrit pas `id` au validateur : c'est l'alias de
+			// `_id` (ADR-029 D13), dont le nom est fixe. Renommer l'alias
+			// réécrirait les FK qui le visent et casserait leur résolution vers `_id`.
+			const declared = jsonSchema?.properties as Document | undefined;
+			if (
+				from === "id" &&
+				jsonSchema !== undefined &&
+				!Object.hasOwn(declared ?? {}, "id") &&
+				(await col.countDocuments({ id: { $exists: true } }, { limit: 1 })) === 0
+			) {
+				throw new EngineExecutionError(
+					`rename column échouée : '${query.collection}.id' est l'alias de '_id', la clé primaire native de Mongo — son nom est fixe`
+				);
+			}
+			const setSchema = async (schema: Document): Promise<void> => {
+				await db.command({
+					collMod: query.collection,
+					validator: { ...validator, $jsonSchema: schema }
+				});
+			};
+			if (jsonSchema !== undefined) {
+				const properties = { ...(jsonSchema.properties as Document | undefined) };
+				if (Object.hasOwn(properties, from) && !Object.hasOwn(properties, to)) {
+					properties[to] = properties[from];
+				}
+				await setSchema(
+					withRequired(
+						{ ...jsonSchema, properties },
+						renameInList(jsonSchema.required, from, to)
+					)
+				);
+			}
+
+			const capMessage = (max: number): string =>
+				`rename column ${from} sur '${query.collection}' : le renommage dépasse le cap ${max} docs — relance la commande, elle reprend où elle s'est arrêtée`;
+			await updateInBatches(
+				col,
+				{ [from]: { $exists: true }, [to]: { $exists: false } },
+				[{ $set: { [to]: `$${from}` } }],
+				capMessage
+			);
+			await renameFieldInIndexes(col, from, to);
+			await updateInBatches(
+				col,
+				{ [from]: { $exists: true } },
+				{ $unset: { [from]: "" } },
+				capMessage
+			);
+
+			if (jsonSchema !== undefined) {
+				const properties = { ...(jsonSchema.properties as Document | undefined) };
+				if (Object.hasOwn(properties, from)) {
+					properties[to] = properties[from];
+					delete properties[from];
+				}
+				await setSchema(
+					withRequired(
+						{ ...jsonSchema, properties },
+						renameInList(jsonSchema.required, from, to)
+					)
+				);
+			}
+
+			const refs = db.collection("_snql_refs");
+			await refs.updateMany(
+				{ fromCollection: query.collection, fromColumn: from },
+				{ $set: { fromColumn: to } }
+			);
+			await refs.updateMany(
+				{ toCollection: query.collection, toColumn: from },
+				{ $set: { toColumn: to } }
+			);
+			return { columns: [], rows: [], rowCount: 0 };
+		} catch (cause) {
+			if (cause instanceof EngineExecutionError) throw cause;
+			throw new EngineExecutionError(
+				`rename column MongoDB échouée sur '${query.collection}.${from}' — ${describeMongoExecutionError(cause)}`,
+				{ cause }
+			);
+		}
+	}
+
+	/**
 	 * Valeurs de `fromColumn` qui ne résolvent pas dans la cible : valeurs
 	 * distinctes par paquets de 1000, résolues en un `$in` par paquet, puis
 	 * nombre de documents concernés. Les valeurs sortent de la base, déjà en
@@ -1683,31 +1907,13 @@ class MongoConnection implements Connection {
 			});
 
 			// D10-miroir $unset batched : purge la valeur dans chaque doc existant.
-			const BATCH_SIZE = 10_000;
-			const MAX_ROWS = 10_000_000;
-			const THROTTLE_MS = 50;
-			let totalUnset = 0;
-			for (;;) {
-				const batchCursor = col
-					.find({ [fieldName]: { $exists: true } }, { projection: { _id: 1 } })
-					.limit(BATCH_SIZE);
-				const batch = await batchCursor.toArray();
-				if (batch.length === 0) break;
-				const ids = batch.map(
-					(d) => (d as { readonly _id: unknown })._id
-				) as unknown as ObjectId[];
-				await col.updateMany(
-					{ _id: { $in: ids } },
-					{ $unset: { [fieldName]: "" } }
-				);
-				totalUnset += batch.length;
-				if (totalUnset >= MAX_ROWS) {
-					throw new EngineExecutionError(
-						`drop column ${fieldName} sur '${query.collection}' : purge dépasse le cap ${MAX_ROWS} docs — augmente mongo.ddl.backfill_max_rows ou purge offline`
-					);
-				}
-				await new Promise((resolve) => setTimeout(resolve, THROTTLE_MS));
-			}
+			await updateInBatches(
+				col,
+				{ [fieldName]: { $exists: true } },
+				{ $unset: { [fieldName]: "" } },
+				(max) =>
+					`drop column ${fieldName} sur '${query.collection}' : purge dépasse le cap ${max} docs — augmente mongo.ddl.backfill_max_rows ou purge offline`
+			);
 
 			return { columns: [], rows: [], rowCount: 0 };
 		} catch (cause) {
@@ -1959,32 +2165,13 @@ class MongoConnection implements Connection {
 			// fois, chaque update est court. Cap MAX_ROWS pour ne pas bloquer
 			// la connection indéfiniment sur une collection énorme.
 			if (query.backfill) {
-				const BATCH_SIZE = 10_000;
-				const MAX_ROWS = 10_000_000;
-				const THROTTLE_MS = 50;
-				const defaultValue = query.column.defaultValue;
-				let totalBackfilled = 0;
-				for (;;) {
-					const batchCursor = col
-						.find({ [fieldName]: { $exists: false } }, { projection: { _id: 1 } })
-						.limit(BATCH_SIZE);
-					const batch = await batchCursor.toArray();
-					if (batch.length === 0) break;
-					const ids = batch.map(
-						(d) => (d as { readonly _id: unknown })._id
-					) as unknown as ObjectId[];
-					await col.updateMany(
-						{ _id: { $in: ids } },
-						{ $set: { [fieldName]: defaultValue } }
-					);
-					totalBackfilled += batch.length;
-					if (totalBackfilled >= MAX_ROWS) {
-						throw new EngineExecutionError(
-							`add column ${fieldName} sur '${query.collection}' : backfill dépasse le cap ${MAX_ROWS} docs — augmente mongo.ddl.backfill_max_rows ou pré-init les rows via update batché offline`
-						);
-					}
-					await new Promise((resolve) => setTimeout(resolve, THROTTLE_MS));
-				}
+				await updateInBatches(
+					col,
+					{ [fieldName]: { $exists: false } },
+					{ $set: { [fieldName]: query.column.defaultValue } },
+					(max) =>
+						`add column ${fieldName} sur '${query.collection}' : backfill dépasse le cap ${max} docs — augmente mongo.ddl.backfill_max_rows ou pré-init les rows via update batché offline`
+				);
 			}
 
 			// Index unique secondaire optionnel (add column ... unique).

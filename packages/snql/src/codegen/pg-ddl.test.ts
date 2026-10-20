@@ -632,6 +632,20 @@ describe("codegen PG — ref FK modifier (ADR-031 FK/1)", () => {
 	});
 });
 
+describe("codegen PG — rename column (ADR-036 E/1b)", () => {
+	it("émet ALTER TABLE RENAME COLUMN", () => {
+		const q = mapDDL({
+			op: "ddl",
+			kind: "rename-column",
+			target: "agency",
+			column: "phone",
+			newName: "mobile"
+		});
+		if (q.kind !== "sql") throw new Error("attendu sql");
+		expect(q.text).toBe(`ALTER TABLE "agency" RENAME COLUMN "phone" TO "mobile"`);
+	});
+});
+
 describe("codegen PG — add ref (ADR-036 E/1a)", () => {
 	it("émet ALTER TABLE ADD CONSTRAINT FOREIGN KEY", () => {
 		const q = mapDDL({

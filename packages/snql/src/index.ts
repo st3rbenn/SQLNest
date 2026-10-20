@@ -100,6 +100,7 @@ export type {
 	KvDDLDropRefQuery,
 	KvDDLDropTableQuery,
 	KvDDLQuery,
+	KvDDLRenameColumnQuery,
 	KvFieldDescriptor,
 	Mapper,
 	MapperContext,
@@ -112,6 +113,7 @@ export type {
 	MongoDDLDropIndexQuery,
 	MongoDDLDropRefQuery,
 	MongoDDLQuery,
+	MongoDDLRenameColumnQuery,
 	MongoIndexSpec,
 	MongoIntrospectQuery,
 	MongoQuery,
@@ -155,6 +157,7 @@ export type {
 	PlanExpr,
 	PlanProjectField,
 	PlanSortKey,
+	RenameColumnPlan,
 	SqlDecimal,
 	SqlValue
 } from "./ir/plan";
