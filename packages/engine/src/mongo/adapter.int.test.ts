@@ -717,3 +717,145 @@ describe.skipIf(!hasMongo)("mongodb adapter — défauts (ADR-036 E/1d)", () => 
 		}
 	}, 60_000);
 });
+
+describe.skipIf(!hasMongo)("mongodb adapter — on update (ADR-031)", () => {
+	it("restrict : refus typé si un enfant référence l'ancienne valeur, rien n'est écrit", async () => {
+		const conn = await mongoAdapter.connect(loadConfig());
+		const drop = async () => {
+			await runQuery(conn, "drop table e1u_rkid if exists");
+			await runQuery(conn, "drop table e1u_rpar if exists");
+		};
+		try {
+			await drop();
+			await runQuery(
+				conn,
+				"create table e1u_rpar { id: string, code: string, name: string nullable, primary key (id) }"
+			);
+			await runQuery(
+				conn,
+				"create table e1u_rkid { label: string, par_code: string nullable ref e1u_rpar.code, par_id: string nullable ref e1u_rpar.id }"
+			);
+			await runQuery(
+				conn,
+				'add {id: "r1", code: "a", name: "x"} into e1u_rpar'
+			);
+			await runQuery(
+				conn,
+				'add {id: "r2", code: "b", name: "w"} into e1u_rpar'
+			);
+			await runQuery(
+				conn,
+				'add {label: "k1", par_code: "a", par_id: "r1"} into e1u_rkid'
+			);
+
+			await expect(
+				runQuery(conn, 'update e1u_rpar where code = "a" set code = "z"')
+			).rejects.toThrow(
+				/update de 'e1u_rpar' viole la foreign key 'fk_e1u_rkid_par_code_e1u_rpar' \(RESTRICT\) : e1u_rkid référence encore les anciennes valeurs de 'code' via 'par_code'/
+			);
+			// Même refus en forme pipeline (nouvelle valeur calculée).
+			await expect(
+				runQuery(conn, 'update e1u_rpar where code = "a" set code = name')
+			).rejects.toThrow(/\(RESTRICT\)/);
+			const codes = await runQuery(conn, "find e1u_rpar pick code sort code");
+			expect(codes.rows).toEqual([{ code: "a" }, { code: "b" }]);
+
+			// Clé non référencée, colonne non référencée, FK vers `_id` : rien à refuser.
+			await runQuery(conn, 'update e1u_rpar where code = "b" set code = "y"');
+			await runQuery(conn, 'update e1u_rpar where code = "a" set name = "n"');
+			const after = await runQuery(
+				conn,
+				"find e1u_rpar pick code, name sort code"
+			);
+			expect(after.rows).toEqual([
+				{ code: "a", name: "n" },
+				{ code: "y", name: "w" }
+			]);
+		} finally {
+			await drop();
+			await conn.close();
+		}
+	}, 60_000);
+
+	it("cascade et set null : enfants et petits-enfants suivent, échange de clés en forme pipeline", async () => {
+		const conn = await mongoAdapter.connect(loadConfig());
+		const drop = async () => {
+			await runQuery(conn, "drop table e1u_sub if exists");
+			await runQuery(conn, "drop table e1u_nul if exists");
+			await runQuery(conn, "drop table e1u_kid if exists");
+			await runQuery(conn, "drop table e1u_par if exists");
+		};
+		try {
+			await drop();
+			await runQuery(
+				conn,
+				"create table e1u_par { code: string, next_code: string nullable }"
+			);
+			await runQuery(
+				conn,
+				"create table e1u_kid { label: string, par_code: string nullable ref e1u_par.code on update cascade }"
+			);
+			await runQuery(
+				conn,
+				"create table e1u_sub { label: string, kid_code: string nullable ref e1u_kid.par_code on update cascade }"
+			);
+			await runQuery(
+				conn,
+				"create table e1u_nul { label: string, par_code: string nullable ref e1u_par.code on update set null }"
+			);
+			await runQuery(conn, 'add {code: "a", next_code: "b"} into e1u_par');
+			await runQuery(conn, 'add {code: "b", next_code: "a"} into e1u_par');
+			await runQuery(conn, 'add {code: "c"} into e1u_par');
+			await runQuery(conn, 'add {label: "k1", par_code: "a"} into e1u_kid');
+			await runQuery(conn, 'add {label: "k2", par_code: "a"} into e1u_kid');
+			await runQuery(conn, 'add {label: "k3", par_code: "b"} into e1u_kid');
+			await runQuery(conn, 'add {label: "k4", par_code: "c"} into e1u_kid');
+			await runQuery(conn, 'add {label: "s1", kid_code: "a"} into e1u_sub');
+			await runQuery(conn, 'add {label: "s2", kid_code: "b"} into e1u_sub');
+			await runQuery(conn, 'add {label: "n1", par_code: "a"} into e1u_nul');
+			await runQuery(conn, 'add {label: "n2", par_code: "c"} into e1u_nul');
+
+			// a ↔ b : chaque enfant suit SA ligne, pas la valeur réécrite juste avant.
+			const swap = await runQuery(
+				conn,
+				'update e1u_par where code != "c" set code = next_code'
+			);
+			expect(swap.rowCount).toBe(2);
+			const pick = async (table: string, col: string) =>
+				(await runQuery(conn, `find ${table} pick label, ${col} sort label`))
+					.rows;
+			expect(await pick("e1u_kid", "par_code")).toEqual([
+				{ label: "k1", par_code: "b" },
+				{ label: "k2", par_code: "b" },
+				{ label: "k3", par_code: "a" },
+				{ label: "k4", par_code: "c" }
+			]);
+			expect(await pick("e1u_sub", "kid_code")).toEqual([
+				{ label: "s1", kid_code: "b" },
+				{ label: "s2", kid_code: "a" }
+			]);
+			expect(await pick("e1u_nul", "par_code")).toEqual([
+				{ label: "n1", par_code: null },
+				{ label: "n2", par_code: "c" }
+			]);
+
+			// Forme littérale.
+			await runQuery(conn, 'update e1u_par where code = "c" set code = "z"');
+			expect(await pick("e1u_kid", "par_code")).toContainEqual({
+				label: "k4",
+				par_code: "z"
+			});
+			expect(await pick("e1u_nul", "par_code")).toContainEqual({
+				label: "n2",
+				par_code: null
+			});
+			// Les enfants réécrits respectent toujours la FK.
+			await expect(
+				runQuery(conn, 'add {label: "k5", par_code: "c"} into e1u_kid')
+			).rejects.toThrow(/viole la foreign key/);
+		} finally {
+			await drop();
+			await conn.close();
+		}
+	}, 60_000);
+});

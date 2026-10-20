@@ -478,6 +478,13 @@ interface RefMeta {
 	readonly toCollection: string;
 	readonly toColumn: string;
 	readonly onDelete: string;
+	readonly onUpdate: string;
+}
+
+/** Clé référencée qui change de valeur sous un update (ADR-031 `on update`). */
+interface KeyMove {
+	readonly from: unknown;
+	readonly to: unknown;
 }
 
 /**
@@ -801,7 +808,8 @@ class MongoConnection implements Connection {
 	/**
 	 * Dispatch write FK-aware (ADR-031 FK/1b). Charge les FK pertinentes depuis
 	 * `_snql_refs` et, si la collection en a, exécute le write dans une
-	 * transaction avec enforcement (write-precheck insert/update, cascade delete).
+	 * transaction avec enforcement (write-precheck insert/update, `on update`
+	 * quand l'update réécrit une colonne référencée, cascade delete).
 	 * Sans FK → fast path direct (pas d'overhead transaction).
 	 */
 	async #executeWrite(
@@ -817,8 +825,10 @@ class MongoConnection implements Connection {
 				: queryIn;
 		if (query.op === "insert" || query.op === "update") {
 			const outgoing = await this.#loadRefs("fromCollection", query.collection);
-			if (outgoing.length > 0) {
-				return this.#executeWriteFKChecked(query, outgoing);
+			const keyColumns =
+				query.op === "update" ? await this.#referencedColumnsSet(query) : [];
+			if (outgoing.length > 0 || keyColumns.length > 0) {
+				return this.#executeWriteFKChecked(query, outgoing, keyColumns);
 			}
 		} else if (query.op === "delete") {
 			const incoming = await this.#loadRefs("toCollection", query.collection);
@@ -953,7 +963,8 @@ class MongoConnection implements Connection {
 						fromColumn: r.fromColumn,
 						toCollection: r.toCollection,
 						toColumn: r.toColumn,
-						onDelete: typeof r.onDelete === "string" ? r.onDelete : "restrict"
+						onDelete: typeof r.onDelete === "string" ? r.onDelete : "restrict",
+						onUpdate: typeof r.onUpdate === "string" ? r.onUpdate : "restrict"
 					});
 				}
 			}
@@ -961,6 +972,30 @@ class MongoConnection implements Connection {
 		} catch {
 			return [];
 		}
+	}
+
+	/**
+	 * Colonnes de `query.collection` ciblées par une FK entrante que l'update
+	 * réécrit. `_id` est immuable sous Mongo : une FK vers `_id` n'a pas
+	 * d'`on update` à appliquer.
+	 */
+	async #referencedColumnsSet(
+		query: Extract<NativeQuery, { kind: "mongo-write"; op: "update" }>
+	): Promise<readonly string[]> {
+		const setCols = Object.keys(extractSetFields(query.update));
+		if (setCols.length === 0) return [];
+		const out = new Set<string>();
+		for (const ref of await this.#loadRefs("toCollection", query.collection)) {
+			if (ref.toColumn === "_id") continue;
+			if (
+				setCols.some(
+					(c) => c === ref.toColumn || c.startsWith(`${ref.toColumn}.`)
+				)
+			) {
+				out.add(ref.toColumn);
+			}
+		}
+		return [...out];
 	}
 
 	/**
@@ -992,13 +1027,16 @@ class MongoConnection implements Connection {
 	/**
 	 * Write insert/update avec write-precheck FK (ADR-031 FK/1b) dans une
 	 * transaction. Pour chaque FK sortante, la valeur écrite doit référencer une
-	 * ligne existante (sauf NULL — FK nullable). `withTransaction` retry les
+	 * ligne existante (sauf NULL — FK nullable). Un update qui réécrit une
+	 * colonne référencée (`keyColumns`) applique ensuite `on update` aux
+	 * dépendants, dans la même transaction. `withTransaction` retry les
 	 * erreurs transientes ; sur mongod standalone, `startSession`/tx lève
 	 * TransactionNotSupported (20) → message guidant (RS requis).
 	 */
 	async #executeWriteFKChecked(
 		query: Extract<NativeQuery, { kind: "mongo-write"; op: "insert" | "update" }>,
-		outgoing: readonly RefMeta[]
+		outgoing: readonly RefMeta[],
+		keyColumns: readonly string[]
 	): Promise<ResultSet> {
 		const session = this.#requireClient().startSession();
 		try {
@@ -1042,13 +1080,140 @@ class MongoConnection implements Connection {
 						}
 					}
 				}
-				result = await this.#executeWriteInSession(query, session);
+				result =
+					query.op === "update" && keyColumns.length > 0
+						? await this.#updateApplyingOnUpdate(query, keyColumns, session)
+						: await this.#executeWriteInSession(query, session);
 			});
 			return result;
 		} catch (cause) {
 			throw fkTransactionError(query.collection, cause);
 		} finally {
 			await session.endSession();
+		}
+	}
+
+	/**
+	 * Update qui réécrit des colonnes référencées : lit leurs valeurs avant et
+	 * après l'update (re-lecture par `_id`, la sélection pouvant ne plus
+	 * matcher), puis applique `on update` aux clés qui ont changé. Couvre aussi
+	 * la forme pipeline, dont les nouvelles valeurs ne se lisent qu'après coup.
+	 */
+	async #updateApplyingOnUpdate(
+		query: Extract<NativeQuery, { kind: "mongo-write"; op: "update" }>,
+		keyColumns: readonly string[],
+		session: ClientSession
+	): Promise<ResultSet> {
+		const coll = this.#requireDb().collection(query.collection);
+		const projection = Object.fromEntries(keyColumns.map((c) => [c, 1]));
+		const before = await coll
+			.find(hydrateBson(query.filter, true) as Document, {
+				session,
+				projection
+			})
+			.toArray();
+		const result = await this.#executeWriteInSession(query, session);
+		if (before.length === 0) return result;
+		const after = new Map<string, Record<string, unknown>>();
+		const reread = await coll
+			.find({ _id: { $in: before.map((d) => d._id) } }, { session, projection })
+			.toArray();
+		for (const doc of reread) after.set(bsonMatchKey(doc._id), doc);
+		const changes = new Map<string, KeyMove[]>();
+		for (const column of keyColumns) {
+			const moves: KeyMove[] = [];
+			for (const doc of before) {
+				const from = (doc as Record<string, unknown>)[column];
+				if (from === null || from === undefined) continue;
+				const to = after.get(bsonMatchKey(doc._id))?.[column] ?? null;
+				if (bsonMatchKey(from) !== bsonMatchKey(to)) moves.push({ from, to });
+			}
+			if (moves.length > 0) changes.set(column, moves);
+		}
+		await this.#applyOnUpdate(query.collection, changes, session);
+		return result;
+	}
+
+	/**
+	 * Applique `on update` aux dépendants des clés de `collection` qui ont
+	 * changé : `restrict` refuse si un enfant référence une ancienne valeur,
+	 * `cascade` y écrit la nouvelle, `set-null` met NULL — puis récurse sur la
+	 * colonne enfant ainsi réécrite. Les enfants sont repérés par l'ancienne
+	 * valeur puis réécrits par `_id`, ce qui garde un échange de clés (a↔b)
+	 * correct. Termine sans garde de cycle : un niveau réécrit toutes les
+	 * lignes qui portaient ses anciennes valeurs, un retour n'en trouve plus.
+	 */
+	async #applyOnUpdate(
+		collection: string,
+		changes: ReadonlyMap<string, readonly KeyMove[]>,
+		session: ClientSession
+	): Promise<void> {
+		if (changes.size === 0) return;
+		const db = this.#requireDb();
+		for (const ref of await this.#loadRefs("toCollection", collection)) {
+			const moves = changes.get(ref.toColumn);
+			if (moves === undefined) continue;
+			const byOld = new Map<string, KeyMove>();
+			for (const move of moves) {
+				const key = bsonMatchKey(move.from);
+				const seen = byOld.get(key);
+				if (
+					seen !== undefined &&
+					ref.onUpdate === "cascade" &&
+					bsonMatchKey(seen.to) !== bsonMatchKey(move.to)
+				) {
+					throw new EngineExecutionError(
+						`update de '${collection}' : la foreign key '${ref.name}' (CASCADE) ne peut pas propager ${JSON.stringify(normalizeBson(move.from))} — plusieurs lignes portant cette valeur sur '${ref.toColumn}' reçoivent des valeurs différentes. Une colonne référencée doit être unique.`
+					);
+				}
+				byOld.set(key, move);
+			}
+			const childColl = db.collection(ref.fromCollection);
+			const childFilter = {
+				[ref.fromColumn]: { $in: [...byOld.values()].map((m) => m.from) }
+			} as Document;
+			if (ref.onUpdate === "restrict") {
+				const cnt = await childColl.countDocuments(childFilter, {
+					session,
+					limit: 1
+				});
+				if (cnt > 0) {
+					throw new EngineExecutionError(
+						`update de '${collection}' viole la foreign key '${ref.name}' (RESTRICT) : ${ref.fromCollection} référence encore les anciennes valeurs de '${ref.toColumn}' via '${ref.fromColumn}'. Mets d'abord à jour les dépendants ou déclare 'on update cascade'.`
+					);
+				}
+				continue;
+			}
+			const children = await childColl
+				.find(childFilter, { session, projection: { [ref.fromColumn]: 1 } })
+				.toArray();
+			const groups = new Map<string, { move: KeyMove; ids: unknown[] }>();
+			for (const child of children) {
+				const key = bsonMatchKey(
+					(child as Record<string, unknown>)[ref.fromColumn]
+				);
+				const move = byOld.get(key);
+				if (move === undefined) continue;
+				const group = groups.get(key) ?? { move, ids: [] };
+				group.ids.push(child._id);
+				groups.set(key, group);
+			}
+			if (groups.size === 0) continue;
+			const childMoves: KeyMove[] = [];
+			for (const { move, ids } of groups.values()) {
+				const to = ref.onUpdate === "set-null" ? null : move.to;
+				await childColl.updateMany(
+					{ _id: { $in: ids } } as Document,
+					{ $set: { [ref.fromColumn]: to } },
+					{ session }
+				);
+				childMoves.push({ from: move.from, to });
+			}
+			await this.#applyOnUpdate(
+				ref.fromCollection,
+				new Map([[ref.fromColumn, childMoves]]),
+				session
+			);
 		}
 	}
 
