@@ -165,7 +165,7 @@ export type {
 	SqlDecimal,
 	SqlValue
 } from "./ir/plan";
-export { isSqlDecimal } from "./ir/plan";
+export { isDdlDefaultFn, isSqlDecimal } from "./ir/plan";
 // --- Language service (éditeur : complétion schema-aware) ---
 export type {
 	SnqlCompletion,

@@ -23,6 +23,7 @@ import type {
 	Expr,
 	RenameColumnStmt
 } from "../parser/ast";
+import { DDL_DEFAULT_FUNCTIONS } from "../parser/parser";
 import type { SchemaModel, SnqlType } from "../schema/model";
 import type {
 	AddColumnPlan,
@@ -657,6 +658,20 @@ function lowerAlterColumn(
 			hasDefault: field.hasDefault ?? false
 		};
 	}
+	if (stmt.action.kind === "set-default") {
+		return {
+			op: "ddl",
+			kind: "alter-column",
+			target: stmt.target,
+			column: stmt.column,
+			action: {
+				kind: "set-default",
+				value: lowerDefault(stmt.action.expr, stmt.column, current?.type ?? "unknown")
+			},
+			...(current !== undefined ? { current } : {}),
+			...(stmt.span !== undefined ? { span: stmt.span } : {})
+		};
+	}
 	if (stmt.action.kind !== "set-type") {
 		return {
 			op: "ddl",
@@ -858,13 +873,31 @@ function assertIdent(
 	}
 }
 
-// Literals only : le codegen bind une `DdlDefault`, pas une `PlanExpr`.
-// Refuse les calls/refs qui masqueraient des divergences cross-engine
-// (`now()` PG vs `$currentDate` Mongo vs rien KV). Cas particulier : un
-// object/array literal est admis SEULEMENT sur `type: json` (PG `::jsonb`,
-// Mongo/KV natif au backfill) — récurse en profondeur pour interdire les
-// call/field imbriqués.
+// Littéral ou `now()` / `uuid()` : le codegen rend une `DdlDefault`, pas une
+// `PlanExpr`. Toute autre fonction est refusée, chaque moteur ayant les
+// siennes (ADR-036 D4 compense ces deux-là sous Mongo). Un object/array
+// literal est admis SEULEMENT sur `type: json` (PG `::jsonb`, Mongo/KV natif
+// au backfill) — récurse en profondeur pour interdire les call/field
+// imbriqués.
 function lowerDefault(expr: Expr, fieldName: string, type: SnqlType): DdlDefault {
+	if (expr.type === "call") {
+		const known = DDL_DEFAULT_FUNCTIONS[expr.name.toLowerCase()];
+		if (known === undefined || expr.args.length > 0) {
+			throw new SnqlError(
+				`'default' de '${fieldName}' : seules les fonctions now() et uuid() sont admises (ou un littéral)`,
+				"lower_ddl_default_not_literal",
+				expr.span
+			);
+		}
+		if (type !== "unknown" && !known.accepts.includes(type)) {
+			throw new SnqlError(
+				`'default ${expr.name}()' produit un ${known.fn === "now" ? "date" : "uuid"} — '${fieldName}' est de type ${type}`,
+				"lower_ddl_default_fn_type_mismatch",
+				expr.span
+			);
+		}
+		return { kind: "fn", fn: known.fn };
+	}
 	if (expr.type === "object" || expr.type === "array") {
 		if (type !== "json") {
 			throw new SnqlError(

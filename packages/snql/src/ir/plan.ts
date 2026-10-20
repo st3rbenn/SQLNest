@@ -96,7 +96,25 @@ export interface SqlJsonLiteral {
 	readonly parsed: unknown;
 }
 
-export type DdlDefault = SqlValue | SqlJsonLiteral;
+/**
+ * Défaut fonction (ADR-036 E/1d) : `now()` ou `uuid()` (alias PG
+ * `gen_random_uuid()`), évalué à l'insertion — natif PG / MSSQL, posé par
+ * l'adapter sous Mongo (`_snql_defaults`).
+ */
+export interface DdlDefaultFn {
+	readonly kind: "fn";
+	readonly fn: "now" | "uuid";
+}
+
+export type DdlDefault = SqlValue | SqlJsonLiteral | DdlDefaultFn;
+
+export function isDdlDefaultFn(value: unknown): value is DdlDefaultFn {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		(value as { kind?: unknown }).kind === "fn"
+	);
+}
 
 export function isSqlJsonLiteral(value: unknown): value is SqlJsonLiteral {
 	return (
@@ -774,10 +792,12 @@ export interface RenameColumnPlan {
 	readonly span?: Span;
 }
 
-/** Action résolue d'un `alter column` (ADR-036 E/1c). */
+/** Action résolue d'un `alter column` (ADR-036 E/1c, E/1d). */
 export type AlterColumnPlanAction =
 	| { readonly kind: "set-nullable" }
 	| { readonly kind: "set-not-null" }
+	| { readonly kind: "set-default"; readonly value: DdlDefault }
+	| { readonly kind: "drop-default" }
 	| {
 			readonly kind: "set-type";
 			readonly type: import("../schema/model").SnqlType;

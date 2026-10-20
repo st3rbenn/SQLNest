@@ -174,10 +174,27 @@ describe("lower DDL — create table (ADR-029)", () => {
 		expect(() => lowerCreate("create table 1users { id: uuid }")).toThrow();
 	});
 
-	it("rejette un default non-literal (call)", () => {
+	it("rejette now() sur une colonne qui n'est pas une date (ADR-036 E/1d)", () => {
 		expect(() =>
 			lowerCreate("create table t { id: uuid default now() }")
-		).toThrow(/littéral scalaire/);
+		).toThrow(/'default now\(\)' produit un date — 'id' est de type uuid/);
+	});
+
+	it("rejette une fonction autre que now() / uuid()", () => {
+		expect(() =>
+			lowerCreate("create table t { id: uuid default random() }")
+		).toThrow(/seules les fonctions now\(\) et uuid\(\) sont admises/);
+	});
+
+	it("accepte now() et uuid() (alias gen_random_uuid())", () => {
+		const plan = lowerCreate(
+			"create table t { id: uuid default gen_random_uuid(), at: timestamptz default now(), code: text default uuid() }"
+		);
+		expect(plan.fields.map((f) => f.defaultValue)).toEqual([
+			{ kind: "fn", fn: "uuid" },
+			{ kind: "fn", fn: "now" },
+			{ kind: "fn", fn: "uuid" }
+		]);
 	});
 
 	it("rejette un default non-literal (field ref)", () => {
@@ -271,10 +288,10 @@ describe("lower DDL — add column (ADR-029 DDL/2)", () => {
 		});
 	});
 
-	it("rejette un default non-literal (D1 safety)", () => {
+	it("rejette now() sur une colonne int (ADR-036 E/1d)", () => {
 		expect(() =>
 			lowerAdd("add column x int default now() into t")
-		).toThrow(/littéral scalaire/);
+		).toThrow(/produit un date — 'x' est de type int/);
 	});
 
 	it("accepte un default object literal sur type json (add column)", () => {
@@ -778,6 +795,21 @@ describe("lower DDL — alter column (ADR-036 E/1c)", () => {
 		expect(() => lowerAlter("alter column booking.agency_id set type bool")).toThrow(
 			/incompatible avec la foreign key 'booking_agency_id_fkey'/
 		);
+	});
+
+	it("set default : littéral ou fonction, typé par la colonne (E/1d)", () => {
+		expect(lowerAlter('alter column agency.zip set default "75000"')).toMatchObject({
+			action: { kind: "set-default", value: "75000" }
+		});
+		expect(lowerAlter("alter column agency.zip set default uuid()")).toMatchObject({
+			action: { kind: "set-default", value: { kind: "fn", fn: "uuid" } }
+		});
+		expect(() => lowerAlter("alter column agency.zip set default now()")).toThrow(
+			/produit un date — 'zip' est de type string/
+		);
+		expect(lowerAlter("alter column agency.zip drop default")).toMatchObject({
+			action: { kind: "drop-default" }
+		});
 	});
 
 	it("refuse une colonne inconnue", () => {

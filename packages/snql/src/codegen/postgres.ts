@@ -22,7 +22,7 @@ import type {
 	RawPlan,
 	TransactionPlan
 } from "../ir/plan";
-import { isSqlDecimal, isSqlJsonLiteral } from "../ir/plan";
+import { isDdlDefaultFn, isSqlDecimal, isSqlJsonLiteral } from "../ir/plan";
 import type { SnqlType } from "../schema/model";
 import type {
 	Mapper,
@@ -652,6 +652,9 @@ function pgInlineDefault(value: DdlDefault): string {
 		const escaped = value.raw.replace(/'/g, "''");
 		return `'${escaped}'::jsonb`;
 	}
+	if (isDdlDefaultFn(value)) {
+		return value.fn === "now" ? "now()" : "gen_random_uuid()";
+	}
 	throw new SnqlError(
 		`Type de default DDL non supporté par pgInlineDefault : ${typeof value}`,
 		"codegen_ddl_default_unsupported"
@@ -812,6 +815,10 @@ function renderAlterColumn(plan: import("../ir/plan").AlterColumnPlan): NativeQu
 	const { action } = plan;
 	if (action.kind === "set-nullable") return sql(`${head} DROP NOT NULL`);
 	if (action.kind === "set-not-null") return sql(`${head} SET NOT NULL`);
+	if (action.kind === "set-default") {
+		return sql(`${head} SET DEFAULT ${pgInlineDefault(action.value)}`);
+	}
+	if (action.kind === "drop-default") return sql(`${head} DROP DEFAULT`);
 	const type =
 		action.enumTypeName !== undefined
 			? quoteIdent(action.enumTypeName)

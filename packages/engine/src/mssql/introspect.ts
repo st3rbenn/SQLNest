@@ -212,7 +212,9 @@ export function buildMssqlSchemaModel(
 			type: mapMssqlType(col.data_type),
 			nullable: col.is_nullable === "YES",
 			source: "declared",
-			...(hasDefault ? { hasDefault: true as const } : {})
+			...(hasDefault
+				? { hasDefault: true as const, defaultExpr: col.column_default as string }
+				: {})
 		});
 		fieldsByTable.set(col.table_name, list);
 	}

@@ -814,10 +814,12 @@ export interface RenameColumnStmt {
 	readonly span: Span;
 }
 
-/** Action d'un `alter column` (ADR-036 E/1c). */
+/** Action d'un `alter column` (ADR-036 E/1c, E/1d). */
 export type AlterColumnAction =
 	| { readonly kind: "set-nullable" }
 	| { readonly kind: "set-not-null" }
+	| { readonly kind: "set-default"; readonly expr: Expr }
+	| { readonly kind: "drop-default" }
 	| {
 			readonly kind: "set-type";
 			readonly type: DDLFieldTypeRef;
@@ -825,8 +827,8 @@ export type AlterColumnAction =
 	  };
 
 /**
- * `alter column <table>.<col> set nullable | set not null | set type <type>`
- * (ADR-036 E/1c).
+ * `alter column <table>.<col> set nullable | set not null | set type <type> |
+ * set default <valeur> | drop default` (ADR-036 E/1c, E/1d).
  */
 export interface AlterColumnStmt {
 	readonly operation: "ddl";

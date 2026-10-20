@@ -673,6 +673,22 @@ describe("codegen PG — alter column (ADR-036 E/1c)", () => {
 	});
 });
 
+describe("codegen PG — défauts (ADR-036 E/1d)", () => {
+	const base = { op: "ddl" as const, kind: "alter-column" as const, target: "agency", column: "zip" };
+
+	it("set default / drop default", () => {
+		const set = mapDDL({ ...base, action: { kind: "set-default", value: "75000" } });
+		const fn = mapDDL({ ...base, action: { kind: "set-default", value: { kind: "fn", fn: "uuid" } } });
+		const drop = mapDDL({ ...base, action: { kind: "drop-default" } });
+		if (set.kind !== "sql" || fn.kind !== "sql" || drop.kind !== "sql") {
+			throw new Error("attendu sql");
+		}
+		expect(set.text).toBe(`ALTER TABLE "agency" ALTER COLUMN "zip" SET DEFAULT '75000'`);
+		expect(fn.text).toBe(`ALTER TABLE "agency" ALTER COLUMN "zip" SET DEFAULT gen_random_uuid()`);
+		expect(drop.text).toBe(`ALTER TABLE "agency" ALTER COLUMN "zip" DROP DEFAULT`);
+	});
+});
+
 describe("codegen PG — rename column (ADR-036 E/1b)", () => {
 	it("émet ALTER TABLE RENAME COLUMN", () => {
 		const q = mapDDL({

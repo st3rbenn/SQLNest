@@ -1819,6 +1819,19 @@ export const SNQL_TYPE_ALIAS: Readonly<Record<string, SnqlType>> = {
 };
 
 /**
+ * Défauts fonction admis par le DDL (ADR-036 D4) et types de colonne qui les
+ * acceptent. `gen_random_uuid` est l'alias natif de `uuid`. Partagé par le
+ * lower et l'autocomplete.
+ */
+export const DDL_DEFAULT_FUNCTIONS: Readonly<
+	Record<string, { fn: "now" | "uuid"; accepts: readonly SnqlType[] }>
+> = {
+	now: { fn: "now", accepts: ["date"] },
+	uuid: { fn: "uuid", accepts: ["uuid", "string"] },
+	gen_random_uuid: { fn: "uuid", accepts: ["uuid", "string"] }
+};
+
+/**
  * Résout un ident type en `DDLFieldTypeRef` — soit builtin (matched dans
  * SNQL_TYPE_ALIAS), soit enum-ref laissé au lower pour lookup via
  * `schema.enums` (ADR-030 Enum/2). Le parser ne throw plus sur type inconnu :
@@ -2560,14 +2573,35 @@ function parseRenameColumn(cursor: TokenCursor): RenameColumnStmt {
 }
 
 /**
- * `alter column <table>.<col> set nullable | set not null | set type <type>`
- * (ADR-036 E/1c).
+ * `alter column <table>.<col> set nullable | set not null | set type <type> |
+ * set default <valeur> | drop default` (ADR-036 E/1c, E/1d).
  */
 function parseAlterColumn(cursor: TokenCursor): AlterColumnStmt {
 	const alterTok = cursor.next(); // `alter` soft-ident
 	cursor.next(); // `column` soft-ident (déjà peeked au dispatch)
 	const { table, column } = parseColumnPath(cursor, "alter column");
-	const expected = "set nullable, set not null ou set type <type>";
+	const expected =
+		"set nullable, set not null, set type <type>, set default <valeur> ou drop default";
+	if (peekIdent(cursor, "drop")) {
+		cursor.next();
+		if (!peekKeyword(cursor, "default")) {
+			throw new SnqlError(
+				"'drop' attend 'default' dans un alter column",
+				"parse_ddl_alter_column_expected_action",
+				cursor.peek().span
+			);
+		}
+		const defaultTok = cursor.next();
+		return {
+			operation: "ddl",
+			kind: "alter-column",
+			target: table.value,
+			column: column.value,
+			columnSpan: column.span,
+			action: { kind: "drop-default" },
+			span: { start: alterTok.span.start, end: defaultTok.span.end }
+		};
+	}
 	if (!peekKeyword(cursor, "set")) {
 		throw new SnqlError(
 			`'alter column ${table.value}.${column.value}' attend une action : ${expected}`,
@@ -2600,6 +2634,11 @@ function parseAlterColumn(cursor: TokenCursor): AlterColumnStmt {
 		cursor.next();
 		action = { kind: "set-not-null" };
 		end = nullTok.span;
+	} else if (tok.kind === "keyword" && word === "default") {
+		cursor.next();
+		const expr = parseExpression(cursor);
+		action = { kind: "set-default", expr };
+		end = expr.span;
 	} else if (tok.kind === "ident" && word === "type") {
 		cursor.next();
 		const typeTok = cursor.expect(

@@ -24,6 +24,7 @@ import type {
 	DropRefPlan,
 	DropTablePlan
 } from "../ir/plan";
+import { isDdlDefaultFn } from "../ir/plan";
 import type { SnqlType } from "../schema/model";
 import type {
 	KvDDLAddColumnQuery,
@@ -345,6 +346,7 @@ function renderKvCreateTable(plan: CreateTablePlan): KvDDLCreateTableQuery {
  */
 function serializeDefault(value: unknown): unknown {
 	if (typeof value === "bigint") return value.toString();
+	if (isDdlDefaultFn(value)) return { fn: value.fn };
 	if (
 		typeof value === "object" &&
 		value !== null &&

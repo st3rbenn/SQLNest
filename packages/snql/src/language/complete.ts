@@ -15,7 +15,7 @@
 import { type OperationKind, verbOperation } from "../lexer/dictionary";
 import { tokenize } from "../lexer/lexer";
 import type { Token } from "../lexer/token";
-import { SNQL_TYPE_ALIAS } from "../parser/parser";
+import { DDL_DEFAULT_FUNCTIONS, SNQL_TYPE_ALIAS } from "../parser/parser";
 import {
 	getIncomingRefs,
 	getOutgoingRefs,
@@ -2020,10 +2020,42 @@ function renameColumnCompletions(
 	return [];
 }
 
+const DEFAULT_FUNCTION_DETAIL = {
+	now: "date de l'insertion",
+	uuid: "uuid généré à l'insertion"
+} as const;
+
 /**
- * Complétions pour `alter column <t>.<c> set nullable | set not null | set type
- * <type>` (ADR-036 E/1c). Les colonnes après `<t>.` passent par
- * `dottedPathOptions`.
+ * Défauts fonction (ADR-036 D4) que le lower accepte pour cette colonne :
+ * `now()` sur une date, `uuid()` sur un uuid ou un texte. Colonne inconnue →
+ * les deux, le lower tranchera.
+ */
+function defaultFunctionSuggestions(
+	schema: SchemaModel,
+	table: string | undefined,
+	column: string | undefined
+): readonly SnqlCompletion[] {
+	const type = schema.collections
+		.find((c) => c.name === table)
+		?.fields.find((f) => f.name === column)?.type;
+	return (["now", "uuid"] as const)
+		.filter(
+			(fn) =>
+				type === undefined ||
+				type === "unknown" ||
+				DDL_DEFAULT_FUNCTIONS[fn]?.accepts.includes(type)
+		)
+		.map((fn) => ({
+			label: `${fn}()`,
+			type: "keyword",
+			detail: DEFAULT_FUNCTION_DETAIL[fn]
+		}));
+}
+
+/**
+ * Complétions pour `alter column <t>.<c> set nullable | set not null | set
+ * type <type> | set default <valeur> | drop default` (ADR-036 E/1c, E/1d).
+ * Les colonnes après `<t>.` passent par `dottedPathOptions`.
  */
 function alterColumnCompletions(
 	toks: readonly Token[],
@@ -2033,13 +2065,17 @@ function alterColumnCompletions(
 	const last = toks[n - 1];
 	if (n === 2) return collections(schema);
 	if (n === 5 && last?.kind === "ident" && toks[3]?.kind === "dot") {
-		return [keyword("set")];
+		return [keyword("set"), keyword("drop")];
 	}
 	if (n === 6 && last?.kind === "keyword" && last.value === "set") {
-		return [keyword("nullable"), keyword("not null"), keyword("type")];
+		return [keyword("nullable"), keyword("not null"), keyword("type"), keyword("default")];
 	}
+	if (n === 6 && last?.value.toLowerCase() === "drop") return [keyword("default")];
 	if (n === 7 && last?.value.toLowerCase() === "type") {
 		return ddlTypeSuggestions(schema);
+	}
+	if (n === 7 && last?.kind === "keyword" && last.value === "default") {
+		return defaultFunctionSuggestions(schema, toks[2]?.value, toks[4]?.value);
 	}
 	return [];
 }

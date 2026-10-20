@@ -196,7 +196,9 @@ export function buildSchemaModel(
 			type,
 			nullable: col.is_nullable === "YES",
 			source: "declared",
-			...(hasDefault ? { hasDefault: true as const } : {}),
+			...(hasDefault
+				? { hasDefault: true as const, defaultExpr: col.column_default as string }
+				: {}),
 			...(enumLabels !== undefined ? { enumValues: enumLabels } : {})
 		});
 		fieldsByTable.set(col.table_name, list);

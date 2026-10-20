@@ -793,6 +793,38 @@ describe.skipIf(!hasMssql)("mssql DDL Tier-2 (intégration M/6)", () => {
 		});
 	});
 
+	it("défauts : now() / uuid() natifs, set default remplace la contrainte, drop default", async () => {
+		await withConn(async (conn) => {
+			await runQuery(conn, `raw "DROP TABLE IF EXISTS e1d_t"`);
+			try {
+				await runQuery(
+					conn,
+					`create table e1d_t { id: int, at: timestamp default now(), ref: uuid default uuid(), tier: text nullable default "free", primary key (id) }`
+				);
+				await runQuery(conn, `add { id: 1 } into e1d_t`);
+				const first = (await runQuery(conn, `find e1d_t pick at, ref, tier`)).rows[0];
+				expect(first?.at).toBeTruthy();
+				expect(String(first?.ref)).toMatch(/^[0-9A-Fa-f-]{36}$/);
+				expect(first?.tier).toBe("free");
+
+				const altered = await runQuery(conn, `alter column e1d_t.tier set default "pro"`);
+				expect(altered.rowCount).toBe(0);
+				await runQuery(conn, `add { id: 2 } into e1d_t`);
+				await runQuery(conn, `alter column e1d_t.tier drop default`);
+				await runQuery(conn, `add { id: 3 } into e1d_t`);
+				const tiers = (await runQuery(conn, `find e1d_t pick id, tier sort id`)).rows;
+				expect(tiers.map((r) => r.tier)).toEqual(["free", "pro", null]);
+
+				const fields = (await conn.introspect()).collections.find((c) => c.name === "e1d_t")
+					?.fields;
+				expect(fields?.find((f) => f.name === "at")?.defaultExpr).toMatch(/sysdatetimeoffset/i);
+				expect(fields?.find((f) => f.name === "tier")?.hasDefault).toBeUndefined();
+			} finally {
+				await runQuery(conn, `raw "DROP TABLE IF EXISTS e1d_t"`);
+			}
+		});
+	});
+
 	it("create table if not exists ×2 → idempotent (sp_getapplock + guard)", async () => {
 		await withConn(async (conn) => {
 			await runQuery(conn, `raw "DROP TABLE IF EXISTS m6_idem"`);

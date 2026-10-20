@@ -651,6 +651,29 @@ describe("codegen mssql — DDL (M/6)", () => {
 		expect(text).toContain("CHECK ([tier] IN (N''a'', N''b''))");
 	});
 
+	it("set default → défaut existant retiré, df_<t>_<c> posé ; fonctions natives", () => {
+		const { text } = ddlText({
+			op: "ddl",
+			kind: "alter-column",
+			target: "agency",
+			column: "created",
+			action: { kind: "set-default", value: { kind: "fn", fn: "now" } }
+		});
+		expect(text).toContain("FROM sys.default_constraints dc");
+		expect(text).toContain(
+			"ALTER TABLE [dbo].[agency] ADD CONSTRAINT [df_agency_created] DEFAULT SYSDATETIMEOFFSET() FOR [created];"
+		);
+		const drop = ddlText({
+			op: "ddl",
+			kind: "alter-column",
+			target: "agency",
+			column: "created",
+			action: { kind: "drop-default" }
+		}).text;
+		expect(drop).toContain("EXEC (@drop);");
+		expect(drop).not.toContain("ADD CONSTRAINT");
+	});
+
 	it("rename column → sp_rename, nouveau nom sans crochets", () => {
 		expect(ddlText({
 			op: "ddl",

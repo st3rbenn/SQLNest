@@ -777,6 +777,63 @@ describe("DDL/4 E2E — drop table / drop column cross-engine (ADR-029)", () => 
 	});
 });
 
+describe("E/1d E2E — défauts (ADR-036)", () => {
+	it("PG : now() / uuid() inline dans create table", () => {
+		const q = pg(
+			"create table t { id: uuid default uuid(), at: timestamp default now(), primary key (id) }"
+		);
+		if (q.kind !== "sql") throw new Error("attendu sql");
+		expect(q.text).toContain(`"id" uuid NOT NULL DEFAULT gen_random_uuid()`);
+		expect(q.text).toContain(`"at" timestamptz NOT NULL DEFAULT now()`);
+	});
+
+	it("create table : défauts littéraux et fonctions pour _snql_defaults", () => {
+		if (mongoMapper.mapDDL === undefined) throw new Error("mapDDL manquant");
+		const q = mongoMapper.mapDDL(
+			lowerDDL(
+				parse(
+					tokenize(
+						'create table t { code: text default "a", at: timestamp default now(), ref: uuid default uuid() }'
+					)
+				) as DDLStatement
+			)
+		);
+		expect(q).toMatchObject({
+			operation: "create-collection",
+			defaults: [
+				{ column: "code", value: "a" },
+				{ column: "at", fn: "now" },
+				{ column: "ref", fn: "uuid" }
+			]
+		});
+	});
+
+	it("add column default uuid() : backfill par fonction", () => {
+		if (mongoMapper.mapDDL === undefined) throw new Error("mapDDL manquant");
+		const q = mongoMapper.mapDDL(
+			lowerDDL(parse(tokenize("add column ref uuid default uuid() into t")) as DDLStatement)
+		);
+		expect(q).toMatchObject({
+			operation: "add-column",
+			backfill: true,
+			column: { name: "ref", defaultFn: "uuid" }
+		});
+		expect((q as { column: object }).column).not.toHaveProperty("defaultValue");
+	});
+
+	it("alter column set default / drop default", () => {
+		if (mongoMapper.mapDDL === undefined) throw new Error("mapDDL manquant");
+		const set = mongoMapper.mapDDL(
+			lowerDDL(parse(tokenize('alter column t.code set default "b"')) as DDLStatement)
+		);
+		const drop = mongoMapper.mapDDL(
+			lowerDDL(parse(tokenize("alter column t.code drop default")) as DDLStatement)
+		);
+		expect(set).toMatchObject({ action: { kind: "set-default", value: "b" } });
+		expect(drop).toMatchObject({ action: { kind: "drop-default" } });
+	});
+});
+
 describe("E/1b E2E — rename column cross-engine (ADR-036)", () => {
 	const source = "rename column agency.phone to mobile";
 

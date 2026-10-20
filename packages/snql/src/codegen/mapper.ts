@@ -227,6 +227,20 @@ export interface MongoIndexSpec {
  * (asymétrie transitoire assumée : PG applique nativement, Mongo enregistre
  * mais n'enforce pas encore).
  */
+/** Défaut fonction évalué par l'adapter Mongo (ADR-036 E/1d). */
+export type MongoDefaultFn = "now" | "uuid";
+
+/**
+ * Défaut d'une colonne Mongo (ADR-036 D4) : entrée de `_snql_defaults`, posée
+ * par l'adapter sur chaque document inséré sans la colonne. `value` est
+ * littérale, `fn` évaluée à l'insertion.
+ */
+export interface MongoDefaultSpec {
+	readonly column: string;
+	readonly value?: unknown;
+	readonly fn?: MongoDefaultFn;
+}
+
 export interface MongoRefSpec {
 	readonly name: string;
 	readonly fromCollection: string;
@@ -253,6 +267,8 @@ export interface MongoDDLCreateCollectionQuery {
 	readonly primaryKeyAlias?: string;
 	/** FK déclarées sur les colonnes (ADR-031 FK/1a) — stockées `_snql_refs`. */
 	readonly refs?: readonly MongoRefSpec[];
+	/** Défauts des colonnes (ADR-036 E/1d), appliqués à l'insertion. */
+	readonly defaults?: readonly MongoDefaultSpec[];
 }
 
 /**
@@ -287,6 +303,8 @@ export interface MongoDDLAddColumnQuery {
 		/** `required` du validator étendu (contrat cross-engine : NOT NULL). */
 		readonly required: boolean;
 		readonly defaultValue?: unknown;
+		/** Défaut fonction (ADR-036 E/1d) : backfill une valeur par document. */
+		readonly defaultFn?: MongoDefaultFn;
 		/**
 		 * Snapshot des members enum (ADR-030 Enum/2). Présent si le field est
 		 * typé par un enum nommé. L'adapter injecte `enum: [...]` dans le
@@ -489,6 +507,8 @@ export interface MongoDDLAlterColumnQuery {
 	readonly action:
 		| { readonly kind: "set-nullable" }
 		| { readonly kind: "set-not-null" }
+		| ({ readonly kind: "set-default" } & Omit<MongoDefaultSpec, "column">)
+		| { readonly kind: "drop-default" }
 		| {
 				readonly kind: "set-type";
 				readonly type: import("../schema/model").SnqlType;

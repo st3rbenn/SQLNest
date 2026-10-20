@@ -9,7 +9,7 @@ import type {
 	RawPlan,
 	TransactionPlan
 } from "../ir/plan";
-import { isSqlDecimal, isSqlJsonLiteral } from "../ir/plan";
+import { isDdlDefaultFn, isSqlDecimal, isSqlJsonLiteral } from "../ir/plan";
 import type { Span } from "../lexer/token";
 import type {
 	Mapper,
@@ -376,7 +376,11 @@ export const mssqlMapper: Mapper = {
 		if (plan.kind === "drop-ref") return renderDropRef(plan);
 		if (plan.kind === "add-ref") return renderAddRef(plan);
 		if (plan.kind === "rename-column") return renderRenameColumn(plan, namespace);
-		if (plan.kind === "alter-column") return renderAlterColumn(plan, namespace);
+		if (plan.kind === "alter-column") {
+			return plan.action.kind === "set-default" || plan.action.kind === "drop-default"
+				? renderColumnDefault(plan, namespace)
+				: renderAlterColumn(plan, namespace);
+		}
 		throw new SnqlError(
 			`DDL kind '${(plan as { kind: string }).kind}' non supporté par le codegen MSSQL M/6`,
 			"codegen_ddl_unsupported"
@@ -863,6 +867,10 @@ function mssqlInlineDefault(value: import("../ir/plan").DdlDefault): string {
 	if (typeof value === "boolean") return value ? "1" : "0";
 	if (isSqlDecimal(value)) return value.raw;
 	if (isSqlJsonLiteral(value)) return `N'${value.raw.replace(/'/g, "''")}'`;
+	// `date` est un datetimeoffset côté MSSQL : SYSDATETIMEOFFSET, pas SYSUTCDATETIME.
+	if (isDdlDefaultFn(value)) {
+		return value.fn === "now" ? "SYSDATETIMEOFFSET()" : "NEWID()";
+	}
 	throw new SnqlError(
 		`Type de default DDL non supporté par mssqlInlineDefault : ${typeof value}`,
 		"codegen_ddl_default_unsupported"
@@ -1065,6 +1073,37 @@ function renderRenameColumn(
 	return ddlQuery(
 		`EXEC sp_rename ${nstr(column)}, ${nstr(plan.newName)}, N'COLUMN'`
 	);
+}
+
+/**
+ * `set default` / `drop default` (ADR-036 E/1d). En T-SQL, un défaut est une
+ * contrainte nommée : l'existante, quel que soit son nom, est retirée, puis la
+ * nouvelle est posée sous `df_<t>_<c>`.
+ */
+function renderColumnDefault(
+	plan: import("../ir/plan").AlterColumnPlan,
+	namespace: string
+): NativeQuery {
+	const table = `${quoteIdent(namespace)}.${quoteIdent(plan.target)}`;
+	const { action } = plan;
+	const lines = [
+		"SET NOCOUNT ON;",
+		"SET XACT_ABORT ON;",
+		"BEGIN TRAN;",
+		`DECLARE @obj int = OBJECT_ID(${nstr(table)});`,
+		`DECLARE @col int = COLUMNPROPERTY(@obj, ${nstr(plan.column)}, 'ColumnId');`,
+		`IF @col IS NULL THROW 50000, ${nstr(`colonne '${plan.target}.${plan.column}' inconnue`)}, 1;`,
+		"DECLARE @drop nvarchar(max) = N'';",
+		`SELECT @drop = N'ALTER TABLE ${table} DROP CONSTRAINT ' + QUOTENAME(dc.name) FROM sys.default_constraints dc WHERE dc.parent_object_id = @obj AND dc.parent_column_id = @col;`,
+		"EXEC (@drop);",
+		...(action.kind === "set-default"
+			? [
+					`ALTER TABLE ${table} ADD CONSTRAINT ${quoteIdent(`df_${plan.target}_${plan.column}`)} DEFAULT ${mssqlInlineDefault(action.value)} FOR ${quoteIdent(plan.column)};`
+				]
+			: []),
+		"COMMIT;"
+	];
+	return ddlQuery(lines.join("\n"));
 }
 
 /** Type T-SQL complet de la colonne `t.obj`/`t.col` (alias `c`, `ty`), relu

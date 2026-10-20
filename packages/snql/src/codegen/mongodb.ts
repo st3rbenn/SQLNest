@@ -27,7 +27,7 @@ import type {
 	TransactionPlan,
 	TransactionPlanItem
 } from "../ir/plan";
-import { isSqlDecimal, isSqlJsonLiteral, linearize } from "../ir/plan";
+import { isDdlDefaultFn, isSqlDecimal, isSqlJsonLiteral, linearize } from "../ir/plan";
 import type { SnqlType } from "../schema/model";
 import type {
 	Mapper,
@@ -41,6 +41,7 @@ import type {
 	MongoDDLDropEnumQuery,
 	MongoDDLDropIndexQuery,
 	MongoDDLDropRefQuery,
+	MongoDefaultSpec,
 	MongoIndexSpec,
 	MongoRefSpec,
 	MongoQuery,
@@ -238,7 +239,9 @@ export const mongoMapper: Mapper = {
 									? { enumMembers: action.enumMembers }
 									: {})
 							}
-						: { kind: action.kind }
+						: action.kind === "set-default"
+							? { kind: "set-default", ...mongoDefaultSpec(action.value) }
+							: { kind: action.kind }
 			};
 		}
 		if (plan.kind === "rename-column") {
@@ -3004,6 +3007,13 @@ function renderMongoCreateTable(
 		if (f.ref !== undefined) refs.push(mongoRefSpec(f.ref, plan.target));
 	}
 
+	const defaults: MongoDefaultSpec[] = [];
+	for (const f of plan.fields) {
+		if (f.defaultValue === undefined) continue;
+		if (primaryKeyAlias !== undefined && f.name === primaryKeyAlias) continue;
+		defaults.push({ column: f.name, ...mongoDefaultSpec(f.defaultValue) });
+	}
+
 	const ddl: MongoDDLCreateCollectionQuery = {
 		engine: "mongodb",
 		kind: "mongo-ddl",
@@ -3013,9 +3023,21 @@ function renderMongoCreateTable(
 		validator,
 		...(indexes.length > 0 ? { indexes } : {}),
 		...(primaryKeyAlias !== undefined ? { primaryKeyAlias } : {}),
-		...(refs.length > 0 ? { refs } : {})
+		...(refs.length > 0 ? { refs } : {}),
+		...(defaults.length > 0 ? { defaults } : {})
 	};
 	return ddl;
+}
+
+/**
+ * Défaut DDL → valeur littérale native (JSON déballé) ou fonction évaluée par
+ * l'adapter (ADR-036 E/1d).
+ */
+function mongoDefaultSpec(
+	value: import("../ir/plan").DdlDefault
+): Omit<MongoDefaultSpec, "column"> {
+	if (isDdlDefaultFn(value)) return { fn: value.fn };
+	return { value: isSqlJsonLiteral(value) ? value.parsed : value };
 }
 
 /** Traduit un `FieldRefPlan` en `MongoRefSpec` (metadata _snql_refs). */
@@ -3214,14 +3236,16 @@ function renderMongoAddColumn(plan: AddColumnPlan): MongoDDLAddColumnQuery {
 	const preflightNotNull = required && !backfill;
 	// SqlJsonLiteral → unwrap `.parsed` : l'adapter $set attend un objet natif,
 	// pas le wrapper `{kind, raw, parsed}`.
-	const nativeDefault = isSqlJsonLiteral(f.defaultValue)
-		? f.defaultValue.parsed
-		: f.defaultValue;
+	const defaultSpec =
+		f.defaultValue !== undefined ? mongoDefaultSpec(f.defaultValue) : undefined;
 	const columnSpec: MongoDDLAddColumnQuery["column"] = {
 		name: f.name,
 		bsonType: bson,
 		required,
-		...(f.defaultValue !== undefined ? { defaultValue: nativeDefault } : {}),
+		...(defaultSpec !== undefined && defaultSpec.fn === undefined
+			? { defaultValue: defaultSpec.value }
+			: {}),
+		...(defaultSpec?.fn !== undefined ? { defaultFn: defaultSpec.fn } : {}),
 		...(f.type === "enum" && f.enumMembers !== undefined
 			? { enum: f.enumMembers }
 			: {}),

@@ -46,6 +46,12 @@ export interface Field {
 	 */
 	readonly hasDefault?: boolean;
 	/**
+	 * Le défaut tel que la base l'exprime (ADR-036 D5) : texte PG
+	 * (`'free'::text`, `now()`), définition MSSQL, entrée `_snql_defaults` Mongo
+	 * (`now()`, `uuid()` ou la valeur en JSON). Absent = pas de défaut.
+	 */
+	readonly defaultExpr?: string;
+	/**
 	 * labels valides pour un type enum. Peuplé par
 	 * l'introspection PG (pg_enum). Utilisé par le complete (suggestions
 	 * après `col:`) et un futur typecheck lower (refus tôt des invalides).

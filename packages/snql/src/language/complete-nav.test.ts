@@ -27,7 +27,8 @@ const SCHEMA: SchemaModel = {
 			fields: [
 				{ name: "id", type: "bigint", nullable: false, source: "declared" },
 				{ name: "name", type: "string", nullable: false, source: "declared" },
-				{ name: "email", type: "string", nullable: true, source: "declared" }
+				{ name: "email", type: "string", nullable: true, source: "declared" },
+				{ name: "created_at", type: "date", nullable: false, source: "declared" }
 			]
 		}
 	],
@@ -147,12 +148,25 @@ describe("alter column autocomplete (ADR-036 E/1c)", () => {
 	});
 
 	it("`alter column users.email ` propose `set`, puis les actions", () => {
-		expect(labels("alter column users.email ")).toEqual(["set"]);
-		expect(labels("alter column users.email set ")).toEqual(["nullable", "not null", "type"]);
+		expect(labels("alter column users.email ")).toEqual(["set", "drop"]);
+		expect(labels("alter column users.email set ")).toEqual([
+			"nullable",
+			"not null",
+			"type",
+			"default"
+		]);
+		expect(labels("alter column users.email drop ")).toEqual(["default"]);
 	});
 
 	it("`set type ` propose les types", () => {
 		expect(labels("alter column users.email set type ")).toContain("int");
+	});
+
+	it("`set default ` propose les fonctions que le type de la colonne accepte (E/1d)", () => {
+		expect(labels("alter column users.email set default ")).toEqual(["uuid()"]);
+		expect(labels("alter column users.created_at set default ")).toEqual(["now()"]);
+		expect(labels("alter column users.id set default ")).toEqual([]);
+		expect(labels("alter column ghost.x set default ")).toEqual(["now()", "uuid()"]);
 	});
 });
 

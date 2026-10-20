@@ -28,7 +28,13 @@ import {
 	type MongoFeatures
 } from "./capability-probe";
 import { describeMongoConfig } from "./config";
-import { inferCollection, introspectMongo, type SampledDoc } from "./introspect";
+import {
+	inferCollection,
+	introspectMongo,
+	mergeValidatorFields,
+	mongoDefaultText,
+	type SampledDoc
+} from "./introspect";
 
 const SERVER_SELECTION_TIMEOUT_MS = 10_000;
 
@@ -129,6 +135,8 @@ export function hydrateBson(
 	if (value === null || typeof value !== "object" || value instanceof Date) {
 		return value;
 	}
+	// Valeur déjà BSON (défaut posé par l'adapter : UUID, Decimal128…).
+	if ((value as { _bsontype?: unknown })._bsontype !== undefined) return value;
 	if (Array.isArray(value)) {
 		return value.map((item) => hydrateBson(item, filter, inId));
 	}
@@ -797,8 +805,16 @@ class MongoConnection implements Connection {
 	 * Sans FK → fast path direct (pas d'overhead transaction).
 	 */
 	async #executeWrite(
-		query: Extract<NativeQuery, { kind: "mongo-write" }>
+		queryIn: Extract<NativeQuery, { kind: "mongo-write" }>
 	): Promise<ResultSet> {
+		// Défauts posés avant le precheck FK : une colonne de FK peut en avoir un.
+		const query =
+			queryIn.op === "insert"
+				? {
+						...queryIn,
+						documents: await this.#withDefaults(queryIn.collection, queryIn.documents)
+					}
+				: queryIn;
 		if (query.op === "insert" || query.op === "update") {
 			const outgoing = await this.#loadRefs("fromCollection", query.collection);
 			if (outgoing.length > 0) {
@@ -1153,7 +1169,10 @@ class MongoConnection implements Connection {
 				const infos = await db
 					.listCollections({ type: "collection" }, { nameOnly: true })
 					.toArray();
-				const rows: Row[] = infos.map((info) => ({ name: info.name }));
+				// Les métadonnées `_snql_*` (refs, enums, défauts) ne sont pas des tables.
+				const rows: Row[] = infos
+					.filter((info) => !info.name.startsWith("_snql_"))
+					.map((info) => ({ name: info.name }));
 				return {
 					columns: [{ name: "name", type: "string", nullable: false }],
 					rows,
@@ -1175,15 +1194,32 @@ class MongoConnection implements Connection {
 					.collection(target)
 					.aggregate([{ $sample: { size: this.#sampleSize } }])
 					.toArray();
-				const inferred = inferCollection(target, docs as SampledDoc[]);
-				const rows: Row[] = inferred.fields.map((field) => ({
-					name: field.name,
-					type: field.type,
-					nullable: field.nullable,
-					default: null,
-					is_primary_key: field.name === "_id",
-					foreign_key: null
-				}));
+				const info = (await db.listCollections({ name: target }).toArray())[0] as
+					| { readonly options?: { readonly validator?: Record<string, unknown> } }
+					| undefined;
+				const fields = mergeValidatorFields(
+					inferCollection(target, docs as SampledDoc[]),
+					info?.options?.validator
+				).fields;
+				const defaults = new Map<string, string>();
+				for (const entry of await db
+					.collection("_snql_defaults")
+					.find({ collection: target })
+					.toArray()) {
+					defaults.set(String(entry.column), mongoDefaultText(entry));
+				}
+				const refs = await this.#loadRefs("fromCollection", target);
+				const rows: Row[] = fields.map((field) => {
+					const ref = refs.find((r) => r.fromColumn === field.name);
+					return {
+						name: field.name,
+						type: field.type,
+						nullable: field.nullable,
+						default: defaults.get(field.name) ?? null,
+						is_primary_key: field.name === "_id",
+						foreign_key: ref !== undefined ? `${ref.toCollection}.${ref.toColumn}` : null
+					};
+				});
 				return { columns: DESCRIBE_COLUMNS, rows, rowCount: rows.length };
 			}
 			if (query.plan.kind === "list-schemas") {
@@ -1866,6 +1902,18 @@ class MongoConnection implements Connection {
 				);
 			}
 
+			const defaults = db.collection("_snql_defaults");
+			const fromId = `${query.collection}.${from}` as unknown as ObjectId;
+			const entry = await defaults.findOne({ _id: fromId });
+			if (entry !== null) {
+				const { _id: _old, ...rest } = entry;
+				await defaults.replaceOne(
+					{ _id: `${query.collection}.${to}` as unknown as ObjectId },
+					{ ...rest, column: to },
+					{ upsert: true }
+				);
+				await defaults.deleteOne({ _id: fromId });
+			}
 			const refs = db.collection("_snql_refs");
 			await refs.updateMany(
 				{ fromCollection: query.collection, fromColumn: from },
@@ -1915,6 +1963,21 @@ class MongoConnection implements Connection {
 			};
 			const properties = { ...(jsonSchema.properties as Document | undefined) };
 			const property: Document = { ...(properties[field] as Document | undefined) };
+			if (action.kind === "set-default" || action.kind === "drop-default") {
+				// Comme en SQL : le défaut vaut pour les insertions à venir, les
+				// documents existants ne changent pas.
+				if (action.kind === "set-default") {
+					await this.#storeDefault(query.collection, {
+						column: field,
+						...(action.fn !== undefined ? { fn: action.fn } : { value: action.value })
+					});
+				} else {
+					await db
+						.collection("_snql_defaults")
+						.deleteOne({ _id: `${query.collection}.${field}` as unknown as ObjectId });
+				}
+				return { columns: [], rows: [], rowCount: 0 };
+			}
 			let required = Array.isArray(jsonSchema.required)
 				? jsonSchema.required.map(String)
 				: [];
@@ -2068,8 +2131,11 @@ class MongoConnection implements Connection {
 						{ toCollection: query.collection }
 					]
 				});
+				await db.collection("_snql_defaults").deleteMany({
+					collection: query.collection
+				});
 			} catch {
-				// silence — _snql_refs absent
+				// silence — _snql_refs / _snql_defaults absents
 			}
 			return { columns: [], rows: [], rowCount: 0 };
 		} catch (cause) {
@@ -2156,6 +2222,9 @@ class MongoConnection implements Connection {
 				(max) =>
 					`drop column ${fieldName} sur '${query.collection}' : purge dépasse le cap ${max} docs — augmente mongo.ddl.backfill_max_rows ou purge offline`
 			);
+			await db
+				.collection("_snql_defaults")
+				.deleteOne({ _id: `${query.collection}.${fieldName}` as unknown as ObjectId });
 
 			return { columns: [], rows: [], rowCount: 0 };
 		} catch (cause) {
@@ -2262,6 +2331,9 @@ class MongoConnection implements Connection {
 			if (query.refs !== undefined && query.refs.length > 0) {
 				await this.#storeRefs(query.refs);
 			}
+			for (const spec of query.defaults ?? []) {
+				await this.#storeDefault(query.collection, spec);
+			}
 			return { columns: [], rows: [], rowCount: 0 };
 		} catch (cause) {
 			throw new EngineExecutionError(
@@ -2269,6 +2341,55 @@ class MongoConnection implements Connection {
 				{ cause }
 			);
 		}
+	}
+
+	/**
+	 * Pose les défauts de `_snql_defaults` (ADR-036 D4) sur chaque document qui
+	 * n'a pas la colonne — un `null` explicite reste `null`, comme en SQL.
+	 * `now` vaut la même date pour tout le lot, `uuid` un uuid par document.
+	 * Best-effort : `_snql_defaults` absent → documents inchangés.
+	 */
+	async #withDefaults<T extends object>(
+		collection: string,
+		documents: readonly T[],
+		session?: ClientSession
+	): Promise<T[]> {
+		let entries: Document[];
+		try {
+			entries = await this.#requireDb()
+				.collection("_snql_defaults")
+				.find({ collection }, session !== undefined ? { session } : {})
+				.toArray();
+		} catch {
+			return [...documents];
+		}
+		if (entries.length === 0) return [...documents];
+		const now = new Date();
+		return documents.map((doc) => {
+			const out = { ...doc } as Record<string, unknown>;
+			for (const entry of entries) {
+				const column = entry.column as string;
+				if (out[column] !== undefined) continue;
+				out[column] =
+					entry.fn === "now" ? now : entry.fn === "uuid" ? new UUID() : entry.value;
+			}
+			return out as T;
+		});
+	}
+
+	/** Écrit (ou remplace) le défaut d'une colonne dans `_snql_defaults`. */
+	async #storeDefault(
+		collection: string,
+		spec: { readonly column: string; readonly value?: unknown; readonly fn?: string }
+	): Promise<void> {
+		const entry: Document = { collection, column: spec.column };
+		if (spec.fn !== undefined) entry.fn = spec.fn;
+		else entry.value = hydrateBson(spec.value ?? null, false);
+		await this.#requireDb()
+			.collection("_snql_defaults")
+			.replaceOne({ _id: `${collection}.${spec.column}` as unknown as ObjectId }, entry, {
+				upsert: true
+			});
 	}
 
 	/**
@@ -2412,13 +2533,33 @@ class MongoConnection implements Connection {
 			// fois, chaque update est court. Cap MAX_ROWS pour ne pas bloquer
 			// la connection indéfiniment sur une collection énorme.
 			if (query.backfill) {
-				await updateInBatches(
-					col,
-					{ [fieldName]: { $exists: false } },
-					{ $set: { [fieldName]: query.column.defaultValue } },
-					(max) =>
-						`add column ${fieldName} sur '${query.collection}' : backfill dépasse le cap ${max} docs — augmente mongo.ddl.backfill_max_rows ou pré-init les rows via update batché offline`
-				);
+				const missing = { [fieldName]: { $exists: false } };
+				const capMessage = (max: number): string =>
+					`add column ${fieldName} sur '${query.collection}' : backfill dépasse le cap ${max} docs — augmente mongo.ddl.backfill_max_rows ou pré-init les rows via update batché offline`;
+				if (query.column.defaultFn === "uuid") {
+					// Un uuid distinct par document : pas d'expression serveur.
+					for await (const doc of col.find(missing, { projection: { _id: 1 } })) {
+						await col.updateOne(
+							{ _id: (doc as Document)._id },
+							{ $set: { [fieldName]: new UUID() } }
+						);
+					}
+				} else {
+					await updateInBatches(
+						col,
+						missing,
+						query.column.defaultFn === "now"
+							? [{ $set: { [fieldName]: "$$NOW" } }]
+							: { $set: { [fieldName]: hydrateBson(query.column.defaultValue, false) } },
+						capMessage
+					);
+				}
+				await this.#storeDefault(query.collection, {
+					column: fieldName,
+					...(query.column.defaultFn !== undefined
+						? { fn: query.column.defaultFn }
+						: { value: query.column.defaultValue })
+				});
 			}
 
 			// Index unique secondaire optionnel (add column ... unique).
@@ -2538,7 +2679,12 @@ class MongoConnection implements Connection {
 		const collection = this.#requireDb().collection(query.collection);
 		try {
 			if (query.op === "insert") {
-				const documents = query.documents.map(
+				const withDefaults = await this.#withDefaults(
+					query.collection,
+					query.documents,
+					session
+				);
+				const documents = withDefaults.map(
 					(doc) => hydrateBson(doc, false) as Document
 				);
 				const result = await collection.insertMany(documents, { session });
@@ -2723,7 +2869,12 @@ class MongoConnection implements Connection {
 	): Promise<{ result: ResultSet; compensate: () => Promise<void> }> {
 		const collection = this.#requireDb().collection(query.collection);
 		if (query.op === "insert") {
-			const documents = query.documents.map(
+			const withDefaults = await this.#withDefaults(
+				query.collection,
+				query.documents,
+				session
+			);
+			const documents = withDefaults.map(
 				(doc) => hydrateBson(doc, false) as Document
 			);
 			const insertResult = await collection.insertMany(documents, {

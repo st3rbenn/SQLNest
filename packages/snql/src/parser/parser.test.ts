@@ -632,6 +632,18 @@ describe("alter column DDL (ADR-036 E/1c)", () => {
 		});
 	});
 
+	it("parse set default / drop default (E/1d)", () => {
+		expect(stmt('alter column agency.city set default "Paris"')).toMatchObject({
+			action: { kind: "set-default", expr: { type: "literal" } }
+		});
+		expect(stmt("alter column agency.created set default now()")).toMatchObject({
+			action: { kind: "set-default", expr: { type: "call", name: "now" } }
+		});
+		expect(stmt("alter column agency.city drop default")).toMatchObject({
+			action: { kind: "drop-default" }
+		});
+	});
+
 	it("parse set type, alias PG compris", () => {
 		expect(stmt("alter column agency.zip set type int")).toMatchObject({
 			action: { kind: "set-type", type: { kind: "builtin", type: "int" } }
@@ -643,10 +655,10 @@ describe("alter column DDL (ADR-036 E/1c)", () => {
 
 	it("refuse une action inconnue en listant les actions", () => {
 		expect(() => stmt("alter column agency.zip set unique")).toThrow(
-			/set nullable, set not null ou set type <type>/
+			/set nullable, set not null, set type <type>, set default <valeur> ou drop default/
 		);
 		expect(() => stmt("alter column agency.zip drop not null")).toThrow(
-			/attend une action/
+			/'drop' attend 'default'/
 		);
 	});
 });

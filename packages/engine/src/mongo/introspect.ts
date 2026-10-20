@@ -175,12 +175,13 @@ export async function introspectMongo(
 		for (const info of infos) {
 			const name = (info as { name?: unknown }).name;
 			if (typeof name !== "string") continue;
-			// `system.*` = Mongo internal ; `_snql_enums` / `_snql_refs` = metadata
-			// SQLNest (introspectés séparément, jamais comme collection user).
+			// `system.*` = Mongo internal ; `_snql_*` = metadata SQLNest
+			// (introspectés séparément, jamais comme collection user).
 			if (
 				name.startsWith("system.") ||
 				name === "_snql_enums" ||
-				name === "_snql_refs"
+				name === "_snql_refs" ||
+				name === "_snql_defaults"
 			) {
 				continue;
 			}
@@ -256,10 +257,31 @@ export async function introspectMongo(
 			// silence — refs restent vide
 		}
 
+		// Défauts posés par SQLNest (ADR-036 D4) : `hasDefault` + leur texte.
+		let withDefaults = collections;
+		try {
+			const docs = await db.collection("_snql_defaults").find({}).toArray();
+			const byColumn = new Map<string, string>();
+			for (const doc of docs) {
+				const d = doc as Record<string, unknown>;
+				if (typeof d.collection !== "string" || typeof d.column !== "string") continue;
+				byColumn.set(`${d.collection}.${d.column}`, mongoDefaultText(d));
+			}
+			withDefaults = collections.map((c) => ({
+				...c,
+				fields: c.fields.map((f) => {
+					const text = byColumn.get(`${c.name}.${f.name}`);
+					return text === undefined ? f : { ...f, hasDefault: true, defaultExpr: text };
+				})
+			}));
+		} catch {
+			// silence — pas de défauts lisibles
+		}
+
 		return {
 			engine: "mongodb",
-			collections,
-			relations: inferRelations(collections),
+			collections: withDefaults,
+			relations: inferRelations(withDefaults),
 			...(enumsList.length > 0 ? { enums: enumsList } : {}),
 			...(refsList.length > 0 ? { refs: refsList } : {})
 		};
@@ -268,6 +290,13 @@ export async function introspectMongo(
 			cause
 		});
 	}
+}
+
+/** Texte d'un défaut de `_snql_defaults` : `now()`, `uuid()` ou la valeur en JSON. */
+export function mongoDefaultText(entry: Record<string, unknown>): string {
+	if (entry.fn === "now") return "now()";
+	if (entry.fn === "uuid") return "uuid()";
+	return JSON.stringify(entry.value);
 }
 
 /**

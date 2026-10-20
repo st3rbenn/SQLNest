@@ -636,3 +636,84 @@ describe.skipIf(!hasMongo)(
 		}, 60_000);
 	}
 );
+
+describe.skipIf(!hasMongo)("mongodb adapter — défauts (ADR-036 E/1d)", () => {
+	it("défauts posés à l'insertion, remplissage, set / drop default, rename, introspection", async () => {
+		const conn = await mongoAdapter.connect(loadConfig());
+		try {
+			await runQuery(conn, "drop table e1d_m if exists");
+			await runQuery(
+				conn,
+				'create table e1d_m { code: text, tier: text nullable default "free", at: timestamp default now(), ref: uuid default uuid() }'
+			);
+			await runQuery(conn, 'add {code: "a"} into e1d_m');
+			await runQuery(conn, 'add {code: "b", tier: null} into e1d_m');
+			const rows = (
+				await runQuery(conn, "find e1d_m pick code, tier, at, ref sort code")
+			).rows;
+			expect(rows[0]).toMatchObject({ code: "a", tier: "free" });
+			expect(rows[1]).toMatchObject({ code: "b", tier: null });
+			expect(rows[0]?.at).toBeTruthy();
+			expect(String(rows[0]?.ref)).toMatch(/^[0-9a-f-]{36}$/);
+			expect(rows[0]?.ref).not.toEqual(rows[1]?.ref);
+
+			// Remplissage : un uuid distinct par document existant.
+			await runQuery(conn, "add column tag uuid default uuid() into e1d_m");
+			const tags = (await runQuery(conn, "find e1d_m pick tag")).rows.map((r) =>
+				String(r.tag)
+			);
+			expect(new Set(tags).size).toBe(2);
+
+			// set default : vaut pour les insertions à venir seulement.
+			await runQuery(conn, 'alter column e1d_m.tier set default "pro"');
+			await runQuery(conn, 'add {code: "c"} into e1d_m');
+			const c = (await runQuery(conn, 'find e1d_m where code = "c" pick tier'))
+				.rows[0];
+			expect(c).toEqual({ tier: "pro" });
+			const a = (await runQuery(conn, 'find e1d_m where code = "a" pick tier'))
+				.rows[0];
+			expect(a).toEqual({ tier: "free" });
+			await runQuery(conn, "alter column e1d_m.tier drop default");
+			await runQuery(conn, 'add {code: "d"} into e1d_m');
+			const d = (await runQuery(conn, 'find e1d_m where code = "d" pick tier'))
+				.rows[0];
+			expect(d?.tier ?? null).toBeNull();
+
+			// Le défaut suit un renommage.
+			await runQuery(conn, "rename column e1d_m.at to created");
+			await runQuery(conn, 'add {code: "e"} into e1d_m');
+			const e = (
+				await runQuery(conn, 'find e1d_m where code = "e" pick created')
+			).rows[0];
+			expect(e?.created).toBeTruthy();
+
+			// Introspection : défauts lisibles ; la métadonnée n'est pas une table.
+			const fields = (await conn.introspect()).collections.find(
+				(col) => col.name === "e1d_m"
+			)?.fields;
+			expect(fields?.find((f) => f.name === "created")).toMatchObject({
+				hasDefault: true,
+				defaultExpr: "now()"
+			});
+			expect(
+				fields?.find((f) => f.name === "tier")?.hasDefault
+			).toBeUndefined();
+			const tables = (await runQuery(conn, "list tables")).rows.map(
+				(r) => r.name
+			);
+			expect(tables).not.toContain("_snql_defaults");
+			// `describe` donne la même vue : défaut et nullabilité déclarés.
+			const described = (await runQuery(conn, "describe e1d_m")).rows;
+			expect(described.find((r) => r.name === "created")).toMatchObject({
+				default: "now()"
+			});
+			expect(described.find((r) => r.name === "tier")).toMatchObject({
+				nullable: true,
+				default: null
+			});
+		} finally {
+			await runQuery(conn, "drop table e1d_m if exists");
+			await conn.close();
+		}
+	}, 60_000);
+});
