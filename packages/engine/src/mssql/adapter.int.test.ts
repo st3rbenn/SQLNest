@@ -1113,6 +1113,82 @@ describe.skipIf(!hasMssql)("mssql DDL Tier-2 (intégration M/6)", () => {
 		});
 	});
 
+	it("add index sur text / ntext / image (types dépréciés) : même compensation", async () => {
+		await withConn(async (conn) => {
+			const cleanup = `raw "DROP TABLE IF EXISTS e1l_t"`;
+			const column = async (
+				name: string
+			): Promise<Record<string, unknown> | undefined> =>
+				(
+					await runQuery(
+						conn,
+						`raw "SELECT TYPE_NAME(system_type_id) AS type, max_length AS len, is_nullable AS nullable FROM sys.columns WHERE object_id = OBJECT_ID('e1l_t') AND name = '${name}'"`
+					)
+				).rows[0];
+			await runQuery(conn, cleanup);
+			try {
+				await runQuery(
+					conn,
+					`raw "CREATE TABLE e1l_t (id int NOT NULL PRIMARY KEY, legacy ntext NULL CONSTRAINT df_e1l_t_legacy DEFAULT N'old', note text NOT NULL, pic image NULL)"`
+				);
+				await runQuery(
+					conn,
+					`raw "CREATE STATISTICS st_e1l_t_legacy ON e1l_t (legacy)"`
+				);
+				await runQuery(
+					conn,
+					`add { id: 1, legacy: "a", note: "x" } into e1l_t`
+				);
+				await runQuery(
+					conn,
+					`add { id: 2, legacy: "${"é".repeat(451)}", note: "y" } into e1l_t`
+				);
+
+				// ntext trop long : refus sans commande find (length refuse ntext).
+				await expect(
+					runQuery(conn, `add index (legacy) into e1l_t`)
+				).rejects.toThrow(
+					/'legacy' dépasse 450 caractères sur 1 ligne de 'e1l_t', la limite d'une clé d'index MSSQL — à raccourcir avant l'index$/
+				);
+				expect(await column("legacy")).toMatchObject({ type: "ntext" });
+
+				await runQuery(conn, `update e1l_t where id = 2 set legacy = "b"`);
+				await runQuery(conn, `add index (legacy) into e1l_t`);
+				expect(await column("legacy")).toMatchObject({
+					type: "nvarchar",
+					len: 900,
+					nullable: true
+				});
+				// Défaut et statistique recréés.
+				await runQuery(conn, `add { id: 3, note: "z" } into e1l_t`);
+				const three = await runQuery(
+					conn,
+					`find e1l_t where id = 3 pick legacy`
+				);
+				expect(three.rows).toEqual([{ legacy: "old" }]);
+				const stats = await runQuery(
+					conn,
+					`raw "SELECT name FROM sys.stats WHERE object_id = OBJECT_ID('e1l_t') AND user_created = 1"`
+				);
+				expect(stats.rows).toEqual([{ name: "st_e1l_t_legacy" }]);
+
+				await runQuery(conn, `add unique index (note) into e1l_t`);
+				expect(await column("note")).toMatchObject({
+					type: "varchar",
+					len: 900,
+					nullable: false
+				});
+				await runQuery(conn, `add index (pic) into e1l_t`);
+				expect(await column("pic")).toMatchObject({
+					type: "varbinary",
+					len: 900
+				});
+			} finally {
+				await runQuery(conn, cleanup);
+			}
+		});
+	});
+
 	it("cycle enums compensés : create → list/describe → add member → drop", async () => {
 		await withConn(async (conn) => {
 			await runQuery(conn, `drop enum m6_statut if exists`);

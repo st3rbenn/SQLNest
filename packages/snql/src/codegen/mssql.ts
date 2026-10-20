@@ -1027,11 +1027,12 @@ function renderAddColumn(
  * choix CONCURRENTLY documenté côté PG.
  *
  * T-SQL refuse un type `(max)` comme colonne de clé d'index (1919), or un
- * texte créé hors position de clé est en `nvarchar(max)`. Dans la même
- * transaction (ADR-029 D14), une telle colonne passe au plus large type
- * indexable, 900 octets (`nvarchar(450)`, `varchar(900)`, `varbinary(900)`),
- * en gardant nullabilité et collation, ses dépendants retirés puis recréés
- * (D9 d'ADR-036). Une valeur plus longue est d'abord refusée, avec le nombre
+ * texte créé hors position de clé est en `nvarchar(max)` ; de même pour les
+ * types dépréciés `text`, `ntext` et `image`. Dans la même transaction
+ * (ADR-029 D14), une telle colonne passe au plus large type indexable,
+ * 900 octets (`nvarchar(450)`, `varchar(900)`, `varbinary(900)`), en gardant
+ * nullabilité et collation, ses dépendants retirés puis recréés (D9
+ * d'ADR-036). Une valeur plus longue est d'abord refusée, avec le nombre
  * de lignes : mesurée en octets, car le rétrécissement rognerait sans erreur
  * les espaces finaux que `LEN` ignore.
  */
@@ -1053,10 +1054,10 @@ function renderAddIndex(
 			: []),
 		"BEGIN TRAN;",
 		MSSQL_ALTER_TARGETS,
-		`INSERT @targets SELECT c.object_id, c.column_id, N'ALTER TABLE ' + ${mssqlQualified("c.object_id")} + N' ALTER COLUMN ' + QUOTENAME(c.name) + CASE ty.name WHEN N'nvarchar' THEN N' ${KEYABLE_STRING_TYPE}' WHEN N'varchar' THEN N' varchar(${MSSQL_INDEX_KEY_BYTES})' ELSE N' varbinary(${MSSQL_INDEX_KEY_BYTES})' END + ISNULL(N' COLLATE ' + c.collation_name, N'') + CASE WHEN c.is_nullable = 1 THEN N' NULL' ELSE N' NOT NULL' END
+		`INSERT @targets SELECT c.object_id, c.column_id, N'ALTER TABLE ' + ${mssqlQualified("c.object_id")} + N' ALTER COLUMN ' + QUOTENAME(c.name) + CASE WHEN ty.name IN (N'nvarchar', N'ntext') THEN N' ${KEYABLE_STRING_TYPE}' WHEN ty.name IN (N'varchar', N'text') THEN N' varchar(${MSSQL_INDEX_KEY_BYTES})' ELSE N' varbinary(${MSSQL_INDEX_KEY_BYTES})' END + ISNULL(N' COLLATE ' + c.collation_name, N'') + CASE WHEN c.is_nullable = 1 THEN N' NULL' ELSE N' NOT NULL' END
 FROM sys.columns c JOIN sys.types ty ON ty.user_type_id = c.user_type_id
-WHERE c.object_id = @obj AND c.max_length = -1 AND ty.name IN (N'nvarchar', N'varchar', N'varbinary') AND c.name IN (${plan.fields.map(nstr).join(", ")});`,
-		"DECLARE @long int, @unicode bit, @msg nvarchar(2048);",
+WHERE c.object_id = @obj AND (ty.name IN (N'ntext', N'text', N'image') OR (c.max_length = -1 AND ty.name IN (N'nvarchar', N'varchar', N'varbinary'))) AND c.name IN (${plan.fields.map(nstr).join(", ")});`,
+		"DECLARE @long int, @type sysname, @msg nvarchar(2048);",
 		...plan.fields.map((field) => indexKeyPreflight(plan.target, table, field)),
 		...mssqlAlterTargets(),
 		`CREATE ${unique}INDEX ${quoteIdent(plan.name)} ON ${table} (${cols});`,
@@ -1066,9 +1067,10 @@ WHERE c.object_id = @obj AND c.max_length = -1 AND ty.name IN (N'nvarchar', N'va
 }
 
 /**
- * Refus d'un `add index` dont la colonne `(max)` à rétrécir porte des valeurs
- * de plus de 900 octets : leur nombre, et pour un texte unicode la commande
- * qui les retrouve (`length` compte les espaces finaux, comme `DATALENGTH`).
+ * Refus d'un `add index` dont la colonne à rétrécir porte des valeurs de plus
+ * de 900 octets : leur nombre, et pour un `nvarchar` la commande qui les
+ * retrouve (`length` compte les espaces finaux, comme `DATALENGTH`, mais
+ * refuse `ntext`).
  */
 function indexKeyPreflight(
 	target: string,
@@ -1081,8 +1083,8 @@ BEGIN
 	SELECT @long = COUNT(*) FROM ${table} WHERE DATALENGTH(${quoteIdent(field)}) > ${MSSQL_INDEX_KEY_BYTES};
 	IF @long > 0
 	BEGIN
-		SELECT @unicode = CASE WHEN TYPE_NAME(c.system_type_id) = N'nvarchar' THEN 1 ELSE 0 END FROM sys.columns c WHERE c.object_id = @obj AND c.name = ${nstr(field)};
-		SET @msg = CONCAT(${nstr(`'${field}' dépasse `)}, CASE WHEN @unicode = 1 THEN N'${MSSQL_INDEX_KEY_BYTES / 2} caractères' ELSE N'${MSSQL_INDEX_KEY_BYTES} octets' END, N' sur ', @long, CASE WHEN @long > 1 THEN N' lignes' ELSE N' ligne' END, ${nstr(` de '${target}', la limite d'une clé d'index MSSQL — à raccourcir avant l'index`)}, CASE WHEN @unicode = 1 THEN ${nstr(` : ${find}`)} ELSE N'' END);
+		SELECT @type = TYPE_NAME(c.system_type_id) FROM sys.columns c WHERE c.object_id = @obj AND c.name = ${nstr(field)};
+		SET @msg = CONCAT(${nstr(`'${field}' dépasse `)}, CASE WHEN @type IN (N'nvarchar', N'ntext') THEN N'${MSSQL_INDEX_KEY_BYTES / 2} caractères' ELSE N'${MSSQL_INDEX_KEY_BYTES} octets' END, N' sur ', @long, CASE WHEN @long > 1 THEN N' lignes' ELSE N' ligne' END, ${nstr(` de '${target}', la limite d'une clé d'index MSSQL — à raccourcir avant l'index`)}, CASE WHEN @type = N'nvarchar' THEN ${nstr(` : ${find}`)} ELSE N'' END);
 		THROW 50000, @msg, 1;
 	END
 END`;

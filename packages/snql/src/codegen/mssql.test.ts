@@ -598,18 +598,26 @@ describe("codegen mssql — DDL (M/6)", () => {
 				"SET NOCOUNT ON;\nSET XACT_ABORT ON;\nDECLARE @obj int = OBJECT_ID(N'[dbo].[e1e_kid]');\nBEGIN TRAN;"
 			)
 		).toBe(true);
-		// Seules les colonnes (max) de l'index changent ; nullabilité et collation suivent.
+		// Seules les colonnes (max) ou text / ntext / image de l'index changent ;
+		// nullabilité et collation suivent.
 		expect(text).toContain(
-			"c.max_length = -1 AND ty.name IN (N'nvarchar', N'varchar', N'varbinary') AND c.name IN (N'tier')"
+			"(ty.name IN (N'ntext', N'text', N'image') OR (c.max_length = -1 AND ty.name IN (N'nvarchar', N'varchar', N'varbinary'))) AND c.name IN (N'tier')"
 		);
 		expect(text).toContain(
-			"CASE ty.name WHEN N'nvarchar' THEN N' nvarchar(450)' WHEN N'varchar' THEN N' varchar(900)' ELSE N' varbinary(900)' END + ISNULL(N' COLLATE ' + c.collation_name, N'') + CASE WHEN c.is_nullable = 1 THEN N' NULL' ELSE N' NOT NULL' END"
+			"CASE WHEN ty.name IN (N'nvarchar', N'ntext') THEN N' nvarchar(450)' WHEN ty.name IN (N'varchar', N'text') THEN N' varchar(900)' ELSE N' varbinary(900)' END + ISNULL(N' COLLATE ' + c.collation_name, N'') + CASE WHEN c.is_nullable = 1 THEN N' NULL' ELSE N' NOT NULL' END"
 		);
 		// Valeurs trop longues comptées en octets (espaces finaux compris) et refusées.
 		expect(text).toContain(
 			"SELECT @long = COUNT(*) FROM [dbo].[e1e_kid] WHERE DATALENGTH([tier]) > 900;"
 		);
-		expect(text).toContain("N' : find e1e_kid where length(tier) > 450'");
+		// Limite en caractères pour nvarchar / ntext ; commande `find` pour nvarchar
+		// seulement, `length` refusant ntext.
+		expect(text).toContain(
+			"CASE WHEN @type IN (N'nvarchar', N'ntext') THEN N'450 caractères' ELSE N'900 octets' END"
+		);
+		expect(text).toContain(
+			"CASE WHEN @type = N'nvarchar' THEN N' : find e1e_kid where length(tier) > 450' ELSE N'' END"
+		);
 		const steps = [
 			"THROW 50000, @msg, 1;",
 			"EXEC (@dropFk); EXEC (@dropIdx); EXEC (@dropChk); EXEC (@dropDf); EXEC (@dropSt);",
