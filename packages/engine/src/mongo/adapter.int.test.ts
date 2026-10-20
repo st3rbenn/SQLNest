@@ -859,3 +859,209 @@ describe.skipIf(!hasMongo)("mongodb adapter — on update (ADR-031)", () => {
 		}
 	}, 60_000);
 });
+
+describe.skipIf(!hasMongo)(
+	"mongodb adapter — FK sur toutes les écritures (ADR-031)",
+	() => {
+		it("valeurs calculées contrôlées après coup : forme pipeline, write-join, insert-select", async () => {
+			const conn = await mongoAdapter.connect(loadConfig());
+			const drop = async () => {
+				for (const t of ["e1g_kid", "e1g_par", "e1g_map", "e1g_src"]) {
+					await runQuery(conn, `drop table ${t} if exists`);
+				}
+			};
+			const kids = async () =>
+				(await runQuery(conn, "find e1g_kid pick label, par_code sort label"))
+					.rows;
+			try {
+				await drop();
+				await runQuery(conn, "create table e1g_par { code: string }");
+				await runQuery(
+					conn,
+					"create table e1g_kid { label: string, alt: string nullable, par_code: string nullable ref e1g_par.code }"
+				);
+				await runQuery(
+					conn,
+					"create table e1g_map { label: string, code: string }"
+				);
+				await runQuery(
+					conn,
+					"create table e1g_src { label: string, par_code: string nullable }"
+				);
+				await runQuery(conn, 'add [{code: "a"}, {code: "b"}] into e1g_par');
+				await runQuery(
+					conn,
+					'add [{label: "k1", alt: "a"}, {label: "k2", alt: "ghost"}] into e1g_kid'
+				);
+
+				// Forme pipeline : la valeur vient d'un autre champ.
+				await runQuery(
+					conn,
+					'update e1g_kid where label = "k1" set par_code = alt'
+				);
+				await expect(
+					runQuery(conn, 'update e1g_kid where label = "k2" set par_code = alt')
+				).rejects.toThrow(
+					/update de 'e1g_kid' viole la foreign key 'fk_e1g_kid_par_code_e1g_par' : 'par_code' = "ghost" ne référence aucune ligne de e1g_par\.code/
+				);
+
+				// Write-join : la valeur vient de la table jointe.
+				await runQuery(
+					conn,
+					'add [{label: "k1", code: "b"}, {label: "k2", code: "ghost"}] into e1g_map'
+				);
+				const join = await runQuery(
+					conn,
+					'update e1g_kid with one e1g_map as m on label = m.label where label = "k1" set par_code = m.code'
+				);
+				expect(join.rowCount).toBe(1);
+				await expect(
+					runQuery(
+						conn,
+						'update e1g_kid with one e1g_map as m on label = m.label where label = "k2" set par_code = m.code'
+					)
+				).rejects.toThrow(/update de 'e1g_kid' viole la foreign key/);
+
+				// Insert-select : la valeur vient de la source.
+				await runQuery(
+					conn,
+					'add [{_id: "507f1f77bcf86cd799439011", label: "k3", par_code: "a"}, {_id: "507f1f77bcf86cd799439012", label: "k4", par_code: "ghost"}] into e1g_src'
+				);
+				await expect(
+					runQuery(
+						conn,
+						'add (find e1g_src where label = "k4" pick label, par_code) into e1g_kid'
+					)
+				).rejects.toThrow(/insert dans 'e1g_kid' viole la foreign key/);
+				await runQuery(
+					conn,
+					'add (find e1g_src where label = "k3" pick _id, label, par_code) into e1g_kid'
+				);
+				// `_id` chaîne 24-hex de la source copié tel quel.
+				expect(
+					(await runQuery(conn, 'find e1g_kid where label = "k3" pick _id'))
+						.rows
+				).toEqual([{ _id: "507f1f77bcf86cd799439011" }]);
+
+				expect(await kids()).toEqual([
+					{ label: "k1", par_code: "b" },
+					{ label: "k2" },
+					{ label: "k3", par_code: "a" }
+				]);
+			} finally {
+				await drop();
+				await conn.close();
+			}
+		}, 60_000);
+
+		it("on update par write-join et upsert ; FK appliquées dans transaction et savepoint", async () => {
+			const conn = await mongoAdapter.connect(loadConfig());
+			const drop = async () => {
+				for (const t of ["e1g_kid", "e1g_par", "e1g_ren"]) {
+					await runQuery(conn, `drop table ${t} if exists`);
+				}
+			};
+			const kids = async () =>
+				(await runQuery(conn, "find e1g_kid pick label, par_code sort label"))
+					.rows;
+			const codes = async () =>
+				(await runQuery(conn, "find e1g_par pick code sort code")).rows.map(
+					(r) => r.code
+				);
+			try {
+				await drop();
+				await runQuery(
+					conn,
+					"create table e1g_par { code: string, label: string }"
+				);
+				await runQuery(
+					conn,
+					"create table e1g_kid { label: string, par_code: string nullable ref e1g_par.code on update cascade on delete cascade }"
+				);
+				await runQuery(
+					conn,
+					"create table e1g_ren { from_code: string, to_code: string }"
+				);
+				await runQuery(
+					conn,
+					'add [{code: "a", label: "pa"}, {code: "b", label: "pb"}] into e1g_par'
+				);
+				await runQuery(
+					conn,
+					'add [{label: "k1", par_code: "a"}, {label: "k2", par_code: "b"}] into e1g_kid'
+				);
+
+				// Clé renommée par un write-join : l'enfant suit.
+				await runQuery(conn, 'add {from_code: "a", to_code: "x"} into e1g_ren');
+				await runQuery(
+					conn,
+					"update e1g_par with one e1g_ren as r on code = r.from_code set code = r.to_code"
+				);
+				// Clé renommée par un upsert : l'enfant suit.
+				await runQuery(
+					conn,
+					'add {label: "pb", code: "y"} into e1g_par on conflict (label) edit set code = new.code'
+				);
+				expect(await codes()).toEqual(["x", "y"]);
+				expect(await kids()).toEqual([
+					{ label: "k1", par_code: "x" },
+					{ label: "k2", par_code: "y" }
+				]);
+
+				// Upsert vers une clé absente, côté update puis côté insert.
+				const upsert = (label: string, code: string) =>
+					runQuery(
+						conn,
+						`add {label: "${label}", par_code: "${code}"} into e1g_kid on conflict (label) edit set par_code = new.par_code`
+					);
+				await expect(upsert("k1", "ghost")).rejects.toThrow(
+					/insert dans 'e1g_kid' viole la foreign key/
+				);
+				await expect(upsert("k9", "ghost")).rejects.toThrow(
+					/viole la foreign key/
+				);
+				await upsert("k3", "x");
+
+				// Bloc transaction : precheck et cascade delete appliqués.
+				await expect(
+					runQuery(
+						conn,
+						'transaction { add {label: "k8", par_code: "ghost"} into e1g_kid }'
+					)
+				).rejects.toThrow(/viole la foreign key/);
+				await runQuery(
+					conn,
+					'transaction { remove from e1g_par where code = "y" }'
+				);
+				expect(await kids()).toEqual([
+					{ label: "k1", par_code: "x" },
+					{ label: "k3", par_code: "x" }
+				]);
+				// Write-join en transaction ($merge y est interdit) : matérialisé.
+				await runQuery(
+					conn,
+					"transaction { update e1g_ren with one e1g_par as p on to_code = p.code set from_code = p.label }"
+				);
+				expect(
+					(await runQuery(conn, "find e1g_ren pick from_code")).rows
+				).toEqual([{ from_code: "pa" }]);
+
+				// Savepoint : la cascade déjà écrite est compensée quand le write suivant
+				// est refusé ; la transaction continue.
+				await runQuery(
+					conn,
+					'transaction { savepoint s1 { update e1g_par where code = "x" set code = "q"; add {label: "k7", par_code: "ghost"} into e1g_kid }; add {label: "k6", par_code: "x"} into e1g_kid }'
+				);
+				expect(await codes()).toEqual(["x"]);
+				expect(await kids()).toEqual([
+					{ label: "k1", par_code: "x" },
+					{ label: "k3", par_code: "x" },
+					{ label: "k6", par_code: "x" }
+				]);
+			} finally {
+				await drop();
+				await conn.close();
+			}
+		}, 60_000);
+	}
+);

@@ -487,6 +487,144 @@ interface KeyMove {
 	readonly to: unknown;
 }
 
+type MongoWrite = import("@sqlnest/snql").MongoWriteQuery;
+
+/** Compensations d'un write sous savepoint, rejouées à l'envers. */
+type Journal = (() => Promise<void>)[];
+
+/**
+ * Ce qu'un write doit faire respecter (ADR-031) : FK sortantes dont il peut
+ * écrire la colonne, colonnes référencées qu'il peut réécrire (`on update`).
+ * Un delete y figure dès que la collection est référencée (cascade).
+ */
+interface FkPlan {
+	readonly outgoing: readonly RefMeta[];
+	readonly keyColumns: readonly string[];
+}
+
+/**
+ * Colonnes qu'un pipeline d'update écrit : clés des stages `$set` /
+ * `$addFields`, moins les champs retirés ensuite par `$unset` (alias de
+ * jointure, slots synthétiques).
+ */
+export function pipelineSetColumns(pipeline: readonly Document[]): string[] {
+	const cols = new Set<string>();
+	for (const stage of pipeline) {
+		for (const op of ["$set", "$addFields"]) {
+			const fields = (stage as Record<string, unknown>)[op];
+			if (fields !== null && typeof fields === "object") {
+				for (const k of Object.keys(fields)) cols.add(k);
+			}
+		}
+		const unset = (stage as { $unset?: unknown }).$unset;
+		const removed =
+			typeof unset === "string" ? [unset] : Array.isArray(unset) ? unset : [];
+		for (const k of removed) cols.delete(String(k));
+	}
+	return [...cols];
+}
+
+/**
+ * Colonnes qu'un write peut écrire (`written`, FK sortantes) et réécrire sur
+ * des documents existants (`rewritten`, `on update`). Un upsert qui insère
+ * écrit aussi les champs d'égalité de son filtre.
+ */
+function writeColumns(query: MongoWrite): {
+	written: string[];
+	rewritten: string[];
+} {
+	switch (query.op) {
+		case "update": {
+			const cols = Object.keys(extractSetFields(query.update));
+			return { written: cols, rewritten: cols };
+		}
+		case "update-agg-merge": {
+			const cols = pipelineSetColumns(query.pipeline);
+			return { written: cols, rewritten: cols };
+		}
+		case "upsert": {
+			const written = new Set<string>();
+			const rewritten = new Set<string>();
+			for (const op of query.operations) {
+				for (const k of Object.keys(op.filter)) written.add(k);
+				for (const k of Object.keys(op.setOnInsert)) written.add(k);
+				for (const k of Object.keys(op.set ?? {})) {
+					written.add(k);
+					rewritten.add(k);
+				}
+			}
+			return { written: [...written], rewritten: [...rewritten] };
+		}
+		default:
+			return { written: [], rewritten: [] };
+	}
+}
+
+/** Un `updateOne` + upsert par ligne d'un `add … on conflict` (sprint v3 Mongo). */
+function upsertBulkOps(
+	operations: Extract<MongoWrite, { op: "upsert" }>["operations"]
+) {
+	return operations.map((op) => {
+		const filter = hydrateBson(op.filter, true) as Document;
+		const update: Document = {};
+		if (op.set !== undefined) {
+			update.$set = hydrateBson(op.set, false) as Document;
+		}
+		update.$setOnInsert = hydrateBson(op.setOnInsert, true) as Document;
+		return { updateOne: { filter, update, upsert: true } };
+	});
+}
+
+/** Colonnes à photographier autour d'un write : clés référencées et FK `refs`. */
+function snapshotColumns(plan: FkPlan, refs: readonly RefMeta[]): string[] {
+	return [...new Set([...plan.keyColumns, ...refs.map((r) => r.fromColumn)])];
+}
+
+/** `_id` et `columns` des documents de `filter`, lus dans la session. */
+function readColumns(
+	coll: Collection,
+	filter: Document,
+	columns: readonly string[],
+	session: ClientSession
+): Promise<Document[]> {
+	const projection: Document = { _id: 1 };
+	for (const c of columns) projection[c] = 1;
+	return coll.find(filter, { session, projection }).toArray();
+}
+
+/**
+ * `updateMany` qui pose `column = value` ; sous savepoint, la valeur d'avant
+ * de chaque document entre dans `journal`.
+ */
+async function setField(
+	coll: Collection,
+	filter: Document,
+	column: string,
+	value: unknown,
+	session: ClientSession,
+	journal?: Journal
+): Promise<void> {
+	if (journal !== undefined) {
+		const prior = await readColumns(coll, filter, [column], session);
+		journal.push(async () => {
+			if (prior.length === 0) return;
+			await coll.bulkWrite(
+				prior.map((doc) => ({
+					updateOne: {
+						filter: { _id: doc._id },
+						update:
+							doc[column] === undefined
+								? { $unset: { [column]: "" } }
+								: { $set: { [column]: doc[column] } }
+					}
+				})),
+				{ session }
+			);
+		});
+	}
+	await coll.updateMany(filter, { $set: { [column]: value } }, { session });
+}
+
 /**
  * Extrait les champs settés par un update pour le write-precheck FK. Gère le
  * `$set` classique (`{$set: {...}}`) ET la forme pipeline (`[{$set: {...}}]`).
@@ -806,16 +944,15 @@ class MongoConnection implements Connection {
 	 * int64, et ObjectId pour un filtre sur `_id`.
 	 */
 	/**
-	 * Dispatch write FK-aware (ADR-031 FK/1b). Charge les FK pertinentes depuis
-	 * `_snql_refs` et, si la collection en a, exécute le write dans une
-	 * transaction avec enforcement (write-precheck insert/update, `on update`
-	 * quand l'update réécrit une colonne référencée, cascade delete).
-	 * Sans FK → fast path direct (pas d'overhead transaction).
+	 * Dispatch write FK-aware (ADR-031). Si le write touche une FK déclarée
+	 * dans `_snql_refs` (voir {@link #fkPlan}), il s'exécute dans une
+	 * transaction qui la fait respecter. Sans FK → fast path direct (pas
+	 * d'overhead transaction). `withTransaction` retry les erreurs
+	 * transientes ; sur mongod standalone, la tx lève TransactionNotSupported
+	 * (20) → message guidant (RS requis).
 	 */
-	async #executeWrite(
-		queryIn: Extract<NativeQuery, { kind: "mongo-write" }>
-	): Promise<ResultSet> {
-		// Défauts posés avant le precheck FK : une colonne de FK peut en avoir un.
+	async #executeWrite(queryIn: MongoWrite): Promise<ResultSet> {
+		// Défauts posés avant le contrôle FK : une colonne de FK peut en avoir un.
 		const query =
 			queryIn.op === "insert"
 				? {
@@ -823,20 +960,20 @@ class MongoConnection implements Connection {
 						documents: await this.#withDefaults(queryIn.collection, queryIn.documents)
 					}
 				: queryIn;
-		if (query.op === "insert" || query.op === "update") {
-			const outgoing = await this.#loadRefs("fromCollection", query.collection);
-			const keyColumns =
-				query.op === "update" ? await this.#referencedColumnsSet(query) : [];
-			if (outgoing.length > 0 || keyColumns.length > 0) {
-				return this.#executeWriteFKChecked(query, outgoing, keyColumns);
-			}
-		} else if (query.op === "delete") {
-			const incoming = await this.#loadRefs("toCollection", query.collection);
-			if (incoming.length > 0) {
-				return this.#executeDeleteCascade(query);
-			}
+		const plan = await this.#fkPlan(query);
+		if (plan === undefined) return this.#executeWritePlain(query);
+		const session = this.#requireClient().startSession();
+		try {
+			let result: ResultSet = { columns: [], rows: [], rowCount: 0 };
+			await session.withTransaction(async () => {
+				result = await this.#writeEnforcingFK(query, plan, session);
+			});
+			return result;
+		} catch (cause) {
+			throw fkTransactionError(query.collection, cause);
+		} finally {
+			await session.endSession();
 		}
-		return this.#executeWritePlain(query);
 	}
 
 	async #executeWritePlain(
@@ -904,19 +1041,9 @@ class MongoConnection implements Connection {
 				// serveur par bulk, pas par transaction). `rowCount` = docs matched
 				// (edit) + docs upserted (insert), analogue au RETURNING PG mais
 				// sans les docs (l'user avait un upsert, pas un fetch).
-				const bulkOps = query.operations.map((op) => {
-					const filter = hydrateBson(op.filter, true) as Document;
-					const update: Document = {};
-					if (op.set !== undefined) {
-						update["$set"] = hydrateBson(op.set, false) as Document;
-					}
-					update["$setOnInsert"] = hydrateBson(
-						op.setOnInsert,
-						true
-					) as Document;
-					return { updateOne: { filter, update, upsert: true } };
-				});
-				const result = await collection.bulkWrite(bulkOps);
+				const result = await collection.bulkWrite(
+					upsertBulkOps(query.operations)
+				);
 				return {
 					columns: [],
 					rows: [],
@@ -975,163 +1102,363 @@ class MongoConnection implements Connection {
 	}
 
 	/**
-	 * Colonnes de `query.collection` ciblées par une FK entrante que l'update
-	 * réécrit. `_id` est immuable sous Mongo : une FK vers `_id` n'a pas
-	 * d'`on update` à appliquer.
+	 * FK qu'un write doit faire respecter, lues dans `_snql_refs`. `undefined`
+	 * si aucune : le write passe sans transaction. Insert et insert-select
+	 * contrôlent toutes leurs FK sortantes (un défaut peut remplir la colonne),
+	 * les updates celles dont ils écrivent la colonne. `_id` est immuable : une
+	 * FK vers `_id` n'a pas d'`on update`.
 	 */
-	async #referencedColumnsSet(
-		query: Extract<NativeQuery, { kind: "mongo-write"; op: "update" }>
-	): Promise<readonly string[]> {
-		const setCols = Object.keys(extractSetFields(query.update));
-		if (setCols.length === 0) return [];
-		const out = new Set<string>();
-		for (const ref of await this.#loadRefs("toCollection", query.collection)) {
-			if (ref.toColumn === "_id") continue;
-			if (
-				setCols.some(
-					(c) => c === ref.toColumn || c.startsWith(`${ref.toColumn}.`)
-				)
-			) {
-				out.add(ref.toColumn);
-			}
+	async #fkPlan(query: MongoWrite): Promise<FkPlan | undefined> {
+		if (query.op === "delete") {
+			const incoming = await this.#loadRefs("toCollection", query.collection);
+			return incoming.length > 0 ? { outgoing: [], keyColumns: [] } : undefined;
 		}
-		return [...out];
+		const inserting =
+			query.op === "insert" || query.op === "insert-select-agg-merge";
+		const { written, rewritten } = writeColumns(query);
+		const touches = (cols: readonly string[], col: string) =>
+			cols.some((c) => c === col || c.startsWith(`${col}.`));
+		const outgoing = (
+			await this.#loadRefs("fromCollection", query.collection)
+		).filter((r) => inserting || touches(written, r.fromColumn));
+		const keyColumns =
+			rewritten.length === 0
+				? []
+				: [
+						...new Set(
+							(await this.#loadRefs("toCollection", query.collection))
+								.filter(
+									(r) => r.toColumn !== "_id" && touches(rewritten, r.toColumn)
+								)
+								.map((r) => r.toColumn)
+						)
+					];
+		return outgoing.length > 0 || keyColumns.length > 0
+			? { outgoing, keyColumns }
+			: undefined;
 	}
 
 	/**
-	 * Vrai ssi une valeur référencée existe dans la collection cible (ADR-031
-	 * FK/1b write-precheck). Gère l'alias `id`→`_id` (D13) : quand `toColumn`
-	 * est `id`, on cherche aussi sous `_id`. La valeur est hydratée (24-hex →
-	 * ObjectId sous `_id`) cohéremment avec le stockage.
+	 * Exécute `query` dans `session` en faisant respecter `plan` (ADR-031) :
+	 * valeurs des FK sortantes contrôlées (avant le write pour des littéraux,
+	 * après sinon), `on update` aux dépendants des clés réécrites, cascade
+	 * `on delete`. Sous savepoint, chaque effet pose sa compensation dans
+	 * `journal`.
 	 */
-	async #refTargetExists(
-		toCollection: string,
-		toColumn: string,
-		value: unknown,
-		session: ClientSession
-	): Promise<boolean> {
-		const col = this.#requireDb().collection(toCollection);
-		const or: Document[] = [
-			{ [toColumn]: hydrateBson(value, false) }
-		];
-		if (toColumn === "id") {
-			or.push({ _id: hydrateBson(value, true) });
-		}
-		const cnt = await col.countDocuments(
-			{ $or: or },
-			{ session, limit: 1 }
-		);
-		return cnt > 0;
-	}
-
-	/**
-	 * Write insert/update avec write-precheck FK (ADR-031 FK/1b) dans une
-	 * transaction. Pour chaque FK sortante, la valeur écrite doit référencer une
-	 * ligne existante (sauf NULL — FK nullable). Un update qui réécrit une
-	 * colonne référencée (`keyColumns`) applique ensuite `on update` aux
-	 * dépendants, dans la même transaction. `withTransaction` retry les
-	 * erreurs transientes ; sur mongod standalone, `startSession`/tx lève
-	 * TransactionNotSupported (20) → message guidant (RS requis).
-	 */
-	async #executeWriteFKChecked(
-		query: Extract<NativeQuery, { kind: "mongo-write"; op: "insert" | "update" }>,
-		outgoing: readonly RefMeta[],
-		keyColumns: readonly string[]
-	): Promise<ResultSet> {
-		const session = this.#requireClient().startSession();
-		try {
-			let result: ResultSet = { columns: [], rows: [], rowCount: 0 };
-			await session.withTransaction(async () => {
-				if (query.op === "insert") {
-					for (const doc of query.documents) {
-						for (const ref of outgoing) {
-							const val = (doc as Record<string, unknown>)[ref.fromColumn];
-							if (val === null || val === undefined) continue;
-							const ok = await this.#refTargetExists(
-								ref.toCollection,
-								ref.toColumn,
-								val,
-								session
-							);
-							if (!ok) {
-								throw new EngineExecutionError(
-									`insert dans '${query.collection}' viole la foreign key '${ref.name}' : '${ref.fromColumn}' = ${JSON.stringify(val)} ne référence aucune ligne de ${ref.toCollection}.${ref.toColumn}`
-								);
-							}
-						}
-					}
-				} else {
-					// update : precheck des FK dont la colonne est settée à une valeur.
-					const setDoc = extractSetFields(query.update);
-					for (const ref of outgoing) {
-						if (!(ref.fromColumn in setDoc)) continue;
-						const val = setDoc[ref.fromColumn];
-						if (val === null || val === undefined) continue;
-						const ok = await this.#refTargetExists(
-							ref.toCollection,
-							ref.toColumn,
-							val,
-							session
-						);
-						if (!ok) {
-							throw new EngineExecutionError(
-								`update de '${query.collection}' viole la foreign key '${ref.name}' : '${ref.fromColumn}' = ${JSON.stringify(val)} ne référence aucune ligne de ${ref.toCollection}.${ref.toColumn}`
-							);
-						}
-					}
-				}
-				result =
-					query.op === "update" && keyColumns.length > 0
-						? await this.#updateApplyingOnUpdate(query, keyColumns, session)
-						: await this.#executeWriteInSession(query, session);
-			});
-			return result;
-		} catch (cause) {
-			throw fkTransactionError(query.collection, cause);
-		} finally {
-			await session.endSession();
-		}
-	}
-
-	/**
-	 * Update qui réécrit des colonnes référencées : lit leurs valeurs avant et
-	 * après l'update (re-lecture par `_id`, la sélection pouvant ne plus
-	 * matcher), puis applique `on update` aux clés qui ont changé. Couvre aussi
-	 * la forme pipeline, dont les nouvelles valeurs ne se lisent qu'après coup.
-	 */
-	async #updateApplyingOnUpdate(
-		query: Extract<NativeQuery, { kind: "mongo-write"; op: "update" }>,
-		keyColumns: readonly string[],
-		session: ClientSession
+	async #writeEnforcingFK(
+		query: MongoWrite,
+		plan: FkPlan,
+		session: ClientSession,
+		journal?: Journal
 	): Promise<ResultSet> {
 		const coll = this.#requireDb().collection(query.collection);
-		const projection = Object.fromEntries(keyColumns.map((c) => [c, 1]));
-		const before = await coll
-			.find(hydrateBson(query.filter, true) as Document, {
-				session,
-				projection
-			})
-			.toArray();
-		const result = await this.#executeWriteInSession(query, session);
-		if (before.length === 0) return result;
-		const after = new Map<string, Record<string, unknown>>();
-		const reread = await coll
-			.find({ _id: { $in: before.map((d) => d._id) } }, { session, projection })
-			.toArray();
-		for (const doc of reread) after.set(bsonMatchKey(doc._id), doc);
+		switch (query.op) {
+			case "delete":
+				return this.#deleteCascading(query, session, journal);
+			case "insert": {
+				const documents = await this.#withDefaults(
+					query.collection,
+					query.documents,
+					session
+				);
+				await this.#assertRefsResolve(
+					query.collection,
+					"insert",
+					plan.outgoing,
+					documents.map((d) => hydrateBson(d, false) as Document),
+					undefined,
+					session
+				);
+				return this.#mainWrite({ ...query, documents }, session, journal);
+			}
+			case "insert-select-agg-merge": {
+				const documents = await this.#insertSelectDocs(query, session);
+				await this.#assertRefsResolve(
+					query.collection,
+					"insert",
+					plan.outgoing,
+					documents,
+					undefined,
+					session
+				);
+				if (documents.length === 0)
+					return { columns: [], rows: [], rowCount: 0 };
+				const res = await coll.insertMany(documents, { session });
+				return { columns: [], rows: [], rowCount: res.insertedCount };
+			}
+			case "update": {
+				const literal = Array.isArray(query.update)
+					? undefined
+					: extractSetFields(query.update);
+				if (literal !== undefined) {
+					await this.#assertRefsResolve(
+						query.collection,
+						"update",
+						plan.outgoing,
+						[hydrateBson(literal, false) as Document],
+						undefined,
+						session
+					);
+				}
+				// Forme pipeline : les valeurs ne se lisent qu'après le write.
+				const computed = literal === undefined ? plan.outgoing : [];
+				if (computed.length === 0 && plan.keyColumns.length === 0) {
+					return this.#mainWrite(query, session, journal);
+				}
+				const before = await readColumns(
+					coll,
+					hydrateBson(query.filter, true) as Document,
+					snapshotColumns(plan, computed),
+					session
+				);
+				const result = await this.#mainWrite(query, session, journal);
+				await this.#checkRewrite(
+					query.collection,
+					"update",
+					plan,
+					computed,
+					before,
+					[],
+					session,
+					journal
+				);
+				return result;
+			}
+			case "update-agg-merge": {
+				const merge = await this.#prepareMergeUpdate(query, session);
+				const before = await readColumns(
+					coll,
+					{ _id: { $in: merge.ids } },
+					snapshotColumns(plan, plan.outgoing),
+					session
+				);
+				const result = await merge.write();
+				await this.#checkRewrite(
+					query.collection,
+					"update",
+					plan,
+					plan.outgoing,
+					before,
+					[],
+					session,
+					journal
+				);
+				return result;
+			}
+			case "upsert": {
+				const before = await readColumns(
+					coll,
+					{
+						$or: query.operations.map(
+							(op) => hydrateBson(op.filter, true) as Document
+						)
+					},
+					snapshotColumns(plan, plan.outgoing),
+					session
+				);
+				const res = await coll.bulkWrite(upsertBulkOps(query.operations), {
+					session
+				});
+				await this.#checkRewrite(
+					query.collection,
+					"insert",
+					plan,
+					plan.outgoing,
+					before,
+					Object.values(res.upsertedIds),
+					session,
+					journal
+				);
+				return {
+					columns: [],
+					rows: [],
+					rowCount: res.matchedCount + res.upsertedCount
+				};
+			}
+		}
+	}
+
+	/** Write principal ; sous savepoint, sa compensation entre dans `journal`. */
+	async #mainWrite(
+		query: MongoWrite,
+		session: ClientSession,
+		journal?: Journal
+	): Promise<ResultSet> {
+		if (journal === undefined)
+			return this.#executeWriteInSession(query, session);
+		const { result, compensate } = await this.#execWriteWithCompensation(
+			query,
+			session
+		);
+		journal.push(compensate);
+		return result;
+	}
+
+	/**
+	 * Contrôles après un write qui a pu réécrire des colonnes : relit par `_id`
+	 * les documents touchés (`before`, plus les `inserted`), vérifie les
+	 * nouvelles valeurs des FK sortantes `refs`, puis applique `on update` aux
+	 * clés référencées qui ont changé.
+	 */
+	async #checkRewrite(
+		collection: string,
+		op: "insert" | "update",
+		plan: FkPlan,
+		refs: readonly RefMeta[],
+		before: readonly Document[],
+		inserted: readonly unknown[],
+		session: ClientSession,
+		journal?: Journal
+	): Promise<void> {
+		const ids = [...before.map((d) => d._id), ...inserted];
+		if (ids.length === 0) return;
+		const after = await readColumns(
+			this.#requireDb().collection(collection),
+			{ _id: { $in: ids } },
+			snapshotColumns(plan, refs),
+			session
+		);
+		const prior = new Map(before.map((d) => [bsonMatchKey(d._id), d]));
+		await this.#assertRefsResolve(collection, op, refs, after, prior, session);
 		const changes = new Map<string, KeyMove[]>();
-		for (const column of keyColumns) {
+		for (const column of plan.keyColumns) {
 			const moves: KeyMove[] = [];
-			for (const doc of before) {
-				const from = (doc as Record<string, unknown>)[column];
+			for (const doc of after) {
+				const from = prior.get(bsonMatchKey(doc._id))?.[column];
 				if (from === null || from === undefined) continue;
-				const to = after.get(bsonMatchKey(doc._id))?.[column] ?? null;
+				const to = doc[column] ?? null;
 				if (bsonMatchKey(from) !== bsonMatchKey(to)) moves.push({ from, to });
 			}
 			if (moves.length > 0) changes.set(column, moves);
 		}
-		await this.#applyOnUpdate(query.collection, changes, session);
-		return result;
+		await this.#applyOnUpdate(collection, changes, session, journal);
+	}
+
+	/**
+	 * Refus typé si une valeur de FK sortante écrite dans `docs` ne référence
+	 * aucune ligne (ADR-031 FK/1b). NULL passe (FK nullable). Avec `prior`
+	 * (documents avant le write, par `_id`), seules les valeurs nouvelles ou
+	 * changées sont contrôlées.
+	 */
+	async #assertRefsResolve(
+		collection: string,
+		op: "insert" | "update",
+		refs: readonly RefMeta[],
+		docs: readonly Document[],
+		prior: ReadonlyMap<string, Document> | undefined,
+		session: ClientSession
+	): Promise<void> {
+		for (const ref of refs) {
+			const values = new Map<string, unknown>();
+			for (const doc of docs) {
+				const value = doc[ref.fromColumn];
+				if (value === null || value === undefined) continue;
+				const old = prior?.get(bsonMatchKey(doc._id))?.[ref.fromColumn];
+				if (old !== undefined && bsonMatchKey(old) === bsonMatchKey(value)) {
+					continue;
+				}
+				values.set(bsonMatchKey(value), value);
+			}
+			const distinct = [...values.values()];
+			for (let i = 0; i < distinct.length; i += 1000) {
+				const [missing] = await this.#missingRefTargets(
+					ref,
+					distinct.slice(i, i + 1000),
+					session
+				);
+				if (missing !== undefined) {
+					throw new EngineExecutionError(
+						`${op === "insert" ? "insert dans" : "update de"} '${collection}' viole la foreign key '${ref.name}' : '${ref.fromColumn}' = ${JSON.stringify(normalizeBson(missing))} ne référence aucune ligne de ${ref.toCollection}.${ref.toColumn}`
+					);
+				}
+			}
+		}
+	}
+
+	/**
+	 * Valeurs d'un paquet (BSON) qu'aucune ligne de la cible ne porte : un
+	 * `$in` sur `toColumn`, et sur `_id` pour l'alias `id` (D13).
+	 */
+	async #missingRefTargets(
+		ref: { readonly toCollection: string; readonly toColumn: string },
+		values: readonly unknown[],
+		session?: ClientSession
+	): Promise<unknown[]> {
+		const or: Document[] = [{ [ref.toColumn]: { $in: [...values] } }];
+		if (ref.toColumn === "id") or.push({ _id: { $in: [...values] } });
+		const projection = { _id: 1, [ref.toColumn]: 1 };
+		const found = await this.#requireDb()
+			.collection(ref.toCollection)
+			.find(
+				{ $or: or },
+				session !== undefined ? { session, projection } : { projection }
+			)
+			.toArray();
+		const keys = new Set<string>();
+		for (const doc of found) {
+			const row = doc as Record<string, unknown>;
+			keys.add(bsonMatchKey(row[ref.toColumn]));
+			if (ref.toColumn === "id") keys.add(bsonMatchKey(row._id));
+		}
+		return values.filter((v) => !keys.has(bsonMatchKey(v)));
+	}
+
+	/**
+	 * Write-join (`update … with`) matérialisé dans la session : `$merge` est
+	 * interdit en transaction. Le pipeline sans son `$merge` calcule les
+	 * documents, puis un `updateOne` par `_id` pose les champs affectés, comme
+	 * le `whenMatched: "merge"` de `$merge`. Les `_id` sont connus avant le write.
+	 */
+	async #prepareMergeUpdate(
+		query: Extract<MongoWrite, { op: "update-agg-merge" }>,
+		session: ClientSession
+	): Promise<{ ids: unknown[]; write: () => Promise<ResultSet> }> {
+		const coll = this.#requireDb().collection(query.collection);
+		const stages = hydrateBson(
+			query.pipeline.filter((s) => !("$merge" in s)),
+			false
+		) as Document[];
+		const docs = await coll.aggregate(stages, { session }).toArray();
+		const fields = [
+			...new Set(
+				pipelineSetColumns(query.pipeline).map((c) => c.split(".")[0] ?? c)
+			)
+		];
+		const ops = docs.flatMap((doc) => {
+			const set: Document = {};
+			for (const f of fields) if (f in doc) set[f] = doc[f];
+			return Object.keys(set).length > 0
+				? [{ updateOne: { filter: { _id: doc._id }, update: { $set: set } } }]
+				: [];
+		});
+		const rowCount = new Set(docs.map((d) => bsonMatchKey(d._id))).size;
+		return {
+			ids: docs.map((d) => d._id),
+			write: async () => {
+				if (ops.length > 0) await coll.bulkWrite(ops, { session });
+				return { columns: [], rows: [], rowCount };
+			}
+		};
+	}
+
+	/**
+	 * Documents d'un insert-select matérialisés dans la session (`$merge`
+	 * interdit en transaction) : le pipeline source sans son `$merge`. Ils
+	 * sortent de la base déjà en BSON et sont copiés tels quels — une
+	 * hydratation en mode filtre réécrirait un `_id` chaîne 24-hex en `$in`.
+	 */
+	async #insertSelectDocs(
+		query: Extract<MongoWrite, { op: "insert-select-agg-merge" }>,
+		session: ClientSession
+	): Promise<Document[]> {
+		const stages = hydrateBson(
+			query.pipeline.filter((s) => !("$merge" in s)),
+			false
+		) as Document[];
+		return this.#requireDb()
+			.collection(query.sourceCollection)
+			.aggregate(stages, { session })
+			.toArray();
 	}
 
 	/**
@@ -1146,7 +1473,8 @@ class MongoConnection implements Connection {
 	async #applyOnUpdate(
 		collection: string,
 		changes: ReadonlyMap<string, readonly KeyMove[]>,
-		session: ClientSession
+		session: ClientSession,
+		journal?: Journal
 	): Promise<void> {
 		if (changes.size === 0) return;
 		const db = this.#requireDb();
@@ -1202,59 +1530,56 @@ class MongoConnection implements Connection {
 			const childMoves: KeyMove[] = [];
 			for (const { move, ids } of groups.values()) {
 				const to = ref.onUpdate === "set-null" ? null : move.to;
-				await childColl.updateMany(
-					{ _id: { $in: ids } } as Document,
-					{ $set: { [ref.fromColumn]: to } },
-					{ session }
+				await setField(
+					childColl,
+					{ _id: { $in: ids } },
+					ref.fromColumn,
+					to,
+					session,
+					journal
 				);
 				childMoves.push({ from: move.from, to });
 			}
 			await this.#applyOnUpdate(
 				ref.fromCollection,
 				new Map([[ref.fromColumn, childMoves]]),
-				session
+				session,
+				journal
 			);
 		}
 	}
 
 	/**
-	 * Delete avec cascade FK (ADR-031 FK/1b) dans une transaction. Trouve les
-	 * lignes supprimées, applique `on delete` (restrict/cascade/set-null) aux
-	 * collections dépendantes récursivement (multi-niveau + garde de cycle),
-	 * puis supprime les lignes cibles. Tout ou rien via `withTransaction`.
+	 * Delete avec cascade FK (ADR-031 FK/1b). Trouve les lignes supprimées,
+	 * applique `on delete` (restrict/cascade/set-null) aux collections
+	 * dépendantes récursivement (multi-niveau + garde de cycle), puis supprime
+	 * les lignes cibles.
 	 */
-	async #executeDeleteCascade(
-		query: Extract<NativeQuery, { kind: "mongo-write"; op: "delete" }>
+	async #deleteCascading(
+		query: Extract<MongoWrite, { op: "delete" }>,
+		session: ClientSession,
+		journal?: Journal
 	): Promise<ResultSet> {
-		const session = this.#requireClient().startSession();
-		try {
-			let deletedCount = 0;
-			await session.withTransaction(async () => {
-				const db = this.#requireDb();
-				const filter = hydrateBson(query.filter, true) as Document;
-				const targetColl = db.collection(query.collection);
-				const docs = await targetColl.find(filter, { session }).toArray();
-				if (docs.length === 0) {
-					deletedCount = 0;
-					return;
-				}
-				const visited = new Set<string>();
-				await this.#cascadeChildren(query.collection, docs, session, visited);
-				const ids = docs.map(
-					(d) => (d as { _id: unknown })._id
-				) as unknown as ObjectId[];
-				const res = await targetColl.deleteMany(
-					{ _id: { $in: ids } },
-					{ session }
-				);
-				deletedCount = res.deletedCount;
-			});
-			return { columns: [], rows: [], rowCount: deletedCount };
-		} catch (cause) {
-			throw fkTransactionError(query.collection, cause);
-		} finally {
-			await session.endSession();
-		}
+		const coll = this.#requireDb().collection(query.collection);
+		const docs = await coll
+			.find(hydrateBson(query.filter, true) as Document, { session })
+			.toArray();
+		if (docs.length === 0) return { columns: [], rows: [], rowCount: 0 };
+		await this.#cascadeChildren(
+			query.collection,
+			docs,
+			session,
+			new Set<string>(),
+			journal
+		);
+		const res = await coll.deleteMany(
+			{ _id: { $in: docs.map((d) => d._id) } },
+			{ session }
+		);
+		journal?.push(async () => {
+			await coll.insertMany(docs, { session });
+		});
+		return { columns: [], rows: [], rowCount: res.deletedCount };
 	}
 
 	/**
@@ -1268,7 +1593,8 @@ class MongoConnection implements Connection {
 		collection: string,
 		docs: readonly Document[],
 		session: ClientSession,
-		visited: Set<string>
+		visited: Set<string>,
+		journal?: Journal
 	): Promise<void> {
 		const db = this.#requireDb();
 		const incoming = await this.#loadRefs("toCollection", collection);
@@ -1293,10 +1619,13 @@ class MongoConnection implements Connection {
 					);
 				}
 			} else if (ref.onDelete === "set-null") {
-				await childColl.updateMany(
+				await setField(
+					childColl,
 					childFilter,
-					{ $set: { [ref.fromColumn]: null } },
-					{ session }
+					ref.fromColumn,
+					null,
+					session,
+					journal
 				);
 			} else {
 				// cascade : récurse puis supprime les enfants (bottom-up).
@@ -1308,14 +1637,20 @@ class MongoConnection implements Connection {
 					return true;
 				});
 				if (fresh.length === 0) continue;
-				await this.#cascadeChildren(ref.fromCollection, fresh, session, visited);
-				const childIds = fresh.map(
-					(c) => (c as { _id: unknown })._id
-				) as unknown as ObjectId[];
+				await this.#cascadeChildren(
+					ref.fromCollection,
+					fresh,
+					session,
+					visited,
+					journal
+				);
 				await childColl.deleteMany(
-					{ _id: { $in: childIds } },
+					{ _id: { $in: fresh.map((c) => c._id) } },
 					{ session }
 				);
+				journal?.push(async () => {
+					await childColl.insertMany(fresh, { session });
+				});
 			}
 		}
 	}
@@ -2231,25 +2566,11 @@ class MongoConnection implements Connection {
 	}): Promise<{ count: number; sample: unknown[] }> {
 		const db = this.#requireDb();
 		const from = db.collection(ref.fromCollection);
-		const to = db.collection(ref.toCollection);
 		const missing: unknown[] = [];
 		let batch: unknown[] = [];
 		const resolve = async (): Promise<void> => {
 			if (batch.length === 0) return;
-			const or: Document[] = [{ [ref.toColumn]: { $in: batch } }];
-			if (ref.toColumn === "id") or.push({ _id: { $in: batch } });
-			const found = await to
-				.find({ $or: or }, { projection: { _id: 1, [ref.toColumn]: 1 } })
-				.toArray();
-			const keys = new Set<string>();
-			for (const doc of found) {
-				const row = doc as Record<string, unknown>;
-				keys.add(bsonMatchKey(row[ref.toColumn]));
-				if (ref.toColumn === "id") keys.add(bsonMatchKey(row._id));
-			}
-			for (const value of batch) {
-				if (!keys.has(bsonMatchKey(value))) missing.push(value);
-			}
+			missing.push(...(await this.#missingRefTargets(ref, batch)));
 			batch = [];
 		};
 		const distinct = from.aggregate(
@@ -2793,7 +3114,11 @@ class MongoConnection implements Connection {
 						rowCount: rows.length
 					};
 				} else if (step.kind === "write") {
-					lastResult = await this.#executeWriteInSession(step.write, session);
+					const plan = await this.#fkPlan(step.write);
+					lastResult =
+						plan === undefined
+							? await this.#executeWriteInSession(step.write, session)
+							: await this.#writeEnforcingFK(step.write, plan, session);
 				} else {
 					// Savepoint via compensation logique in-session.
 					lastResult = await this.#executeSavepoint(step, session);
@@ -2869,15 +3194,7 @@ class MongoConnection implements Connection {
 				return { columns: [], rows: [], rowCount: result.matchedCount };
 			}
 			if (query.op === "update-agg-merge") {
-				// Write-join dans une transaction Mongo. Fonctionne sur RS 4.2+
-				// (aggregation avec $merge en tx supportée depuis MongoDB 4.2
-				// replica set). rowCount = 0 (limitation $merge).
-				const pipeline = hydrateBson(
-					[...query.pipeline],
-					false
-				) as Document[];
-				await collection.aggregate(pipeline, { session }).toArray();
-				return { columns: [], rows: [], rowCount: 0 };
+				return (await this.#prepareMergeUpdate(query, session)).write();
 			}
 			if (query.op === "insert-select-agg-merge") {
 				// Insert-select DANS session tx via matérialisation client +
@@ -2888,25 +3205,10 @@ class MongoConnection implements Connection {
 				// rollback protège en cas d'erreur. Non-atomique par-doc sur
 				// duplicate key (insertMany ordonné throw à la première collision)
 				// — même sémantique que $merge whenMatched='fail' hors tx.
-				const sourceColl = this.#requireDb().collection(query.sourceCollection);
-				const stagesBeforeMerge = query.pipeline.filter(
-					(s) => !("$merge" in s)
-				);
-				const fetchPipeline = hydrateBson(
-					[...stagesBeforeMerge],
-					false
-				) as Document[];
-				const docsRaw = await sourceColl
-					.aggregate(fetchPipeline, { session })
-					.toArray();
-				if (docsRaw.length === 0) {
+				const docsToInsert = await this.#insertSelectDocs(query, session);
+				if (docsToInsert.length === 0) {
 					return { columns: [], rows: [], rowCount: 0 };
 				}
-				// insert-select : `_id` source (normalisé ObjectId→string) re-coercé
-				// pour préserver le type à la copie (pas une saisie user → hors #7).
-				const docsToInsert = docsRaw.map(
-					(d) => hydrateBson(d, true) as Document
-				);
 				const targetColl = this.#requireDb().collection(query.collection);
 				const result = await targetColl.insertMany(docsToInsert, {
 					session
@@ -2918,19 +3220,10 @@ class MongoConnection implements Connection {
 				};
 			}
 			if (query.op === "upsert") {
-				const bulkOps = query.operations.map((op) => {
-					const filter = hydrateBson(op.filter, true) as Document;
-					const update: Document = {};
-					if (op.set !== undefined) {
-						update["$set"] = hydrateBson(op.set, false) as Document;
-					}
-					update["$setOnInsert"] = hydrateBson(
-						op.setOnInsert,
-						true
-					) as Document;
-					return { updateOne: { filter, update, upsert: true } };
-				});
-				const result = await collection.bulkWrite(bulkOps, { session });
+				const result = await collection.bulkWrite(
+					upsertBulkOps(query.operations),
+					{ session }
+				);
 				return {
 					columns: [],
 					rows: [],
@@ -2994,12 +3287,36 @@ class MongoConnection implements Connection {
 						rowCount: rows.length
 					};
 				} else if (bodyStep.kind === "write") {
-					const outcome = await this.#execWriteWithCompensation(
-						bodyStep.write,
-						session
-					);
-					lastResult = outcome.result;
-					compensations.push(outcome.compensate);
+					const write = bodyStep.write;
+					const plan =
+						write.op === "insert" ||
+						write.op === "update" ||
+						write.op === "delete"
+							? await this.#fkPlan(write)
+							: undefined;
+					if (plan === undefined) {
+						const outcome = await this.#execWriteWithCompensation(
+							write,
+							session
+						);
+						lastResult = outcome.result;
+						compensations.push(outcome.compensate);
+					} else {
+						// Journal posé avant le write : un refus FK après coup compense
+						// aussi ce que le write et ses cascades ont déjà écrit.
+						const journal: Journal = [];
+						compensations.push(async () => {
+							for (let i = journal.length - 1; i >= 0; i -= 1) {
+								await journal[i]?.();
+							}
+						});
+						lastResult = await this.#writeEnforcingFK(
+							write,
+							plan,
+							session,
+							journal
+						);
+					}
 				}
 			}
 			return lastResult;

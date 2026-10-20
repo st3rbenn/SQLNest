@@ -745,9 +745,15 @@ function resolveFieldRef(
 	const onDelete = mod.onDelete ?? "restrict";
 	const onUpdate = mod.onUpdate ?? "restrict";
 
-	if (onDelete === "set-null" && !fromNullable) {
+	const setNullOn =
+		onDelete === "set-null"
+			? "delete"
+			: onUpdate === "set-null"
+				? "update"
+				: undefined;
+	if (setNullOn !== undefined && !fromNullable) {
 		throw new SnqlError(
-			`'ref ${targetCollection}.${mod.targetColumn} on delete set null' exige que '${fromColumn}' soit nullable`,
+			`'ref ${targetCollection}.${mod.targetColumn} on ${setNullOn} set null' exige que '${fromColumn}' soit nullable`,
 			"lower_ddl_ref_set_null_not_nullable",
 			mod.span
 		);

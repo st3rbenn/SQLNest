@@ -1,6 +1,11 @@
 import { Binary, Decimal128, Double, Int32, Long, ObjectId } from "mongodb";
 import { describe, expect, it } from "vitest";
-import { bsonMatchKey, extractSetFields, uniqueDefined } from "./adapter";
+import {
+	bsonMatchKey,
+	extractSetFields,
+	pipelineSetColumns,
+	uniqueDefined
+} from "./adapter";
 
 describe("extractSetFields (ADR-031 FK/1b write-precheck)", () => {
 	it("lit $set classique", () => {
@@ -18,6 +23,37 @@ describe("extractSetFields (ADR-031 FK/1b write-precheck)", () => {
 
 	it("update sans $set → objet vide", () => {
 		expect(extractSetFields({ $inc: { n: 1 } })).toEqual({});
+	});
+});
+
+describe("pipelineSetColumns (ADR-031 write-join)", () => {
+	it("colonnes affectées, sans les alias de jointure retirés par $unset", () => {
+		expect(
+			pipelineSetColumns([
+				{ $match: { label: "k1" } },
+				{
+					$lookup: {
+						from: "m",
+						localField: "label",
+						foreignField: "label",
+						as: "m"
+					}
+				},
+				{ $unwind: { path: "$m" } },
+				{ $set: { par_code: "$m.code", note: "x" } },
+				{ $unset: ["m"] },
+				{ $merge: { into: "kid" } }
+			])
+		).toEqual(["par_code", "note"]);
+	});
+
+	it("$unset en chaîne et $addFields", () => {
+		expect(
+			pipelineSetColumns([
+				{ $addFields: { __sq_0: 1, total: 2 } },
+				{ $unset: "__sq_0" }
+			])
+		).toEqual(["total"]);
 	});
 });
 

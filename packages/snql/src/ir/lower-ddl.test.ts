@@ -1000,6 +1000,16 @@ describe("lower DDL — add ref (ADR-036 E/1a)", () => {
 		).toMatchObject({ ref: { onDelete: "set-null" } });
 	});
 
+	it("refuse on update set null sur une colonne NOT NULL", () => {
+		expect(() =>
+			lowerAddRef(
+				"add ref (user_id) references users.id on update set null into orders"
+			)
+		).toThrow(
+			/'ref users\.id on update set null' exige que 'user_id' soit nullable/
+		);
+	});
+
 	it("refuse un type incompatible", () => {
 		expect(() => lowerAddRef("add ref (label) references users.id into orders")).toThrow(
 			/incompatible/
@@ -1113,6 +1123,15 @@ describe("lower DDL — ref modifier FK (ADR-031 FK/1)", () => {
 				schemaWithUsers
 			)
 		).toThrow(/nullable/);
+	});
+
+	it("refuse on update set null sur colonne non-nullable", () => {
+		expect(() =>
+			lowerRefTable(
+				"create table orders { user_id: uuid ref users.id on update set null }",
+				schemaWithUsers
+			)
+		).toThrow(/on update set null' exige que 'user_id' soit nullable/);
 	});
 
 	it("accepte set null si colonne nullable", () => {
