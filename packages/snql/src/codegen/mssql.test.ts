@@ -621,6 +621,26 @@ describe("codegen mssql — DDL (M/6)", () => {
 		).toBe(`ALTER TABLE [orders] DROP CONSTRAINT [fk_orders_user_id]`);
 	});
 
+	it("add ref → WITH CHECK ADD CONSTRAINT (orphelins vérifiés)", () => {
+		expect(
+			ddlText({
+				op: "ddl",
+				kind: "add-ref",
+				target: "orders",
+				ref: {
+					name: "fk_orders_user_id",
+					fromColumn: "user_id",
+					targetCollection: "users",
+					targetColumn: "id",
+					onDelete: "restrict",
+					onUpdate: "cascade"
+				}
+			}).text
+		).toBe(
+			`ALTER TABLE [orders] WITH CHECK ADD CONSTRAINT [fk_orders_user_id] FOREIGN KEY ([user_id]) REFERENCES [users] ([id]) ON DELETE NO ACTION ON UPDATE CASCADE`
+		);
+	});
+
 	it("create enum → bootstrap _snql_enums + INSERT paramétré", () => {
 		const { text, params } = ddlText({
 			op: "ddl",

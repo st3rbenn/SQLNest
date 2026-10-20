@@ -322,7 +322,7 @@ function contextOptions(
 	// génériques : le pattern matching top-level doit prendre le dessus car
 	// certains keywords partagés (`into`/`from`/`unique`) ont un sens DDL vs
 	// DML. On lookup à partir du 1er token pour discriminer.
-	const ddlOptions = ddlContextOptions(toks, schema);
+	const ddlOptions = ddlContextOptions(toks, schema, suffixToks);
 	if (ddlOptions !== null) return ddlOptions;
 
 	// +introspection verbs (soft-keyword). En tête de statement
@@ -423,6 +423,7 @@ function contextOptions(
 				keyword("index"),
 				keyword("unique"),
 				keyword("enum"),
+				keyword("ref"),
 				...collections(schema)
 			];
 		}
@@ -511,6 +512,15 @@ function dottedPathOptions(
 	}
 	const head = toks[toks.length - 1];
 	if (head?.kind !== "ident") return [];
+	// Cible d'une FK en DDL (`ref users.|`, `references users.|`) : colonnes
+	// de la table nommée.
+	const before = toks[toks.length - 2];
+	if (before?.kind === "ident") {
+		const kw = before.value.toLowerCase();
+		if (kw === "ref" || kw === "references") {
+			return refTargetColumns(schema, head.value);
+		}
+	}
 	const operation = operationOf(toks);
 	if (operation !== "select") return [];
 	const scope = extractScope(toks, operation);
@@ -1571,7 +1581,8 @@ function orientRelation(
  */
 function ddlContextOptions(
 	toks: readonly Token[],
-	schema: SchemaModel
+	schema: SchemaModel,
+	suffixToks: readonly Token[] = []
 ): readonly SnqlCompletion[] | null {
 	if (toks.length === 0) return null;
 	const head = toks[0];
@@ -1598,6 +1609,7 @@ function ddlContextOptions(
 			return addIndexCompletions(toks, schema);
 		}
 		if (t1Lower === "enum") return addEnumMemberCompletions(toks, schema);
+		if (t1Lower === "ref") return addRefCompletions(toks, schema, suffixToks);
 		return null;
 	}
 
@@ -1913,6 +1925,58 @@ function addIndexCompletions(
 	}
 
 	return [];
+}
+
+/**
+ * Complétions pour `add ref (<col>) references <t>.<c> [on …] [as …] into <T>`
+ * (ADR-036 E/1a). La table porteuse vient après `into` : la colonne entre
+ * parenthèses n'est proposée que si `into <T>` est déjà écrit après le
+ * curseur. Les règles `on delete|update` passent par `refClauseCompletions`
+ * (le `ref` de tête ouvre la clause).
+ */
+function addRefCompletions(
+	toks: readonly Token[],
+	schema: SchemaModel,
+	suffixToks: readonly Token[]
+): readonly SnqlCompletion[] {
+	const n = toks.length;
+	const last = toks[n - 1];
+	if (last === undefined) return [];
+	const at = (i: number): Token | undefined => toks[i];
+	const isReferences = (t: Token | undefined): boolean =>
+		t !== undefined &&
+		t.kind === "ident" &&
+		t.value.toLowerCase() === "references";
+
+	if (n === 2) return [{ label: "(", type: "keyword" }];
+	if (last.kind === "lparen" && n === 3) {
+		const into = suffixToks.findIndex(
+			(t) => t.kind === "keyword" && t.value === "into"
+		);
+		const target = into >= 0 ? suffixToks[into + 1] : undefined;
+		return target?.kind === "ident"
+			? refTargetColumns(schema, target.value)
+			: [];
+	}
+	if (last.kind === "rparen" && n === 5) return [keyword("references")];
+	if (!toks.some(isReferences)) return [];
+	if (last.kind === "keyword" && last.value === "into") {
+		return collections(schema);
+	}
+	if (at(n - 2)?.kind === "keyword" && at(n - 2)?.value === "into") return [];
+	if (isReferences(last)) return collections(schema);
+	const table = at(n - 2);
+	if (
+		last.kind === "dot" &&
+		table?.kind === "ident" &&
+		isReferences(at(n - 3))
+	) {
+		return refTargetColumns(schema, table.value);
+	}
+	const clause = refClauseCompletions(toks, schema);
+	if (clause !== null) return clause;
+	if (last.kind === "keyword" && last.value === "as") return [];
+	return [keyword("on"), keyword("as"), keyword("into")];
 }
 
 /** Complétions pour `drop table T [if exists]` (DDL/4). */

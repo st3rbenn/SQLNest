@@ -93,6 +93,7 @@ export { DISTINCT_ON_RN_COLUMN } from "./codegen/sql-core";
 export type {
 	KvDDLAddColumnQuery,
 	KvDDLAddIndexQuery,
+	KvDDLAddRefQuery,
 	KvDDLCreateTableQuery,
 	KvDDLDropColumnQuery,
 	KvDDLDropIndexQuery,
@@ -104,6 +105,7 @@ export type {
 	MapperContext,
 	MongoDDLAddColumnQuery,
 	MongoDDLAddIndexQuery,
+	MongoDDLAddRefQuery,
 	MongoDDLCreateCollectionQuery,
 	MongoDDLDropCollectionQuery,
 	MongoDDLDropColumnQuery,
@@ -135,6 +137,7 @@ export { lowerDDL } from "./ir/lower-ddl";
 export type {
 	AddColumnPlan,
 	AddIndexPlan,
+	AddRefPlan,
 	Capability,
 	CompareOp,
 	CreateTableField,

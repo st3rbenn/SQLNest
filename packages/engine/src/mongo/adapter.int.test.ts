@@ -371,3 +371,59 @@ describe.skipIf(!hasMongo)("mongodb — mutations : corrections review", () => {
 		}
 	}, 20_000);
 });
+
+describe.skipIf(!hasMongo)("mongodb adapter — add ref (ADR-036 E/1a)", () => {
+	it("orphelins comptés et refusés, puis FK posée et appliquée aux writes", async () => {
+		const conn = await mongoAdapter.connect(loadConfig());
+		const drop = async () => {
+			await runQuery(
+				conn,
+				"drop ref fk_e1a_kid_par_id_e1a_par from e1a_kid if exists"
+			);
+			await runQuery(conn, "drop table e1a_kid if exists");
+			await runQuery(conn, "drop table e1a_par if exists");
+		};
+		try {
+			await drop();
+			await runQuery(
+				conn,
+				"create table e1a_par { id: string, primary key (id) }"
+			);
+			await runQuery(
+				conn,
+				"create table e1a_kid { id: string, par_id: string nullable, primary key (id) }"
+			);
+			await runQuery(conn, 'add { id: "p1" } into e1a_par');
+			await runQuery(conn, 'add { id: "k1", par_id: "p1" } into e1a_kid');
+			await runQuery(conn, 'add { id: "k2", par_id: "ghost" } into e1a_kid');
+			await runQuery(conn, 'add { id: "k3", par_id: "ghost" } into e1a_kid');
+			await runQuery(conn, 'add { id: "k4", par_id: null } into e1a_kid');
+
+			const add = "add ref (par_id) references e1a_par.id into e1a_kid";
+			await expect(runQuery(conn, add)).rejects.toThrow(
+				/2 docs de 'e1a_kid' ont 'par_id' sans correspondance dans e1a_par\.id \(ex\. "ghost"\).*update e1a_kid where par_id = "ghost" set par_id = null/
+			);
+
+			await runQuery(
+				conn,
+				'update e1a_kid where par_id = "ghost" set par_id = null'
+			);
+			await runQuery(conn, add);
+			const schema = await conn.introspect();
+			expect(
+				schema.refs?.find((r) => r.fromCollection === "e1a_kid")
+			).toMatchObject({
+				name: "fk_e1a_kid_par_id_e1a_par",
+				toCollection: "e1a_par",
+				toColumn: "id"
+			});
+			await expect(runQuery(conn, add)).rejects.toThrow(/existe déjà/);
+			await expect(
+				runQuery(conn, 'add { id: "k5", par_id: "ghost" } into e1a_kid')
+			).rejects.toThrow(/viole la foreign key 'fk_e1a_kid_par_id_e1a_par'/);
+		} finally {
+			await drop();
+			await conn.close();
+		}
+	}, 30_000);
+});

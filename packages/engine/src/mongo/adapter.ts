@@ -145,6 +145,31 @@ export function hydrateBson(
 	return out;
 }
 
+/**
+ * Clé de comparaison d'une valeur BSON, à la façon de `$in` : le type compte
+ * (ObjectId ≠ chaîne de même hex), les numériques se comparent par valeur
+ * (int, long, double et decimal égaux matchent).
+ */
+export function bsonMatchKey(value: unknown): string {
+	if (value instanceof ObjectId) return `o:${value.toHexString()}`;
+	if (value instanceof Date) return `d:${value.getTime()}`;
+	if (typeof value === "number" || typeof value === "bigint") {
+		return `n:${Number(value)}`;
+	}
+	if (value instanceof Long || value instanceof Decimal128) {
+		return `n:${Number(value.toString())}`;
+	}
+	const bsontype = (value as { _bsontype?: unknown } | null)?._bsontype;
+	if (bsontype === "Binary") {
+		const bin = value as { sub_type: number; toString(enc: "hex"): string };
+		return `b:${bin.sub_type}:${bin.toString("hex")}`;
+	}
+	if (bsontype === "Int32" || bsontype === "Double") {
+		return `n:${(value as { valueOf(): number }).valueOf()}`;
+	}
+	return `${typeof value}:${JSON.stringify(value)}`;
+}
+
 /** Les deux formes d'une valeur `_id` 24-hex : ObjectId + string brute. */
 function idBothForms(hex: string): unknown[] {
 	return [new ObjectId(hex), hex];
@@ -1126,6 +1151,9 @@ class MongoConnection implements Connection {
 		if (query.operation === "drop-enum") {
 			return this.#executeDDLDropEnum(query);
 		}
+		if (query.operation === "add-ref") {
+			return this.#executeDDLAddRef(query);
+		}
 		return this.#executeDDLDropRef(query);
 	}
 
@@ -1441,6 +1469,114 @@ class MongoConnection implements Connection {
 				{ cause }
 			);
 		}
+	}
+
+	/**
+	 * `add ref` Mongo (ADR-036 E/1a). PG refuse une FK posée sur des orphelins ;
+	 * ici le préflight les compte avec la règle du write-precheck FK/1b (valeur
+	 * cherchée sous `toColumn`, et sous `_id` quand la cible est `id`), puis la
+	 * FK entre dans `_snql_refs` — `insertOne` : un nom déjà pris est refusé.
+	 */
+	async #executeDDLAddRef(
+		query: Extract<NativeQuery, { kind: "mongo-ddl"; operation: "add-ref" }>
+	): Promise<ResultSet> {
+		const db = this.#requireDb();
+		const { ref } = query;
+		try {
+			const exists = await db
+				.listCollections({ name: query.collection }, { nameOnly: true })
+				.toArray();
+			if (exists.length === 0) {
+				throw new EngineExecutionError(
+					`add ref échouée : collection '${query.collection}' inexistante`
+				);
+			}
+			const unresolved = await this.#findUnresolvedRefValues(ref);
+			if (unresolved.count > 0) {
+				const sample = unresolved.sample.map((v) => JSON.stringify(normalizeBson(v))).join(", ");
+				throw new EngineExecutionError(
+					`${unresolved.count} docs de '${query.collection}' ont '${ref.fromColumn}' sans correspondance dans ${ref.toCollection}.${ref.toColumn} (ex. ${sample}) — corrige-les d'abord, par exemple : update ${query.collection} where ${ref.fromColumn} = ${JSON.stringify(normalizeBson(unresolved.sample[0]))} set ${ref.fromColumn} = null, puis relance add ref`
+				);
+			}
+			await db.collection("_snql_refs").insertOne({
+				_id: ref.name as unknown as import("mongodb").ObjectId,
+				fromCollection: ref.fromCollection,
+				fromColumn: ref.fromColumn,
+				toCollection: ref.toCollection,
+				toColumn: ref.toColumn,
+				onDelete: ref.onDelete,
+				onUpdate: ref.onUpdate
+			});
+			return { columns: [], rows: [], rowCount: 0 };
+		} catch (cause) {
+			if (cause instanceof EngineExecutionError) throw cause;
+			if ((cause as { code?: unknown } | null)?.code === 11000) {
+				throw new EngineExecutionError(
+					`add ref échouée : une foreign key '${ref.name}' existe déjà — choisis un autre nom avec 'as <nom>'`,
+					{ cause }
+				);
+			}
+			throw new EngineExecutionError(
+				`add ref MongoDB échouée sur '${ref.name}' — ${describeMongoExecutionError(cause)}`,
+				{ cause }
+			);
+		}
+	}
+
+	/**
+	 * Valeurs de `fromColumn` qui ne résolvent pas dans la cible : valeurs
+	 * distinctes par paquets de 1000, résolues en un `$in` par paquet, puis
+	 * nombre de documents concernés. Les valeurs sortent de la base, déjà en
+	 * BSON — pas d'hydratation.
+	 */
+	async #findUnresolvedRefValues(ref: {
+		readonly fromCollection: string;
+		readonly fromColumn: string;
+		readonly toCollection: string;
+		readonly toColumn: string;
+	}): Promise<{ count: number; sample: unknown[] }> {
+		const db = this.#requireDb();
+		const from = db.collection(ref.fromCollection);
+		const to = db.collection(ref.toCollection);
+		const missing: unknown[] = [];
+		let batch: unknown[] = [];
+		const resolve = async (): Promise<void> => {
+			if (batch.length === 0) return;
+			const or: Document[] = [{ [ref.toColumn]: { $in: batch } }];
+			if (ref.toColumn === "id") or.push({ _id: { $in: batch } });
+			const found = await to
+				.find({ $or: or }, { projection: { _id: 1, [ref.toColumn]: 1 } })
+				.toArray();
+			const keys = new Set<string>();
+			for (const doc of found) {
+				const row = doc as Record<string, unknown>;
+				keys.add(bsonMatchKey(row[ref.toColumn]));
+				if (ref.toColumn === "id") keys.add(bsonMatchKey(row._id));
+			}
+			for (const value of batch) {
+				if (!keys.has(bsonMatchKey(value))) missing.push(value);
+			}
+			batch = [];
+		};
+		const distinct = from.aggregate(
+			[
+				{ $match: { [ref.fromColumn]: { $exists: true, $ne: null } } },
+				{ $group: { _id: `$${ref.fromColumn}` } }
+			],
+			{ allowDiskUse: true, batchSize: 1000 }
+		);
+		for await (const group of distinct) {
+			batch.push((group as { _id: unknown })._id);
+			if (batch.length >= 1000) await resolve();
+		}
+		await resolve();
+		let count = 0;
+		for (let i = 0; i < missing.length; i += 1000) {
+			count += await from.countDocuments({
+				[ref.fromColumn]: { $in: missing.slice(i, i + 1000) }
+			});
+		}
+		return { count, sample: missing.slice(0, 3) };
 	}
 
 	/**
@@ -1785,7 +1921,7 @@ class MongoConnection implements Connection {
 				});
 				if (orphanCount > 0) {
 					throw new EngineExecutionError(
-						`${orphanCount} docs sans '${fieldName}' — exécute d'abord : update ${query.collection} set ${fieldName} = <val> where ${fieldName} is null, puis relance add column not null`
+						`${orphanCount} docs sans '${fieldName}' — exécute d'abord : update ${query.collection} where ${fieldName} is null set ${fieldName} = <val>, puis relance add column not null`
 					);
 				}
 			}

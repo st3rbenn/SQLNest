@@ -80,6 +80,24 @@ export function mapKvDDL(plan: DDLPlan): KvDDLQuery {
 	if (plan.kind === "add-enum-member") return renderKvAddEnumMember(plan);
 	if (plan.kind === "drop-enum") return renderKvDropEnum(plan);
 	if (plan.kind === "drop-ref") return renderKvDropRef(plan);
+	if (plan.kind === "add-ref") {
+		const { ref } = plan;
+		return {
+			engine: "kv",
+			kind: "kv-ddl",
+			operation: "add-ref",
+			collection: plan.target,
+			ref: {
+				name: ref.name,
+				fromCollection: plan.target,
+				fromColumn: ref.fromColumn,
+				toCollection: ref.targetCollection,
+				toColumn: ref.targetColumn,
+				onDelete: ref.onDelete,
+				onUpdate: ref.onUpdate
+			}
+		};
+	}
 	throw new SnqlError(
 		`DDL kind '${(plan as { kind: string }).kind}' non supporté par le codegen KV V1`,
 		"codegen_ddl_unsupported"

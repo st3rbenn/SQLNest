@@ -446,6 +446,20 @@ export interface MongoDDLDropRefQuery {
 	readonly ifExists: boolean;
 }
 
+/**
+ * `add ref` (ADR-036 E/1a). L'adapter compte d'abord les documents dont la
+ * valeur ne résout pas dans la cible (refus typé avec leur nombre), puis
+ * enregistre la FK dans `_snql_refs` : l'enforcement FK/1b s'applique dès le
+ * write suivant (`#loadRefs`).
+ */
+export interface MongoDDLAddRefQuery {
+	readonly engine: string;
+	readonly kind: "mongo-ddl";
+	readonly operation: "add-ref";
+	readonly collection: string;
+	readonly ref: MongoRefSpec;
+}
+
 export type MongoDDLQuery =
 	| MongoDDLCreateCollectionQuery
 	| MongoDDLAddColumnQuery
@@ -456,7 +470,8 @@ export type MongoDDLQuery =
 	| MongoDDLCreateEnumQuery
 	| MongoDDLAddEnumMemberQuery
 	| MongoDDLDropEnumQuery
-	| MongoDDLDropRefQuery;
+	| MongoDDLDropRefQuery
+	| MongoDDLAddRefQuery;
 
 /**
  * DDL Tier-2 sur KV (ADR-029). Entièrement compensé — KV est schema-less,
@@ -672,6 +687,19 @@ export interface KvDDLDropRefQuery {
 	readonly name: string;
 }
 
+/**
+ * `add ref` sur KV (ADR-036 E/1a). Compensation : préflight des orphelins
+ * (`SCAN` + `EXISTS` sur la cible), puis snapshot `ref` posé sur le descriptor
+ * de la colonne dans `namespace:_schema:{collection}`.
+ */
+export interface KvDDLAddRefQuery {
+	readonly engine: string;
+	readonly kind: "kv-ddl";
+	readonly operation: "add-ref";
+	readonly collection: string;
+	readonly ref: MongoRefSpec;
+}
+
 export type KvDDLQuery =
 	| KvDDLCreateTableQuery
 	| KvDDLAddColumnQuery
@@ -682,7 +710,8 @@ export type KvDDLQuery =
 	| KvDDLCreateEnumQuery
 	| KvDDLAddEnumMemberQuery
 	| KvDDLDropEnumQuery
-	| KvDDLDropRefQuery;
+	| KvDDLDropRefQuery
+	| KvDDLAddRefQuery;
 
 /**
  * native shape pour un `raw {...}` Mongo — command native

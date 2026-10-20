@@ -278,6 +278,7 @@ export const postgresMapper: Mapper = {
 		if (plan.kind === "add-enum-member") return renderAddEnumMember(plan);
 		if (plan.kind === "drop-enum") return renderDropEnum(plan);
 		if (plan.kind === "drop-ref") return renderDropRef(plan);
+		if (plan.kind === "add-ref") return renderAddRef(plan);
 		throw new SnqlError(
 			`DDL kind '${(plan as { kind: string }).kind}' non supporté par le codegen Postgres V1`,
 			"codegen_ddl_unsupported"
@@ -782,6 +783,25 @@ function renderDropIndex(plan: DropIndexPlan): NativeQuery {
  * dépendants. Le frontend applique D7 typing UI gate avant Execute (retirer
  * une FK relâche silencieusement l'intégrité référentielle).
  */
+/** `add ref` → contrainte de table : PG valide les lignes existantes et
+ *  refuse les orphelins (23503) dans le même statement. */
+function renderAddRef(plan: import("../ir/plan").AddRefPlan): NativeQuery {
+	const { ref } = plan;
+	const text =
+		`ALTER TABLE ${quoteIdent(plan.target)} ADD CONSTRAINT ${quoteIdent(ref.name)} ` +
+		`FOREIGN KEY (${quoteIdent(ref.fromColumn)}) REFERENCES ` +
+		`${quoteIdent(ref.targetCollection)} (${quoteIdent(ref.targetColumn)}) ` +
+		`ON DELETE ${PG_REF_ACTION[ref.onDelete]} ` +
+		`ON UPDATE ${PG_REF_ACTION[ref.onUpdate]}`;
+	return {
+		engine: "postgres",
+		kind: "sql",
+		text,
+		params: [],
+		paramSpans: []
+	};
+}
+
 function renderDropRef(plan: DropRefPlan): NativeQuery {
 	const ifExists = plan.ifExists ? "IF EXISTS " : "";
 	const text = `ALTER TABLE ${quoteIdent(plan.target)} DROP CONSTRAINT ${ifExists}${quoteIdent(plan.name)}`;

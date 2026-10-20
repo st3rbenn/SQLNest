@@ -777,6 +777,34 @@ describe("DDL/4 E2E — drop table / drop column cross-engine (ADR-029)", () => 
 	});
 });
 
+describe("E/1a E2E — add ref cross-engine (ADR-036)", () => {
+	const source =
+		"add ref (user_id) references users.id on delete cascade into orders";
+
+	it("PG : ALTER TABLE ADD CONSTRAINT natif", () => {
+		const q = pg(source);
+		if (q.kind !== "sql") throw new Error("attendu sql");
+		expect(q.text).toBe(
+			`ALTER TABLE "orders" ADD CONSTRAINT "fk_orders_user_id_users" FOREIGN KEY ("user_id") REFERENCES "users" ("id") ON DELETE CASCADE ON UPDATE RESTRICT`
+		);
+	});
+
+	it("Mongo : add-ref (préflight orphelins + _snql_refs)", () => {
+		if (mongoMapper.mapDDL === undefined) throw new Error("mapDDL manquant");
+		const q = mongoMapper.mapDDL(lowerDDL(parse(tokenize(source)) as DDLStatement));
+		expect(q).toMatchObject({
+			operation: "add-ref",
+			collection: "orders",
+			ref: { name: "fk_orders_user_id_users", fromColumn: "user_id", onDelete: "cascade" }
+		});
+	});
+
+	it("KV : add-ref", () => {
+		const q = mapKvDDL(lowerDDL(parse(tokenize(source)) as DDLStatement));
+		expect(q).toMatchObject({ operation: "add-ref", collection: "orders" });
+	});
+});
+
 describe("FK/3 E2E — drop ref cross-engine (ADR-031)", () => {
 	const source = "drop ref fk_orders_user_id_users from orders";
 

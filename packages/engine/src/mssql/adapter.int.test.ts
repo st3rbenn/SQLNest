@@ -649,6 +649,36 @@ describe.skipIf(!hasMssql)("mssql DDL Tier-2 (intégration M/6)", () => {
 		});
 	});
 
+	it("add ref sur une colonne existante : orphelin refusé, puis contrainte posée", async () => {
+		await withConn(async (conn) => {
+			await runQuery(conn, `raw "DROP TABLE IF EXISTS e1a_orders"`);
+			try {
+				await runQuery(
+					conn,
+					`create table e1a_orders { id: int, artist_ref: int nullable, primary key (id) }`
+				);
+				await runQuery(conn, `add { id: 1, artist_ref: 999999 } into e1a_orders`);
+				const add = `add ref (artist_ref) references artist.artist_id into e1a_orders`;
+				await expect(runQuery(conn, add)).rejects.toThrow();
+
+				await runQuery(conn, `update e1a_orders where id = 1 set artist_ref = null`);
+				await runQuery(conn, add);
+				const schema = await conn.introspect();
+				expect(schema.refs?.find((r) => r.fromCollection === "e1a_orders")).toMatchObject({
+					name: "fk_e1a_orders_artist_ref_artist",
+					fromColumn: "artist_ref",
+					toCollection: "artist",
+					toColumn: "artist_id"
+				});
+				await expect(
+					runQuery(conn, `add { id: 2, artist_ref: 999999 } into e1a_orders`)
+				).rejects.toThrow();
+			} finally {
+				await runQuery(conn, `raw "DROP TABLE IF EXISTS e1a_orders"`);
+			}
+		});
+	});
+
 	it("create table if not exists ×2 → idempotent (sp_getapplock + guard)", async () => {
 		await withConn(async (conn) => {
 			await runQuery(conn, `raw "DROP TABLE IF EXISTS m6_idem"`);

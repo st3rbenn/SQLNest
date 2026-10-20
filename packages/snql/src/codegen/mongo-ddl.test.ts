@@ -803,6 +803,40 @@ describe("codegen Mongo — ref FK modifier (ADR-031 FK/1a)", () => {
 	});
 });
 
+describe("codegen Mongo — add ref (ADR-036 E/1a)", () => {
+	it("émet le shape add-ref (préflight orphelins + _snql_refs côté adapter)", () => {
+		if (mongoMapper.mapDDL === undefined) throw new Error("mapDDL manquant");
+		const q = mongoMapper.mapDDL({
+			op: "ddl",
+			kind: "add-ref",
+			target: "orders",
+			ref: {
+				name: "fk_orders_user_id_users",
+				fromColumn: "user_id",
+				targetCollection: "users",
+				targetColumn: "id",
+				onDelete: "cascade",
+				onUpdate: "restrict"
+			}
+		});
+		expect(q).toEqual({
+			engine: "mongodb",
+			kind: "mongo-ddl",
+			operation: "add-ref",
+			collection: "orders",
+			ref: {
+				name: "fk_orders_user_id_users",
+				fromCollection: "orders",
+				fromColumn: "user_id",
+				toCollection: "users",
+				toColumn: "id",
+				onDelete: "cascade",
+				onUpdate: "restrict"
+			}
+		});
+	});
+});
+
 describe("codegen Mongo — drop ref (ADR-031 FK/3)", () => {
 	it("émet le shape drop-ref (deleteOne _snql_refs par _id=name côté adapter)", () => {
 		if (mongoMapper.mapDDL === undefined) throw new Error("mapDDL manquant");

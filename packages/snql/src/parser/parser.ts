@@ -6,6 +6,7 @@ import type {
 	AddColumnStmt,
 	AddEnumMemberStmt,
 	AddIndexStmt,
+	AddRefStmt,
 	Assignment,
 	CreateEnumStmt,
 	CreateTableStmt,
@@ -154,6 +155,15 @@ function parseStatement(cursor: TokenCursor): Statement {
 		peekIdent(cursor, "column", 1)
 	) {
 		return parseAddColumn(cursor);
+	}
+	// E/1a : `add ref (<col>) references <t>.<c> … into <table>`. `ref` reste
+	// soft-ident (préserve `add {ref: 1} into t`, où `{` suit `add`).
+	if (
+		first.kind === "verb" &&
+		first.value.toLowerCase() === "add" &&
+		peekIdent(cursor, "ref", 1)
+	) {
+		return parseAddRef(cursor);
 	}
 	// Enum/3 : `add enum member <Name> "m" [if not exists]`. Dispatch avant
 	// `add column`/`add index` — `enum` + `member` sont soft-idents. Peek 2
@@ -1979,15 +1989,18 @@ function parseCreateTableField(cursor: TokenCursor): DDLFieldDef {
  * `collection.column`, puis les clauses optionnelles `on delete/update`
  * (rule ∈ cascade|restrict|set null) dans n'importe quel ordre, puis `as`.
  */
-function parseFieldRefModifier(cursor: TokenCursor): FieldRefModifier {
-	const refTok = cursor.next(); // `ref` soft-ident
+function parseFieldRefModifier(
+	cursor: TokenCursor,
+	keyword: "ref" | "references" = "ref"
+): FieldRefModifier {
+	const refTok = cursor.next(); // `ref` / `references` soft-ident
 	const targetTok = cursor.expect(
 		"ident",
-		"une collection cible après 'ref' (ex. ref users.id)"
+		`une collection cible après '${keyword}' (ex. ${keyword} users.id)`
 	);
 	if (cursor.peek().kind !== "dot") {
 		throw new SnqlError(
-			"'ref' attend '<collection>.<colonne>' (ex. ref users.id)",
+			`'${keyword}' attend '<collection>.<colonne>' (ex. ${keyword} users.id)`,
 			"parse_ddl_ref_missing_dot",
 			cursor.peek().span
 		);
@@ -1995,7 +2008,7 @@ function parseFieldRefModifier(cursor: TokenCursor): FieldRefModifier {
 	cursor.next(); // dot
 	const colTok = cursor.expect(
 		"ident",
-		"une colonne cible après '.' (ex. ref users.id)"
+		`une colonne cible après '.' (ex. ${keyword} users.id)`
 	);
 
 	let onDelete: FieldRefRule | undefined;
@@ -2417,6 +2430,57 @@ function parseDropIndex(cursor: TokenCursor): DropIndexStmt {
 		name: nameTok.value,
 		...(ifExists ? { ifExists } : {}),
 		span: { start: dropTok.span.start, end: targetTok.span.end }
+	};
+}
+
+/**
+ * `add ref (<col>) references <t>.<c> [on delete <rule>] [on update <rule>]
+ * [as <name>] into <table>` (ADR-031 corpus, ADR-036 E/1a). Une seule colonne :
+ * les FK composites restent hors scope (ADR-031 Q#5).
+ */
+function parseAddRef(cursor: TokenCursor): AddRefStmt {
+	const addTok = cursor.next(); // `add` verb
+	cursor.next(); // `ref` soft-ident (déjà peeked au dispatch)
+
+	cursor.expect("lparen", "'(' avant la colonne de la foreign key");
+	const colTok = cursor.expect("ident", "la colonne qui porte la foreign key");
+	if (cursor.peek().kind === "comma") {
+		throw new SnqlError(
+			"'add ref' prend une seule colonne (foreign key composite non supportée)",
+			"parse_ddl_add_ref_composite",
+			cursor.peek().span
+		);
+	}
+	cursor.expect("rparen", "')' après la colonne de la foreign key");
+
+	if (!peekIdent(cursor, "references")) {
+		throw new SnqlError(
+			"'add ref (<col>)' attend 'references <table>.<colonne>'",
+			"parse_ddl_add_ref_missing_references",
+			cursor.peek().span
+		);
+	}
+	const ref = parseFieldRefModifier(cursor, "references");
+
+	// Préposition unifiée `into <table>` (D6 ADR-029, aligné add column).
+	if (!peekKeyword(cursor, "into")) {
+		throw new SnqlError(
+			"'add ref' attend 'into <table>' pour cibler la table porteuse",
+			"parse_ddl_add_ref_missing_into",
+			cursor.peek().span
+		);
+	}
+	cursor.next();
+	const targetTok = cursor.expect("ident", "un nom de table après 'into'");
+
+	return {
+		operation: "ddl",
+		kind: "add-ref",
+		target: targetTok.value,
+		column: colTok.value,
+		columnSpan: colTok.span,
+		ref,
+		span: { start: addTok.span.start, end: targetTok.span.end }
 	};
 }
 

@@ -711,6 +711,127 @@ describe("lower DDL — drop ref (ADR-031 FK/3)", () => {
 	});
 });
 
+describe("lower DDL — add ref (ADR-036 E/1a)", () => {
+	const schema: import("../schema/model").SchemaModel = {
+		engine: "postgres",
+		collections: [
+			{
+				name: "users",
+				source: "declared",
+				primaryKey: ["id"],
+				fields: [
+					{ name: "id", type: "uuid", nullable: false, source: "declared" },
+					{ name: "email", type: "string", nullable: false, source: "declared" }
+				]
+			},
+			{
+				name: "orders",
+				source: "declared",
+				primaryKey: ["id"],
+				fields: [
+					{ name: "id", type: "uuid", nullable: false, source: "declared" },
+					{ name: "user_id", type: "uuid", nullable: false, source: "declared" },
+					{ name: "owner_id", type: "uuid", nullable: true, source: "declared" },
+					{ name: "label", type: "string", nullable: true, source: "declared" }
+				]
+			}
+		],
+		relations: [],
+		refs: [
+			{
+				name: "fk_orders_owner_id_users",
+				fromCollection: "orders",
+				fromColumn: "owner_id",
+				toCollection: "users",
+				toColumn: "id",
+				onDelete: "restrict",
+				onUpdate: "restrict",
+				source: "declared"
+			}
+		]
+	};
+
+	function lowerAddRef(
+		source: string,
+		withSchema: import("../schema/model").SchemaModel | undefined = schema
+	): DDLPlan {
+		const plan = lowerDDL(parse(tokenize(source)) as DDLStatement, withSchema);
+		if (plan.kind !== "add-ref") {
+			throw new Error(`expected add-ref plan, got ${plan.kind}`);
+		}
+		return plan;
+	}
+
+	it("résout la FK sur une colonne existante, nom auto + défauts restrict", () => {
+		expect(lowerAddRef("add ref (user_id) references users.id into orders")).toEqual({
+			op: "ddl",
+			kind: "add-ref",
+			target: "orders",
+			ref: {
+				name: "fk_orders_user_id_users",
+				fromColumn: "user_id",
+				targetCollection: "users",
+				targetColumn: "id",
+				onDelete: "restrict",
+				onUpdate: "restrict"
+			},
+			span: expect.anything()
+		});
+	});
+
+	it("propage règles et nom explicite", () => {
+		expect(
+			lowerAddRef(
+				"add ref (user_id) references users.id on delete cascade as fk_buyer into orders"
+			)
+		).toMatchObject({ ref: { name: "fk_buyer", onDelete: "cascade" } });
+	});
+
+	it("refuse une table inconnue", () => {
+		expect(() => lowerAddRef("add ref (user_id) references users.id into ghosts")).toThrow(
+			/table 'ghosts' inconnue/
+		);
+	});
+
+	it("refuse une colonne absente et pointe vers add column … ref", () => {
+		expect(() => lowerAddRef("add ref (buyer_id) references users.id into orders")).toThrow(
+			/add column buyer_id <type> ref users.id into orders/
+		);
+	});
+
+	it("refuse set null sur une colonne NOT NULL", () => {
+		expect(() =>
+			lowerAddRef("add ref (user_id) references users.id on delete set null into orders")
+		).toThrow(/exige que 'user_id' soit nullable/);
+	});
+
+	it("accepte set null sur une colonne nullable", () => {
+		expect(
+			lowerAddRef(
+				"add ref (owner_id) references users.id on delete set null as fk_owner_null into orders"
+			)
+		).toMatchObject({ ref: { onDelete: "set-null" } });
+	});
+
+	it("refuse un type incompatible", () => {
+		expect(() => lowerAddRef("add ref (label) references users.id into orders")).toThrow(
+			/incompatible/
+		);
+	});
+
+	it("refuse un nom de contrainte déjà pris", () => {
+		expect(() =>
+			lowerAddRef("add ref (user_id) references users.id as fk_orders_owner_id_users into orders")
+		).toThrow(/déjà pris par la foreign key orders.owner_id → users.id/);
+	});
+
+	it("sans schéma, ne vérifie que les identifiants", () => {
+		expect(
+			lowerAddRef("add ref (user_id) references users.id into orders", undefined)
+		).toMatchObject({ ref: { name: "fk_orders_user_id_users" } });
+	});
+});
+
 describe("lower DDL — ref modifier FK (ADR-031 FK/1)", () => {
 	const schemaWithUsers: import("../schema/model").SchemaModel = {
 		engine: "postgres",

@@ -98,6 +98,47 @@ describe("reverse-nav autocomplete (ADR-031 D7, FK/2b)", () => {
 	});
 });
 
+describe("add ref autocomplete (ADR-036 E/1a)", () => {
+	it("`add ` propose `ref`", () => {
+		expect(labels("add ")).toContain("ref");
+	});
+
+	it("`add ref (user_id) ` propose `references`", () => {
+		expect(labels("add ref (user_id) ")).toEqual(["references"]);
+	});
+
+	it("`references ` propose les tables, `references users.` leurs colonnes", () => {
+		expect(labels("add ref (user_id) references ")).toContain("users");
+		expect(labels("add ref (user_id) references users.")).toContain("email");
+	});
+
+	it("après la cible : `on`, `as`, `into`", () => {
+		expect(labels("add ref (user_id) references users.id ")).toEqual(["on", "as", "into"]);
+	});
+
+	it("`on delete ` propose les règles", () => {
+		expect(labels("add ref (user_id) references users.id on delete ")).toEqual([
+			"cascade",
+			"restrict",
+			"set null"
+		]);
+	});
+
+	it("`into ` propose les tables", () => {
+		expect(labels("add ref (user_id) references users.id into ")).toContain("orders");
+	});
+
+	it("`add ref (|` propose les colonnes de la table déjà écrite après `into`", () => {
+		const src = "add ref () references users.id into orders";
+		const opts = completeSnql(src, src.indexOf("(") + 1, SCHEMA).options.map((o) => o.label);
+		expect(opts).toContain("user_id");
+	});
+
+	it("`ref users.` d'un add column propose les colonnes de users", () => {
+		expect(labels("add column buyer_id bigint ref users.")).toContain("email");
+	});
+});
+
 describe("drop ref autocomplete (ADR-031 FK/3)", () => {
 	it("`drop ` propose `ref` parmi les cibles drop", () => {
 		expect(labels("drop ")).toContain("ref");

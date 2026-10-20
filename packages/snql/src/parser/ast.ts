@@ -570,7 +570,8 @@ export type DDLKind =
 	| "create-enum"
 	| "add-enum-member"
 	| "drop-enum"
-	| "drop-ref";
+	| "drop-ref"
+	| "add-ref";
 
 /**
  * Un type de field dans un body `create table` ou dans `add column`. Soit un
@@ -782,6 +783,21 @@ export interface DropRefStmt {
 }
 
 /**
+ * `add ref (<col>) references <t>.<c> [on delete <rule>] [on update <rule>]
+ * [as <name>] into <table>` (ADR-031 corpus, ADR-036 E/1a). Pose une FK sur
+ * une colonne existante — `add column … ref` couvre la colonne neuve.
+ */
+export interface AddRefStmt {
+	readonly operation: "ddl";
+	readonly kind: "add-ref";
+	readonly target: string;
+	readonly column: string;
+	readonly columnSpan: Span;
+	readonly ref: FieldRefModifier;
+	readonly span: Span;
+}
+
+/**
  * Union des statements DDL. Corpus Tier-2 (create-table/add-column/[add-|
  * drop-]index/drop-table/drop-column) + Enum Tier-3+ (create-enum/
  * add-enum-member/drop-enum) + Relations FK/3 (drop-ref).
@@ -796,7 +812,8 @@ export type DDLStatement =
 	| CreateEnumStmt
 	| AddEnumMemberStmt
 	| DropEnumStmt
-	| DropRefStmt;
+	| DropRefStmt
+	| AddRefStmt;
 
 /** Racine de l'AST : lecture (`Query`), mutation, transaction, introspection, raw, let/CTE ou DDL Tier-2. */
 export type Statement =

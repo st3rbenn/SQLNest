@@ -1,5 +1,6 @@
+import { Binary, Decimal128, Double, Int32, Long, ObjectId } from "mongodb";
 import { describe, expect, it } from "vitest";
-import { extractSetFields, uniqueDefined } from "./adapter";
+import { bsonMatchKey, extractSetFields, uniqueDefined } from "./adapter";
 
 describe("extractSetFields (ADR-031 FK/1b write-precheck)", () => {
 	it("lit $set classique", () => {
@@ -35,5 +36,39 @@ describe("uniqueDefined (ADR-031 FK/1b cascade keys)", () => {
 
 	it("liste vide", () => {
 		expect(uniqueDefined([])).toEqual([]);
+	});
+});
+
+describe("bsonMatchKey (ADR-036 E/1a préflight add ref)", () => {
+	const hex = "507f1f77bcf86cd799439011";
+
+	it("ObjectId et chaîne de même hex ne se confondent pas (comme $in)", () => {
+		expect(bsonMatchKey(new ObjectId(hex))).not.toBe(bsonMatchKey(hex));
+		expect(bsonMatchKey(new ObjectId(hex))).toBe(
+			bsonMatchKey(new ObjectId(hex))
+		);
+	});
+
+	it("les numériques égaux matchent quel que soit leur type BSON", () => {
+		const keys = [
+			3,
+			new Int32(3),
+			new Long(3),
+			new Double(3),
+			Decimal128.fromString("3")
+		].map(bsonMatchKey);
+		expect(new Set(keys).size).toBe(1);
+	});
+
+	it("un uuid binaire se compare par sous-type et contenu", () => {
+		const a = new Binary(Buffer.from("0123456789abcdef"), 4);
+		const b = new Binary(Buffer.from("0123456789abcdef"), 4);
+		const c = new Binary(Buffer.from("0123456789abcdef"), 0);
+		expect(bsonMatchKey(a)).toBe(bsonMatchKey(b));
+		expect(bsonMatchKey(a)).not.toBe(bsonMatchKey(c));
+	});
+
+	it("chaîne et nombre de même texte restent distincts", () => {
+		expect(bsonMatchKey("3")).not.toBe(bsonMatchKey(3));
 	});
 });

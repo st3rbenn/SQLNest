@@ -747,6 +747,20 @@ export interface DropRefPlan {
 }
 
 /**
+ * `add ref (<col>) references <t>.<c> … into <table>` résolu (ADR-036 E/1a).
+ * Le lower a validé la colonne portante, la cible, la compatibilité de type
+ * et l'unicité du nom. PG / MSSQL `ALTER TABLE ADD CONSTRAINT` natif (le moteur
+ * refuse les orphelins) ; Mongo préflight des orphelins puis `_snql_refs`.
+ */
+export interface AddRefPlan {
+	readonly op: "ddl";
+	readonly kind: "add-ref";
+	readonly target: string;
+	readonly ref: FieldRefPlan;
+	readonly span?: Span;
+}
+
+/**
  * Union des plans DDL. Corpus Tier-2 (create-table/add-column/[add-|drop-]
  * index/drop-table/drop-column) + Enum Tier-3+ (create-enum/add-enum-member/
  * drop-enum) + Relations FK/3 (drop-ref).
@@ -761,7 +775,8 @@ export type DDLPlan =
 	| CreateEnumPlan
 	| AddEnumMemberPlan
 	| DropEnumPlan
-	| DropRefPlan;
+	| DropRefPlan
+	| AddRefPlan;
 
 /** Un plan complet : lecture, mutation, transaction, introspect, raw, let/CTE ou DDL Tier-2. */
 export type Plan =

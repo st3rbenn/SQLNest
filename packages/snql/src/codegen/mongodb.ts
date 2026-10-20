@@ -220,6 +220,15 @@ export const mongoMapper: Mapper = {
 		if (plan.kind === "add-enum-member") return renderMongoAddEnumMember(plan);
 		if (plan.kind === "drop-enum") return renderMongoDropEnum(plan);
 		if (plan.kind === "drop-ref") return renderMongoDropRef(plan);
+		if (plan.kind === "add-ref") {
+			return {
+				engine: "mongodb",
+				kind: "mongo-ddl",
+				operation: "add-ref",
+				collection: plan.target,
+				ref: mongoRefSpec(plan.ref, plan.target)
+			};
+		}
 		throw new SnqlError(
 			`DDL kind '${(plan as { kind: string }).kind}' non supporté par le codegen Mongo V1`,
 			"codegen_ddl_unsupported"

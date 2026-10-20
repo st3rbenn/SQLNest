@@ -374,6 +374,7 @@ export const mssqlMapper: Mapper = {
 		if (plan.kind === "add-enum-member") return renderAddEnumMember(plan, namespace);
 		if (plan.kind === "drop-enum") return renderDropEnum(plan, namespace);
 		if (plan.kind === "drop-ref") return renderDropRef(plan);
+		if (plan.kind === "add-ref") return renderAddRef(plan);
 		throw new SnqlError(
 			`DDL kind '${(plan as { kind: string }).kind}' non supporté par le codegen MSSQL M/6`,
 			"codegen_ddl_unsupported"
@@ -1049,6 +1050,19 @@ function renderDropColumn(
 	const table = nstr(`${quoteIdent(namespace)}.${quoteIdent(plan.target)}`);
 	return ddlQuery(
 		`IF COL_LENGTH(${table}, ${nstr(plan.column)}) IS NOT NULL ${dropText}`
+	);
+}
+
+/** `add ref` → contrainte de table. `WITH CHECK` : les lignes existantes
+ *  sont vérifiées (orphelins refusés) et la contrainte est approuvée. */
+function renderAddRef(plan: import("../ir/plan").AddRefPlan): NativeQuery {
+	const { ref } = plan;
+	return ddlQuery(
+		`ALTER TABLE ${quoteIdent(plan.target)} WITH CHECK ADD CONSTRAINT ${quoteIdent(ref.name)} ` +
+			`FOREIGN KEY (${quoteIdent(ref.fromColumn)}) REFERENCES ` +
+			`${quoteIdent(ref.targetCollection)} (${quoteIdent(ref.targetColumn)}) ` +
+			`ON DELETE ${MSSQL_REF_ACTION[ref.onDelete]} ` +
+			`ON UPDATE ${MSSQL_REF_ACTION[ref.onUpdate]}`
 	);
 }
 

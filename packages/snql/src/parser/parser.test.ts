@@ -570,6 +570,54 @@ describe("drop ref DDL (ADR-031 FK/3)", () => {
 	});
 });
 
+// ─── E/1a — add ref autonome (ADR-036) ─────────────────────────────────
+describe("add ref DDL (ADR-036 E/1a)", () => {
+	it("parse add ref minimal", () => {
+		expect(stmt("add ref (user_id) references users.id into orders")).toMatchObject({
+			operation: "ddl",
+			kind: "add-ref",
+			target: "orders",
+			column: "user_id",
+			ref: { targetCollection: "users", targetColumn: "id" }
+		});
+	});
+
+	it("parse règles et nom de contrainte", () => {
+		expect(
+			stmt(
+				"add ref (user_id) references users.id on delete set null on update cascade as fk_owner into orders"
+			)
+		).toMatchObject({
+			kind: "add-ref",
+			ref: { onDelete: "set-null", onUpdate: "cascade", name: "fk_owner" }
+		});
+	});
+
+	it("refuse une FK composite", () => {
+		expect(() => stmt("add ref (a, b) references users.id into orders")).toThrow(
+			/une seule colonne/
+		);
+	});
+
+	it("refuse add ref sans 'references'", () => {
+		expect(() => stmt("add ref (user_id) users.id into orders")).toThrow(
+			/'references <table>.<colonne>'/
+		);
+	});
+
+	it("refuse add ref sans 'into'", () => {
+		expect(() => stmt("add ref (user_id) references users.id orders")).toThrow(
+			/'into <table>'/
+		);
+	});
+
+	it("refuse une cible sans point", () => {
+		expect(() => stmt("add ref (user_id) references users into orders")).toThrow(
+			/'references' attend '<collection>.<colonne>'/
+		);
+	});
+});
+
 // ─── DDL/4 — drop table / drop column (ADR-029) ────────────────────────
 describe("drop table / drop column DDL (ADR-029 DDL/4)", () => {
 	it("parse drop table minimal", () => {

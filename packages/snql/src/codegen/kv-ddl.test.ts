@@ -698,6 +698,35 @@ describe("codegen KV — ref FK modifier (ADR-031 FK/1a)", () => {
 	});
 });
 
+describe("codegen KV — add ref (ADR-036 E/1a)", () => {
+	it("émet le shape add-ref", () => {
+		const q = mapKvDDL({
+			op: "ddl",
+			kind: "add-ref",
+			target: "orders",
+			ref: {
+				name: "fk_orders_user_id_users",
+				fromColumn: "user_id",
+				targetCollection: "users",
+				targetColumn: "id",
+				onDelete: "cascade",
+				onUpdate: "restrict"
+			}
+		});
+		expect(q).toMatchObject({
+			engine: "kv",
+			kind: "kv-ddl",
+			operation: "add-ref",
+			collection: "orders",
+			ref: {
+				name: "fk_orders_user_id_users",
+				toCollection: "users",
+				toColumn: "id"
+			}
+		});
+	});
+});
+
 describe("codegen KV — drop ref (ADR-031 FK/3)", () => {
 	it("émet le shape drop-ref (retrait snapshot ref du descriptor, wiring V-next)", () => {
 		const q = mapKvDDL({

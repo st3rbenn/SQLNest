@@ -632,6 +632,29 @@ describe("codegen PG — ref FK modifier (ADR-031 FK/1)", () => {
 	});
 });
 
+describe("codegen PG — add ref (ADR-036 E/1a)", () => {
+	it("émet ALTER TABLE ADD CONSTRAINT FOREIGN KEY", () => {
+		const q = mapDDL({
+			op: "ddl",
+			kind: "add-ref",
+			target: "orders",
+			ref: {
+				name: "fk_orders_user_id_users",
+				fromColumn: "user_id",
+				targetCollection: "users",
+				targetColumn: "id",
+				onDelete: "cascade",
+				onUpdate: "restrict"
+			}
+		});
+		if (q.kind !== "sql") throw new Error("attendu sql");
+		expect(q.text).toBe(
+			`ALTER TABLE "orders" ADD CONSTRAINT "fk_orders_user_id_users" FOREIGN KEY ("user_id") REFERENCES "users" ("id") ON DELETE CASCADE ON UPDATE RESTRICT`
+		);
+		expect(q.params).toEqual([]);
+	});
+});
+
 describe("codegen PG — drop ref (ADR-031 FK/3)", () => {
 	it("émet ALTER TABLE DROP CONSTRAINT", () => {
 		const q = mapDDL({

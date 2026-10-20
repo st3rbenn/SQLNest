@@ -10,6 +10,7 @@ import type {
 	AddColumnStmt,
 	AddEnumMemberStmt,
 	AddIndexStmt,
+	AddRefStmt,
 	CreateEnumStmt,
 	CreateTableStmt,
 	DDLStatement,
@@ -25,6 +26,7 @@ import type {
 	AddColumnPlan,
 	AddEnumMemberPlan,
 	AddIndexPlan,
+	AddRefPlan,
 	CreateEnumPlan,
 	CreateTableField,
 	CreateTablePlan,
@@ -80,6 +82,9 @@ export function lowerDDL(
 	}
 	if (statement.kind === "drop-ref") {
 		return lowerDropRef(statement, schema);
+	}
+	if (statement.kind === "add-ref") {
+		return lowerAddRef(statement, schema);
 	}
 	throw new SnqlError(
 		`DDL kind '${(statement as { kind: string }).kind}' non supporté au lower`,
@@ -481,6 +486,66 @@ function generateRefName(
  *  - `on delete set null` exige que la colonne portante soit nullable.
  *  - Défaut D2 : `restrict` sur delete ET update.
  */
+/**
+ * `add ref` (ADR-036 E/1a) : la colonne portante existe déjà — son type et sa
+ * nullabilité viennent du schéma. Le nom de contrainte doit être libre dans
+ * tout le schéma : Mongo indexe `_snql_refs` par nom. Sans schéma, seuls les
+ * identifiants sont vérifiés (le moteur tranche).
+ */
+function lowerAddRef(stmt: AddRefStmt, schema?: SchemaModel): AddRefPlan {
+	assertIdent(stmt.target, "target");
+	assertIdent(stmt.column, "field");
+	let fromType: SnqlType = "unknown";
+	let fromNullable = true;
+	if (schema !== undefined) {
+		const table = schema.collections.find((c) => c.name === stmt.target);
+		if (table === undefined) {
+			const available =
+				schema.collections.map((c) => c.name).join(", ") || "(aucune)";
+			throw new SnqlError(
+				`'add ref' : table '${stmt.target}' inconnue — tables : ${available}`,
+				"lower_ddl_add_ref_unknown_table",
+				stmt.span
+			);
+		}
+		const field = table.fields.find((f) => f.name === stmt.column);
+		if (field === undefined) {
+			const available = table.fields.map((f) => f.name).join(", ") || "(aucune)";
+			throw new SnqlError(
+				`'add ref' : colonne '${stmt.column}' inconnue dans '${stmt.target}' — colonnes : ${available}. Pour une colonne neuve : add column ${stmt.column} <type> ref ${stmt.ref.targetCollection}.${stmt.ref.targetColumn} into ${stmt.target}`,
+				"lower_ddl_add_ref_unknown_column",
+				stmt.columnSpan
+			);
+		}
+		fromType = field.type;
+		fromNullable = field.nullable;
+	}
+	const ref = resolveFieldRef(
+		stmt.ref,
+		stmt.target,
+		stmt.column,
+		fromType,
+		fromNullable,
+		schema,
+		schema?.collections.find((c) => c.name === stmt.target)?.fields ?? []
+	);
+	const taken = schema?.refs?.find((r) => r.name === ref.name);
+	if (taken !== undefined) {
+		throw new SnqlError(
+			`'add ref' : le nom '${ref.name}' est déjà pris par la foreign key ${taken.fromCollection}.${taken.fromColumn} → ${taken.toCollection}.${taken.toColumn} — choisis-en un autre avec 'as <nom>'`,
+			"lower_ddl_add_ref_name_taken",
+			stmt.ref.span
+		);
+	}
+	return {
+		op: "ddl",
+		kind: "add-ref",
+		target: stmt.target,
+		ref,
+		...(stmt.span !== undefined ? { span: stmt.span } : {})
+	};
+}
+
 function resolveFieldRef(
 	mod: import("../parser/ast").FieldRefModifier,
 	fromCollection: string,
