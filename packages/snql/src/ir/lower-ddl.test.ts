@@ -711,6 +711,88 @@ describe("lower DDL — drop ref (ADR-031 FK/3)", () => {
 	});
 });
 
+describe("lower DDL — alter column (ADR-036 E/1c)", () => {
+	const schema: import("../schema/model").SchemaModel = {
+		engine: "postgres",
+		collections: [
+			{
+				name: "agency",
+				source: "declared",
+				fields: [
+					{ name: "id", type: "uuid", nullable: false, source: "declared" },
+					{ name: "zip", type: "string", nullable: true, source: "declared", hasDefault: true }
+				]
+			},
+			{
+				name: "booking",
+				source: "declared",
+				fields: [{ name: "agency_id", type: "uuid", nullable: true, source: "declared" }]
+			}
+		],
+		relations: [],
+		enums: [{ name: "TIER", members: ["standard", "premium"] }],
+		refs: [
+			{
+				name: "booking_agency_id_fkey",
+				fromCollection: "booking",
+				fromColumn: "agency_id",
+				toCollection: "agency",
+				toColumn: "id",
+				onDelete: "set-null",
+				onUpdate: "cascade",
+				source: "declared"
+			}
+		]
+	};
+
+	function lowerAlter(
+		source: string,
+		withSchema: import("../schema/model").SchemaModel | null = schema
+	): DDLPlan {
+		return lowerDDL(parse(tokenize(source)) as DDLStatement, withSchema ?? undefined);
+	}
+
+	it("porte l'état courant de la colonne (défaut compris)", () => {
+		expect(lowerAlter("alter column agency.zip set not null")).toMatchObject({
+			kind: "alter-column",
+			action: { kind: "set-not-null" },
+			current: { type: "string", nullable: true, hasDefault: true }
+		});
+	});
+
+	it("résout un type enum", () => {
+		expect(lowerAlter("alter column agency.zip set type TIER")).toMatchObject({
+			action: {
+				kind: "set-type",
+				type: "enum",
+				enumTypeName: "TIER",
+				enumMembers: ["standard", "premium"]
+			}
+		});
+	});
+
+	it("refuse un type incompatible avec une FK entrante ou sortante", () => {
+		expect(() => lowerAlter("alter column agency.id set type string")).toThrow(
+			/incompatible avec la foreign key 'booking_agency_id_fkey' \(booking.agency_id est de type 'uuid'\)/
+		);
+		expect(() => lowerAlter("alter column booking.agency_id set type bool")).toThrow(
+			/incompatible avec la foreign key 'booking_agency_id_fkey'/
+		);
+	});
+
+	it("refuse une colonne inconnue", () => {
+		expect(() => lowerAlter("alter column agency.fax set nullable")).toThrow(
+			/colonne 'fax' inconnue dans 'agency'/
+		);
+	});
+
+	it("sans schéma, aucun état courant", () => {
+		expect(lowerAlter("alter column agency.zip set type int", null)).not.toHaveProperty(
+			"current"
+		);
+	});
+});
+
 describe("lower DDL — rename column (ADR-036 E/1b)", () => {
 	const schema: import("../schema/model").SchemaModel = {
 		engine: "postgres",
@@ -730,9 +812,9 @@ describe("lower DDL — rename column (ADR-036 E/1b)", () => {
 
 	function lowerRename(
 		source: string,
-		withSchema: import("../schema/model").SchemaModel | undefined = schema
+		withSchema: import("../schema/model").SchemaModel | null = schema
 	): DDLPlan {
-		return lowerDDL(parse(tokenize(source)) as DDLStatement, withSchema);
+		return lowerDDL(parse(tokenize(source)) as DDLStatement, withSchema ?? undefined);
 	}
 
 	it("abaisse rename column", () => {
@@ -771,7 +853,7 @@ describe("lower DDL — rename column (ADR-036 E/1b)", () => {
 	});
 
 	it("refuse un identifiant invalide", () => {
-		expect(() => lowerRename("rename column agency.phone to 2fax", undefined)).toThrow();
+		expect(() => lowerRename("rename column agency.phone to 2fax", null)).toThrow();
 	});
 
 	it("Mongo : `_id` garde son nom (ADR-029 D13)", () => {
@@ -823,9 +905,12 @@ describe("lower DDL — add ref (ADR-036 E/1a)", () => {
 
 	function lowerAddRef(
 		source: string,
-		withSchema: import("../schema/model").SchemaModel | undefined = schema
+		withSchema: import("../schema/model").SchemaModel | null = schema
 	): DDLPlan {
-		const plan = lowerDDL(parse(tokenize(source)) as DDLStatement, withSchema);
+		const plan = lowerDDL(
+			parse(tokenize(source)) as DDLStatement,
+			withSchema ?? undefined
+		);
 		if (plan.kind !== "add-ref") {
 			throw new Error(`expected add-ref plan, got ${plan.kind}`);
 		}
@@ -897,7 +982,7 @@ describe("lower DDL — add ref (ADR-036 E/1a)", () => {
 
 	it("sans schéma, ne vérifie que les identifiants", () => {
 		expect(
-			lowerAddRef("add ref (user_id) references users.id into orders", undefined)
+			lowerAddRef("add ref (user_id) references users.id into orders", null)
 		).toMatchObject({ ref: { name: "fk_orders_user_id_users" } });
 	});
 });

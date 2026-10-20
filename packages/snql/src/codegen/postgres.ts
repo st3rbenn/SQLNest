@@ -279,6 +279,7 @@ export const postgresMapper: Mapper = {
 		if (plan.kind === "drop-enum") return renderDropEnum(plan);
 		if (plan.kind === "drop-ref") return renderDropRef(plan);
 		if (plan.kind === "add-ref") return renderAddRef(plan);
+		if (plan.kind === "alter-column") return renderAlterColumn(plan);
 		if (plan.kind === "rename-column") {
 			return {
 				engine: "postgres",
@@ -792,6 +793,45 @@ function renderDropIndex(plan: DropIndexPlan): NativeQuery {
  * dépendants. Le frontend applique D7 typing UI gate avant Execute (retirer
  * une FK relâche silencieusement l'intégrité référentielle).
  */
+/**
+ * `alter column` (ADR-036 E/1c). PG reconstruit index et contraintes. Un
+ * défaut existant n'est pas converti par `USING` : quand le schéma en signale
+ * un, il est retiré, puis reposé converti vers le nouveau type.
+ */
+function renderAlterColumn(plan: import("../ir/plan").AlterColumnPlan): NativeQuery {
+	const table = quoteIdent(plan.target);
+	const column = quoteIdent(plan.column);
+	const head = `ALTER TABLE ${table} ALTER COLUMN ${column}`;
+	const sql = (text: string): NativeQuery => ({
+		engine: "postgres",
+		kind: "sql",
+		text,
+		params: [],
+		paramSpans: []
+	});
+	const { action } = plan;
+	if (action.kind === "set-nullable") return sql(`${head} DROP NOT NULL`);
+	if (action.kind === "set-not-null") return sql(`${head} SET NOT NULL`);
+	const type =
+		action.enumTypeName !== undefined
+			? quoteIdent(action.enumTypeName)
+			: PG_DDL_TYPE[action.type];
+	const alter = `${head} TYPE ${type} USING ${column}::${type}`;
+	if (plan.current?.hasDefault !== true) return sql(alter);
+	return sql(
+		[
+			"DO $$",
+			"DECLARE d text;",
+			"BEGIN",
+			`SELECT pg_get_expr(ad.adbin, ad.adrelid) INTO d FROM pg_attrdef ad JOIN pg_attribute a ON a.attrelid = ad.adrelid AND a.attnum = ad.adnum WHERE ad.adrelid = '${table}'::regclass AND a.attname = '${plan.column}';`,
+			`EXECUTE '${head} DROP DEFAULT';`,
+			`EXECUTE '${alter}';`,
+			`IF d IS NOT NULL THEN EXECUTE format('${head} SET DEFAULT (%s)::${type}', d); END IF;`,
+			"END $$"
+		].join("\n")
+	);
+}
+
 /** `add ref` → contrainte de table : PG valide les lignes existantes et
  *  refuse les orphelins (23503) dans le même statement. */
 function renderAddRef(plan: import("../ir/plan").AddRefPlan): NativeQuery {

@@ -376,6 +376,7 @@ export const mssqlMapper: Mapper = {
 		if (plan.kind === "drop-ref") return renderDropRef(plan);
 		if (plan.kind === "add-ref") return renderAddRef(plan);
 		if (plan.kind === "rename-column") return renderRenameColumn(plan, namespace);
+		if (plan.kind === "alter-column") return renderAlterColumn(plan, namespace);
 		throw new SnqlError(
 			`DDL kind '${(plan as { kind: string }).kind}' non supporté par le codegen MSSQL M/6`,
 			"codegen_ddl_unsupported"
@@ -1064,6 +1065,128 @@ function renderRenameColumn(
 	return ddlQuery(
 		`EXEC sp_rename ${nstr(column)}, ${nstr(plan.newName)}, N'COLUMN'`
 	);
+}
+
+/** Type T-SQL complet de la colonne `t.obj`/`t.col` (alias `c`, `ty`), relu
+ *  au catalogue : longueur, précision, collation. `ALTER COLUMN` exige de le
+ *  répéter. */
+const MSSQL_CURRENT_TYPE = `CASE
+	WHEN ty.name IN (N'varchar', N'char', N'varbinary', N'binary') THEN ty.name + N'(' + CASE WHEN c.max_length = -1 THEN N'max' ELSE CAST(c.max_length AS nvarchar(10)) END + N')'
+	WHEN ty.name IN (N'nvarchar', N'nchar') THEN ty.name + N'(' + CASE WHEN c.max_length = -1 THEN N'max' ELSE CAST(c.max_length / 2 AS nvarchar(10)) END + N')'
+	WHEN ty.name IN (N'decimal', N'numeric') THEN ty.name + N'(' + CAST(c.precision AS nvarchar(10)) + N', ' + CAST(c.scale AS nvarchar(10)) + N')'
+	WHEN ty.name IN (N'datetime2', N'time', N'datetimeoffset') THEN ty.name + N'(' + CAST(c.scale AS nvarchar(10)) + N')'
+	ELSE ty.name END + ISNULL(N' COLLATE ' + c.collation_name, N'')`;
+
+/** Liste de colonnes d'un index ou d'une FK, agrégée sans STRING_AGG (2014). */
+function mssqlColumnList(select: string): string {
+	return `STUFF((${select} FOR XML PATH(''), TYPE).value('.', 'nvarchar(max)'), 1, 1, N'')`;
+}
+
+/** Nom qualifié `[schéma].[table]` d'un objet, en expression T-SQL. */
+function mssqlQualified(objectId: string): string {
+	return `QUOTENAME(OBJECT_SCHEMA_NAME(${objectId})) + N'.' + QUOTENAME(OBJECT_NAME(${objectId}))`;
+}
+
+/**
+ * `alter column` (ADR-036 E/1c). T-SQL refuse un `ALTER COLUMN` dès qu'un
+ * index, une contrainte (PK, UNIQUE, CHECK, DEFAULT) ou une FK dépend de la
+ * colonne (5074) : compensation dans une transaction, en relisant le
+ * catalogue à l'exécution — retrait des dépendants, `ALTER COLUMN`,
+ * recréation à l'identique. Une FK exige des types identiques des deux
+ * côtés : `set type` emmène les colonnes partenaires des FK de la colonne.
+ * Le CHECK d'enum `ck_<t>_<c>_enum` suit le type : retiré, puis reposé si la
+ * cible est un enum. Une valeur non convertible fait échouer la transaction,
+ * rien n'est modifié.
+ */
+function renderAlterColumn(
+	plan: import("../ir/plan").AlterColumnPlan,
+	namespace: string
+): NativeQuery {
+	const table = `${quoteIdent(namespace)}.${quoteIdent(plan.target)}`;
+	const column = quoteIdent(plan.column);
+	const enumCheck = `ck_${plan.target}_${plan.column}_enum`;
+	const { action } = plan;
+	const isTypeChange = action.kind === "set-type";
+	const onTarget = (objectId: string, columnId: string): string =>
+		`EXISTS (SELECT 1 FROM @targets tg WHERE tg.obj = ${objectId} AND tg.col = ${columnId})`;
+	const keyCols = (filter: string): string =>
+		mssqlColumnList(
+			`SELECT N',' + QUOTENAME(COL_NAME(ic.object_id, ic.column_id)) + CASE WHEN ic.is_descending_key = 1 THEN N' DESC' ELSE N'' END FROM sys.index_columns ic WHERE ic.object_id = i.object_id AND ic.index_id = i.index_id AND ${filter} ORDER BY ic.key_ordinal, ic.index_column_id`
+		);
+	const fkCols = (side: "parent" | "referenced"): string =>
+		mssqlColumnList(
+			`SELECT N',' + QUOTENAME(COL_NAME(fkc.${side}_object_id, fkc.${side}_column_id)) FROM sys.foreign_key_columns fkc WHERE fkc.constraint_object_id = fk.object_id ORDER BY fkc.constraint_column_id`
+		);
+	// Type cible : un texte qui reste indexé passe en nvarchar(450).
+	const newType = (obj: string, col: string): string =>
+		action.kind !== "set-type"
+			? ""
+			: action.type === "string" || action.type === "enum"
+				? `CASE WHEN EXISTS (SELECT 1 FROM sys.index_columns ic WHERE ic.object_id = ${obj} AND ic.column_id = ${col}) THEN N'${KEYABLE_STRING_TYPE}' ELSE N'${MSSQL_DDL_TYPE[action.type]}' END`
+				: `N'${MSSQL_DDL_TYPE[action.type]}'`;
+	const nullability = (kind: string): string =>
+		kind === "set-nullable"
+			? "N' NULL'"
+			: kind === "set-not-null"
+				? "N' NOT NULL'"
+				: "CASE WHEN c.is_nullable = 1 THEN N' NULL' ELSE N' NOT NULL' END";
+	const enumAdd =
+		action.kind === "set-type" &&
+		action.type === "enum" &&
+		action.enumMembers !== undefined &&
+		action.enumMembers.length > 0
+			? `ALTER TABLE ${table} WITH CHECK ADD CONSTRAINT ${quoteIdent(enumCheck)} CHECK (${column} IN (${action.enumMembers.map(nstr).join(", ")}));`
+			: "";
+	const lines = [
+		// Les lectures du catalogue ne sont pas des lignes affectées.
+		"SET NOCOUNT ON;",
+		"SET XACT_ABORT ON;",
+		"BEGIN TRAN;",
+		`DECLARE @obj int = OBJECT_ID(${nstr(table)});`,
+		`DECLARE @col int = COLUMNPROPERTY(@obj, ${nstr(plan.column)}, 'ColumnId');`,
+		`IF @col IS NULL THROW 50000, ${nstr(`colonne '${plan.target}.${plan.column}' inconnue`)}, 1;`,
+		"DECLARE @targets TABLE (obj int, col int, sql nvarchar(max));",
+		`INSERT @targets SELECT c.object_id, c.column_id, N'ALTER TABLE ' + ${mssqlQualified("c.object_id")} + N' ALTER COLUMN ' + QUOTENAME(c.name) + N' ' + ${isTypeChange ? newType("c.object_id", "c.column_id") : MSSQL_CURRENT_TYPE} + ${nullability(action.kind)}
+FROM sys.columns c JOIN sys.types ty ON ty.user_type_id = c.user_type_id
+WHERE (c.object_id = @obj AND c.column_id = @col)${
+			isTypeChange
+				? `
+	OR EXISTS (SELECT 1 FROM sys.foreign_key_columns fkc WHERE (fkc.referenced_object_id = @obj AND fkc.referenced_column_id = @col AND fkc.parent_object_id = c.object_id AND fkc.parent_column_id = c.column_id) OR (fkc.parent_object_id = @obj AND fkc.parent_column_id = @col AND fkc.referenced_object_id = c.object_id AND fkc.referenced_column_id = c.column_id))`
+				: ""
+		};`,
+		"DECLARE @dropFk nvarchar(max) = N'', @addFk nvarchar(max) = N'';",
+		"DECLARE @dropIdx nvarchar(max) = N'', @addIdx nvarchar(max) = N'';",
+		"DECLARE @dropChk nvarchar(max) = N'', @addChk nvarchar(max) = N'';",
+		"DECLARE @dropDf nvarchar(max) = N'', @addDf nvarchar(max) = N'';",
+		"DECLARE @alter nvarchar(max) = N'';",
+		`SELECT @dropFk = @dropFk + N'ALTER TABLE ' + ${mssqlQualified("fk.parent_object_id")} + N' DROP CONSTRAINT ' + QUOTENAME(fk.name) + N';',
+	@addFk = @addFk + N'ALTER TABLE ' + ${mssqlQualified("fk.parent_object_id")} + N' WITH CHECK ADD CONSTRAINT ' + QUOTENAME(fk.name) + N' FOREIGN KEY (' + ${fkCols("parent")} + N') REFERENCES ' + ${mssqlQualified("fk.referenced_object_id")} + N' (' + ${fkCols("referenced")} + N') ON DELETE ' + REPLACE(fk.delete_referential_action_desc, N'_', N' ') + N' ON UPDATE ' + REPLACE(fk.update_referential_action_desc, N'_', N' ') + N';'
+FROM sys.foreign_keys fk
+WHERE EXISTS (SELECT 1 FROM sys.foreign_key_columns fkc WHERE fkc.constraint_object_id = fk.object_id AND (${onTarget("fkc.parent_object_id", "fkc.parent_column_id")} OR ${onTarget("fkc.referenced_object_id", "fkc.referenced_column_id")}));`,
+		`SELECT @dropIdx = @dropIdx + CASE WHEN i.is_primary_key = 1 OR i.is_unique_constraint = 1 THEN N'ALTER TABLE ' + ${mssqlQualified("i.object_id")} + N' DROP CONSTRAINT ' + QUOTENAME(i.name) ELSE N'DROP INDEX ' + QUOTENAME(i.name) + N' ON ' + ${mssqlQualified("i.object_id")} END + N';',
+	@addIdx = @addIdx + CASE
+		WHEN i.is_primary_key = 1 THEN N'ALTER TABLE ' + ${mssqlQualified("i.object_id")} + N' ADD CONSTRAINT ' + QUOTENAME(i.name) + N' PRIMARY KEY ' + i.type_desc COLLATE DATABASE_DEFAULT + N' (' + ${keyCols("ic.is_included_column = 0")} + N')'
+		WHEN i.is_unique_constraint = 1 THEN N'ALTER TABLE ' + ${mssqlQualified("i.object_id")} + N' ADD CONSTRAINT ' + QUOTENAME(i.name) + N' UNIQUE ' + i.type_desc COLLATE DATABASE_DEFAULT + N' (' + ${keyCols("ic.is_included_column = 0")} + N')'
+		ELSE N'CREATE ' + CASE WHEN i.is_unique = 1 THEN N'UNIQUE ' ELSE N'' END + i.type_desc COLLATE DATABASE_DEFAULT + N' INDEX ' + QUOTENAME(i.name) + N' ON ' + ${mssqlQualified("i.object_id")} + N' (' + ${keyCols("ic.is_included_column = 0")} + N')' + ISNULL(N' INCLUDE (' + ${keyCols("ic.is_included_column = 1")} + N')', N'') + ISNULL(N' WHERE ' + i.filter_definition, N'')
+	END + N';'
+FROM sys.indexes i
+WHERE i.type IN (1, 2) AND EXISTS (SELECT 1 FROM sys.index_columns ic WHERE ic.object_id = i.object_id AND ic.index_id = i.index_id AND ${onTarget("ic.object_id", "ic.column_id")});`,
+		`SELECT @dropChk = @dropChk + N'ALTER TABLE ' + ${mssqlQualified("cc.parent_object_id")} + N' DROP CONSTRAINT ' + QUOTENAME(cc.name) + N';',
+	@addChk = @addChk + CASE WHEN ${isTypeChange ? `cc.name = ${nstr(enumCheck)}` : "1 = 0"} THEN N'' ELSE N'ALTER TABLE ' + ${mssqlQualified("cc.parent_object_id")} + N' WITH CHECK ADD CONSTRAINT ' + QUOTENAME(cc.name) + N' CHECK ' + cc.definition + N';' END
+FROM sys.check_constraints cc
+WHERE EXISTS (SELECT 1 FROM @targets tg WHERE tg.obj = cc.parent_object_id AND (cc.parent_column_id = tg.col OR cc.definition LIKE N'%[[]' + COL_NAME(tg.obj, tg.col) + N']%'));`,
+		`SELECT @dropDf = @dropDf + N'ALTER TABLE ' + ${mssqlQualified("dc.parent_object_id")} + N' DROP CONSTRAINT ' + QUOTENAME(dc.name) + N';',
+	@addDf = @addDf + N'ALTER TABLE ' + ${mssqlQualified("dc.parent_object_id")} + N' ADD CONSTRAINT ' + QUOTENAME(dc.name) + N' DEFAULT ' + dc.definition + N' FOR ' + QUOTENAME(COL_NAME(dc.parent_object_id, dc.parent_column_id)) + N';'
+FROM sys.default_constraints dc
+WHERE ${onTarget("dc.parent_object_id", "dc.parent_column_id")};`,
+		"SELECT @alter = @alter + sql + N';' FROM @targets;",
+		"EXEC (@dropFk); EXEC (@dropIdx); EXEC (@dropChk); EXEC (@dropDf);",
+		"EXEC (@alter);",
+		"EXEC (@addDf); EXEC (@addChk); EXEC (@addIdx); EXEC (@addFk);",
+		...(enumAdd !== "" ? [`EXEC (${nstr(enumAdd)});`] : []),
+		"COMMIT;"
+	];
+	return ddlQuery(lines.join("\n"));
 }
 
 /** `add ref` → contrainte de table. `WITH CHECK` : les lignes existantes

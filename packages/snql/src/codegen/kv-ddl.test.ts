@@ -698,6 +698,26 @@ describe("codegen KV — ref FK modifier (ADR-031 FK/1a)", () => {
 	});
 });
 
+describe("codegen KV — alter column (ADR-036 E/1c)", () => {
+	it("émet le shape alter-column", () => {
+		const q = mapKvDDL({
+			op: "ddl",
+			kind: "alter-column",
+			target: "agency",
+			column: "zip",
+			action: { kind: "set-not-null" }
+		});
+		expect(q).toEqual({
+			engine: "kv",
+			kind: "kv-ddl",
+			operation: "alter-column",
+			collection: "agency",
+			column: "zip",
+			action: { kind: "set-not-null" }
+		});
+	});
+});
+
 describe("codegen KV — rename column (ADR-036 E/1b)", () => {
 	it("émet le shape rename-column", () => {
 		const q = mapKvDDL({

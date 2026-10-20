@@ -7,6 +7,8 @@ import type {
 	AddEnumMemberStmt,
 	AddIndexStmt,
 	AddRefStmt,
+	AlterColumnAction,
+	AlterColumnStmt,
 	Assignment,
 	CreateEnumStmt,
 	CreateTableStmt,
@@ -237,6 +239,14 @@ function parseStatement(cursor: TokenCursor): Statement {
 		peekIdent(cursor, "ref", 1)
 	) {
 		return parseDropRef(cursor);
+	}
+	// E/1c : `alter column <table>.<col> <action>`. `alter` reste soft-ident.
+	if (
+		first.kind === "ident" &&
+		first.value.toLowerCase() === "alter" &&
+		peekIdent(cursor, "column", 1)
+	) {
+		return parseAlterColumn(cursor);
 	}
 	// E/1b : `rename column <table>.<col> to <nouveau>`. `rename` reste
 	// soft-ident (une colonne nommée `rename` reste valide ailleurs).
@@ -2546,6 +2556,77 @@ function parseRenameColumn(cursor: TokenCursor): RenameColumnStmt {
 		newName: newTok.value,
 		newNameSpan: newTok.span,
 		span: { start: renameTok.span.start, end: newTok.span.end }
+	};
+}
+
+/**
+ * `alter column <table>.<col> set nullable | set not null | set type <type>`
+ * (ADR-036 E/1c).
+ */
+function parseAlterColumn(cursor: TokenCursor): AlterColumnStmt {
+	const alterTok = cursor.next(); // `alter` soft-ident
+	cursor.next(); // `column` soft-ident (déjà peeked au dispatch)
+	const { table, column } = parseColumnPath(cursor, "alter column");
+	const expected = "set nullable, set not null ou set type <type>";
+	if (!peekKeyword(cursor, "set")) {
+		throw new SnqlError(
+			`'alter column ${table.value}.${column.value}' attend une action : ${expected}`,
+			"parse_ddl_alter_column_expected_action",
+			cursor.peek().span
+		);
+	}
+	cursor.next();
+	const tok = cursor.peek();
+	const word = tok.value.toLowerCase();
+	let action: AlterColumnAction;
+	let end: Span;
+	if (tok.kind === "ident" && word === "nullable") {
+		cursor.next();
+		action = { kind: "set-nullable" };
+		end = tok.span;
+	} else if (tok.kind === "keyword" && word === "not") {
+		cursor.next();
+		const nullTok = cursor.peek();
+		const isNull =
+			nullTok.kind === "null" ||
+			(nullTok.kind === "ident" && nullTok.value.toLowerCase() === "null");
+		if (!isNull) {
+			throw new SnqlError(
+				"'set not' doit être suivi de 'null'",
+				"parse_ddl_expected_null_after_not",
+				nullTok.span
+			);
+		}
+		cursor.next();
+		action = { kind: "set-not-null" };
+		end = nullTok.span;
+	} else if (tok.kind === "ident" && word === "type") {
+		cursor.next();
+		const typeTok = cursor.expect(
+			"ident",
+			"un type SNQL (uuid/string/int/...), alias PG (varchar/jsonb/...) ou nom d'enum"
+		);
+		action = {
+			kind: "set-type",
+			type: parseFieldTypeRef(typeTok.value),
+			typeSpan: typeTok.span
+		};
+		end = typeTok.span;
+	} else {
+		throw new SnqlError(
+			`'alter column … set' attend ${expected}`,
+			"parse_ddl_alter_column_expected_action",
+			tok.span
+		);
+	}
+	return {
+		operation: "ddl",
+		kind: "alter-column",
+		target: table.value,
+		column: column.value,
+		columnSpan: column.span,
+		action,
+		span: { start: alterTok.span.start, end: end.end }
 	};
 }
 

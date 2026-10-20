@@ -621,6 +621,36 @@ describe("codegen mssql — DDL (M/6)", () => {
 		).toBe(`ALTER TABLE [orders] DROP CONSTRAINT [fk_orders_user_id]`);
 	});
 
+	it("alter column → transaction : dépendants retirés, ALTER COLUMN, dépendants recréés", () => {
+		const { text } = ddlText({
+			op: "ddl",
+			kind: "alter-column",
+			target: "agency",
+			column: "zip",
+			action: { kind: "set-not-null" }
+		});
+		expect(text.startsWith("SET NOCOUNT ON;\nSET XACT_ABORT ON;\nBEGIN TRAN;")).toBe(true);
+		expect(text).toContain("N' NOT NULL'");
+		expect(text).toContain("EXEC (@dropFk); EXEC (@dropIdx); EXEC (@dropChk); EXEC (@dropDf);");
+		expect(text).toContain("EXEC (@alter);");
+		expect(text).toContain("EXEC (@addDf); EXEC (@addChk); EXEC (@addIdx); EXEC (@addFk);");
+		expect(text.endsWith("COMMIT;")).toBe(true);
+	});
+
+	it("alter column set type enum → CHECK d'enum reposé", () => {
+		const { text } = ddlText({
+			op: "ddl",
+			kind: "alter-column",
+			target: "agency",
+			column: "tier",
+			action: { kind: "set-type", type: "enum", enumTypeName: "TIER", enumMembers: ["a", "b"] }
+		});
+		expect(text).toContain("CASE WHEN EXISTS (SELECT 1 FROM sys.index_columns ic");
+		// Les colonnes partenaires des FK suivent le nouveau type.
+		expect(text).toContain("fkc.referenced_object_id = @obj AND fkc.referenced_column_id = @col");
+		expect(text).toContain("CHECK ([tier] IN (N''a'', N''b''))");
+	});
+
 	it("rename column → sp_rename, nouveau nom sans crochets", () => {
 		expect(ddlText({
 			op: "ddl",

@@ -572,7 +572,8 @@ export type DDLKind =
 	| "drop-enum"
 	| "drop-ref"
 	| "add-ref"
-	| "rename-column";
+	| "rename-column"
+	| "alter-column";
 
 /**
  * Un type de field dans un body `create table` ou dans `add column`. Soit un
@@ -813,6 +814,30 @@ export interface RenameColumnStmt {
 	readonly span: Span;
 }
 
+/** Action d'un `alter column` (ADR-036 E/1c). */
+export type AlterColumnAction =
+	| { readonly kind: "set-nullable" }
+	| { readonly kind: "set-not-null" }
+	| {
+			readonly kind: "set-type";
+			readonly type: DDLFieldTypeRef;
+			readonly typeSpan: Span;
+	  };
+
+/**
+ * `alter column <table>.<col> set nullable | set not null | set type <type>`
+ * (ADR-036 E/1c).
+ */
+export interface AlterColumnStmt {
+	readonly operation: "ddl";
+	readonly kind: "alter-column";
+	readonly target: string;
+	readonly column: string;
+	readonly columnSpan: Span;
+	readonly action: AlterColumnAction;
+	readonly span: Span;
+}
+
 /**
  * Union des statements DDL. Corpus Tier-2 (create-table/add-column/[add-|
  * drop-]index/drop-table/drop-column) + Enum Tier-3+ (create-enum/
@@ -830,7 +855,8 @@ export type DDLStatement =
 	| DropEnumStmt
 	| DropRefStmt
 	| AddRefStmt
-	| RenameColumnStmt;
+	| RenameColumnStmt
+	| AlterColumnStmt;
 
 /** Racine de l'AST : lecture (`Query`), mutation, transaction, introspection, raw, let/CTE ou DDL Tier-2. */
 export type Statement =

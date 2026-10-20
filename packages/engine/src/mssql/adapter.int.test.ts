@@ -715,6 +715,84 @@ describe.skipIf(!hasMssql)("mssql DDL Tier-2 (intégration M/6)", () => {
 		});
 	});
 
+	it("alter column : index, défaut, unique et FK survivent ; non convertible → rien ne change", async () => {
+		await withConn(async (conn) => {
+			const cleanup = `raw "DROP TABLE IF EXISTS e1c_kid; DROP TABLE IF EXISTS e1c_t; DELETE FROM dbo._snql_enums WHERE name = 'E1C_TIER'"`;
+			await runQuery(conn, `raw "DROP TABLE IF EXISTS e1c_kid; DROP TABLE IF EXISTS e1c_t"`);
+			try {
+				await runQuery(
+					conn,
+					`create table e1c_t { id: int, code: string unique, n: int nullable default 5, tier: string nullable, primary key (id) }`
+				);
+				await runQuery(conn, `add index (n) into e1c_t`);
+				await runQuery(
+					conn,
+					`create table e1c_kid { id: int, t_id: int nullable ref e1c_t.id, primary key (id) }`
+				);
+				await runQuery(conn, `add { id: 1, code: "a", n: 1, tier: "x" } into e1c_t`);
+				await runQuery(conn, `add { id: 2, code: "b", tier: "abc" } into e1c_t`);
+				await runQuery(conn, `add { id: 1, t_id: 1 } into e1c_kid`);
+
+				// n : index + défaut. Nullabilité puis type.
+				const altered = await runQuery(conn, `alter column e1c_t.n set not null`);
+				expect(altered.rowCount).toBe(0);
+				await expect(
+					runQuery(conn, `add { id: 3, code: "c", n: null } into e1c_t`)
+				).rejects.toThrow();
+				await runQuery(conn, `add { id: 3, code: "c" } into e1c_t`);
+				await runQuery(conn, `alter column e1c_t.n set type bigint`);
+				const described = await runQuery(conn, `describe e1c_t`);
+				const n = described.rows.find((r) => r.name === "n");
+				expect(n).toMatchObject({ type: "bigint", nullable: false });
+				const rows = await runQuery(conn, `find e1c_t pick id, n sort id`);
+				expect(rows.rows.map((r) => Number(r.n))).toEqual([1, 5, 5]);
+				const indexes = await runQuery(conn, `list indexes on e1c_t`);
+				expect(indexes.rows.map((r) => r.name)).toEqual(
+					expect.arrayContaining(["idx_e1c_t_n"])
+				);
+
+				// code : contrainte UNIQUE, reste indexable.
+				await runQuery(conn, `alter column e1c_t.code set nullable`);
+				await expect(
+					runQuery(conn, `add { id: 4, code: "a" } into e1c_t`)
+				).rejects.toThrow();
+
+				// id : PK référencée par une FK. Une PK ne devient pas nullable
+				// (refus du moteur, rien ne change) ; son type change avec celui
+				// de la colonne partenaire, que la FK exige identique.
+				await expect(runQuery(conn, `alter column e1c_t.id set nullable`)).rejects.toThrow();
+				await runQuery(conn, `alter column e1c_t.id set type bigint`);
+				const kid = (await runQuery(conn, `describe e1c_kid`)).rows.find(
+					(r) => r.name === "t_id"
+				);
+				expect(kid).toMatchObject({ type: "bigint", foreign_key: "e1c_t.id" });
+				await expect(
+					runQuery(conn, `add { id: 2, t_id: 99 } into e1c_kid`)
+				).rejects.toThrow();
+				await runQuery(conn, `add { id: 2, t_id: 1 } into e1c_kid`);
+
+				// Valeur non convertible : la transaction annule tout.
+				await expect(runQuery(conn, `alter column e1c_t.tier set type int`)).rejects.toThrow();
+				const tier = (await runQuery(conn, `describe e1c_t`)).rows.find(
+					(r) => r.name === "tier"
+				);
+				expect(tier?.type).not.toBe("int");
+
+				// Enum : CHECK posé, puis retiré au retour vers text.
+				await runQuery(conn, `update e1c_t where id = 2 set tier = "x"`);
+				await runQuery(conn, `create enum E1C_TIER { "x", "y" }`);
+				await runQuery(conn, `alter column e1c_t.tier set type E1C_TIER`, await conn.introspect());
+				await expect(
+					runQuery(conn, `update e1c_t where id = 1 set tier = "z"`)
+				).rejects.toThrow();
+				await runQuery(conn, `alter column e1c_t.tier set type text`);
+				await runQuery(conn, `update e1c_t where id = 1 set tier = "z"`);
+			} finally {
+				await runQuery(conn, cleanup);
+			}
+		});
+	});
+
 	it("create table if not exists ×2 → idempotent (sp_getapplock + guard)", async () => {
 		await withConn(async (conn) => {
 			await runQuery(conn, `raw "DROP TABLE IF EXISTS m6_idem"`);

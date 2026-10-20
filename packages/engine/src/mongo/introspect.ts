@@ -295,22 +295,44 @@ export function mergeValidatorFields(
 	);
 	const known = new Set(inferred.fields.map((f) => f.name));
 	const declared: Field[] = [];
+	const fromValidator = new Map<string, Field>();
 	for (const [propName, propRaw] of Object.entries(properties)) {
-		if (known.has(propName)) continue;
 		const bsonType = (propRaw as { bsonType?: unknown }).bsonType;
+		// Une colonne nullable est déclarée `[type, "null"]` : le type reste lisible.
+		const single = Array.isArray(bsonType)
+			? bsonType.find((t) => t !== "null")
+			: bsonType;
 		const type =
-			typeof bsonType === "string"
-				? (BSON_TYPE_TO_SNQL[bsonType] ?? "unknown")
+			typeof single === "string"
+				? (BSON_TYPE_TO_SNQL[single] ?? "unknown")
 				: "unknown";
-		declared.push({
+		const members = (propRaw as { enum?: unknown }).enum;
+		const enumValues = Array.isArray(members)
+			? members.filter((m): m is string => typeof m === "string")
+			: undefined;
+		const field: Field = {
 			name: propName,
 			type,
 			nullable: !required.has(propName),
-			source: "declared"
-		});
+			source: "declared",
+			...(enumValues !== undefined ? { enumValues } : {})
+		};
+		if (known.has(propName)) fromValidator.set(propName, field);
+		else declared.push(field);
 	}
-	if (declared.length === 0) return inferred;
-	return { ...inferred, fields: [...inferred.fields, ...declared] };
+	// Une colonne échantillonnée garde ses stats ; le validateur, contrat
+	// déclaré, en fixe le type, la nullabilité et les valeurs d'enum.
+	const fields = inferred.fields.map((f) => {
+		const d = fromValidator.get(f.name);
+		if (d === undefined) return f;
+		return {
+			...f,
+			type: d.type === "unknown" ? f.type : d.type,
+			nullable: d.nullable,
+			...(d.enumValues !== undefined ? { enumValues: d.enumValues } : {})
+		};
+	});
+	return { ...inferred, fields: [...fields, ...declared] };
 }
 
 /** Normalise une règle de cascade lue du metadata (`set null` alias). */

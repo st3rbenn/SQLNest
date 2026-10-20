@@ -131,6 +131,12 @@ export const DDL_SUPPORT: Readonly<
 		mssql: { mode: "native", locks: [EXCLUSIVE_TABLE] },
 		mongodb: { mode: "compensated", locks: [METADATA_DATABASE] },
 		kv: { mode: "compensated", locks: [] }
+	},
+	"alter-column": {
+		postgres: { mode: "native", locks: [EXCLUSIVE_TABLE] },
+		mssql: { mode: "compensated", locks: [EXCLUSIVE_TABLE] },
+		mongodb: { mode: "compensated", locks: [METADATA_DATABASE] },
+		kv: { mode: "compensated", locks: [] }
 	}
 };
 
@@ -152,7 +158,8 @@ export const DDL_ERROR_CODES: Readonly<Record<DDLKind, string>> = {
 	"drop-enum": "planner_ddl_drop_enum_unsupported",
 	"drop-ref": "planner_ddl_drop_ref_unsupported",
 	"add-ref": "planner_ddl_add_ref_unsupported",
-	"rename-column": "planner_ddl_rename_column_unsupported"
+	"rename-column": "planner_ddl_rename_column_unsupported",
+	"alter-column": "planner_ddl_alter_column_unsupported"
 };
 
 /**

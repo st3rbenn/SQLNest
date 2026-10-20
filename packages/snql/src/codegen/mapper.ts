@@ -475,6 +475,28 @@ export interface MongoDDLRenameColumnQuery {
 	readonly newName: string;
 }
 
+/**
+ * `alter column` (ADR-036 E/1c), compensé par l'adapter : `set not null`
+ * compte d'abord les documents nuls ou sans le champ ; `set type` compte les
+ * valeurs non convertibles, convertit par lots, puis met le validateur à jour.
+ */
+export interface MongoDDLAlterColumnQuery {
+	readonly engine: string;
+	readonly kind: "mongo-ddl";
+	readonly operation: "alter-column";
+	readonly collection: string;
+	readonly column: string;
+	readonly action:
+		| { readonly kind: "set-nullable" }
+		| { readonly kind: "set-not-null" }
+		| {
+				readonly kind: "set-type";
+				readonly type: import("../schema/model").SnqlType;
+				readonly bsonType: string | null;
+				readonly enumMembers?: readonly string[];
+		  };
+}
+
 export type MongoDDLQuery =
 	| MongoDDLCreateCollectionQuery
 	| MongoDDLAddColumnQuery
@@ -487,7 +509,8 @@ export type MongoDDLQuery =
 	| MongoDDLDropEnumQuery
 	| MongoDDLDropRefQuery
 	| MongoDDLAddRefQuery
-	| MongoDDLRenameColumnQuery;
+	| MongoDDLRenameColumnQuery
+	| MongoDDLAlterColumnQuery;
 
 /**
  * DDL Tier-2 sur KV (ADR-029). Entièrement compensé — KV est schema-less,
@@ -730,6 +753,20 @@ export interface KvDDLRenameColumnQuery {
 	readonly newName: string;
 }
 
+/**
+ * `alter column` sur KV (ADR-036 E/1c) : descriptor de la colonne mis à jour
+ * dans `namespace:_schema:{collection}` ; `set not null` / `set type`
+ * vérifient puis convertissent chaque hash (`SCAN`).
+ */
+export interface KvDDLAlterColumnQuery {
+	readonly engine: string;
+	readonly kind: "kv-ddl";
+	readonly operation: "alter-column";
+	readonly collection: string;
+	readonly column: string;
+	readonly action: import("../ir/plan").AlterColumnPlanAction;
+}
+
 export type KvDDLQuery =
 	| KvDDLCreateTableQuery
 	| KvDDLAddColumnQuery
@@ -742,7 +779,8 @@ export type KvDDLQuery =
 	| KvDDLDropEnumQuery
 	| KvDDLDropRefQuery
 	| KvDDLAddRefQuery
-	| KvDDLRenameColumnQuery;
+	| KvDDLRenameColumnQuery
+	| KvDDLAlterColumnQuery;
 
 /**
  * native shape pour un `raw {...}` Mongo — command native

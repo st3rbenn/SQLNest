@@ -15,6 +15,16 @@ describe("ddlImpactHint (ADR-036 D7)", () => {
 		});
 	});
 
+	it("set type et set not null : rappellent l'effet sur le code et les écritures", () => {
+		expect(hint("alter column agency.zip set type int")?.message).toBe(
+			"Le code qui lit 'agency.zip' recevra des valeurs de type int."
+		);
+		expect(hint("alter column agency.zip set not null")?.message).toBe(
+			"Les écritures qui laissent 'agency.zip' vide seront refusées."
+		);
+		expect(hint("alter column agency.zip set nullable")).toBeNull();
+	});
+
 	it("rien pour un DDL additif ni pour une lecture", () => {
 		expect(hint("add column website text nullable into agency")).toBeNull();
 		expect(hint("get agency")).toBeNull();

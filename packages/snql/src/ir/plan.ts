@@ -774,6 +774,38 @@ export interface RenameColumnPlan {
 	readonly span?: Span;
 }
 
+/** Action résolue d'un `alter column` (ADR-036 E/1c). */
+export type AlterColumnPlanAction =
+	| { readonly kind: "set-nullable" }
+	| { readonly kind: "set-not-null" }
+	| {
+			readonly kind: "set-type";
+			readonly type: import("../schema/model").SnqlType;
+			readonly enumTypeName?: string;
+			readonly enumMembers?: readonly string[];
+	  };
+
+/**
+ * `alter column <table>.<col> <action>` résolu (ADR-036 E/1c). `current` vient
+ * du schéma quand il est fourni (le défaut existant décide de la forme PG).
+ * PG natif ; MSSQL : objets dépendants retirés puis recréés autour de
+ * l'`ALTER COLUMN` ; Mongo compensé (préflight, conversion par lots,
+ * validateur).
+ */
+export interface AlterColumnPlan {
+	readonly op: "ddl";
+	readonly kind: "alter-column";
+	readonly target: string;
+	readonly column: string;
+	readonly action: AlterColumnPlanAction;
+	readonly current?: {
+		readonly type: import("../schema/model").SnqlType;
+		readonly nullable: boolean;
+		readonly hasDefault: boolean;
+	};
+	readonly span?: Span;
+}
+
 /**
  * Union des plans DDL. Corpus Tier-2 (create-table/add-column/[add-|drop-]
  * index/drop-table/drop-column) + Enum Tier-3+ (create-enum/add-enum-member/
@@ -791,7 +823,8 @@ export type DDLPlan =
 	| DropEnumPlan
 	| DropRefPlan
 	| AddRefPlan
-	| RenameColumnPlan;
+	| RenameColumnPlan
+	| AlterColumnPlan;
 
 /** Un plan complet : lecture, mutation, transaction, introspect, raw, let/CTE ou DDL Tier-2. */
 export type Plan =

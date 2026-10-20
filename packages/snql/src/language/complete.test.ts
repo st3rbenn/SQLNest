@@ -72,9 +72,10 @@ describe("completeSnql — début de requête", () => {
 			"let",
 			"create",
 			"drop",
-			"rename"
+			"rename",
+			"alter"
 		]);
-		// Les CRUD sont taggés `verb` ; list/describe/raw/let/create/drop/rename
+		// Les CRUD sont taggés `verb` ; list/describe/raw/let/create/drop/rename/alter
 		// sont `keyword` (soft-kw ou verb-alias DDL — ADR-029 DDL/5).
 		const opts = at("").options;
 		expect(opts.filter((o) => o.type === "verb").map((o) => o.label)).toEqual([
@@ -84,7 +85,7 @@ describe("completeSnql — début de requête", () => {
 			"remove"
 		]);
 		expect(opts.filter((o) => o.type === "keyword").map((o) => o.label)).toEqual(
-			["list", "describe", "raw", "let", "create", "drop", "rename"]
+			["list", "describe", "raw", "let", "create", "drop", "rename", "alter"]
 		);
 	});
 
@@ -491,7 +492,8 @@ describe("completeSnql — robustesse", () => {
 			"let",
 			"create",
 			"drop",
-			"rename"
+			"rename",
+			"alter"
 		]);
 		expect(
 			completeSnql("get users ", 10, empty).options.map((o) => o.label)

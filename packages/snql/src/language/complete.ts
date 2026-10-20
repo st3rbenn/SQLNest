@@ -79,7 +79,8 @@ const PRIMARY_VERBS: readonly {
 	// reste soft-ident (peekIdent au dispatch) — head-of-statement only.
 	{ label: "create", detail: "DDL create table", type: "keyword" },
 	{ label: "drop", detail: "DDL drop table/column/index (destructif)", type: "keyword" },
-	{ label: "rename", detail: "DDL rename column", type: "keyword" }
+	{ label: "rename", detail: "DDL rename column", type: "keyword" },
+	{ label: "alter", detail: "DDL alter column", type: "keyword" }
 ];
 
 /**
@@ -339,7 +340,7 @@ function contextOptions(
 			// Tables + le sous-verbe `enum` (sprint EN : `describe enum <name>`).
 			return [...collections(schema), keyword("enum")];
 		}
-		if (lower === "rename") return [keyword("column")];
+		if (lower === "rename" || lower === "alter") return [keyword("column")];
 		if (lower === "drop") {
 			// ADR-029 D7 destructive — WriteConfirmBar D7 typing gate au run.
 			// Enum/3 ajoute `enum` (D8), FK/3 ajoute `ref`.
@@ -1624,6 +1625,12 @@ function ddlContextOptions(
 		return null;
 	}
 
+	// === alter column <t>.<c> set … === (ADR-036 E/1c)
+	if (head.kind === "ident" && headLower === "alter" && toks.length >= 2) {
+		if (toks[1]?.value.toLowerCase() !== "column") return null;
+		return alterColumnCompletions(toks, schema);
+	}
+
 	// === rename column <t>.<c> to <n> === (ADR-036 E/1b)
 	if (head.kind === "ident" && headLower === "rename" && toks.length >= 2) {
 		if (toks[1]?.value.toLowerCase() !== "column") return null;
@@ -2009,6 +2016,30 @@ function renameColumnCompletions(
 	if (n === 2) return collections(schema);
 	if (n === 5 && last?.kind === "ident" && toks[3]?.kind === "dot") {
 		return [keyword("to")];
+	}
+	return [];
+}
+
+/**
+ * Complétions pour `alter column <t>.<c> set nullable | set not null | set type
+ * <type>` (ADR-036 E/1c). Les colonnes après `<t>.` passent par
+ * `dottedPathOptions`.
+ */
+function alterColumnCompletions(
+	toks: readonly Token[],
+	schema: SchemaModel
+): readonly SnqlCompletion[] {
+	const n = toks.length;
+	const last = toks[n - 1];
+	if (n === 2) return collections(schema);
+	if (n === 5 && last?.kind === "ident" && toks[3]?.kind === "dot") {
+		return [keyword("set")];
+	}
+	if (n === 6 && last?.kind === "keyword" && last.value === "set") {
+		return [keyword("nullable"), keyword("not null"), keyword("type")];
+	}
+	if (n === 7 && last?.value.toLowerCase() === "type") {
+		return ddlTypeSuggestions(schema);
 	}
 	return [];
 }

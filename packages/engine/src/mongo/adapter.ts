@@ -3,12 +3,13 @@ import type {
 	ResultColumn,
 	ResultSet,
 	Row,
-	SchemaModel
+	SchemaModel,
+	SnqlType
 } from "@sqlnest/snql";
 import { createHash } from "node:crypto";
 import { isSqlDecimal, MONGODB_CAPABILITIES } from "@sqlnest/snql";
 import type { ClientSession, Collection, Db, Document } from "mongodb";
-import { Decimal128, Long, MongoClient, ObjectId } from "mongodb";
+import { Decimal128, Long, MongoClient, ObjectId, UUID } from "mongodb";
 import type {
 	Connection,
 	EngineAdapter,
@@ -175,6 +176,140 @@ async function updateInBatches(
 			throw new EngineExecutionError(capMessage(MAX_ROWS));
 		}
 		await new Promise((resolve) => setTimeout(resolve, THROTTLE_MS));
+	}
+}
+
+/** Type `bsonType` d'une property, `null` retiré d'une union `[t, "null"]`. */
+function withoutNull(bsonType: unknown): string | null | undefined {
+	if (typeof bsonType === "string") return bsonType;
+	if (!Array.isArray(bsonType)) return undefined;
+	const rest = bsonType.filter((t) => t !== "null");
+	return typeof rest[0] === "string" ? rest[0] : undefined;
+}
+
+/** Sentinelle d'une valeur non convertible dans les expressions de conversion. */
+const UNCONVERTIBLE = "__snql_unconvertible__";
+
+/** Cible `$convert` et alias `$type` par type SNQL convertible côté serveur. */
+const MONGO_CONVERT: Partial<Record<SnqlType, string>> = {
+	string: "string",
+	int: "int",
+	bigint: "long",
+	float: "double",
+	decimal: "decimal",
+	bool: "bool",
+	date: "date",
+	enum: "string"
+};
+
+/** Lecture d'un texte en booléen, mots acceptés par Postgres (`'f'::boolean`).
+ *  `$convert` rendrait `true` pour tout texte non vide, `"false"` compris. */
+const BOOL_TRUE = ["true", "t", "yes", "y", "on", "1"];
+const BOOL_FALSE = ["false", "f", "no", "n", "off", "0"];
+
+/** Valeur convertie, ou `UNCONVERTIBLE`. `null` reste `null`. */
+function convertExpr(field: string, type: SnqlType, to: string): Document {
+	const input = `$${field}`;
+	const convert = { $convert: { input, to, onError: UNCONVERTIBLE, onNull: null } };
+	if (type !== "bool") return convert;
+	const word = { $toLower: { $trim: { input } } };
+	return {
+		$cond: [
+			{ $eq: [{ $type: input }, "string"] },
+			{
+				$switch: {
+					branches: [
+						// biome-ignore lint/suspicious/noThenProperty: syntaxe de $switch
+						{ case: { $in: [word, BOOL_TRUE] }, then: true },
+						// biome-ignore lint/suspicious/noThenProperty: syntaxe de $switch
+						{ case: { $in: [word, BOOL_FALSE] }, then: false }
+					],
+					default: UNCONVERTIBLE
+				}
+			},
+			convert
+		]
+	};
+}
+
+/**
+ * Convertit `field` vers le type cible d'un `set type`, après un préflight
+ * qui refuse s'il reste des valeurs non convertibles (ADR-036 D3). uuid et
+ * json passent côté adapter (`$convert` ne sait pas les produire en Mongo 7).
+ */
+async function convertFieldType(
+	col: Collection,
+	collection: string,
+	field: string,
+	action: { readonly type: SnqlType; readonly enumMembers?: readonly string[] }
+): Promise<void> {
+	const present = { [field]: { $exists: true, $ne: null } };
+	const refuse = (count: number, sample: unknown): never => {
+		throw new EngineExecutionError(
+			`${count} docs de '${collection}' ont une valeur de '${field}' non convertible en ${action.type} (ex. ${JSON.stringify(normalizeBson(sample))}) — corrige-les d'abord, puis relance alter column ${collection}.${field} set type`
+		);
+	};
+	const capMessage = (max: number): string =>
+		`alter column ${field} sur '${collection}' : la conversion dépasse le cap ${max} docs — relance la commande, elle reprend où elle s'est arrêtée`;
+
+	const to = MONGO_CONVERT[action.type];
+	if (to !== undefined) {
+		const converted = convertExpr(field, action.type, to);
+		const invalid: Document[] = [{ $eq: [converted, UNCONVERTIBLE] }];
+		if (action.enumMembers !== undefined) {
+			invalid.push({ $not: [{ $in: [converted, [...action.enumMembers]] }] });
+		}
+		const bad = { ...present, $expr: { $or: invalid } };
+		const count = await col.countDocuments(bad);
+		if (count > 0) {
+			const sample = await col.findOne(bad, { projection: { [field]: 1 } });
+			refuse(count, (sample as Document | null)?.[field]);
+		}
+		await updateInBatches(
+			col,
+			{ ...present, [field]: { $exists: true, $ne: null, $not: { $type: to } } },
+			[{ $set: { [field]: converted } }],
+			capMessage
+		);
+		return;
+	}
+
+	// uuid / json / array : conversion côté adapter, un document à la fois.
+	const parse = (value: unknown): { ok: boolean; value?: unknown } => {
+		if (action.type === "uuid") {
+			if (value instanceof UUID) return { ok: true, value };
+			if (typeof value === "string" && UUID.isValid(value)) {
+				return { ok: true, value: new UUID(value) };
+			}
+			return { ok: false };
+		}
+		const wantArray = action.type === "array";
+		const isTarget = (v: unknown): boolean =>
+			wantArray ? Array.isArray(v) : v !== null && typeof v === "object";
+		if (isTarget(value)) return { ok: true, value };
+		if (typeof value !== "string") return { ok: false };
+		try {
+			const parsed: unknown = JSON.parse(value);
+			return isTarget(parsed) ? { ok: true, value: parsed } : { ok: false };
+		} catch {
+			return { ok: false };
+		}
+	};
+	let count = 0;
+	let sample: unknown;
+	for await (const doc of col.find(present, { projection: { [field]: 1 } })) {
+		if (!parse((doc as Document)[field]).ok) {
+			count += 1;
+			sample ??= (doc as Document)[field];
+		}
+	}
+	if (count > 0) refuse(count, sample);
+	for await (const doc of col.find(present, { projection: { [field]: 1 } })) {
+		const current = (doc as Document)[field];
+		const next = parse(current).value;
+		if (next !== current) {
+			await col.updateOne({ _id: (doc as Document)._id }, { $set: { [field]: next } });
+		}
 	}
 }
 
@@ -1254,6 +1389,9 @@ class MongoConnection implements Connection {
 		if (query.operation === "rename-column") {
 			return this.#executeDDLRenameColumn(query);
 		}
+		if (query.operation === "alter-column") {
+			return this.#executeDDLAlterColumn(query);
+		}
 		return this.#executeDDLDropRef(query);
 	}
 
@@ -1659,7 +1797,7 @@ class MongoConnection implements Connection {
 			});
 			if (clash > 0) {
 				throw new EngineExecutionError(
-					`${clash} docs de '${query.collection}' ont déjà '${to}' en plus de '${from}' — le renommage écraserait leur '${to}' ; vide l'un des deux d'abord, par exemple : update ${query.collection} where ${to} is not null set ${to} = null, puis relance rename column`
+					`${clash} docs de '${query.collection}' ont déjà '${to}' en plus de '${from}' — le renommage écraserait leur '${to}' ; vide l'un des deux d'abord, par exemple : update ${query.collection} where ${to} != null set ${to} = null, puis relance rename column`
 				);
 			}
 
@@ -1742,6 +1880,110 @@ class MongoConnection implements Connection {
 			if (cause instanceof EngineExecutionError) throw cause;
 			throw new EngineExecutionError(
 				`rename column MongoDB échouée sur '${query.collection}.${from}' — ${describeMongoExecutionError(cause)}`,
+				{ cause }
+			);
+		}
+	}
+
+	/**
+	 * `alter column` Mongo (ADR-036 E/1c).
+	 *  - `set nullable` : le validateur accepte `null`, le champ quitte `required`.
+	 *  - `set not null` : préflight des documents nuls ou sans le champ (refus
+	 *    avec commande copiable, ADR-029 D2), puis validateur.
+	 *  - `set type` : préflight des valeurs non convertibles (refus avec leur
+	 *    nombre et un exemple), conversion par lots, puis validateur. Les
+	 *    documents déjà convertis sont sautés : la commande se relance.
+	 */
+	async #executeDDLAlterColumn(
+		query: Extract<NativeQuery, { kind: "mongo-ddl"; operation: "alter-column" }>
+	): Promise<ResultSet> {
+		const db = this.#requireDb();
+		const col = db.collection(query.collection);
+		const { column: field, action } = query;
+		try {
+			const info = (await db.listCollections({ name: query.collection }).toArray())[0] as
+				| { readonly options?: { readonly validator?: Document } }
+				| undefined;
+			if (info === undefined) {
+				throw new EngineExecutionError(
+					`alter column échouée : collection '${query.collection}' inexistante`
+				);
+			}
+			const validator = info.options?.validator;
+			const jsonSchema = (validator?.$jsonSchema as Document | undefined) ?? {
+				bsonType: "object"
+			};
+			const properties = { ...(jsonSchema.properties as Document | undefined) };
+			const property: Document = { ...(properties[field] as Document | undefined) };
+			let required = Array.isArray(jsonSchema.required)
+				? jsonSchema.required.map(String)
+				: [];
+			const nullable = !required.includes(field);
+			// Sans validateur, un champ Mongo accepte déjà `null` : rien à poser.
+			if (action.kind === "set-nullable" && validator === undefined) {
+				return { columns: [], rows: [], rowCount: 0 };
+			}
+
+			if (action.kind === "set-not-null") {
+				const missing = await col.countDocuments({
+					$or: [{ [field]: { $exists: false } }, { [field]: null }]
+				});
+				if (missing > 0) {
+					throw new EngineExecutionError(
+						`${missing} docs de '${query.collection}' ont '${field}' nul ou absent — exécute d'abord : update ${query.collection} where ${field} = null set ${field} = <val>, puis relance alter column ${query.collection}.${field} set not null`
+					);
+				}
+			}
+			if (action.kind === "set-type") {
+				// Le validateur garde l'ancien type tant que la conversion tourne :
+				// il le lâche d'abord, le nouveau est posé à la fin.
+				if (validator !== undefined && properties[field] !== undefined) {
+					const { bsonType: _type, enum: _enum, ...untyped } = property;
+					await db.command({
+						collMod: query.collection,
+						validator: {
+							...validator,
+							$jsonSchema: { ...jsonSchema, properties: { ...properties, [field]: untyped } }
+						}
+					});
+				}
+				await convertFieldType(col, query.collection, field, action);
+			}
+
+			const bsonType =
+				action.kind === "set-type" ? action.bsonType : withoutNull(property.bsonType);
+			const enumMembers =
+				action.kind === "set-type"
+					? action.enumMembers
+					: (property.enum as unknown[] | undefined)?.filter((m) => m !== null);
+			const stayNullable =
+				action.kind === "set-nullable" ? true : action.kind === "set-not-null" ? false : nullable;
+			delete property.bsonType;
+			delete property.enum;
+			if (bsonType !== null && bsonType !== undefined) {
+				property.bsonType = stayNullable ? [bsonType, "null"] : bsonType;
+			} else if (!stayNullable) {
+				property.not = { bsonType: "null" };
+			}
+			if (stayNullable) delete property.not;
+			if (enumMembers !== undefined) {
+				property.enum = stayNullable ? [...enumMembers, null] : [...enumMembers];
+			}
+			properties[field] = property;
+			required = required.filter((name) => name !== field);
+			if (!stayNullable) required.push(field);
+			await db.command({
+				collMod: query.collection,
+				validator: {
+					...validator,
+					$jsonSchema: withRequired({ ...jsonSchema, properties }, required)
+				}
+			});
+			return { columns: [], rows: [], rowCount: 0 };
+		} catch (cause) {
+			if (cause instanceof EngineExecutionError) throw cause;
+			throw new EngineExecutionError(
+				`alter column MongoDB échouée sur '${query.collection}.${field}' — ${describeMongoExecutionError(cause)}`,
 				{ cause }
 			);
 		}
@@ -2127,7 +2369,7 @@ class MongoConnection implements Connection {
 				});
 				if (orphanCount > 0) {
 					throw new EngineExecutionError(
-						`${orphanCount} docs sans '${fieldName}' — exécute d'abord : update ${query.collection} where ${fieldName} is null set ${fieldName} = <val>, puis relance add column not null`
+						`${orphanCount} docs sans '${fieldName}' — exécute d'abord : update ${query.collection} where ${fieldName} = null set ${fieldName} = <val>, puis relance add column not null`
 					);
 				}
 			}
@@ -2142,6 +2384,11 @@ class MongoConnection implements Connection {
 				newProperty["bsonType"] = query.column.required
 					? query.column.bsonType
 					: [query.column.bsonType, "null"];
+			}
+			if (query.column.enum !== undefined) {
+				newProperty.enum = query.column.required
+					? [...query.column.enum]
+					: [...query.column.enum, null];
 			}
 			const newProperties = {
 				...existingProperties,

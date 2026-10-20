@@ -220,6 +220,27 @@ export const mongoMapper: Mapper = {
 		if (plan.kind === "add-enum-member") return renderMongoAddEnumMember(plan);
 		if (plan.kind === "drop-enum") return renderMongoDropEnum(plan);
 		if (plan.kind === "drop-ref") return renderMongoDropRef(plan);
+		if (plan.kind === "alter-column") {
+			const { action } = plan;
+			return {
+				engine: "mongodb",
+				kind: "mongo-ddl",
+				operation: "alter-column",
+				collection: plan.target,
+				column: plan.column,
+				action:
+					action.kind === "set-type"
+						? {
+								kind: "set-type",
+								type: action.type,
+								bsonType: MONGO_BSON_TYPE[action.type],
+								...(action.enumMembers !== undefined
+									? { enumMembers: action.enumMembers }
+									: {})
+							}
+						: { kind: action.kind }
+			};
+		}
 		if (plan.kind === "rename-column") {
 			return {
 				engine: "mongodb",

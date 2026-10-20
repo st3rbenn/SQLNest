@@ -139,6 +139,23 @@ describe("add ref autocomplete (ADR-036 E/1a)", () => {
 	});
 });
 
+describe("alter column autocomplete (ADR-036 E/1c)", () => {
+	it("`alter ` propose `column`, puis les tables, puis les colonnes", () => {
+		expect(labels("alter ")).toEqual(["column"]);
+		expect(labels("alter column ")).toContain("users");
+		expect(labels("alter column users.")).toContain("email");
+	});
+
+	it("`alter column users.email ` propose `set`, puis les actions", () => {
+		expect(labels("alter column users.email ")).toEqual(["set"]);
+		expect(labels("alter column users.email set ")).toEqual(["nullable", "not null", "type"]);
+	});
+
+	it("`set type ` propose les types", () => {
+		expect(labels("alter column users.email set type ")).toContain("int");
+	});
+});
+
 describe("rename column autocomplete (ADR-036 E/1b)", () => {
 	it("`rename ` propose `column`", () => {
 		expect(labels("rename ")).toEqual(["column"]);

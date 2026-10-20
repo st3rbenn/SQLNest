@@ -803,6 +803,28 @@ describe("codegen Mongo — ref FK modifier (ADR-031 FK/1a)", () => {
 	});
 });
 
+describe("codegen Mongo — alter column (ADR-036 E/1c)", () => {
+	it("set type : type SNQL, bsonType cible et membres d'enum", () => {
+		if (mongoMapper.mapDDL === undefined) throw new Error("mapDDL manquant");
+		expect(
+			mongoMapper.mapDDL({
+				op: "ddl",
+				kind: "alter-column",
+				target: "agency",
+				column: "zip",
+				action: { kind: "set-type", type: "enum", enumTypeName: "TIER", enumMembers: ["a", "b"] }
+			})
+		).toEqual({
+			engine: "mongodb",
+			kind: "mongo-ddl",
+			operation: "alter-column",
+			collection: "agency",
+			column: "zip",
+			action: { kind: "set-type", type: "enum", bsonType: "string", enumMembers: ["a", "b"] }
+		});
+	});
+});
+
 describe("codegen Mongo — rename column (ADR-036 E/1b)", () => {
 	it("émet le shape rename-column (compensation en 5 temps côté adapter)", () => {
 		if (mongoMapper.mapDDL === undefined) throw new Error("mapDDL manquant");

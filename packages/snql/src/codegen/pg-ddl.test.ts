@@ -632,6 +632,47 @@ describe("codegen PG — ref FK modifier (ADR-031 FK/1)", () => {
 	});
 });
 
+describe("codegen PG — alter column (ADR-036 E/1c)", () => {
+	const base = { op: "ddl" as const, kind: "alter-column" as const, target: "agency", column: "zip" };
+
+	it("nullabilité", () => {
+		const nullable = mapDDL({ ...base, action: { kind: "set-nullable" } });
+		const notNull = mapDDL({ ...base, action: { kind: "set-not-null" } });
+		if (nullable.kind !== "sql" || notNull.kind !== "sql") throw new Error("attendu sql");
+		expect(nullable.text).toBe(`ALTER TABLE "agency" ALTER COLUMN "zip" DROP NOT NULL`);
+		expect(notNull.text).toBe(`ALTER TABLE "agency" ALTER COLUMN "zip" SET NOT NULL`);
+	});
+
+	it("set type sans défaut : TYPE … USING", () => {
+		const q = mapDDL({ ...base, action: { kind: "set-type", type: "int" } });
+		if (q.kind !== "sql") throw new Error("attendu sql");
+		expect(q.text).toBe(
+			`ALTER TABLE "agency" ALTER COLUMN "zip" TYPE integer USING "zip"::integer`
+		);
+	});
+
+	it("set type vers un enum", () => {
+		const q = mapDDL({
+			...base,
+			action: { kind: "set-type", type: "enum", enumTypeName: "TIER", enumMembers: ["a"] }
+		});
+		if (q.kind !== "sql") throw new Error("attendu sql");
+		expect(q.text).toContain(`TYPE "TIER" USING "zip"::"TIER"`);
+	});
+
+	it("set type avec un défaut : retiré puis reposé converti", () => {
+		const q = mapDDL({
+			...base,
+			action: { kind: "set-type", type: "int" },
+			current: { type: "string", nullable: true, hasDefault: true }
+		});
+		if (q.kind !== "sql") throw new Error("attendu sql");
+		expect(q.text).toContain("DO $$");
+		expect(q.text).toContain(`EXECUTE 'ALTER TABLE "agency" ALTER COLUMN "zip" DROP DEFAULT';`);
+		expect(q.text).toContain(`SET DEFAULT (%s)::integer', d)`);
+	});
+});
+
 describe("codegen PG — rename column (ADR-036 E/1b)", () => {
 	it("émet ALTER TABLE RENAME COLUMN", () => {
 		const q = mapDDL({

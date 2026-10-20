@@ -618,6 +618,39 @@ describe("add ref DDL (ADR-036 E/1a)", () => {
 	});
 });
 
+// ─── E/1c — alter column (ADR-036) ─────────────────────────────────────
+describe("alter column DDL (ADR-036 E/1c)", () => {
+	it("parse set nullable / set not null", () => {
+		expect(stmt("alter column agency.phone set nullable")).toMatchObject({
+			kind: "alter-column",
+			target: "agency",
+			column: "phone",
+			action: { kind: "set-nullable" }
+		});
+		expect(stmt("alter column agency.phone set not null")).toMatchObject({
+			action: { kind: "set-not-null" }
+		});
+	});
+
+	it("parse set type, alias PG compris", () => {
+		expect(stmt("alter column agency.zip set type int")).toMatchObject({
+			action: { kind: "set-type", type: { kind: "builtin", type: "int" } }
+		});
+		expect(stmt("alter column agency.zip set type varchar")).toMatchObject({
+			action: { kind: "set-type", type: { kind: "builtin", type: "string" } }
+		});
+	});
+
+	it("refuse une action inconnue en listant les actions", () => {
+		expect(() => stmt("alter column agency.zip set unique")).toThrow(
+			/set nullable, set not null ou set type <type>/
+		);
+		expect(() => stmt("alter column agency.zip drop not null")).toThrow(
+			/attend une action/
+		);
+	});
+});
+
 // ─── E/1b — rename column (ADR-036) ────────────────────────────────────
 describe("rename column DDL (ADR-036 E/1b)", () => {
 	it("parse rename column t.c to n", () => {

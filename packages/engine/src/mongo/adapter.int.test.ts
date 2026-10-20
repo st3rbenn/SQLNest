@@ -520,3 +520,119 @@ describe.skipIf(!hasMongo)(
 		}, 60_000);
 	}
 );
+
+describe.skipIf(!hasMongo)(
+	"mongodb adapter — alter column (ADR-036 E/1c)",
+	() => {
+		it("nullabilité et type : préflight, conversion par lots, validateur et introspection", async () => {
+			const conn = await mongoAdapter.connect(loadConfig());
+			const cleanup = async () => {
+				await runQuery(conn, "drop table e1c_m if exists");
+				await runQuery(conn, "drop enum E1C_TIER if exists");
+			};
+			try {
+				await cleanup();
+				await runQuery(
+					conn,
+					"create table e1c_m { code: string, n: string nullable, flag: string nullable, tier: string nullable, ref: string nullable }"
+				);
+				await runQuery(
+					conn,
+					'add {code: "a", n: "5", flag: "yes", tier: "x", ref: "0f8fad5b-d9cb-469f-a165-70867728950e"} into e1c_m'
+				);
+				await runQuery(
+					conn,
+					'add {code: "b", n: null, flag: "false", tier: "y"} into e1c_m'
+				);
+
+				// Type : texte → entier, null conservé ; le validateur suit.
+				await runQuery(conn, "alter column e1c_m.n set type int");
+				const ints = await runQuery(conn, "find e1c_m pick code, n sort code");
+				expect(ints.rows).toEqual([
+					{ code: "a", n: 5 },
+					{ code: "b", n: null }
+				]);
+				await expect(
+					runQuery(conn, 'add {code: "c", n: "7"} into e1c_m')
+				).rejects.toThrow();
+
+				// Nullabilité : refus tant qu'un document est nul, puis appliquée.
+				await expect(
+					runQuery(conn, "alter column e1c_m.n set not null")
+				).rejects.toThrow(
+					/1 docs de 'e1c_m' ont 'n' nul ou absent — exécute d'abord : update e1c_m where n = null set n = <val>/
+				);
+				await runQuery(conn, "update e1c_m where n = null set n = 0");
+				await runQuery(conn, "alter column e1c_m.n set not null");
+				await expect(
+					runQuery(conn, 'add {code: "c", n: null} into e1c_m')
+				).rejects.toThrow();
+				await runQuery(conn, "alter column e1c_m.n set nullable");
+				await runQuery(conn, 'add {code: "c", n: null} into e1c_m');
+
+				// Booléen depuis du texte : mots de Postgres, pas `$convert`.
+				await runQuery(conn, "alter column e1c_m.flag set type bool");
+				const flags = await runQuery(
+					conn,
+					"find e1c_m pick code, flag sort code"
+				);
+				expect(flags.rows.slice(0, 2)).toEqual([
+					{ code: "a", flag: true },
+					{ code: "b", flag: false }
+				]);
+
+				// Non convertible : refusé avec le nombre et un exemple, rien ne change.
+				await expect(
+					runQuery(conn, "alter column e1c_m.code set type int")
+				).rejects.toThrow(
+					/3 docs de 'e1c_m' ont une valeur de 'code' non convertible en int \(ex\. "a"\)/
+				);
+
+				// uuid : converti côté adapter.
+				await runQuery(conn, "alter column e1c_m.ref set type uuid");
+				const refs = await runQuery(
+					conn,
+					'find e1c_m where code = "a" pick ref'
+				);
+				expect(String(refs.rows[0]?.ref)).toBe(
+					"0f8fad5b-d9cb-469f-a165-70867728950e"
+				);
+
+				// Enum : membres vérifiés, puis posés au validateur.
+				await runQuery(conn, 'create enum E1C_TIER { "x" }');
+				await expect(
+					runQuery(
+						conn,
+						"alter column e1c_m.tier set type E1C_TIER",
+						await conn.introspect()
+					)
+				).rejects.toThrow(/non convertible en enum \(ex\. "y"\)/);
+				await runQuery(conn, 'add enum member E1C_TIER "y"');
+				await runQuery(
+					conn,
+					"alter column e1c_m.tier set type E1C_TIER",
+					await conn.introspect()
+				);
+				await expect(
+					runQuery(conn, 'add {code: "d", tier: "z"} into e1c_m')
+				).rejects.toThrow();
+
+				// Introspection : type lisible sur une colonne nullable, valeurs d'enum.
+				const fields = (await conn.introspect()).collections.find(
+					(c) => c.name === "e1c_m"
+				)?.fields;
+				expect(fields?.find((f) => f.name === "n")).toMatchObject({
+					type: "int",
+					nullable: true
+				});
+				expect(fields?.find((f) => f.name === "tier")?.enumValues).toEqual([
+					"x",
+					"y"
+				]);
+			} finally {
+				await cleanup();
+				await conn.close();
+			}
+		}, 60_000);
+	}
+);

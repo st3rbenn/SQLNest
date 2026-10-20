@@ -11,6 +11,7 @@ import type {
 	AddEnumMemberStmt,
 	AddIndexStmt,
 	AddRefStmt,
+	AlterColumnStmt,
 	CreateEnumStmt,
 	CreateTableStmt,
 	DDLStatement,
@@ -28,6 +29,7 @@ import type {
 	AddEnumMemberPlan,
 	AddIndexPlan,
 	AddRefPlan,
+	AlterColumnPlan,
 	CreateEnumPlan,
 	CreateTableField,
 	CreateTablePlan,
@@ -90,6 +92,9 @@ export function lowerDDL(
 	}
 	if (statement.kind === "rename-column") {
 		return lowerRenameColumn(statement, schema);
+	}
+	if (statement.kind === "alter-column") {
+		return lowerAlterColumn(statement, schema);
 	}
 	throw new SnqlError(
 		`DDL kind '${(statement as { kind: string }).kind}' non supporté au lower`,
@@ -610,6 +615,99 @@ function lowerRenameColumn(
 		target: stmt.target,
 		column: stmt.column,
 		newName: stmt.newName,
+		...(stmt.span !== undefined ? { span: stmt.span } : {})
+	};
+}
+
+/**
+ * `alter column` (ADR-036 E/1c). `set type` : le nouveau type reste
+ * compatible avec chaque FK qui part de la colonne ou y arrive (sinon le
+ * moteur refuserait la FK, ou Mongo la casserait en silence).
+ */
+function lowerAlterColumn(
+	stmt: AlterColumnStmt,
+	schema?: SchemaModel
+): AlterColumnPlan {
+	assertIdent(stmt.target, "target");
+	assertIdent(stmt.column, "field");
+	let current: AlterColumnPlan["current"];
+	if (schema !== undefined) {
+		const table = schema.collections.find((c) => c.name === stmt.target);
+		if (table === undefined) {
+			const available =
+				schema.collections.map((c) => c.name).join(", ") || "(aucune)";
+			throw new SnqlError(
+				`'alter column' : table '${stmt.target}' inconnue — tables : ${available}`,
+				"lower_ddl_alter_column_unknown_table",
+				stmt.span
+			);
+		}
+		const field = table.fields.find((f) => f.name === stmt.column);
+		if (field === undefined) {
+			const available = table.fields.map((f) => f.name).join(", ") || "(aucune)";
+			throw new SnqlError(
+				`'alter column' : colonne '${stmt.column}' inconnue dans '${stmt.target}' — colonnes : ${available}`,
+				"lower_ddl_alter_column_unknown_column",
+				stmt.columnSpan
+			);
+		}
+		current = {
+			type: field.type,
+			nullable: field.nullable,
+			hasDefault: field.hasDefault ?? false
+		};
+	}
+	if (stmt.action.kind !== "set-type") {
+		return {
+			op: "ddl",
+			kind: "alter-column",
+			target: stmt.target,
+			column: stmt.column,
+			action: { kind: stmt.action.kind },
+			...(current !== undefined ? { current } : {}),
+			...(stmt.span !== undefined ? { span: stmt.span } : {})
+		};
+	}
+	const resolved = resolveFieldType(
+		stmt.action.type,
+		stmt.column,
+		schema,
+		stmt.action.typeSpan
+	);
+	for (const ref of schema?.refs ?? []) {
+		const outgoing = ref.fromCollection === stmt.target && ref.fromColumn === stmt.column;
+		const incoming = ref.toCollection === stmt.target && ref.toColumn === stmt.column;
+		if (!outgoing && !incoming) continue;
+		const other = outgoing
+			? { table: ref.toCollection, column: ref.toColumn }
+			: { table: ref.fromCollection, column: ref.fromColumn };
+		const otherType = schema?.collections
+			.find((c) => c.name === other.table)
+			?.fields.find((f) => f.name === other.column)?.type;
+		if (otherType !== undefined && !refTypesCompatible(resolved.type, otherType)) {
+			throw new SnqlError(
+				`'alter column ${stmt.target}.${stmt.column} set type ${resolved.enumTypeName ?? resolved.type}' : incompatible avec la foreign key '${ref.name}' (${other.table}.${other.column} est de type '${otherType}')`,
+				"lower_ddl_ref_type_mismatch",
+				stmt.action.typeSpan
+			);
+		}
+	}
+	return {
+		op: "ddl",
+		kind: "alter-column",
+		target: stmt.target,
+		column: stmt.column,
+		action: {
+			kind: "set-type",
+			type: resolved.type,
+			...(resolved.enumTypeName !== undefined
+				? { enumTypeName: resolved.enumTypeName }
+				: {}),
+			...(resolved.enumMembers !== undefined
+				? { enumMembers: resolved.enumMembers }
+				: {})
+		},
+		...(current !== undefined ? { current } : {}),
 		...(stmt.span !== undefined ? { span: stmt.span } : {})
 	};
 }
