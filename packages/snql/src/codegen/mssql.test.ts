@@ -612,9 +612,9 @@ describe("codegen mssql — DDL (M/6)", () => {
 		expect(text).toContain("N' : find e1e_kid where length(tier) > 450'");
 		const steps = [
 			"THROW 50000, @msg, 1;",
-			"EXEC (@dropFk); EXEC (@dropIdx); EXEC (@dropChk); EXEC (@dropDf);",
+			"EXEC (@dropFk); EXEC (@dropIdx); EXEC (@dropChk); EXEC (@dropDf); EXEC (@dropSt);",
 			"EXEC (@alter);",
-			"EXEC (@addDf); EXEC (@addChk); EXEC (@addIdx); EXEC (@addFk);",
+			"EXEC (@addSt); EXEC (@addDf); EXEC (@addChk); EXEC (@addIdx); EXEC (@addFk);",
 			"CREATE INDEX [idx_e1e_kid_tier] ON [dbo].[e1e_kid] ([tier]);",
 			"COMMIT;"
 		].map((step) => text.indexOf(step));
@@ -690,9 +690,18 @@ describe("codegen mssql — DDL (M/6)", () => {
 		});
 		expect(text.startsWith("SET NOCOUNT ON;\nSET XACT_ABORT ON;\nBEGIN TRAN;")).toBe(true);
 		expect(text).toContain("N' NOT NULL'");
-		expect(text).toContain("EXEC (@dropFk); EXEC (@dropIdx); EXEC (@dropChk); EXEC (@dropDf);");
+		expect(text).toContain(
+			"EXEC (@dropFk); EXEC (@dropIdx); EXEC (@dropChk); EXEC (@dropDf); EXEC (@dropSt);"
+		);
 		expect(text).toContain("EXEC (@alter);");
-		expect(text).toContain("EXEC (@addDf); EXEC (@addChk); EXEC (@addIdx); EXEC (@addFk);");
+		expect(text).toContain(
+			"EXEC (@addSt); EXEC (@addDf); EXEC (@addChk); EXEC (@addIdx); EXEC (@addFk);"
+		);
+		// Statistiques créées à la main : filtre et NORECOMPUTE reposés.
+		expect(text).toContain("FROM sys.stats s\nWHERE s.user_created = 1 AND");
+		expect(text).toContain(
+			"ISNULL(N' WHERE ' + s.filter_definition, N'') + CASE WHEN s.no_recompute = 1 THEN N' WITH NORECOMPUTE' ELSE N'' END"
+		);
 		expect(text.endsWith("COMMIT;")).toBe(true);
 	});
 

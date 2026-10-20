@@ -1188,9 +1188,11 @@ const MSSQL_ALTER_TARGETS =
 
 /**
  * `ALTER COLUMN` des colonnes de `@targets` (ADR-036 D9). T-SQL le refuse dès
- * qu'un index, une contrainte (PK, UNIQUE, CHECK, DEFAULT) ou une FK dépend
- * de la colonne (5074) : les dépendants, relus au catalogue à l'exécution,
- * sont retirés, puis recréés à l'identique après les `ALTER COLUMN`.
+ * qu'un index, une contrainte (PK, UNIQUE, CHECK, DEFAULT), une FK ou une
+ * statistique créée à la main dépend de la colonne (5074) : les dépendants,
+ * relus au catalogue à l'exécution, sont retirés, puis recréés à l'identique
+ * après les `ALTER COLUMN`. Les statistiques automatiques, elles, sont
+ * retirées par le moteur.
  * `droppedCheck` est retiré sans être reposé. S'exécute dans la transaction
  * de l'appelant, une fois `@targets` rempli.
  */
@@ -1205,11 +1207,15 @@ function mssqlAlterTargets(droppedCheck?: string): string[] {
 		mssqlColumnList(
 			`SELECT N',' + QUOTENAME(COL_NAME(fkc.${side}_object_id, fkc.${side}_column_id)) FROM sys.foreign_key_columns fkc WHERE fkc.constraint_object_id = fk.object_id ORDER BY fkc.constraint_column_id`
 		);
+	const statCols = mssqlColumnList(
+		"SELECT N',' + QUOTENAME(COL_NAME(sc.object_id, sc.column_id)) FROM sys.stats_columns sc WHERE sc.object_id = s.object_id AND sc.stats_id = s.stats_id ORDER BY sc.stats_column_id"
+	);
 	return [
 		"DECLARE @dropFk nvarchar(max) = N'', @addFk nvarchar(max) = N'';",
 		"DECLARE @dropIdx nvarchar(max) = N'', @addIdx nvarchar(max) = N'';",
 		"DECLARE @dropChk nvarchar(max) = N'', @addChk nvarchar(max) = N'';",
 		"DECLARE @dropDf nvarchar(max) = N'', @addDf nvarchar(max) = N'';",
+		"DECLARE @dropSt nvarchar(max) = N'', @addSt nvarchar(max) = N'';",
 		"DECLARE @alter nvarchar(max) = N'';",
 		`SELECT @dropFk = @dropFk + N'ALTER TABLE ' + ${mssqlQualified("fk.parent_object_id")} + N' DROP CONSTRAINT ' + QUOTENAME(fk.name) + N';',
 	@addFk = @addFk + N'ALTER TABLE ' + ${mssqlQualified("fk.parent_object_id")} + N' WITH CHECK ADD CONSTRAINT ' + QUOTENAME(fk.name) + N' FOREIGN KEY (' + ${fkCols("parent")} + N') REFERENCES ' + ${mssqlQualified("fk.referenced_object_id")} + N' (' + ${fkCols("referenced")} + N') ON DELETE ' + REPLACE(fk.delete_referential_action_desc, N'_', N' ') + N' ON UPDATE ' + REPLACE(fk.update_referential_action_desc, N'_', N' ') + N';'
@@ -1231,10 +1237,14 @@ WHERE EXISTS (SELECT 1 FROM @targets tg WHERE tg.obj = cc.parent_object_id AND (
 	@addDf = @addDf + N'ALTER TABLE ' + ${mssqlQualified("dc.parent_object_id")} + N' ADD CONSTRAINT ' + QUOTENAME(dc.name) + N' DEFAULT ' + dc.definition + N' FOR ' + QUOTENAME(COL_NAME(dc.parent_object_id, dc.parent_column_id)) + N';'
 FROM sys.default_constraints dc
 WHERE ${onTarget("dc.parent_object_id", "dc.parent_column_id")};`,
+		`SELECT @dropSt = @dropSt + N'DROP STATISTICS ' + ${mssqlQualified("s.object_id")} + N'.' + QUOTENAME(s.name) + N';',
+	@addSt = @addSt + N'CREATE STATISTICS ' + QUOTENAME(s.name) + N' ON ' + ${mssqlQualified("s.object_id")} + N' (' + ${statCols} + N')' + ISNULL(N' WHERE ' + s.filter_definition, N'') + CASE WHEN s.no_recompute = 1 THEN N' WITH NORECOMPUTE' ELSE N'' END + N';'
+FROM sys.stats s
+WHERE s.user_created = 1 AND EXISTS (SELECT 1 FROM sys.stats_columns sc WHERE sc.object_id = s.object_id AND sc.stats_id = s.stats_id AND ${onTarget("sc.object_id", "sc.column_id")});`,
 		"SELECT @alter = @alter + sql + N';' FROM @targets;",
-		"EXEC (@dropFk); EXEC (@dropIdx); EXEC (@dropChk); EXEC (@dropDf);",
+		"EXEC (@dropFk); EXEC (@dropIdx); EXEC (@dropChk); EXEC (@dropDf); EXEC (@dropSt);",
 		"EXEC (@alter);",
-		"EXEC (@addDf); EXEC (@addChk); EXEC (@addIdx); EXEC (@addFk);"
+		"EXEC (@addSt); EXEC (@addDf); EXEC (@addChk); EXEC (@addIdx); EXEC (@addFk);"
 	];
 }
 

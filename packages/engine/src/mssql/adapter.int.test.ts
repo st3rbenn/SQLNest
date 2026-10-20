@@ -727,6 +727,10 @@ describe.skipIf(!hasMssql)("mssql DDL Tier-2 (intégration M/6)", () => {
 				await runQuery(conn, `add index (n) into e1c_t`);
 				await runQuery(
 					conn,
+					`raw "CREATE STATISTICS st_e1c_t_n ON e1c_t (n, tier) WHERE n > 0 WITH NORECOMPUTE"`
+				);
+				await runQuery(
+					conn,
 					`create table e1c_kid { id: int, t_id: int nullable ref e1c_t.id, primary key (id) }`
 				);
 				await runQuery(conn, `add { id: 1, code: "a", n: 1, tier: "x" } into e1c_t`);
@@ -750,6 +754,17 @@ describe.skipIf(!hasMssql)("mssql DDL Tier-2 (intégration M/6)", () => {
 				expect(indexes.rows.map((r) => r.name)).toEqual(
 					expect.arrayContaining(["idx_e1c_t_n"])
 				);
+				const stats = await runQuery(
+					conn,
+					`raw "SELECT name, no_recompute, filter_definition FROM sys.stats WHERE object_id = OBJECT_ID('e1c_t') AND user_created = 1"`
+				);
+				expect(stats.rows).toEqual([
+					{
+						name: "st_e1c_t_n",
+						no_recompute: true,
+						filter_definition: "([n]>(0))"
+					}
+				]);
 
 				// code : contrainte UNIQUE, reste indexable.
 				await runQuery(conn, `alter column e1c_t.code set nullable`);
@@ -912,6 +927,10 @@ describe.skipIf(!hasMssql)("mssql DDL Tier-2 (intégration M/6)", () => {
 				);
 				await runQuery(
 					conn,
+					`raw "CREATE STATISTICS st_e1k_t_tier ON e1k_t (tier)"`
+				);
+				await runQuery(
+					conn,
 					`raw "ALTER TABLE e1k_t ADD blob varbinary(max) NULL"`
 				);
 				await runQuery(
@@ -952,6 +971,11 @@ describe.skipIf(!hasMssql)("mssql DDL Tier-2 (intégration M/6)", () => {
 				expect(indexes).toEqual(
 					expect.arrayContaining(["idx_e1k_t_tier", "ix_e1k_t_inc"])
 				);
+				const stats = await runQuery(
+					conn,
+					`raw "SELECT name FROM sys.stats WHERE object_id = OBJECT_ID('e1k_t') AND user_created = 1"`
+				);
+				expect(stats.rows).toEqual([{ name: "st_e1k_t_tier" }]);
 				// Défaut et CHECK recréés.
 				await runQuery(conn, `add { id: 4, code: "w" } into e1k_t`);
 				const four = await runQuery(conn, `find e1k_t where id = 4 pick tier`);
