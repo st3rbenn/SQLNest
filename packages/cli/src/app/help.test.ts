@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { renderHelp } from "./help";
 import { COMMANDS } from "./registry";
 
-/** Aide écrite à la main avant le registre de commandes (E/2a) : l'aide
- *  générée doit rester identique. */
-const PREVIOUS_HELP = `sqlnest — CLI SQLNest (tunnel local vers ta DB Postgres).
+/** Aide attendue, au caractère près : une commande qui change son aide
+ *  met ce texte à jour. */
+const EXPECTED_HELP = `sqlnest — CLI SQLNest (tunnel local vers ta DB Postgres).
 
 Usage :
   sqlnest connect                          Device flow interactif (menu ↑↓ si ≥2 DSN)
@@ -16,7 +16,9 @@ Usage :
   sqlnest ping --tunnel <name>             Ping local DSN (diagnostic)
   sqlnest add-connection --name <n>        Ajoute une DSN locale (menu engine + prompts interactifs)
   sqlnest add-connection --name <n> --url <dsn>  DSN inline (⚠ visible dans ps aux / historique shell)
+  sqlnest add-connection --url <chaîne>    URL, JDBC, ADO.NET ou libpq ; nom proposé d'après la base
   sqlnest add-connection --name <n> --force  Écrase sans demander confirmation
+  sqlnest add-connection … --no-test       Enregistre sans tester la connexion
   sqlnest list-connections                 Liste les DSN locales (sans les credentials)
   sqlnest revoke-connection --name <n>     Retire une DSN locale (avec confirm)
   sqlnest revoke-connection --name <n> --yes  Skip la confirmation
@@ -25,7 +27,7 @@ Usage :
 `;
 
 describe("renderHelp", () => {
-	it("reproduit l'aide de sqlnest à l'identique", () => {
-		expect(renderHelp(COMMANDS)).toBe(PREVIOUS_HELP);
+	it("rend l'aide de sqlnest", () => {
+		expect(renderHelp(COMMANDS)).toBe(EXPECTED_HELP);
 	});
 });

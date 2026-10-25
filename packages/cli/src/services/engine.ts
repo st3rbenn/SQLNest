@@ -29,6 +29,7 @@ import {
 	type SchemaModel
 } from "@sqlnest/engine";
 import {
+	type ConnectionDiagnostics,
 	describeConnectionForDiagnostics,
 	resolveLocalConnectionUrl
 } from "./local-connections";
@@ -36,7 +37,7 @@ import {
 /** Résultat d'un `pingTunnel` — enrichi avec les infos SAFE de source
  * DSN (env-per-tunnel / env-fallback / local-file). */
 export interface TunnelPingResult extends PingResult {
-	readonly source: "env-per-tunnel" | "env-fallback" | "local-file";
+	readonly source: ConnectionDiagnostics["source"];
 }
 
 /**
@@ -99,6 +100,44 @@ function resolveEngineConfigFromUrl(url: string): ResolvedEngineConfig {
 		`Scheme de DSN non supporté ('${scheme}:'). Attendu : postgres / postgresql / mongodb / mongodb+srv / mssql / sqlserver.`
 	);
 }
+
+/** Ce qu'une connexion testée avant d'être enregistrée a répondu. */
+export interface ConnectionProbe extends PingResult {
+	readonly collectionCount: number;
+}
+
+/**
+ * Teste une URL avant de l'enregistrer (ADR-038 S2) : connexion, ping,
+ * introspection. Lève l'erreur du moteur si la base ne répond pas.
+ */
+export async function probeConnection(url: string): Promise<ConnectionProbe> {
+	const conn = await engineConnect(resolveEngineConfigFromUrl(url));
+	try {
+		const ping = await conn.ping();
+		const schema = await conn.introspect();
+		return { ...ping, collectionCount: schema.collections.length };
+	} finally {
+		await conn.close();
+	}
+}
+
+/** Version courte d'un serveur : « PostgreSQL 16.13 », « MongoDB 7.0.39 »… */
+export function describeServer(
+	engine: "postgres" | "mongodb" | "mssql",
+	serverVersion: string | undefined
+): string {
+	if (serverVersion === undefined) return ENGINE_LABELS[engine];
+	if (engine === "mongodb") return `MongoDB ${serverVersion}`;
+	if (engine === "postgres")
+		return serverVersion.split(" ").slice(0, 2).join(" ");
+	return (serverVersion.split(" (")[0] as string).trim();
+}
+
+const ENGINE_LABELS = {
+	postgres: "PostgreSQL",
+	mongodb: "MongoDB",
+	mssql: "SQL Server"
+} as const;
 
 /**
  * Ping + info SAFE de source DSN — le CLI l'appelle à `sqlnest ping`

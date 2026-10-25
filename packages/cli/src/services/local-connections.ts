@@ -11,9 +11,19 @@
  * url  = "postgres://user:pass@host:5432/db"
  *
  * [[connections]]
- * name = "staging"
- * url  = "postgres://…"
+ * name = "apollon"
+ * url_from = { file = "/Users/me/apollon/.env", key = "DATABASE_URL" }
+ *
+ * [connections.project]
+ * path  = "/Users/me/apollon"
+ * orm   = "prisma"
+ * apply = true
  * ```
+ * Une entrée porte une `url` copiée, ou une référence `url_from` à une
+ * variable d'un `.env`, relue au moment de servir (ADR-038 S4) ; `project`
+ * est le projet relié (ADR-038 S5). Version 2 dès qu'une entrée utilise
+ * `url_from` ou `project` (un ancien CLI refuse alors le fichier au lieu de
+ * le lire de travers), 1 sinon.
  * Perms 0600 obligatoires (même politique que `config.toml`). Le fichier
  * peut ne pas exister — la résolution retombe sur les variables d'env.
  *
@@ -44,25 +54,48 @@ import {
 } from "node:fs";
 import { platform } from "node:os";
 import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
+import { ORM_NAMES, type OrmName } from "../orm/types";
 import { CONFIG_DIR_PERMS, getConfigDir, MAX_CONFIG_PERMS } from "./config";
+import { parseDotenv } from "./dotenv";
 
 export const LOCAL_CONNECTIONS_VERSION = 1 as const;
 export const LOCAL_CONNECTIONS_FILENAME = "local-connections.toml";
 
+/** Variable `key` du fichier `file` (un `.env`), relue au moment de servir. */
+export interface LocalConnectionUrlRef {
+	readonly file: string;
+	readonly key: string;
+}
+
+/** Projet relié à une connexion (ADR-038 S5). */
+export interface LocalConnectionProject {
+	readonly path: string;
+	readonly orm: OrmName;
+	/** `false` : migration et modèle écrits, base non touchée (ADR-035 point 3). */
+	readonly apply: boolean;
+}
+
+/** Une connexion : `url` copiée, ou `urlFrom` référence — l'une des deux. */
 export interface LocalConnectionEntry {
 	readonly name: string;
-	readonly url: string;
+	readonly url?: string;
+	readonly urlFrom?: LocalConnectionUrlRef;
+	readonly project?: LocalConnectionProject;
 }
 
 export interface LocalConnectionsFile {
-	readonly version: typeof LOCAL_CONNECTIONS_VERSION;
+	readonly version: 1 | 2;
 	readonly connections: readonly LocalConnectionEntry[];
 }
 
 /** Représentation SAFE pour logs/UI — ne contient PAS la DSN. */
 export interface ConnectionDiagnostics {
 	readonly name: string;
-	readonly source: "env-per-tunnel" | "env-fallback" | "local-file";
+	readonly source:
+		| "env-per-tunnel"
+		| "env-fallback"
+		| "local-file"
+		| "env-file";
 }
 
 // Regex hoistées (règle Biome).
@@ -118,8 +151,23 @@ export function saveLocalConnections(file: LocalConnectionsFile): void {
 	}
 	const path = getLocalConnectionsPath();
 	const serialized = stringifyToml({
-		version: file.version,
-		connections: file.connections.map((c) => ({ name: c.name, url: c.url }))
+		version: fileVersion(file.connections),
+		connections: file.connections.map((c) => ({
+			name: c.name,
+			...(c.url !== undefined ? { url: c.url } : {}),
+			...(c.urlFrom !== undefined
+				? { url_from: { file: c.urlFrom.file, key: c.urlFrom.key } }
+				: {}),
+			...(c.project !== undefined
+				? {
+						project: {
+							path: c.project.path,
+							orm: c.project.orm,
+							apply: c.project.apply
+						}
+					}
+				: {})
+		}))
 	});
 	writeFileSync(path, serialized, { mode: MAX_CONFIG_PERMS });
 	assertLocalConnectionsPerms(path);
@@ -127,9 +175,10 @@ export function saveLocalConnections(file: LocalConnectionsFile): void {
 
 /**
  * Ajoute (ou remplace, dedup par `name`) une entrée dans le fichier local.
- * Créé le fichier avec version=1 s'il n'existe pas. Perms 0600 posées à
- * l'écriture — le caller n'a pas à s'en soucier. La nouvelle entrée est
- * ajoutée en QUEUE (l'ordre existant est préservé pour les autres entrées).
+ * Créé le fichier s'il n'existe pas. Perms 0600 posées à l'écriture — le
+ * caller n'a pas à s'en soucier. La nouvelle entrée est ajoutée en QUEUE
+ * (l'ordre existant est préservé pour les autres entrées). Remplacer
+ * l'URL d'une connexion garde son projet relié, sauf s'il est fourni.
  */
 export function addLocalConnection(entry: LocalConnectionEntry): void {
 	const existing = loadLocalConnections();
@@ -137,9 +186,11 @@ export function addLocalConnection(entry: LocalConnectionEntry): void {
 		version: LOCAL_CONNECTIONS_VERSION,
 		connections: []
 	};
+	const previous = base.connections.find((c) => c.name === entry.name);
+	const project = entry.project ?? previous?.project;
 	const next: LocalConnectionEntry[] = [
 		...base.connections.filter((c) => c.name !== entry.name),
-		entry
+		{ ...entry, ...(project !== undefined ? { project } : {}) }
 	];
 	saveLocalConnections({
 		version: LOCAL_CONNECTIONS_VERSION,
@@ -195,9 +246,38 @@ export function resolveLocalConnectionUrl(
 
 	const file = loadLocalConnections();
 	const entry = file?.connections.find((c) => c.name === tunnelName);
-	if (entry) return entry.url;
+	if (entry) return entryUrl(entry);
 
 	throw new LocalConnectionNotFoundError(tunnelName, perTunnelKey);
+}
+
+/** Version du fichier : 2 dès qu'une entrée en utilise les champs. */
+function fileVersion(connections: readonly LocalConnectionEntry[]): 1 | 2 {
+	return connections.some(
+		(c) => c.urlFrom !== undefined || c.project !== undefined
+	)
+		? 2
+		: LOCAL_CONNECTIONS_VERSION;
+}
+
+/** URL d'une entrée : copiée, ou relue dans le `.env` qu'elle référence. */
+export function entryUrl(entry: LocalConnectionEntry): string {
+	if (entry.url !== undefined) return entry.url;
+	const ref = entry.urlFrom as LocalConnectionUrlRef;
+	if (!existsSync(ref.file)) {
+		throw new Error(
+			`« ${entry.name} » lit ${ref.key} dans ${ref.file} : fichier introuvable.`
+		);
+	}
+	const value = parseDotenv(readFileSync(ref.file, "utf8"), process.env)[
+		ref.key
+	];
+	if (value === undefined || value === "") {
+		throw new Error(
+			`« ${entry.name} » lit ${ref.key} dans ${ref.file} : variable absente ou vide.`
+		);
+	}
+	return value;
 }
 
 /**
@@ -217,7 +297,13 @@ export function describeConnectionForDiagnostics(
 	if (env.SQLNEST_PG_URL && env.SQLNEST_PG_URL.length > 0) {
 		return { name: tunnelName, source: "env-fallback" };
 	}
-	return { name: tunnelName, source: "local-file" };
+	const entry = loadLocalConnections()?.connections.find(
+		(c) => c.name === tunnelName
+	);
+	return {
+		name: tunnelName,
+		source: entry?.urlFrom !== undefined ? "env-file" : "local-file"
+	};
 }
 
 export class LocalConnectionNotFoundError extends Error {
@@ -243,9 +329,9 @@ function validateLocalConnections(raw: unknown): LocalConnectionsFile {
 		throw new Error(`${LOCAL_CONNECTIONS_FILENAME}: TOML invalide`);
 	}
 	const obj = raw as Record<string, unknown>;
-	if (obj.version !== LOCAL_CONNECTIONS_VERSION) {
+	if (obj.version !== 1 && obj.version !== 2) {
 		throw new Error(
-			`${LOCAL_CONNECTIONS_FILENAME}: version ${String(obj.version)} inconnue (attendu ${LOCAL_CONNECTIONS_VERSION}).`
+			`${LOCAL_CONNECTIONS_FILENAME}: version ${String(obj.version)} inconnue (attendu 1 ou 2).`
 		);
 	}
 	// `connections` absent est légitime : un user qui a supprimé toutes ses
@@ -271,9 +357,15 @@ function validateLocalConnections(raw: unknown): LocalConnectionsFile {
 				`${LOCAL_CONNECTIONS_FILENAME}: connections[${i}].name manquant.`
 			);
 		}
-		if (typeof entry.url !== "string" || entry.url.length === 0) {
+		const where = `${LOCAL_CONNECTIONS_FILENAME}: connections[${i}]`;
+		const url =
+			typeof entry.url === "string" && entry.url.length > 0
+				? entry.url
+				: undefined;
+		const urlFrom = validateUrlRef(entry.url_from, where);
+		if ((url === undefined) === (urlFrom === undefined)) {
 			throw new Error(
-				`${LOCAL_CONNECTIONS_FILENAME}: connections[${i}].url manquant.`
+				`${where} : une \`url\` ou un \`url_from\`, l'un des deux.`
 			);
 		}
 		if (seenNames.has(entry.name)) {
@@ -282,7 +374,56 @@ function validateLocalConnections(raw: unknown): LocalConnectionsFile {
 			);
 		}
 		seenNames.add(entry.name);
-		connections.push({ name: entry.name, url: entry.url });
+		const project = validateProject(entry.project, where);
+		connections.push({
+			name: entry.name,
+			...(url !== undefined ? { url } : {}),
+			...(urlFrom !== undefined ? { urlFrom } : {}),
+			...(project !== undefined ? { project } : {})
+		});
 	}
-	return { version: LOCAL_CONNECTIONS_VERSION, connections };
+	return { version: obj.version, connections };
+}
+
+function validateUrlRef(
+	raw: unknown,
+	where: string
+): LocalConnectionUrlRef | undefined {
+	if (raw === undefined) return undefined;
+	const ref = raw as Record<string, unknown> | null;
+	if (
+		ref === null ||
+		typeof ref !== "object" ||
+		typeof ref.file !== "string" ||
+		ref.file.length === 0 ||
+		typeof ref.key !== "string" ||
+		ref.key.length === 0
+	) {
+		throw new Error(`${where}.url_from : \`file\` et \`key\` attendus.`);
+	}
+	return { file: ref.file, key: ref.key };
+}
+
+function validateProject(
+	raw: unknown,
+	where: string
+): LocalConnectionProject | undefined {
+	if (raw === undefined) return undefined;
+	const project = raw as Record<string, unknown> | null;
+	if (
+		project === null ||
+		typeof project !== "object" ||
+		typeof project.path !== "string" ||
+		project.path.length === 0 ||
+		!ORM_NAMES.includes(project.orm as OrmName)
+	) {
+		throw new Error(
+			`${where}.project : \`path\` et \`orm\` (${ORM_NAMES.join(", ")}) attendus.`
+		);
+	}
+	return {
+		path: project.path,
+		orm: project.orm as OrmName,
+		apply: project.apply !== false
+	};
 }

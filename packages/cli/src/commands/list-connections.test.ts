@@ -6,7 +6,7 @@
  * sortent pas du fichier local).
  */
 
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
@@ -96,5 +96,51 @@ describe("listConnections", () => {
 		const joined = out.join("\n");
 		expect(joined).toContain("broken");
 		expect(joined).toContain("<opaque>");
+	});
+});
+
+describe("listConnections — référence au .env et projet relié (ADR-038)", () => {
+	let tempDir: string;
+	beforeEach(() => {
+		tempDir = mkdtempSync(join(tmpdir(), "sqlnest-list-v2-"));
+		process.env.SQLNEST_CONFIG_DIR = tempDir;
+	});
+	afterEach(() => {
+		delete process.env.SQLNEST_CONFIG_DIR;
+		rmSync(tempDir, { recursive: true, force: true });
+	});
+
+	test("colonnes SOURCE et PROJET, sans secret ; .env disparu → raison", () => {
+		const envFile = join(tempDir, ".env");
+		writeFileSync(
+			envFile,
+			"DATABASE_URL=postgres://lab:secret@localhost:5440/apollon_prisma\n"
+		);
+		saveLocalConnections({
+			version: 2,
+			connections: [
+				{
+					name: "apollon",
+					urlFrom: { file: envFile, key: "DATABASE_URL" },
+					project: { path: "/srv/apollon", orm: "prisma", apply: true }
+				},
+				{ name: "chinook", url: "mssql://sa:pw@localhost:1433/Chinook" },
+				{
+					name: "gone",
+					urlFrom: { file: join(tempDir, "nope.env"), key: "DATABASE_URL" }
+				}
+			]
+		});
+		const out: string[] = [];
+		listConnections({ stdout: (l) => out.push(l) });
+		const joined = out.join("\n");
+		expect(out[0]).toMatch(/^NAME\s+ENGINE\s+LOCATION\s+SOURCE\s+PROJET$/);
+		expect(joined).toContain("localhost:5440/apollon_prisma");
+		expect(joined).toContain("DATABASE_URL · ");
+		expect(joined).toContain("Prisma · /srv/apollon");
+		expect(joined).toContain("localhost:1433/Chinook");
+		expect(joined).toContain("<.env illisible>");
+		expect(joined).not.toContain("secret");
+		expect(joined).not.toContain("lab");
 	});
 });

@@ -199,3 +199,104 @@ url = "postgres://x@y/z"
 		expect(() => loadLocalConnections()).toThrow(/double|duplicate/i);
 	});
 });
+
+describe("version 2 : référence au .env et projet relié (ADR-038)", () => {
+	const writeRaw = (raw: string) => {
+		const { writeFileSync, mkdirSync } = require("node:fs");
+		mkdirSync(tempDir, { recursive: true, mode: 0o700 });
+		writeFileSync(getLocalConnectionsPath(), raw, { mode: 0o600 });
+	};
+
+	test("url_from relue au moment de servir : un changement du .env est suivi", () => {
+		const { writeFileSync } = require("node:fs");
+		const envFile = join(tempDir, ".env");
+		writeFileSync(
+			envFile,
+			"DATABASE_URL=postgres://u:p@localhost:5436/apollon\n"
+		);
+		saveLocalConnections({
+			version: 2,
+			connections: [
+				{ name: "apollon", urlFrom: { file: envFile, key: "DATABASE_URL" } }
+			]
+		});
+		expect(resolveLocalConnectionUrl("apollon")).toBe(
+			"postgres://u:p@localhost:5436/apollon"
+		);
+		writeFileSync(
+			envFile,
+			"DATABASE_URL=postgres://u:p@localhost:5437/apollon\n"
+		);
+		expect(resolveLocalConnectionUrl("apollon")).toBe(
+			"postgres://u:p@localhost:5437/apollon"
+		);
+		expect(describeConnectionForDiagnostics("apollon").source).toBe("env-file");
+	});
+
+	test("url_from : fichier ou variable disparus → erreur qui le dit", () => {
+		const { writeFileSync } = require("node:fs");
+		const envFile = join(tempDir, ".env");
+		saveLocalConnections({
+			version: 2,
+			connections: [
+				{ name: "apollon", urlFrom: { file: envFile, key: "DATABASE_URL" } }
+			]
+		});
+		expect(() => resolveLocalConnectionUrl("apollon")).toThrow(
+			/fichier introuvable/
+		);
+		writeFileSync(envFile, "OTHER=1\n");
+		expect(() => resolveLocalConnectionUrl("apollon")).toThrow(
+			/variable absente/
+		);
+	});
+
+	test("version écrite : 1 sans champ v2, 2 dès un url_from ou un projet", () => {
+		const { readFileSync } = require("node:fs");
+		saveLocalConnections({
+			version: LOCAL_CONNECTIONS_VERSION,
+			connections: [{ name: "pg", url: "postgres://a@b/c" }]
+		});
+		expect(readFileSync(getLocalConnectionsPath(), "utf8")).toContain(
+			"version = 1"
+		);
+		saveLocalConnections({
+			version: LOCAL_CONNECTIONS_VERSION,
+			connections: [
+				{
+					name: "pg",
+					url: "postgres://a@b/c",
+					project: { path: "/tmp/app", orm: "prisma", apply: false }
+				}
+			]
+		});
+		const raw = readFileSync(getLocalConnectionsPath(), "utf8") as string;
+		expect(raw).toContain("version = 2");
+		expect(loadLocalConnections()?.connections[0]).toEqual({
+			name: "pg",
+			url: "postgres://a@b/c",
+			project: { path: "/tmp/app", orm: "prisma", apply: false }
+		});
+	});
+
+	test("ni url ni url_from, ou les deux → refusé ; ORM inconnu → refusé ; apply absent = true", () => {
+		writeRaw('version = 2\n\n[[connections]]\nname = "x"\n');
+		expect(() => loadLocalConnections()).toThrow(/l'un des deux/);
+		writeRaw(
+			'version = 2\n\n[[connections]]\nname = "x"\nurl = "postgres://a@b/c"\nurl_from = { file = "/a/.env", key = "K" }\n'
+		);
+		expect(() => loadLocalConnections()).toThrow(/l'un des deux/);
+		writeRaw(
+			'version = 2\n\n[[connections]]\nname = "x"\nurl = "postgres://a@b/c"\n\n[connections.project]\npath = "/a"\norm = "typeorm"\n'
+		);
+		expect(() => loadLocalConnections()).toThrow(/orm/);
+		writeRaw(
+			'version = 2\n\n[[connections]]\nname = "x"\nurl = "postgres://a@b/c"\n\n[connections.project]\npath = "/a"\norm = "doctrine"\n'
+		);
+		expect(loadLocalConnections()?.connections[0]?.project).toEqual({
+			path: "/a",
+			orm: "doctrine",
+			apply: true
+		});
+	});
+});

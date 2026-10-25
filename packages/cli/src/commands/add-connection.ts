@@ -27,13 +27,19 @@
 
 import { defineCommand, parseCommandArgs } from "../app/command";
 import {
+	type ParsedConnection,
+	parseConnectionString,
+	suggestConnectionName
+} from "../services/connection-strings";
+import { type ConnectionProbe, describeServer } from "../services/engine";
+import {
 	addLocalConnection,
 	loadLocalConnections
 } from "../services/local-connections";
 import type { Prompter } from "../ui/prompts";
 
 export class AddConnectionError extends Error {
-	readonly kind: "cancelled" | "invalid-input";
+	readonly kind: "cancelled" | "invalid-input" | "unreachable";
 	constructor(kind: AddConnectionError["kind"], message: string) {
 		super(message);
 		this.name = "AddConnectionError";
@@ -42,12 +48,17 @@ export class AddConnectionError extends Error {
 }
 
 export interface AddConnectionOptions {
-	readonly name: string;
+	/** Absent (avec `url`) : nom proposé d'après la base (ADR-038 S2). */
+	readonly name?: string;
 	readonly force?: boolean;
-	/** DSN complète — skip tous les prompts. Format `postgres://…` ou
-	 *  `postgresql://…` (alias), `mongodb://…`, `mssql://…` ou
-	 *  `sqlserver://…` (alias). */
+	/** Chaîne de connexion complète — skip tous les prompts. URL, JDBC,
+	 *  ADO.NET ou libpq (ADR-038 S3), normalisée en URL. */
 	readonly url?: string;
+	/** Test de la connexion avant d'enregistrer ; absent = pas de test. */
+	readonly test?: (url: string) => Promise<ConnectionProbe>;
+	/** `false` (stdin redirigé, script) : aucune question ; une base
+	 *  injoignable fait échouer la commande. Défaut `true`. */
+	readonly interactive?: boolean;
 	readonly prompter: Prompter;
 	readonly stdout: (line: string) => void;
 }
@@ -58,40 +69,109 @@ export interface AddConnectionResult {
 }
 
 const PORT_RE = /^[0-9]{1,5}$/;
-const DSN_RE = /^(postgres|postgresql|mongodb(\+srv)?|mssql|sqlserver):\/\/.+/;
 
 export async function addConnection(
 	opts: AddConnectionOptions
 ): Promise<AddConnectionResult> {
-	const existing = loadLocalConnections();
-	const alreadyExists =
-		existing?.connections.some((c) => c.name === opts.name) ?? false;
+	const taken = loadLocalConnections()?.connections.map((c) => c.name) ?? [];
+	// Nom connu d'avance : la question d'écrasement vient avant les prompts.
+	if (opts.name !== undefined) await confirmOverwrite(opts, opts.name, taken);
 
-	if (alreadyExists && !opts.force) {
-		const ok = await opts.prompter.confirm(
-			`Une entrée « ${opts.name} » existe déjà. Écraser ? [y/N] `
-		);
-		if (!ok) {
-			throw new AddConnectionError("cancelled", "Annulé par l'utilisateur");
-		}
-	}
-
-	// ─── Mode --url : DSN prise telle quelle, skip prompts ────────────
+	// ─── Mode --url : chaîne prise telle quelle, skip prompts ─────────
+	let url: string;
 	if (opts.url !== undefined) {
-		const url = opts.url.trim();
-		if (!DSN_RE.test(url)) {
+		const parsed = parseConnectionString(opts.url);
+		if (parsed === undefined) {
 			throw new AddConnectionError(
 				"invalid-input",
-				"DSN invalide (attendu: postgres://…, postgresql://…, mongodb://…, mssql://… ou sqlserver://…)"
+				"Chaîne de connexion non reconnue (attendu : URL postgres:// / mongodb:// / mssql://, JDBC, ADO.NET ou libpq)"
 			);
 		}
-		addLocalConnection({ name: opts.name, url });
-		opts.stdout(
-			`✓ Connection « ${opts.name} » ${alreadyExists ? "remplacée" : "ajoutée"} dans ~/.sqlnest/local-connections.toml (perms 0600)`
-		);
-		return { name: opts.name, overwritten: alreadyExists };
+		url = parsed.url;
+	} else {
+		url = await promptConnectionUrl(opts);
+	}
+	const parsed = parseConnectionString(url) as ParsedConnection;
+	const name = opts.name ?? suggestConnectionName(parsed, taken);
+
+	if (opts.test !== undefined) {
+		try {
+			const probe = await opts.test(url);
+			opts.stdout(
+				`✓ ${describeServer(parsed.engine, probe.serverVersion)} — ${probe.collectionCount} ${
+					probe.collectionCount === 1 ? "table" : "tables"
+				}`
+			);
+		} catch (err) {
+			const reason = describeFailure(err);
+			if (opts.interactive === false) {
+				throw new AddConnectionError(
+					"unreachable",
+					`Connexion impossible : ${reason} — relance avec --no-test pour l'enregistrer sans la tester.`
+				);
+			}
+			opts.stdout(`✗ Connexion impossible : ${reason}`);
+			const keep = await opts.prompter.confirm(
+				"Enregistrer quand même ? [y/N] "
+			);
+			if (!keep) {
+				throw new AddConnectionError(
+					"cancelled",
+					"Annulé — rien n'a été enregistré"
+				);
+			}
+		}
 	}
 
+	const alreadyExists = taken.includes(name);
+	addLocalConnection({ name, url });
+	opts.stdout(
+		`✓ Connection « ${name} » ${alreadyExists ? "remplacée" : "ajoutée"} dans ~/.sqlnest/local-connections.toml (perms 0600)`
+	);
+	return { name, overwritten: alreadyExists };
+}
+
+/**
+ * Message d'un échec de connexion, cause du pilote comprise. Une
+ * `AggregateError` (une tentative IPv6 et une IPv4) a un message vide : ses
+ * erreurs internes portent la cause.
+ */
+function describeFailure(err: unknown): string {
+	const message = (err as Error)?.message ?? String(err);
+	const cause = (err as { cause?: unknown })?.cause;
+	if (!(cause instanceof Error)) return message;
+	const inner = (cause as { errors?: unknown }).errors;
+	const causeMessage =
+		cause.message !== ""
+			? cause.message
+			: Array.isArray(inner)
+				? [
+						...new Set(inner.map((e) => (e as Error)?.message ?? String(e)))
+					].join(", ")
+				: "";
+	return causeMessage !== "" && !message.includes(causeMessage)
+		? `${message} — ${causeMessage}`
+		: message;
+}
+
+async function confirmOverwrite(
+	opts: AddConnectionOptions,
+	name: string,
+	taken: readonly string[]
+): Promise<void> {
+	if (!taken.includes(name) || opts.force) return;
+	const ok = await opts.prompter.confirm(
+		`Une entrée « ${name} » existe déjà. Écraser ? [y/N] `
+	);
+	if (!ok) {
+		throw new AddConnectionError("cancelled", "Annulé par l'utilisateur");
+	}
+}
+
+/** Saisie guidée : moteur, hôte, port, base, utilisateur, mot de passe. */
+async function promptConnectionUrl(
+	opts: AddConnectionOptions
+): Promise<string> {
 	// Sélection de l'engine en tête — le port default + le scheme DSN
 	// dépendent de ce choix. Sur non-TTY, le prompter.select throw : le
 	// caller peut fallback sur `--url` (mode scriptable).
@@ -175,15 +255,7 @@ export async function addConnection(
 			: trustServerCertificate
 				? "?trustServerCertificate=true"
 				: "";
-	const url = `${scheme}://${auth}${host}:${port}/${encodeURIComponent(database)}${query}`;
-
-	addLocalConnection({ name: opts.name, url });
-
-	opts.stdout(
-		`✓ Connection « ${opts.name} » ${alreadyExists ? "remplacée" : "ajoutée"} dans ~/.sqlnest/local-connections.toml (perms 0600)`
-	);
-
-	return { name: opts.name, overwritten: alreadyExists };
+	return `${scheme}://${auth}${host}:${port}/${encodeURIComponent(database)}${query}`;
 }
 
 export const addConnectionCommand = defineCommand({
@@ -198,19 +270,28 @@ export const addConnectionCommand = defineCommand({
 			"DSN inline (⚠ visible dans ps aux / historique shell)"
 		],
 		[
+			"sqlnest add-connection --url <chaîne>",
+			"URL, JDBC, ADO.NET ou libpq ; nom proposé d'après la base"
+		],
+		[
 			"sqlnest add-connection --name <n> --force",
 			"Écrase sans demander confirmation"
+		],
+		[
+			"sqlnest add-connection … --no-test",
+			"Enregistre sans tester la connexion"
 		]
 	],
 	async run(args, ctx) {
 		const values = parseCommandArgs(ctx, "add-connection", args, {
 			name: { type: "string" },
 			force: { type: "boolean" },
-			url: { type: "string" }
+			url: { type: "string" },
+			"no-test": { type: "boolean" }
 		});
 		if (values === undefined) return 2;
 		const name = values.name;
-		if (!name) {
+		if (!name && !values.url) {
 			ctx.stderr(
 				"sqlnest add-connection: `--name <label>` est requis. Ex: sqlnest add-connection --name apollon"
 			);
@@ -219,9 +300,11 @@ export const addConnectionCommand = defineCommand({
 		const prompter = ctx.services.prompter();
 		try {
 			await ctx.services.addConnection({
-				name,
+				...(name ? { name } : {}),
 				...(values.force ? { force: true } : {}),
 				...(values.url ? { url: values.url } : {}),
+				...(values["no-test"] ? {} : { test: ctx.services.probeConnection }),
+				interactive: process.stdin.isTTY === true,
 				prompter,
 				stdout: ctx.stdout
 			});
@@ -229,7 +312,7 @@ export const addConnectionCommand = defineCommand({
 		} catch (err) {
 			if (err instanceof AddConnectionError) {
 				ctx.stderr(`✗ ${err.message}`);
-				return err.kind === "cancelled" ? 1 : 2;
+				return err.kind === "invalid-input" ? 2 : 1;
 			}
 			ctx.stderr(`✗ ${(err as Error).message ?? String(err)}`);
 			return 1;

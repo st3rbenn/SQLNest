@@ -2,14 +2,25 @@
  * `sqlnest list-connections` — liste les DSN enregistrées dans
  * `~/.sqlnest/local-connections.toml` en cachant les credentials.
  *
- * Sortie : `<name>  <engine>  <host>:<port>/<database>` — jamais le user
- * ni le password. Politique alignée avec `describeConnectionForDiagnostics`
+ * Sortie : `<name>  <engine>  <host>:<port>/<database>`, plus la source
+ * (référence à un `.env`) et le projet relié quand une entrée en a — jamais
+ * le user ni le password. Politique alignée avec `describeConnectionForDiagnostics`
  * (règle sécu SQLNest : les creds ne sortent JAMAIS du fichier, même pour
  * l'user local qui les a saisis).
  */
 
+import { homedir } from "node:os";
 import { defineCommand } from "../app/command";
-import { loadLocalConnections } from "../services/local-connections";
+import { ORM_LABELS } from "../orm/types";
+import {
+	describeLocation,
+	parseConnectionString
+} from "../services/connection-strings";
+import {
+	entryUrl,
+	type LocalConnectionEntry,
+	loadLocalConnections
+} from "../services/local-connections";
 
 export interface ListConnectionsOptions {
 	readonly stdout: (line: string) => void;
@@ -23,48 +34,80 @@ export function listConnections(opts: ListConnectionsOptions): void {
 		);
 		return;
 	}
-	// Aligne les 4 colonnes pour lisibilité — largeur du name + engine
-	// dépendent des entrées. Fallback minimums pour un affichage propre
-	// même avec une seule entrée courte.
-	const rows = file.connections.map((c) => summarizeUrl(c.name, c.url));
-	const nameW = Math.max(4, ...rows.map((r) => r.name.length));
-	const engineW = Math.max(6, ...rows.map((r) => r.engine.length));
-	opts.stdout(`${pad("NAME", nameW)}  ${pad("ENGINE", engineW)}  LOCATION`);
-	for (const r of rows) {
-		opts.stdout(`${pad(r.name, nameW)}  ${pad(r.engine, engineW)}  ${r.location}`);
+	const rows = file.connections.map(summarize);
+	// SOURCE et PROJET n'apparaissent que si une entrée les utilise.
+	const columns: (readonly [string, (r: SummarizedConnection) => string])[] = [
+		["NAME", (r) => r.name],
+		["ENGINE", (r) => r.engine],
+		["LOCATION", (r) => r.location]
+	];
+	if (rows.some((r) => r.source !== undefined)) {
+		columns.push(["SOURCE", (r) => r.source ?? "url"]);
 	}
+	if (rows.some((r) => r.project !== undefined)) {
+		columns.push(["PROJET", (r) => r.project ?? ""]);
+	}
+	const widths = columns.map(([title, cell]) =>
+		Math.max(title.length, ...rows.map((r) => cell(r).length))
+	);
+	const line = (cells: readonly string[]) =>
+		cells
+			.map((cell, i) =>
+				i === cells.length - 1 ? cell : pad(cell, widths[i] ?? 0)
+			)
+			.join("  ")
+			.trimEnd();
+	opts.stdout(line(columns.map(([title]) => title)));
+	for (const r of rows) opts.stdout(line(columns.map(([, cell]) => cell(r))));
 }
 
 interface SummarizedConnection {
 	readonly name: string;
 	readonly engine: string;
 	readonly location: string;
+	readonly source?: string;
+	readonly project?: string;
 }
 
 /**
- * Extrait `host:port/database` de la DSN sans exposer user/password. Sur
- * DSN invalide, retombe sur `<opaque>` (jamais throw — cette command ne
- * doit pas mourir sur une entrée mal formée qu'un edit manuel aurait
- * introduite).
+ * `hôte:port/base` de l'entrée, sans utilisateur ni mot de passe. Une entrée
+ * illisible (édition à la main, `.env` disparu) ne fait pas tomber la
+ * commande : `<opaque>` ou la raison.
  */
-function summarizeUrl(name: string, url: string): SummarizedConnection {
+function summarize(entry: LocalConnectionEntry): SummarizedConnection {
+	let location = "<opaque>";
+	let engine = "?";
 	try {
-		const u = new URL(url);
-		const engine = u.protocol.replace(/:$/, "");
-		const host = u.hostname;
-		const port = u.port || defaultPortOf(engine);
-		// pathname = "/dbname" pour PG/Mongo ; le "/" en tête reste retiré.
-		const database = u.pathname.replace(/^\//, "") || "<unset>";
-		return { name, engine, location: `${host}:${port}/${database}` };
+		const parsed = parseConnectionString(entryUrl(entry));
+		if (parsed !== undefined) {
+			engine = parsed.engine;
+			location = describeLocation(parsed);
+		}
 	} catch {
-		return { name, engine: "?", location: "<opaque>" };
+		location = "<.env illisible>";
 	}
+	return {
+		name: entry.name,
+		engine,
+		location,
+		...(entry.urlFrom !== undefined
+			? { source: `${entry.urlFrom.key} · ${tildify(entry.urlFrom.file)}` }
+			: {}),
+		...(entry.project !== undefined
+			? {
+					project: `${ORM_LABELS[entry.project.orm]} · ${tildify(entry.project.path)}${
+						entry.project.apply ? "" : " (sans apply)"
+					}`
+				}
+			: {})
+	};
 }
 
-function defaultPortOf(engine: string): string {
-	if (engine === "postgres" || engine === "postgresql") return "5432";
-	if (engine === "mongodb" || engine === "mongodb+srv") return "27017";
-	return "?";
+function tildify(path: string): string {
+	const home = homedir();
+	return path === home || path.startsWith(`${home}/`)
+		? `~${path.slice(home.length)}`
+		: path;
 }
 
 function pad(s: string, width: number): string {

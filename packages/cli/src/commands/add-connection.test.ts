@@ -424,3 +424,165 @@ describe("addConnection — engine mongodb", () => {
 		).rejects.toBeInstanceOf(AddConnectionError);
 	});
 });
+
+describe("addConnection — setup intelligent (ADR-038 E/2b1)", () => {
+	const okProbe = vi.fn(async () => ({
+		latencyMs: 2,
+		serverVersion: "PostgreSQL 16.13 on aarch64-unknown-linux-musl",
+		collectionCount: 11
+	}));
+
+	test("--url JDBC sans --name : URL normalisée, nom proposé, connexion testée", async () => {
+		const res = await addConnection({
+			url: "jdbc:postgresql://localhost:5433/chinook?user=postgres&password=pw",
+			test: okProbe,
+			prompter: mockPrompter({}),
+			stdout: (l) => out.push(l)
+		});
+		expect(res).toEqual({ name: "chinook", overwritten: false });
+		expect(okProbe).toHaveBeenCalledWith(
+			"postgres://postgres:pw@localhost:5433/chinook"
+		);
+		expect(loadLocalConnections()?.connections).toEqual([
+			{ name: "chinook", url: "postgres://postgres:pw@localhost:5433/chinook" }
+		]);
+		expect(out[0]).toBe("✓ PostgreSQL 16.13 — 11 tables");
+		expect(out.join("\n")).not.toContain("pw@");
+	});
+
+	test("nom proposé déjà pris → suffixe, sans question d'écrasement", async () => {
+		saveLocalConnections({
+			version: LOCAL_CONNECTIONS_VERSION,
+			connections: [
+				{ name: "Chinook", url: "postgres://a@b/c" },
+				{ name: "chinook", url: "postgres://a@b/c" }
+			]
+		});
+		const res = await addConnection({
+			url: "Server=localhost,1433;Database=Chinook;User Id=sa;Password=x;TrustServerCertificate=True",
+			prompter: mockPrompter({}),
+			stdout: (l) => out.push(l)
+		});
+		expect(res.name).toBe("chinook-2");
+		expect(loadLocalConnections()?.connections.at(-1)).toEqual({
+			name: "chinook-2",
+			url: "mssql://sa:x@localhost:1433/Chinook?trustServerCertificate=true"
+		});
+	});
+
+	test("base injoignable : refus d'enregistrer quand même → rien n'est écrit", async () => {
+		const failing = vi.fn(async () => {
+			throw new Error("connect ECONNREFUSED 127.0.0.1:5999");
+		});
+		await expect(
+			addConnection({
+				name: "down",
+				url: "postgres://u:p@localhost:5999/x",
+				test: failing,
+				prompter: mockPrompter({ confirms: [false] }),
+				stdout: (l) => out.push(l)
+			})
+		).rejects.toMatchObject({ kind: "cancelled" });
+		expect(out).toContain(
+			"✗ Connexion impossible : connect ECONNREFUSED 127.0.0.1:5999"
+		);
+		expect(loadLocalConnections()).toBeNull();
+	});
+
+	test("base injoignable : enregistrer quand même → écrit", async () => {
+		const failing = vi.fn(async () => {
+			throw new Error("timeout");
+		});
+		await addConnection({
+			name: "later",
+			url: "postgres://u:p@localhost:5999/x",
+			test: failing,
+			prompter: mockPrompter({ confirms: [true] }),
+			stdout: (l) => out.push(l)
+		});
+		expect(loadLocalConnections()?.connections).toEqual([
+			{ name: "later", url: "postgres://u:p@localhost:5999/x" }
+		]);
+	});
+
+	test("remplacer l'URL d'une connexion garde son projet relié", async () => {
+		saveLocalConnections({
+			version: 2,
+			connections: [
+				{
+					name: "apollon",
+					url: "postgres://old@localhost/apollon",
+					project: { path: "/srv/apollon", orm: "prisma", apply: true }
+				}
+			]
+		});
+		await addConnection({
+			name: "apollon",
+			force: true,
+			url: "postgres://new@localhost:5436/apollon",
+			prompter: mockPrompter({}),
+			stdout: (l) => out.push(l)
+		});
+		expect(loadLocalConnections()?.connections).toEqual([
+			{
+				name: "apollon",
+				url: "postgres://new@localhost:5436/apollon",
+				project: { path: "/srv/apollon", orm: "prisma", apply: true }
+			}
+		]);
+	});
+});
+
+describe("addConnection — sans terminal (ADR-038 E/2b1)", () => {
+	test("base injoignable, stdin redirigé : échec sans question, cause du pilote et --no-test indiqués", async () => {
+		const cause = new Error("connect ECONNREFUSED 127.0.0.1:5999");
+		const failing = vi.fn(async () => {
+			throw Object.assign(
+				new Error(
+					"Connexion Postgres échouée (postgres://u:***@localhost:5999/x)"
+				),
+				{ cause }
+			);
+		});
+		const prompter = mockPrompter({});
+		await expect(
+			addConnection({
+				name: "down",
+				url: "postgres://u:p@localhost:5999/x",
+				test: failing,
+				interactive: false,
+				prompter,
+				stdout: (l) => out.push(l)
+			})
+		).rejects.toThrow(
+			"Connexion impossible : Connexion Postgres échouée (postgres://u:***@localhost:5999/x) — connect ECONNREFUSED 127.0.0.1:5999 — relance avec --no-test pour l'enregistrer sans la tester."
+		);
+		expect(prompter.confirm).not.toHaveBeenCalled();
+		expect(loadLocalConnections()).toBeNull();
+	});
+});
+
+test("cause AggregateError (IPv6 + IPv4) : erreurs internes affichées", async () => {
+	const cause = Object.assign(
+		new AggregateError([
+			new Error("connect ECONNREFUSED ::1:5999"),
+			new Error("connect ECONNREFUSED 127.0.0.1:5999")
+		]),
+		{ message: "" }
+	);
+	const failing = vi.fn(async () => {
+		throw Object.assign(new Error("Connexion Postgres échouée"), { cause });
+	});
+	await expect(
+		addConnection({
+			name: "down",
+			url: "postgres://u:p@localhost:5999/x",
+			test: failing,
+			interactive: false,
+			prompter: mockPrompter({}),
+			stdout: (l) => out.push(l)
+		})
+	).rejects.toThrow(
+		"Connexion Postgres échouée — connect ECONNREFUSED ::1:5999, connect ECONNREFUSED 127.0.0.1:5999"
+	);
+});

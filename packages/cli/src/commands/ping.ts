@@ -13,14 +13,15 @@
  *
  * ─── Sécurité ─────────────────────────────────────────────────────────
  * L'output ne contient JAMAIS la DSN — uniquement `source`
- * (`env-per-tunnel` / `env-fallback` / `local-file`), latence, et
+ * (`env-per-tunnel` / `env-fallback` / `local-file` / `env-file`), latence, et
  * `serverVersion` (renvoyée par PG lui-même — pas un secret).
  */
 
 import { defineCommand, parseCommandArgs } from "../app/command";
 import {
 	introspectTunnel as defaultIntrospect,
-	pingTunnel as defaultPing
+	pingTunnel as defaultPing,
+	type TunnelPingResult
 } from "../services/engine";
 import { LocalConnectionNotFoundError } from "../services/local-connections";
 
@@ -34,7 +35,7 @@ export interface PingCommandOptions {
 
 export interface PingCommandResult {
 	readonly latencyMs: number;
-	readonly source: "env-per-tunnel" | "env-fallback" | "local-file";
+	readonly source: TunnelPingResult["source"];
 	readonly serverVersion?: string;
 	/** Nombre de collections détectées à l'introspection. Un chiffre nul
 	 *  signale une base vide ou un search_path mal configuré (souvent utile
