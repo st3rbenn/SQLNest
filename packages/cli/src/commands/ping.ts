@@ -18,9 +18,12 @@
  */
 
 import { defineCommand, parseCommandArgs } from "../app/command";
+import type { DbEngine } from "../services/connection-strings";
 import {
 	introspectTunnel as defaultIntrospect,
 	pingTunnel as defaultPing,
+	describeServer,
+	detectEngineFromConnectionName,
 	type TunnelPingResult
 } from "../services/engine";
 import { LocalConnectionNotFoundError } from "../services/local-connections";
@@ -41,6 +44,8 @@ export interface PingCommandResult {
 	 *  signale une base vide ou un search_path mal configuré (souvent utile
 	 *  en dev). */
 	readonly collectionCount: number;
+	/** Moteur, d'après l'URL de la connexion. */
+	readonly engine?: DbEngine;
 }
 
 export async function ping(
@@ -56,9 +61,11 @@ export async function ping(
 	// commande pour éviter à l'user de lancer 2 commandes.
 	const schema = await introspectFn(opts.tunnelName, env);
 
+	const engine = detectEngineFromConnectionName(opts.tunnelName, env);
 	return {
 		latencyMs: pingRes.latencyMs,
 		source: pingRes.source,
+		...(engine !== null ? { engine } : {}),
 		...(pingRes.serverVersion !== undefined
 			? { serverVersion: pingRes.serverVersion }
 			: {}),
@@ -68,7 +75,9 @@ export async function ping(
 
 export const pingCommand = defineCommand({
 	name: "ping",
-	help: [["sqlnest ping --tunnel <name>", "Ping local DSN (diagnostic)"]],
+	help: [
+		["sqlnest ping --tunnel <name>", "Teste une connexion locale (diagnostic)"]
+	],
 	async run(args, ctx) {
 		const values = parseCommandArgs(ctx, "ping", args, {
 			tunnel: { type: "string" }
@@ -86,11 +95,13 @@ export const pingCommand = defineCommand({
 				tunnelName,
 				...(ctx.env ? { env: ctx.env } : {})
 			});
-			ctx.stdout(
-				`✓ Ping OK — ${res.latencyMs} ms (source: ${res.source})${
-					res.serverVersion ? ` — PG ${res.serverVersion}` : ""
-				}`
-			);
+			const latency =
+				res.latencyMs < 1 ? "< 1 ms" : `${Math.round(res.latencyMs)} ms`;
+			const server =
+				res.serverVersion === undefined
+					? ""
+					: ` — ${res.engine !== undefined ? describeServer(res.engine, res.serverVersion) : res.serverVersion}`;
+			ctx.stdout(`✓ Ping OK — ${latency} (source: ${res.source})${server}`);
 			ctx.stdout(
 				`  ${res.collectionCount} collections détectées à l'introspection`
 			);

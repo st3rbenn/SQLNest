@@ -3,25 +3,44 @@
  * `--token`), puis tunnel jusqu'à Ctrl-C.
  */
 
+import { homedir } from "node:os";
 import { API_URL, FRONTEND_URL } from "../../app/build-info";
 import { defineCommand, parseCommandArgs } from "../../app/command";
 import type { CliContext } from "../../app/context";
 import { ApiClientError } from "../../services/api-client";
-import { loadConfig, type TunnelEntry } from "../../services/config";
-import { loadLocalConnections } from "../../services/local-connections";
+import { loadConfig } from "../../services/config";
+import {
+	describeConnection,
+	ENGINE_LABELS,
+	parseConnectionString
+} from "../../services/connection-strings";
+import {
+	type DiscoveredServer,
+	type Discovery,
+	serverFor
+} from "../../services/discovery";
+import { resolveLocalConnectionUrl } from "../../services/local-connections";
+import type { Prompter } from "../../ui/prompts";
 import { createSpinner, type SpinnerHandle } from "../../ui/spinner";
+import { AddConnectionError, discoveryTools } from "../add-connection";
+import { ensureRunning } from "../add-connection/discovered";
+import { describeFailure } from "../add-connection/errors";
+import { LinkProjectError, linkConnection } from "../link-project/link";
+import { chooseConnection } from "./choose";
 import { ConnectError } from "./device-flow";
+
+export { describeTunnelStatus } from "./choose";
 
 export const connectCommand = defineCommand({
 	name: "connect",
 	help: [
-		["sqlnest connect", "Device flow interactif (menu ↑↓ si ≥2 DSN)"],
 		[
-			"sqlnest connect --connection <name>",
-			"Force la DSN locale à servir (skip menu)"
+			"sqlnest connect",
+			"Sert une connexion : celle du projet relié, sinon menu"
 		],
-		["sqlnest connect --no-browser", "Idem, sans ouverture browser"],
-		["sqlnest connect --token <sn> --name <n>", "CI mode (Bearer sn_...)"]
+		["sqlnest connect --connection <name>", "Sert cette connexion, sans menu"],
+		["sqlnest connect --no-browser", "Idem, sans ouvrir le navigateur"],
+		["sqlnest connect --token <sn> --name <n>", "Mode CI (Bearer sn_...)"]
 	],
 	run: runConnect
 });
@@ -44,18 +63,79 @@ async function runConnect(args: string[], ctx: CliContext): Promise<number> {
 	const baseUrl = API_URL;
 	const frontendUrl = FRONTEND_URL;
 
-	// ─── Résolution de la DSN locale à servir ─────────────────────────
-	// Un même install CLI (une seule keypair) peut manager plusieurs DSN
-	// locales via `add-connection`. On envoie le nom choisi au backend :
-	// le fingerprint effectif est `SHA256(pubkey || "|" || cliConnectionName)`,
-	// donc chaque (CLI, DSN) devient une db_connection distincte côté
-	// serveur — sinon les 2 DSN collapse toutes sur la même db_connection.
+	// ─── Résolution de la connexion locale à servir ────────────────────
+	// Un même install CLI (une seule keypair) peut manager plusieurs
+	// connexions locales via `add-connection`. On envoie le nom choisi au
+	// backend : le fingerprint effectif est `SHA256(pubkey || "|" || cliConnectionName)`,
+	// donc chaque (CLI, connexion) devient une db_connection distincte côté
+	// serveur — sinon elles collapsent toutes sur la même db_connection.
+	const interactive = process.stdin.isTTY === true;
+	const tools = discoveryTools(ctx);
+	let discovery: Promise<Discovery> | undefined;
+	const discoverOnce = (): Promise<Discovery> => {
+		discovery ??= tools.discover(process.cwd());
+		return discovery;
+	};
+	const prompter = ctx.services.prompter();
 	let cliConnectionName: string | null;
 	try {
-		cliConnectionName = await resolveCliConnectionName(values.connection, ctx);
+		cliConnectionName = await chooseConnection({
+			...(values.connection !== undefined
+				? { explicit: values.connection }
+				: {}),
+			cwd: process.cwd(),
+			home: homedir(),
+			interactive,
+			tunnels: loadConfig()?.tunnels ?? [],
+			discover: discoverOnce,
+			addConnection: async (database) =>
+				(
+					await ctx.services.addConnection({
+						...(database !== undefined ? { database, offerLink: false } : {}),
+						discover: discoverOnce,
+						test: ctx.services.probeConnection,
+						listDatabases: tools.listDatabases,
+						startServer: tools.startServer,
+						interactive,
+						prompter,
+						stdout: ctx.stdout
+					})
+				).name,
+			link: async (name, detection) => {
+				await linkConnection({
+					name,
+					detection,
+					apply: true,
+					probe: ctx.services.probeConnection,
+					interactive,
+					prompter,
+					stdout: ctx.stdout
+				});
+			},
+			prompter,
+			stdout: ctx.stdout,
+			stderr: ctx.stderr
+		});
+		if (interactive && cliConnectionName !== null) {
+			await checkBeforePairing(cliConnectionName, ctx, {
+				prompter,
+				discover: discoverOnce,
+				startServer: tools.startServer
+			});
+		}
 	} catch (err) {
+		if (err instanceof AddConnectionError || err instanceof LinkProjectError) {
+			ctx.stderr(`✗ ${err.message}`);
+			return err.kind === "invalid-input" ? 2 : 1;
+		}
+		if ((err as Error).name === "ExitPromptError") {
+			ctx.stderr("✗ Annulé");
+			return 130;
+		}
 		ctx.stderr(`sqlnest connect: ${(err as Error).message}`);
 		return 2;
+	} finally {
+		prompter.close?.();
 	}
 
 	let sessionId: string;
@@ -97,12 +177,14 @@ async function runConnect(args: string[], ctx: CliContext): Promise<number> {
 					onCodeDisplayed: (info) => {
 						ctx.stdout("▲ SQLNest — device pairing");
 						if (cliConnectionName) {
-							ctx.stdout(`  DSN    : ${cliConnectionName}`);
+							ctx.stdout(
+								`  Connexion : ${describeServed(cliConnectionName, ctx.env)}`
+							);
 						}
-						ctx.stdout(`  Visite : ${info.connectUrl}`);
-						ctx.stdout(`  Code   : ${info.code}`);
+						ctx.stdout(`  Visite    : ${info.connectUrl}`);
+						ctx.stdout(`  Code      : ${info.code}`);
 						ctx.stdout(
-							`  Expire : ${new Date(info.expiresAt).toLocaleTimeString()}`
+							`  Expire    : ${new Date(info.expiresAt).toLocaleTimeString()}`
 						);
 						ctx.stdout("");
 						spinner = createSpinner("En attente d'approbation…");
@@ -183,139 +265,65 @@ async function runConnect(args: string[], ctx: CliContext): Promise<number> {
 	}
 }
 
-/**
- * Résout la DSN LOCALE que `sqlnest connect` doit servir cette session.
- *
- * Ordre de priorité :
- *   1. Flag `--connection <name>` explicite (validé contre le fichier).
- *   2. Si une seule DSN est configurée localement → celle-ci automatiquement.
- *   3. Si ≥2 DSN → prompt interactif "1) apollon  2) delphi > ".
- *   4. Si 0 DSN → `null` (le tunnel utilisera les env vars `SQLNEST_PG_URL`
- *      ou throw à la résolution).
- *
- * La valeur retournée est envoyée au backend au POST /pairings pour scoper
- * le fingerprint effectif ET utilisée dans le serve loop pour matérialiser
- * la DSN via `resolveLocalConnectionUrl`.
- */
-async function resolveCliConnectionName(
-	explicit: string | undefined,
-	ctx: CliContext
-): Promise<string | null> {
-	const local = loadLocalConnections();
-	const entries = local?.connections ?? [];
-
-	if (explicit) {
-		if (entries.length === 0) {
-			throw new Error(
-				`--connection ${explicit} : aucune DSN configurée localement.\n` +
-					"Ajoute-en une : sqlnest add-connection --name " +
-					explicit
-			);
-		}
-		const match = entries.find((c) => c.name === explicit);
-		if (!match) {
-			const names = entries.map((c) => c.name).join(", ");
-			throw new Error(
-				`--connection ${explicit} : aucune entrée nommée « ${explicit} » ` +
-					`dans local-connections.toml. Connues : ${names}`
-			);
-		}
-		return match.name;
-	}
-
-	if (entries.length === 0) {
-		// Compat legacy — pas de DSN locale = mode env var. Le backend
-		// fallback à `hashSha256Hex(pubkey)` seul.
-		return null;
-	}
-	if (entries.length === 1) {
-		return entries[0]?.name ?? null;
-	}
-
-	// ≥2 DSN : prompt select interactif (flèches ↑↓, Enter valide, Ctrl-C
-	// annule via `ExitPromptError`). Sur non-TTY (CI, stdin pipé), inquirer
-	// throw → fallback silencieux sur le prompt numéroté classique.
-	//
-	// Chaque item est enrichi avec le status du tunnel_session existant :
-	//   - `apollon (valide 20j)` → auto-resume (skip /pair) au select.
-	//   - `apollon (expiré il y a 3j)` → device flow au select.
-	//   - `apollon` (sans suffix) → jamais paired, device flow au select.
-	// Le branchement est géré côté `connect()` via `findResumableTunnel`.
-	const tunnels = loadConfig()?.tunnels ?? [];
-	const nowMs = Date.now();
-	const decorate = (name: string): string => {
-		const status = describeTunnelStatus(tunnels, name, nowMs);
-		return status === null ? name : `${name} (${status})`;
-	};
-	const prompter = ctx.services.prompter();
+/** `nom — PostgreSQL · user@hôte:port/base`, sans secret ; le nom seul si l'URL est illisible. */
+function describeServed(
+	name: string,
+	env: NodeJS.ProcessEnv | undefined
+): string {
 	try {
-		if (process.stdin.isTTY === true) {
-			return await prompter.select({
-				message: "DSN à servir",
-				choices: entries.map((c) => ({
-					value: c.name,
-					label: decorate(c.name)
-				}))
-			});
-		}
-		// Fallback non-TTY : prompt numéroté ligne par ligne.
-		ctx.stdout("▲ Plusieurs DSN locales configurées :");
-		for (let i = 0; i < entries.length; i++) {
-			const name = entries[i]?.name;
-			if (name !== undefined) ctx.stdout(`  ${i + 1}) ${decorate(name)}`);
-		}
-		while (true) {
-			const raw = await prompter.line("Choisis la DSN à servir [1] : ");
-			const trimmed = raw.trim();
-			const idx = trimmed === "" ? 1 : Number.parseInt(trimmed, 10);
-			if (Number.isInteger(idx) && idx >= 1 && idx <= entries.length) {
-				return entries[idx - 1]?.name ?? null;
-			}
-			ctx.stderr(
-				`Réponse invalide — tape un numéro entre 1 et ${entries.length}.`
-			);
-		}
-	} finally {
-		prompter.close?.();
+		const c = parseConnectionString(resolveLocalConnectionUrl(name, env));
+		return c !== undefined
+			? `${name} — ${ENGINE_LABELS[c.engine]} · ${describeConnection(c)}`
+			: name;
+	} catch {
+		return name;
 	}
 }
 
 /**
- * Cherche le tunnel le plus récent pour une DSN locale donnée dans la
- * config et retourne un status human-readable :
- *   - `"valide 20j"` — token pas expiré (matching strict par `connection_name`).
- *   - `"expiré il y a 3j"` — token expiré.
- *   - `null` — aucun tunnel taggé pour cette DSN (jamais paired ou entry
- *     legacy sans `connection_name`).
- * Utilisé pour enrichir le menu de sélection `sqlnest connect`.
+ * Avant le pairing, la base répond-elle ? Sinon, un conteneur arrêté qui la
+ * sert est proposé au démarrage ; à défaut, un avertissement — le tunnel
+ * s'ouvre quand même.
  */
-export function describeTunnelStatus(
-	tunnels: readonly TunnelEntry[],
-	connectionName: string,
-	nowMs: number
-): string | null {
-	// Le plus récent d'abord — reflète le dernier pair effectué.
-	for (let i = tunnels.length - 1; i >= 0; i--) {
-		const t = tunnels[i];
-		if (t?.connection_name !== connectionName) continue;
-		const expiresMs = Date.parse(t.expires_at);
-		if (Number.isNaN(expiresMs)) return null;
-		const delta = expiresMs - nowMs;
-		if (delta > 0) return `valide ${humanDuration(delta)}`;
-		return `expiré il y a ${humanDuration(-delta)}`;
+async function checkBeforePairing(
+	name: string,
+	ctx: CliContext,
+	tools: {
+		readonly prompter: Prompter;
+		readonly discover: () => Promise<Discovery>;
+		readonly startServer: (
+			server: DiscoveredServer,
+			url: string
+		) => Promise<void>;
 	}
-	return null;
-}
-
-const MINUTE_MS = 60 * 1000;
-const HOUR_MS = 60 * MINUTE_MS;
-const DAY_MS = 24 * HOUR_MS;
-
-function humanDuration(ms: number): string {
-	if (ms < MINUTE_MS) return "moins d'une minute";
-	if (ms < HOUR_MS) return `${Math.floor(ms / MINUTE_MS)}min`;
-	if (ms < DAY_MS) return `${Math.floor(ms / HOUR_MS)}h`;
-	return `${Math.floor(ms / DAY_MS)}j`;
+): Promise<void> {
+	let url: string | undefined;
+	try {
+		url = resolveLocalConnectionUrl(name, ctx.env);
+		await ctx.services.waitForDatabase(url, 0);
+		return;
+	} catch (err) {
+		const parsed = url !== undefined ? parseConnectionString(url) : undefined;
+		const server =
+			parsed !== undefined
+				? serverFor(parsed, await tools.discover())
+				: undefined;
+		if (server !== undefined && !server.running && url !== undefined) {
+			await ensureRunning(
+				{
+					prompter: tools.prompter,
+					stdout: ctx.stdout,
+					startServer: tools.startServer
+				},
+				server,
+				url
+			);
+			return;
+		}
+		ctx.stderr(
+			`⚠ Base injoignable : ${describeFailure(err)} — le tunnel s'ouvre quand même.`
+		);
+	}
 }
 
 function handleConnectError(

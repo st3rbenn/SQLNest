@@ -30,7 +30,7 @@ export function listConnections(opts: ListConnectionsOptions): void {
 	const file = loadLocalConnections();
 	if (file === null || file.connections.length === 0) {
 		opts.stdout(
-			"Aucune connexion enregistrée.\nAjoute-en une : sqlnest add-connection --name <label>"
+			"Aucune connexion enregistrée.\nAjoute-en une : sqlnest add-connection"
 		);
 		return;
 	}
@@ -110,7 +110,7 @@ function pad(s: string, width: number): string {
 export const listConnectionsCommand = defineCommand({
 	name: "list-connections",
 	help: [
-		["sqlnest list-connections", "Liste les DSN locales (sans les credentials)"]
+		["sqlnest list-connections", "Liste les connexions locales (sans secret)"]
 	],
 	run(args, ctx) {
 		if (args.length > 0) {

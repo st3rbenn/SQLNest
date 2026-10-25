@@ -151,7 +151,7 @@ describe("add-connection sans argument", () => {
 			prompter,
 			stdout: (l) => out.push(l)
 		});
-		expect(res).toEqual({ name: "apollon_prisma", overwritten: false });
+		expect(res).toMatchObject({ name: "apollon_prisma", overwritten: false });
 		expect(prompter.line).toHaveBeenCalledWith("Nom [apollon_prisma] : ");
 		expect(okProbe).toHaveBeenCalledWith(
 			"postgres://lab:lab@localhost:5440/apollon_prisma"
@@ -520,6 +520,95 @@ describe("add-connection — serveur arrêté (ADR-038 S1)", () => {
 		});
 		expect(prompter.line).toHaveBeenCalledTimes(1);
 		expect(prompter.line).toHaveBeenCalledWith("Nom [shop-db] : ");
+	});
+});
+
+describe("add-connection — projet relié dans la foulée (ADR-038 S5)", () => {
+	const projectDir = "/srv/lab/prisma";
+	const withOrm = (): DiscoveredDatabase =>
+		database("postgres://lab:lab@localhost:5440/apollon_prisma", {
+			orm: {
+				orm: "prisma",
+				dir: projectDir,
+				configFile: `${projectDir}/prisma/schema.prisma`,
+				envKey: "DATABASE_URL"
+			}
+		});
+	const probeWith = (tables: string[]) =>
+		vi.fn(async () => ({
+			latencyMs: 1,
+			serverVersion: "PostgreSQL 16.13 on x86_64",
+			collectionCount: tables.length,
+			collectionNames: tables
+		}));
+
+	test("base d'un projet Prisma : liaison proposée, historique lu dans le test déjà fait", async () => {
+		const test = probeWith(["_prisma_migrations", "users"]);
+		const res = await addConnection({
+			discover: discovery({ databases: [withOrm()] }),
+			test,
+			prompter: scriptedPrompter({
+				picks: ["apollon_prisma"],
+				lines: ["", ""]
+			}),
+			stdout: (l) => out.push(l)
+		});
+		expect(res.linked).toBe(true);
+		expect(test).toHaveBeenCalledOnce();
+		expect(out).toContain("✓ _prisma_migrations présente dans la base");
+		expect(loadLocalConnections()?.connections[0]?.project).toEqual({
+			path: projectDir,
+			orm: "prisma",
+			apply: true
+		});
+	});
+
+	test("liaison refusée : connexion seule", async () => {
+		const res = await addConnection({
+			discover: discovery({ databases: [withOrm()] }),
+			test: probeWith(["_prisma_migrations"]),
+			prompter: scriptedPrompter({
+				picks: ["apollon_prisma"],
+				lines: ["", "n"]
+			}),
+			stdout: (l) => out.push(l)
+		});
+		expect(res.linked).toBeUndefined();
+		expect(loadLocalConnections()?.connections[0]?.project).toBeUndefined();
+	});
+
+	test("base gérée par un autre ORM : la connexion reste, la liaison est refusée", async () => {
+		await addConnection({
+			discover: discovery({ databases: [withOrm()] }),
+			test: probeWith(["SequelizeMeta"]),
+			prompter: scriptedPrompter({
+				picks: ["apollon_prisma"],
+				lines: ["", ""]
+			}),
+			stdout: (l) => out.push(l)
+		});
+		expect(out).toContain(
+			"✗ La base est gérée par Sequelize (SequelizeMeta), pas par Prisma"
+		);
+		expect(loadLocalConnections()?.connections).toEqual([
+			{
+				name: "apollon_prisma",
+				url: "postgres://lab:lab@localhost:5440/apollon_prisma"
+			}
+		]);
+	});
+
+	test("base présélectionnée (link-project, connect) : pas de menu, pas de proposition", async () => {
+		const prompter = scriptedPrompter({ picks: [], lines: [""] });
+		const res = await addConnection({
+			database: withOrm(),
+			offerLink: false,
+			prompter,
+			stdout: (l) => out.push(l)
+		});
+		expect(res.name).toBe("apollon_prisma");
+		expect(prompter.menus).toHaveLength(0);
+		expect(prompter.line).toHaveBeenCalledTimes(1);
 	});
 });
 

@@ -66,6 +66,16 @@ export interface Prompter {
 	readonly close?: () => void;
 }
 
+const YES_ANSWERS = new Set(["", "y", "yes", "o", "oui"]);
+
+/** Question `[Y/n]` : Entrée vaut oui. */
+export async function confirmDefaultYes(
+	prompter: Prompter,
+	question: string
+): Promise<boolean> {
+	return YES_ANSWERS.has((await prompter.line(question)).trim().toLowerCase());
+}
+
 export function defaultPrompter(): Prompter {
 	// `terminal: false` — l'OS gère l'écho en mode canonical pendant les
 	// prompts normaux. Avec `terminal: true`, readline pose son propre

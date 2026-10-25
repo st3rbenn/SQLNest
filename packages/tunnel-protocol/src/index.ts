@@ -54,6 +54,7 @@ export type {
 	TunnelOpResult,
 	TunnelOpTable,
 	TunnelPingData,
+	TunnelProjectStatusData,
 	TunnelResultColumn,
 	TunnelRunSnqlData
 } from "./ops";

@@ -418,8 +418,9 @@ describe("runCli — ping", () => {
 		const stub = vi.fn().mockResolvedValue({
 			latencyMs: 7,
 			source: "env-per-tunnel",
-			serverVersion: "16.2",
-			collectionCount: 7
+			serverVersion: "PostgreSQL 16.2 on aarch64-unknown-linux-musl",
+			collectionCount: 7,
+			engine: "postgres"
 		});
 		const code = await runCli(["ping", "--tunnel", "shop"], {
 			stdout: io.stdout,
@@ -432,7 +433,9 @@ describe("runCli — ping", () => {
 		expect(stub.mock.calls[0]?.[0].tunnelName).toBe("shop");
 		expect(io.out.some((l) => /7 ms/i.test(l))).toBe(true);
 		expect(io.out.some((l) => /env-per-tunnel/i.test(l))).toBe(true);
-		expect(io.out.some((l) => /PG 16\.2/i.test(l))).toBe(true);
+		expect(io.out).toContain(
+			"✓ Ping OK — 7 ms (source: env-per-tunnel) — PostgreSQL 16.2"
+		);
 		expect(io.out.some((l) => /7 collections/i.test(l))).toBe(true);
 	});
 

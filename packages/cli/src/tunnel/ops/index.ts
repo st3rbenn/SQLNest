@@ -9,13 +9,15 @@ import { openConnectionForTunnel } from "../../services/engine";
 import { introspectOp } from "./introspect";
 import type { OpDefinition, SchemaCache } from "./op";
 import { pingOp } from "./ping";
+import { projectStatusOp } from "./project-status";
 import { runSnqlOp } from "./run-snql";
 
 /** Un handler par op du contrat : une op sans handler ne compile pas. */
 const OPS: { readonly [K in TunnelOpName]: OpDefinition<K> } = {
 	ping: pingOp,
 	introspect: introspectOp,
-	runSnql: runSnqlOp
+	runSnql: runSnqlOp,
+	projectStatus: projectStatusOp
 };
 
 /** Cache de schéma d'une connexion, pour la durée du process CLI. */

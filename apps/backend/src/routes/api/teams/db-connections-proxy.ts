@@ -3,6 +3,7 @@
  *
  *   GET  /api/teams/:slug/db-connections/:id/schema
  *   POST /api/teams/:slug/db-connections/:id/query
+ *   GET  /api/teams/:slug/db-connections/:id/project-status
  *
  * Miroir de `routes/api/db-connections/proxy.ts` — même logique, mais
  * l'autorisation passe par `team_id` (via `requireTeamAccess` +
@@ -15,6 +16,7 @@ import z from "zod/v4";
 import { assertConnectionInTeam } from "../../../domains/db-connections/get-in-team";
 import {
 	PgErrorInfoSchema,
+	ProjectStatusResponse,
 	ProxyErrorResponse,
 	ProxyQueryBody,
 	ProxyQueryResponse
@@ -173,6 +175,44 @@ export default function teamsDbConnectionsProxyRoute(fastify: FastifyInstance) {
 				return await fastify.backendProxy.sendReq(tunnelId, {
 					op: "runSnql",
 					src: request.body.source
+				});
+			} catch (err) {
+				return mapErrorToReply(err, reply, request);
+			}
+		}
+	);
+
+	// ─── GET /:slug/db-connections/:id/project-status ────────────────
+	// Projet relié côté CLI (ADR-037 D2) : relié ou non, ORM, `apply`,
+	// table d'historique. Le chemin reste sur la machine de l'utilisateur.
+	instance.get(
+		"/:slug/db-connections/:id/project-status",
+		{
+			preHandler: [requireTeamAccess],
+			schema: {
+				params: SlugAndConnectionParams,
+				response: {
+					200: ProjectStatusResponse,
+					404: ProxyErrorResponse,
+					500: ProxyErrorResponse,
+					502: ProxyErrorResponse,
+					503: ProxyErrorResponse,
+					504: ProxyErrorResponse
+				}
+			}
+		},
+		async (request, reply) => {
+			assertTeamAccess(request);
+			try {
+				const params = request.params as SlugAndConnectionParamsT;
+				const { tunnelId } = await resolveActiveTunnelInTeam(
+					fastify,
+					request.user.id,
+					request.team.id,
+					params.id
+				);
+				return await fastify.backendProxy.sendReq(tunnelId, {
+					op: "projectStatus"
 				});
 			} catch (err) {
 				return mapErrorToReply(err, reply, request);

@@ -1,5 +1,6 @@
 import { addConnectionCommand } from "../commands/add-connection";
 import { connectCommand } from "../commands/connect";
+import { linkProjectCommand } from "../commands/link-project";
 import { listConnectionsCommand } from "../commands/list-connections";
 import { logoutCommand } from "../commands/logout";
 import { pingCommand } from "../commands/ping";
@@ -12,6 +13,7 @@ export const COMMANDS: readonly CommandDefinition[] = [
 	logoutCommand,
 	pingCommand,
 	addConnectionCommand,
+	linkProjectCommand,
 	listConnectionsCommand,
 	revokeConnectionCommand
 ];

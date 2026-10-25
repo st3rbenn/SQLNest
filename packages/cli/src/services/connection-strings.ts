@@ -17,6 +17,13 @@ export interface ParsedConnection {
 	readonly user: string | undefined;
 }
 
+/** Nom affiché d'un moteur. */
+export const ENGINE_LABELS: Readonly<Record<DbEngine, string>> = {
+	postgres: "PostgreSQL",
+	mongodb: "MongoDB",
+	mssql: "SQL Server"
+};
+
 /** Port par défaut de chaque moteur. */
 export const DEFAULT_PORT: Readonly<Record<DbEngine, number>> = {
 	postgres: 5432,

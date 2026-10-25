@@ -41,3 +41,32 @@ export function parseCommandArgs<const T extends ParseArgsOptionsConfig>(
 		return undefined;
 	}
 }
+
+/**
+ * Comme `parseCommandArgs`, avec au plus `max` arguments positionnels :
+ * `sqlnest link-project <connexion> <dossier>`.
+ */
+export function parseCommandLine<const T extends ParseArgsOptionsConfig>(
+	ctx: CliContext,
+	command: string,
+	args: string[],
+	options: T,
+	max: number
+) {
+	try {
+		const parsed = parseArgs({
+			args,
+			options,
+			strict: true,
+			allowPositionals: true
+		});
+		const extra = parsed.positionals[max];
+		if (extra !== undefined) throw new Error(`argument en trop « ${extra} »`);
+		return parsed;
+	} catch (err) {
+		ctx.stderr(
+			`sqlnest ${command}: usage invalide — ${(err as Error).message}`
+		);
+		return undefined;
+	}
+}

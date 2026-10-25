@@ -67,9 +67,9 @@ export const revokeConnectionCommand = defineCommand({
 	help: [
 		[
 			"sqlnest revoke-connection --name <n>",
-			"Retire une DSN locale (avec confirm)"
+			"Retire une connexion locale (avec confirmation)"
 		],
-		["sqlnest revoke-connection --name <n> --yes", "Skip la confirmation"]
+		["sqlnest revoke-connection --name <n> --yes", "Sans confirmation"]
 	],
 	async run(args, ctx) {
 		const values = parseCommandArgs(ctx, "revoke-connection", args, {

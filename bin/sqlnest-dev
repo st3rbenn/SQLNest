@@ -1,14 +1,19 @@
 #!/usr/bin/env bash
 # CLI SQLNest en mode dev (source via tsx, NODE_ENV=development).
-# Résout la racine du repo depuis l'emplacement du script → utilisable
-# depuis n'importe quel sous-dossier.
+# Résout la racine du repo depuis l'emplacement réel du script (lien
+# symbolique suivi) → utilisable depuis n'importe quel dossier, dans le
+# repo ou ailleurs. Le dossier courant est gardé : `add-connection` y
+# cherche les bases du projet.
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$REPO_ROOT"
+SCRIPT="$(readlink -f "${BASH_SOURCE[0]}")"
+CLI_DIR="$(cd "$(dirname "$SCRIPT")/.." && pwd)/packages/cli"
 
 # NODE_ENV=development force la branche localhost dans cli.ts :
 #   process.env.NODE_ENV === "development" ? "http://localhost:4000" : "https://dev.sqlnest.io"
 # En dev-from-source (tsx), aucune substitution build-time — la ternary
 # est évaluée au runtime.
-exec env NODE_ENV=development pnpm --silent --filter @sqlnest/cli exec tsx src/bin.ts "$@"
+# tsx lit par défaut le tsconfig du dossier courant : celui du CLI est
+# imposé, pour qu'un tsconfig de projet (paths, module) n'interfère pas.
+exec env NODE_ENV=development "$CLI_DIR/node_modules/.bin/tsx" \
+	--tsconfig "$CLI_DIR/tsconfig.json" "$CLI_DIR/src/bin.ts" "$@"

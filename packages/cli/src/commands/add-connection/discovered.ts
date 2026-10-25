@@ -5,12 +5,11 @@
  * serveur arrêté est démarré si l'utilisateur le veut.
  */
 
-import { relative } from "node:path";
 import { ORM_LABELS } from "../../orm/types";
 import {
 	connectionIdentity,
-	type DbEngine,
 	describeConnection,
+	ENGINE_LABELS,
 	type ParsedConnection,
 	parseConnectionString
 } from "../../services/connection-strings";
@@ -22,8 +21,13 @@ import {
 	serverConnection
 } from "../../services/discovery";
 import type { LocalConnectionUrlRef } from "../../services/local-connections";
-import { tildify } from "../../ui/paths";
-import type { Prompter, SelectEntry } from "../../ui/prompts";
+import { shortPath, tildify } from "../../ui/paths";
+import {
+	confirmDefaultYes,
+	type Prompter,
+	type SelectEntry
+} from "../../ui/prompts";
+import { alignCells, columnWidths } from "../../ui/table";
 import {
 	AddConnectionError,
 	describeFailure,
@@ -34,6 +38,8 @@ import {
 export interface ConnectionTarget {
 	readonly url: string;
 	readonly urlFrom?: LocalConnectionUrlRef;
+	/** Base découverte choisie : son ORM permet de relier le projet. */
+	readonly database?: DiscoveredDatabase;
 }
 
 export type DiscoveryPick =
@@ -55,14 +61,6 @@ export interface ChooseOptions {
 	readonly manual: () => Promise<string>;
 }
 
-const YES_ANSWERS = new Set(["", "y", "yes", "o", "oui"]);
-
-const ENGINE_LABELS: Readonly<Record<DbEngine, string>> = {
-	postgres: "PostgreSQL",
-	mongodb: "MongoDB",
-	mssql: "SQL Server"
-};
-
 export async function chooseDiscovered(
 	opts: ChooseOptions,
 	discovery: Discovery,
@@ -80,16 +78,8 @@ export async function chooseDiscovered(
 		choices: discoveryChoices(discovery, configured)
 	});
 	switch (pick.kind) {
-		case "database": {
-			const { connection, server, urlFrom } = pick.database;
-			if (server !== undefined && !server.running) {
-				await ensureRunning(opts, server, connection.url);
-			}
-			return {
-				url: connection.url,
-				...(urlFrom !== undefined ? { urlFrom } : {})
-			};
-		}
+		case "database":
+			return targetOfDatabase(opts, pick.database);
 		case "server":
 			return {
 				url: (await chooseServerDatabase(opts, pick.server, configured)).url
@@ -214,17 +204,37 @@ function stoppedMark(server: DiscoveredServer | undefined): string {
 	return server !== undefined && !server.running ? " (arrêté)" : "";
 }
 
-/** Propose de démarrer un serveur arrêté ; un échec n'arrête pas l'ajout. */
-async function ensureRunning(
-	opts: ChooseOptions,
+/** Une base découverte, son serveur démarré s'il est arrêté et que l'utilisateur le veut. */
+export async function targetOfDatabase(
+	opts: Pick<ChooseOptions, "prompter" | "stdout" | "startServer">,
+	database: DiscoveredDatabase
+): Promise<ConnectionTarget> {
+	const { connection, server, urlFrom } = database;
+	if (server !== undefined && !server.running) {
+		await ensureRunning(opts, server, connection.url);
+	}
+	return {
+		url: connection.url,
+		...(urlFrom !== undefined ? { urlFrom } : {}),
+		database
+	};
+}
+
+/** Propose de démarrer un serveur arrêté ; un échec n'arrête pas la suite. */
+export async function ensureRunning(
+	opts: Pick<ChooseOptions, "prompter" | "stdout" | "startServer">,
 	server: DiscoveredServer,
 	url: string
 ): Promise<void> {
 	if (opts.startServer === undefined) return;
-	const answer = await opts.prompter.line(
-		`« ${server.name} » est arrêté. Le démarrer ? [Y/n] `
-	);
-	if (!YES_ANSWERS.has(answer.trim().toLowerCase())) return;
+	if (
+		!(await confirmDefaultYes(
+			opts.prompter,
+			`« ${server.name} » est arrêté. Le démarrer ? [Y/n] `
+		))
+	) {
+		return;
+	}
 	try {
 		await opts.startServer(server, url);
 		opts.stdout(`✓ ${server.name} démarré`);
@@ -311,36 +321,4 @@ function describeSource(
 /** `user@hôte:port`, sans la base (première colonne) ni le secret. */
 function describeServerOf(c: ParsedConnection): string {
 	return describeConnection({ ...c, database: undefined });
-}
-
-/** Chemin relatif à la racine du projet, sinon abrégé en `~`. */
-function shortPath(path: string, root: string | undefined): string {
-	if (root === undefined) return tildify(path);
-	const rel = relative(root, path);
-	return rel === "" ? "." : rel.startsWith("..") ? tildify(path) : rel;
-}
-
-function columnWidths(rows: readonly (readonly string[])[]): number[] {
-	const widths: number[] = [];
-	for (const cells of rows) {
-		cells.forEach((cell, i) => {
-			widths[i] = Math.max(widths[i] ?? 0, cell.length);
-		});
-	}
-	return widths;
-}
-
-/** Colonnes alignées ; une colonne vide sur toutes les lignes disparaît. */
-function alignCells(
-	cells: readonly string[],
-	widths: readonly number[]
-): string {
-	return cells
-		.flatMap((cell, i) =>
-			(widths[i] ?? 0) === 0
-				? []
-				: [i < cells.length - 1 ? cell.padEnd(widths[i] ?? 0) : cell]
-		)
-		.join("  ")
-		.trimEnd();
 }

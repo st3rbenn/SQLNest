@@ -1,6 +1,6 @@
 import type { CommandDefinition } from "./command";
 
-const HEADER = "sqlnest — CLI SQLNest (tunnel local vers ta DB Postgres).";
+const HEADER = "sqlnest — CLI SQLNest (tunnel local vers tes bases).";
 
 const GLOBAL_HELP: readonly (readonly [string, string])[] = [
 	["sqlnest --help", "Affiche cette aide"],

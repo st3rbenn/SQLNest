@@ -102,3 +102,18 @@ z.globalRegistry.add(ProxyQueryResponse, {
 	id: "DbConnectionsProxyQueryResponse"
 });
 export type ProxyQueryResponseT = z.infer<typeof ProxyQueryResponse>;
+
+/**
+ * Réponse de GET /api/teams/:slug/db-connections/:id/project-status : le
+ * projet relié à la connexion côté CLI (ADR-037 D2). Jamais son chemin.
+ */
+export const ProjectStatusResponse = z.object({
+	linked: z.boolean(),
+	orm: z.enum(["prisma", "doctrine", "sequelize", "seaorm"]).optional(),
+	apply: z.boolean().optional(),
+	projectFound: z.boolean().optional(),
+	historyTable: z.object({ name: z.string(), present: z.boolean() }).optional()
+});
+z.globalRegistry.add(ProjectStatusResponse, {
+	id: "DbConnectionsProjectStatusResponse"
+});

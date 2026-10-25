@@ -200,6 +200,30 @@ export function addLocalConnection(entry: LocalConnectionEntry): void {
 }
 
 /**
+ * Relie un projet à la connexion `name`, ou retire la liaison (`undefined`).
+ * Throw si la connexion n'existe pas.
+ */
+export function setConnectionProject(
+	name: string,
+	project: LocalConnectionProject | undefined
+): void {
+	const existing = loadLocalConnections();
+	if (!existing?.connections.some((c) => c.name === name)) {
+		throw new Error(
+			`Aucune entrée nommée « ${name} » dans ${LOCAL_CONNECTIONS_FILENAME}.`
+		);
+	}
+	saveLocalConnections({
+		version: LOCAL_CONNECTIONS_VERSION,
+		connections: existing.connections.map((c) => {
+			if (c.name !== name) return c;
+			const { project: _previous, ...rest } = c;
+			return project !== undefined ? { ...rest, project } : rest;
+		})
+	});
+}
+
+/**
  * Retire l'entrée nommée `name` du fichier local. Throw explicitement si
  * le fichier n'existe pas ou si aucune entrée ne matche — la commande CLI
  * doit distinguer ces cas de l'idempotence.

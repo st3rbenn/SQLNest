@@ -23,6 +23,9 @@
  */
 
 import { defineCommand, parseCommandArgs } from "../../app/command";
+import type { CliContext } from "../../app/context";
+import type { OrmDetection } from "../../orm/detect";
+import { ORM_LABELS } from "../../orm/types";
 import {
 	type ParsedConnection,
 	parseConnectionString,
@@ -30,6 +33,7 @@ import {
 } from "../../services/connection-strings";
 import {
 	configuredIdentities,
+	type DiscoveredDatabase,
 	type DiscoveredServer,
 	type Discovery
 } from "../../services/discovery";
@@ -39,9 +43,14 @@ import {
 	loadLocalConnections
 } from "../../services/local-connections";
 import { tildify } from "../../ui/paths";
-import type { Prompter } from "../../ui/prompts";
+import { confirmDefaultYes, type Prompter } from "../../ui/prompts";
 import { withSpinner } from "../../ui/spinner";
-import { type ConnectionTarget, chooseDiscovered } from "./discovered";
+import { LinkProjectError, linkConnection } from "../link-project/link";
+import {
+	type ConnectionTarget,
+	chooseDiscovered,
+	targetOfDatabase
+} from "./discovered";
 import {
 	AddConnectionError,
 	describeFailure,
@@ -70,6 +79,10 @@ export interface AddConnectionOptions {
 		server: DiscoveredServer,
 		url: string
 	) => Promise<void>;
+	/** Base découverte déjà choisie (`link-project`, `connect`) : pas de menu. */
+	readonly database?: DiscoveredDatabase;
+	/** Base choisie avec l'ORM d'un projet : proposer de le relier. Défaut `true`. */
+	readonly offerLink?: boolean;
 	/** `false` (stdin redirigé, script) : aucune question ; une base
 	 *  injoignable fait échouer la commande. Défaut `true`. */
 	readonly interactive?: boolean;
@@ -80,6 +93,10 @@ export interface AddConnectionOptions {
 export interface AddConnectionResult {
 	readonly name: string;
 	readonly overwritten: boolean;
+	/** Base découverte choisie, s'il y en a une. */
+	readonly database?: DiscoveredDatabase;
+	/** Projet relié dans la foulée. */
+	readonly linked?: boolean;
 }
 
 export async function addConnection(
@@ -100,6 +117,17 @@ export async function addConnection(
 		throw new AddConnectionError(
 			"invalid-input",
 			"Sans terminal, passe la chaîne de connexion : sqlnest add-connection --url <chaîne>"
+		);
+	} else if (opts.database !== undefined) {
+		target = await targetOfDatabase(
+			{
+				prompter: opts.prompter,
+				stdout: opts.stdout,
+				...(opts.startServer !== undefined
+					? { startServer: opts.startServer }
+					: {})
+			},
+			opts.database
 		);
 	} else if (opts.discover !== undefined) {
 		target = await chooseDiscovered(
@@ -130,9 +158,10 @@ export async function addConnection(
 				: await askName(opts, suggested, taken);
 	}
 
+	let probe: ConnectionProbe | undefined;
 	if (opts.test !== undefined) {
 		try {
-			const probe = await opts.test(target.url);
+			probe = await opts.test(target.url);
 			opts.stdout(
 				`✓ ${describeServer(parsed.engine, probe.serverVersion)} — ${probe.collectionCount} ${
 					probe.collectionCount === 1 ? "table" : "tables"
@@ -173,7 +202,56 @@ export async function addConnection(
 			`  URL relue dans ${tildify(target.urlFrom.file)} (${target.urlFrom.key}) à chaque connexion`
 		);
 	}
-	return { name, overwritten: alreadyExists };
+	const linked =
+		opts.offerLink !== false && target.database?.orm !== undefined
+			? await offerLink(opts, name, target.database.orm, probe)
+			: false;
+	return {
+		name,
+		overwritten: alreadyExists,
+		...(target.database !== undefined ? { database: target.database } : {}),
+		...(linked ? { linked } : {})
+	};
+}
+
+/** La base choisie est celle d'un projet ORM : le relier dans la foulée (ADR-038 S5). */
+async function offerLink(
+	opts: AddConnectionOptions,
+	name: string,
+	detection: OrmDetection,
+	probe: ConnectionProbe | undefined
+): Promise<boolean> {
+	if (
+		!(await confirmDefaultYes(
+			opts.prompter,
+			`Relier le projet ${ORM_LABELS[detection.orm]} (${tildify(detection.dir)}) à « ${name} » ? [Y/n] `
+		))
+	) {
+		return false;
+	}
+	try {
+		await linkConnection({
+			name,
+			detection,
+			apply: true,
+			...(probe !== undefined
+				? { collectionNames: probe.collectionNames }
+				: opts.test !== undefined
+					? { probe: opts.test }
+					: {}),
+			interactive: true,
+			prompter: opts.prompter,
+			stdout: opts.stdout
+		});
+		return true;
+	} catch (err) {
+		// La connexion reste enregistrée : seule la liaison échoue.
+		if (err instanceof LinkProjectError) {
+			opts.stdout(`✗ ${err.message}`);
+			return false;
+		}
+		throw err;
+	}
 }
 
 /** Nom proposé d'après la base ; Entrée l'accepte. */
@@ -200,6 +278,29 @@ async function confirmOverwrite(
 	if (!ok) {
 		throw new AddConnectionError("cancelled", "Annulé par l'utilisateur");
 	}
+}
+
+/**
+ * Découverte, bases d'un serveur, démarrage d'un serveur arrêté : sous
+ * spinner, pour les commandes interactives (`add-connection`,
+ * `link-project`, `connect`).
+ */
+export function discoveryTools(ctx: CliContext) {
+	return {
+		discover: (cwd?: string) =>
+			withSpinner("Recherche des bases (projet, Docker)…", () =>
+				ctx.services.discoverDatabases(cwd !== undefined ? { cwd } : {})
+			),
+		listDatabases: (url: string) =>
+			withSpinner("Lecture des bases du serveur…", () =>
+				ctx.services.listServerDatabases(url)
+			),
+		startServer: (server: DiscoveredServer, url: string) =>
+			withSpinner(`Démarrage de ${server.name}…`, async () => {
+				await ctx.services.startDockerServer(server);
+				await ctx.services.waitForDatabase(url);
+			})
+	};
 }
 
 export const addConnectionCommand = defineCommand({
@@ -238,19 +339,7 @@ export const addConnectionCommand = defineCommand({
 				...(values.force ? { force: true } : {}),
 				...(values.url ? { url: values.url } : {}),
 				...(values["no-test"] ? {} : { test: ctx.services.probeConnection }),
-				discover: () =>
-					withSpinner("Recherche des bases (projet, Docker)…", () =>
-						ctx.services.discoverDatabases()
-					),
-				listDatabases: (url) =>
-					withSpinner("Lecture des bases du serveur…", () =>
-						ctx.services.listServerDatabases(url)
-					),
-				startServer: (server, url) =>
-					withSpinner(`Démarrage de ${server.name}…`, async () => {
-						await ctx.services.startDockerServer(server);
-						await ctx.services.waitForDatabase(url);
-					}),
+				...discoveryTools(ctx),
 				interactive: process.stdin.isTTY === true,
 				prompter,
 				stdout: ctx.stdout

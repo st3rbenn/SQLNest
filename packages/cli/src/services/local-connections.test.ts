@@ -21,7 +21,8 @@ import {
 	LocalConnectionNotFoundError,
 	loadLocalConnections,
 	resolveLocalConnectionUrl,
-	saveLocalConnections
+	saveLocalConnections,
+	setConnectionProject
 } from "./local-connections";
 
 let tempDir: string;
@@ -320,5 +321,52 @@ describe("version 2 : référence au .env et projet relié (ADR-038)", () => {
 			orm: "doctrine",
 			apply: true
 		});
+	});
+});
+
+describe("setConnectionProject (ADR-038 S5)", () => {
+	test("relie, remplace, retire ; connexion inconnue → erreur", () => {
+		saveLocalConnections({
+			version: 1,
+			connections: [
+				{ name: "lab", url: "postgres://lab@localhost:5440/lab" },
+				{ name: "other", url: "postgres://u@h/db" }
+			]
+		});
+		setConnectionProject("lab", {
+			path: "/srv/lab/prisma",
+			orm: "prisma",
+			apply: true
+		});
+		expect(loadLocalConnections()).toEqual({
+			version: 2,
+			connections: [
+				{
+					name: "lab",
+					url: "postgres://lab@localhost:5440/lab",
+					project: { path: "/srv/lab/prisma", orm: "prisma", apply: true }
+				},
+				{ name: "other", url: "postgres://u@h/db" }
+			]
+		});
+		setConnectionProject("lab", {
+			path: "/srv/lab/seaorm",
+			orm: "seaorm",
+			apply: false
+		});
+		expect(loadLocalConnections()?.connections[0]?.project).toEqual({
+			path: "/srv/lab/seaorm",
+			orm: "seaorm",
+			apply: false
+		});
+		setConnectionProject("lab", undefined);
+		expect(loadLocalConnections()).toEqual({
+			version: 1,
+			connections: [
+				{ name: "lab", url: "postgres://lab@localhost:5440/lab" },
+				{ name: "other", url: "postgres://u@h/db" }
+			]
+		});
+		expect(() => setConnectionProject("ghost", undefined)).toThrow(/ghost/);
 	});
 });

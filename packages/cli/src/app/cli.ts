@@ -22,6 +22,7 @@
 import { addConnection } from "../commands/add-connection";
 import { connect } from "../commands/connect/device-flow";
 import { connectWithToken } from "../commands/connect/token";
+import { linkProject } from "../commands/link-project";
 import { listConnections } from "../commands/list-connections";
 import { logout } from "../commands/logout";
 import { ping } from "../commands/ping";
@@ -66,6 +67,7 @@ function servicesFrom(io: CliIO): CliServices {
 		logout: io.logoutFn ?? logout,
 		ping: io.pingFn ?? ping,
 		addConnection: io.addConnectionFn ?? addConnection,
+		linkProject,
 		listConnections: io.listConnectionsFn ?? listConnections,
 		revokeConnection: io.revokeConnectionFn ?? revokeConnection,
 		probeConnection,

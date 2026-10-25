@@ -27,6 +27,21 @@ export interface TunnelRunSnqlData {
 }
 
 /**
+ * Projet relié à la connexion servie (ADR-037 D2) : ce que le navigateur en
+ * sait. Jamais le chemin du projet.
+ */
+export interface TunnelProjectStatusData {
+	readonly linked: boolean;
+	readonly orm?: "prisma" | "doctrine" | "sequelize" | "seaorm";
+	/** `false` : migration et modèle écrits, base non touchée (ADR-035 point 3). */
+	readonly apply?: boolean;
+	/** Le dossier du projet existe et l'ORM y est toujours détecté. */
+	readonly projectFound?: boolean;
+	/** Table d'historique de l'ORM, présente ou non dans la base. */
+	readonly historyTable?: { readonly name: string; readonly present: boolean };
+}
+
+/**
  * Table des ops : nom → requête (champs en plus de `op`) et données de la
  * réponse. `introspect` rend le `SchemaModel` de `@sqlnest/snql`, que ce
  * paquet n'importe pas.
@@ -37,6 +52,10 @@ export interface TunnelOpTable {
 	readonly runSnql: {
 		readonly req: { readonly src: string };
 		readonly data: TunnelRunSnqlData;
+	};
+	readonly projectStatus: {
+		readonly req: object;
+		readonly data: TunnelProjectStatusData;
 	};
 }
 

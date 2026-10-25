@@ -9,6 +9,7 @@ import { homedir } from "node:os";
 import {
 	connectionIdentity,
 	DEFAULT_PORT,
+	type ParsedConnection,
 	parseConnectionString
 } from "../connection-strings";
 import { entryUrl, type LocalConnectionEntry } from "../local-connections";
@@ -18,10 +19,11 @@ import {
 	discoverContainers
 } from "./docker";
 import { discoverProject, isInside } from "./project";
-import type { DiscoveredDatabase, DiscoveredServer, Discovery } from "./types";
+import type { DiscoveredServer, Discovery } from "./types";
 
 export type { DockerRunner } from "./docker";
 export { startDockerServer } from "./docker";
+export { isInside } from "./project";
 export { serverConnection } from "./servers";
 export type * from "./types";
 
@@ -79,7 +81,10 @@ export async function discoverDatabases(
 	const portOpen = opts.portOpen ?? isPortOpen;
 	const databases = await Promise.all(
 		project.databases.map(async (database) => {
-			const server = servingServer(database, projectServers, servers);
+			const server = serverFor(database.connection, {
+				projectServers,
+				servers
+			});
 			if (server === undefined) return database;
 			// Un conteneur arrêté qui déclare ce port ne sert la base que si
 			// rien d'autre n'y répond déjà.
@@ -98,22 +103,21 @@ export async function discoverDatabases(
 	};
 }
 
-/** Serveur qui publie le port local de la base : en cours, sinon du projet. */
-function servingServer(
-	database: DiscoveredDatabase,
-	projectServers: readonly DiscoveredServer[],
-	servers: readonly DiscoveredServer[]
+/** Serveur qui publie le port local d'une base : en cours, sinon du projet. */
+export function serverFor(
+	c: ParsedConnection,
+	discovery: Pick<Discovery, "projectServers" | "servers">
 ): DiscoveredServer | undefined {
-	const c = database.connection;
 	if (!LOCAL_HOSTS.has(c.host)) return undefined;
 	const port = c.port ?? DEFAULT_PORT[c.engine];
-	const candidates = [...projectServers, ...servers].filter(
+	const candidates = [...discovery.projectServers, ...discovery.servers].filter(
 		(s) => s.engine === c.engine && LOCAL_HOSTS.has(s.host) && s.port === port
 	);
 	return candidates.find((s) => s.running) ?? candidates[0];
 }
 
-function isPortOpen(host: string, port: number): Promise<boolean> {
+/** Un port de la machine accepte-t-il une connexion ? (300 ms au plus) */
+export function isPortOpen(host: string, port: number): Promise<boolean> {
 	return new Promise((resolve) => {
 		const socket = createConnection({ host, port });
 		const done = (open: boolean): void => {

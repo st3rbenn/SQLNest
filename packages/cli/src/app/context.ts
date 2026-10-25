@@ -1,6 +1,7 @@
 import type { addConnection } from "../commands/add-connection";
 import type { connect } from "../commands/connect/device-flow";
 import type { connectWithToken } from "../commands/connect/token";
+import type { linkProject } from "../commands/link-project";
 import type { listConnections } from "../commands/list-connections";
 import type { logout } from "../commands/logout";
 import type { ping } from "../commands/ping";
@@ -25,6 +26,7 @@ export interface CliServices {
 	readonly logout: typeof logout;
 	readonly ping: typeof ping;
 	readonly addConnection: typeof addConnection;
+	readonly linkProject: typeof linkProject;
 	readonly listConnections: typeof listConnections;
 	readonly revokeConnection: typeof revokeConnection;
 	/** Test d'une connexion avant de l'enregistrer (ADR-038 S2). */

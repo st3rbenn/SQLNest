@@ -28,6 +28,7 @@ import {
 	runQuery,
 	type SchemaModel
 } from "@sqlnest/engine";
+import { ENGINE_LABELS } from "./connection-strings";
 import {
 	type ConnectionDiagnostics,
 	describeConnectionForDiagnostics,
@@ -104,6 +105,8 @@ function resolveEngineConfigFromUrl(url: string): ResolvedEngineConfig {
 /** Ce qu'une connexion testée avant d'être enregistrée a répondu. */
 export interface ConnectionProbe extends PingResult {
 	readonly collectionCount: number;
+	/** Noms des tables : la table d'historique d'un ORM s'y lit. */
+	readonly collectionNames: readonly string[];
 }
 
 /**
@@ -115,7 +118,11 @@ export async function probeConnection(url: string): Promise<ConnectionProbe> {
 	try {
 		const ping = await conn.ping();
 		const schema = await conn.introspect();
-		return { ...ping, collectionCount: schema.collections.length };
+		return {
+			...ping,
+			collectionCount: schema.collections.length,
+			collectionNames: schema.collections.map((c) => c.name)
+		};
 	} finally {
 		await conn.close();
 	}
@@ -215,11 +222,6 @@ export function describeServer(
 	return (serverVersion.split(" (")[0] as string).trim();
 }
 
-const ENGINE_LABELS = {
-	postgres: "PostgreSQL",
-	mongodb: "MongoDB",
-	mssql: "SQL Server"
-} as const;
 
 /**
  * Ping + info SAFE de source DSN — le CLI l'appelle à `sqlnest ping`
