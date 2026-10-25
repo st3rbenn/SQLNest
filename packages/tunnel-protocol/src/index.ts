@@ -9,6 +9,7 @@
  *   - AEAD ChaCha20-Poly1305 pour le chiffrement browser ↔ CLI
  *     (`aead.ts`).
  *   - Handshake self-signed avec pinning externe (`handshake.ts`).
+ *   - Contrat des ops applicatives et de leurs réponses (`ops.ts`).
  */
 
 export {
@@ -45,6 +46,17 @@ export {
 	nextCounter,
 	type PeerCounterState
 } from "./nonce";
+export type {
+	TunnelOp,
+	TunnelOpData,
+	TunnelOpName,
+	TunnelOpOf,
+	TunnelOpResult,
+	TunnelOpTable,
+	TunnelPingData,
+	TunnelResultColumn,
+	TunnelRunSnqlData
+} from "./ops";
 export { signFrame, verifyFrame } from "./signature";
 export {
 	CHACHA_NONCE_LEN,

@@ -7,9 +7,9 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import type { ApiClient, AuthenticateResult } from "../api-client";
-import { loadConfig } from "../config";
-import { connectWithToken } from "./connect-token";
+import type { ApiClient, AuthenticateResult } from "../../services/api-client";
+import { loadConfig } from "../../services/config";
+import { connectWithToken } from "./token";
 
 function makeAuthResult(
 	overrides: Partial<AuthenticateResult> = {}

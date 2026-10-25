@@ -16,7 +16,8 @@
  * `{ removed: 0 }` — idempotent.
  */
 
-import { loadConfig, saveConfig } from "../config";
+import { defineCommand, parseCommandArgs } from "../app/command";
+import { loadConfig, saveConfig } from "../services/config";
 
 export interface LogoutOptions {
 	readonly all?: boolean;
@@ -52,3 +53,35 @@ export function logout(opts: LogoutOptions): LogoutResult {
 	}
 	return { removed };
 }
+
+export const logoutCommand = defineCommand({
+	name: "logout",
+	help: [
+		["sqlnest logout --all", "Retire tous les tunnels locaux"],
+		["sqlnest logout --tunnel <id>", "Retire un tunnel local"]
+	],
+	run(args, ctx) {
+		const values = parseCommandArgs(ctx, "logout", args, {
+			all: { type: "boolean" },
+			tunnel: { type: "string" }
+		});
+		if (values === undefined) return 2;
+		if (!values.all && !values.tunnel) {
+			ctx.stderr("sqlnest logout: spécifie `--all` OU `--tunnel <id>`.");
+			return 2;
+		}
+		try {
+			const result = ctx.services.logout({
+				...(values.all ? { all: true } : {}),
+				...(values.tunnel ? { tunnelId: values.tunnel } : {})
+			});
+			ctx.stdout(
+				`✓ ${result.removed} tunnel${result.removed === 1 ? "" : "s"} retiré${result.removed === 1 ? "" : "s"} de la config locale`
+			);
+			return 0;
+		} catch (err) {
+			ctx.stderr(`sqlnest logout: erreur — ${(err as Error).message}`);
+			return 1;
+		}
+	}
+});

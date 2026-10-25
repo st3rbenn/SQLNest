@@ -43,17 +43,16 @@ import {
 	type PeerCounterState,
 	PROTOCOL_VERSION,
 	signFrame,
+	type TunnelOp,
 	verifyFrame
 } from "@sqlnest/tunnel-protocol";
 import type { PgErrorInfo } from "@sqlnest/engine";
 import { pack, unpack } from "msgpackr";
 import NodeWebSocket from "ws";
 
-/** Op applicative reçue du browser (payload clair du frame req). */
-export type RemoteOp =
-	| { readonly op: "ping" }
-	| { readonly op: "introspect" }
-	| { readonly op: "runSnql"; readonly src: string };
+/** Op applicative reçue du browser (payload clair du frame req) : contrat
+ *  partagé (`@sqlnest/tunnel-protocol`). */
+export type RemoteOp = TunnelOp;
 
 /**
  * Résultat retourné par `runOp` — sérialisé dans le payload de `res`.

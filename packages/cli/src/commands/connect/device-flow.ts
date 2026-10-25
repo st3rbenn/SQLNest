@@ -36,26 +36,18 @@ import {
 	createApiClient,
 	type PairingStatus,
 	type StatusPairingResult
-} from "../api-client";
+} from "../../services/api-client";
 import {
-	CONFIG_VERSION,
-	loadConfig,
-	type SqlnestConfig,
+	loadOrInitConfig,
 	saveConfig,
 	type TunnelEntry
-} from "../config";
-import {
-	decryptPrivateKey,
-	encryptPrivateKey,
-	generateKeypair,
-	generateSalt,
-	signMessage
-} from "../crypto";
+} from "../../services/config";
+import { signMessage } from "../../services/crypto";
 import {
 	computeTunnelFingerprint,
 	computeTunnelSchemaChecksum
-} from "../engine";
-import { openBrowser } from "../open-browser";
+} from "../../services/engine";
+import { openBrowser } from "../../ui/open-browser";
 
 /** Regex hissée top-level (règle Biome `useTopLevelRegex`). */
 const TRAILING_SLASH_RE = /\/+$/;
@@ -334,40 +326,6 @@ export function findResumableTunnel(
 		}
 	}
 	return null;
-}
-
-/**
- * Init d'une config fraîche si absente — génère salt + keypair. Sinon
- * décrypte la privkey de la config existante.
- *
- * Isolé pour test / réutilisation par `connect-token`.
- */
-export function loadOrInitConfig(): {
-	config: SqlnestConfig;
-	privateKeyHex: string;
-} {
-	const existing = loadConfig();
-	if (existing != null) {
-		const privateKeyHex = decryptPrivateKey(
-			existing.keypair.encrypted_private,
-			existing.salt
-		);
-		return { config: existing, privateKeyHex };
-	}
-
-	const salt = generateSalt();
-	const kp = generateKeypair();
-	const config: SqlnestConfig = {
-		version: CONFIG_VERSION,
-		salt,
-		keypair: {
-			public: kp.publicHex,
-			encrypted_private: encryptPrivateKey(kp.privateHex, salt)
-		},
-		tunnels: []
-	};
-	saveConfig(config);
-	return { config, privateKeyHex: kp.privateHex };
 }
 
 function defaultSleep(ms: number): Promise<void> {

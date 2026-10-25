@@ -17,10 +17,12 @@
  * `serverVersion` (renvoyée par PG lui-même — pas un secret).
  */
 
+import { defineCommand, parseCommandArgs } from "../app/command";
 import {
 	introspectTunnel as defaultIntrospect,
 	pingTunnel as defaultPing
-} from "../engine";
+} from "../services/engine";
+import { LocalConnectionNotFoundError } from "../services/local-connections";
 
 export interface PingCommandOptions {
 	readonly tunnelName: string;
@@ -62,3 +64,43 @@ export async function ping(
 		collectionCount: schema.collections.length
 	};
 }
+
+export const pingCommand = defineCommand({
+	name: "ping",
+	help: [["sqlnest ping --tunnel <name>", "Ping local DSN (diagnostic)"]],
+	async run(args, ctx) {
+		const values = parseCommandArgs(ctx, "ping", args, {
+			tunnel: { type: "string" }
+		});
+		if (values === undefined) return 2;
+		const tunnelName = values.tunnel;
+		if (!tunnelName) {
+			ctx.stderr(
+				"sqlnest ping: `--tunnel <name>` est requis. Ex: sqlnest ping --tunnel prod"
+			);
+			return 2;
+		}
+		try {
+			const res = await ctx.services.ping({
+				tunnelName,
+				...(ctx.env ? { env: ctx.env } : {})
+			});
+			ctx.stdout(
+				`✓ Ping OK — ${res.latencyMs} ms (source: ${res.source})${
+					res.serverVersion ? ` — PG ${res.serverVersion}` : ""
+				}`
+			);
+			ctx.stdout(
+				`  ${res.collectionCount} collections détectées à l'introspection`
+			);
+			return 0;
+		} catch (err) {
+			if (err instanceof LocalConnectionNotFoundError) {
+				ctx.stderr(`✗ ${err.message}`);
+				return 1;
+			}
+			ctx.stderr(`✗ Ping échec : ${(err as Error).message ?? String(err)}`);
+			return 1;
+		}
+	}
+});

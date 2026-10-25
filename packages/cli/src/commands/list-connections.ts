@@ -8,7 +8,8 @@
  * l'user local qui les a saisis).
  */
 
-import { loadLocalConnections } from "../local-connections";
+import { defineCommand } from "../app/command";
+import { loadLocalConnections } from "../services/local-connections";
 
 export interface ListConnectionsOptions {
 	readonly stdout: (line: string) => void;
@@ -69,3 +70,25 @@ function defaultPortOf(engine: string): string {
 function pad(s: string, width: number): string {
 	return s.length >= width ? s : s + " ".repeat(width - s.length);
 }
+
+export const listConnectionsCommand = defineCommand({
+	name: "list-connections",
+	help: [
+		["sqlnest list-connections", "Liste les DSN locales (sans les credentials)"]
+	],
+	run(args, ctx) {
+		if (args.length > 0) {
+			ctx.stderr(
+				`sqlnest list-connections: aucun argument attendu, reçu « ${args.join(" ")} »`
+			);
+			return 2;
+		}
+		try {
+			ctx.services.listConnections({ stdout: ctx.stdout });
+			return 0;
+		} catch (err) {
+			ctx.stderr(`✗ ${(err as Error).message}`);
+			return 1;
+		}
+	}
+});

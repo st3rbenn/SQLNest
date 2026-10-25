@@ -7,35 +7,36 @@
  * ouverture browser best-effort), et wrappers engine + WS.
  */
 
+export type { CliIO } from "./app/cli";
+export { runCli } from "./app/cli";
+export type { CliServices } from "./app/context";
+export type {
+	CodeDisplayInfo,
+	ConnectFailureReason,
+	ConnectOptions,
+	ConnectResult
+} from "./commands/connect/device-flow";
+export {
+	ConnectError,
+	connect,
+	POLL_INTERVAL_MS,
+	POLL_TIMEOUT_MS
+} from "./commands/connect/device-flow";
+export type { ConnectTokenOptions } from "./commands/connect/token";
+export { connectWithToken } from "./commands/connect/token";
+export type { LogoutOptions, LogoutResult } from "./commands/logout";
+export { logout } from "./commands/logout";
+export type { PingCommandOptions, PingCommandResult } from "./commands/ping";
+export { ping } from "./commands/ping";
 export type {
 	ApiClient,
 	AuthenticateResult,
 	CreatePairingResult,
 	PairingStatus,
 	StatusPairingResult
-} from "./api-client";
-export { ApiClientError, createApiClient } from "./api-client";
-export type { CliIO } from "./cli";
-export { runCli } from "./cli";
-export type {
-	CodeDisplayInfo,
-	ConnectFailureReason,
-	ConnectOptions,
-	ConnectResult
-} from "./commands/connect";
-export {
-	ConnectError,
-	connect,
-	POLL_INTERVAL_MS,
-	POLL_TIMEOUT_MS
-} from "./commands/connect";
-export type { ConnectTokenOptions } from "./commands/connect-token";
-export { connectWithToken } from "./commands/connect-token";
-export type { LogoutOptions, LogoutResult } from "./commands/logout";
-export { logout } from "./commands/logout";
-export type { PingCommandOptions, PingCommandResult } from "./commands/ping";
-export { ping } from "./commands/ping";
-export type { SqlnestConfig, TunnelEntry } from "./config";
+} from "./services/api-client";
+export { ApiClientError, createApiClient } from "./services/api-client";
+export type { SqlnestConfig, TunnelEntry } from "./services/config";
 export {
 	assertConfigPerms,
 	CONFIG_VERSION,
@@ -45,27 +46,27 @@ export {
 	loadConfig,
 	MAX_CONFIG_PERMS,
 	saveConfig
-} from "./config";
-export type { Keypair } from "./crypto";
+} from "./services/config";
+export type { Keypair } from "./services/crypto";
 export {
 	decryptPrivateKey,
 	encryptPrivateKey,
 	generateKeypair,
 	generateSalt,
 	signMessage
-} from "./crypto";
-export type { TunnelPingResult } from "./engine";
+} from "./services/crypto";
+export type { TunnelPingResult } from "./services/engine";
 export {
 	introspectTunnel,
 	openConnectionForTunnel,
 	pingTunnel,
 	runSnqlOnTunnel
-} from "./engine";
+} from "./services/engine";
 export type {
 	ConnectionDiagnostics,
 	LocalConnectionEntry,
 	LocalConnectionsFile
-} from "./local-connections";
+} from "./services/local-connections";
 export {
 	assertLocalConnectionsPerms,
 	describeConnectionForDiagnostics,
@@ -76,13 +77,13 @@ export {
 	loadLocalConnections,
 	resolveLocalConnectionUrl,
 	saveLocalConnections
-} from "./local-connections";
-export { openBrowser } from "./open-browser";
+} from "./services/local-connections";
 export type {
 	RemoteOp,
 	RemoteResult,
 	TunnelWsClient,
 	TunnelWsClientOptions,
 	WsSocket
-} from "./ws-client";
-export { createTunnelWsClient } from "./ws-client";
+} from "./tunnel/ws-client";
+export { createTunnelWsClient } from "./tunnel/ws-client";
+export { openBrowser } from "./ui/open-browser";

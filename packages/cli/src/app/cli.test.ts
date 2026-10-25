@@ -9,10 +9,11 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { describeTunnelStatus, runCli } from "./cli";
-import { ConnectError } from "./commands/connect";
-import type { TunnelEntry } from "./config";
-import { addLocalConnection } from "./local-connections";
+import { describeTunnelStatus } from "../commands/connect";
+import { ConnectError } from "../commands/connect/device-flow";
+import type { TunnelEntry } from "../services/config";
+import { addLocalConnection } from "../services/local-connections";
+import { runCli } from "./cli";
 
 // Isolation obligatoire : `runCli connect` (via `resolveCliConnectionName`)
 // lit `~/.sqlnest/local-connections.toml`. Sans isolation, un dev qui a des

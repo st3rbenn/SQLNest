@@ -10,8 +10,8 @@ import {
 	LOCAL_CONNECTIONS_VERSION,
 	loadLocalConnections,
 	saveLocalConnections
-} from "../local-connections";
-import type { Prompter } from "../prompts";
+} from "../services/local-connections";
+import type { Prompter } from "../ui/prompts";
 import { RevokeConnectionError, revokeConnection } from "./revoke-connection";
 
 function mockPrompter(confirms: boolean[] = []): Prompter {

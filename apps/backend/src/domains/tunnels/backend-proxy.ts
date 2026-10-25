@@ -41,17 +41,15 @@ import {
 	generateSessionNonce,
 	nextCounter,
 	PROTOCOL_VERSION,
-	signFrame
+	signFrame,
+	type TunnelOp
 } from "@sqlnest/tunnel-protocol";
 import { pack, unpack } from "msgpackr";
 import type { BackendKeypair } from "../backend-identity/keypair";
 import type { TunnelRegistry } from "./session/registry";
 
-/** Op envoyée du backend au CLI. Même shape que côté browser. */
-export type BackendProxyOp =
-	| { readonly op: "ping" }
-	| { readonly op: "introspect" }
-	| { readonly op: "runSnql"; readonly src: string };
+/** Op envoyée du backend au CLI : contrat partagé (`@sqlnest/tunnel-protocol`). */
+export type BackendProxyOp = TunnelOp;
 
 export type BackendProxyResult =
 	| { readonly ok: true; readonly data: unknown }

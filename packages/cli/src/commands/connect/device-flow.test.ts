@@ -17,14 +17,14 @@ import type {
 	CreatePairingResult,
 	PairingStatus,
 	StatusPairingResult
-} from "../api-client";
-import { loadConfig, saveConfig, type TunnelEntry } from "../config";
+} from "../../services/api-client";
 import {
-	ConnectError,
-	connect,
-	findResumableTunnel,
-	loadOrInitConfig
-} from "./connect";
+	loadConfig,
+	loadOrInitConfig,
+	saveConfig,
+	type TunnelEntry
+} from "../../services/config";
+import { ConnectError, connect, findResumableTunnel } from "./device-flow";
 
 /** Fabrique un ApiClient contrôlé par vi.fn — permet les assertions et
  * scénarios (approve après N polls, timeout, etc.). */

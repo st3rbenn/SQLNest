@@ -8,11 +8,12 @@
  * dashboard web. Ici on retire UNIQUEMENT la DSN locale.
  */
 
+import { defineCommand, parseCommandArgs } from "../app/command";
 import {
 	loadLocalConnections,
 	removeLocalConnection
-} from "../local-connections";
-import type { Prompter } from "../prompts";
+} from "../services/local-connections";
+import type { Prompter } from "../ui/prompts";
 
 export class RevokeConnectionError extends Error {
 	readonly kind: "not-found" | "cancelled";
@@ -60,3 +61,43 @@ export async function revokeConnection(
 	opts.stdout(`✓ Connection « ${opts.name} » retirée`);
 	return { name: opts.name };
 }
+
+export const revokeConnectionCommand = defineCommand({
+	name: "revoke-connection",
+	help: [
+		[
+			"sqlnest revoke-connection --name <n>",
+			"Retire une DSN locale (avec confirm)"
+		],
+		["sqlnest revoke-connection --name <n> --yes", "Skip la confirmation"]
+	],
+	async run(args, ctx) {
+		const values = parseCommandArgs(ctx, "revoke-connection", args, {
+			name: { type: "string" },
+			yes: { type: "boolean" }
+		});
+		if (values === undefined) return 2;
+		const name = values.name;
+		if (!name) {
+			ctx.stderr(
+				"sqlnest revoke-connection: `--name <label>` est requis. Ex: sqlnest revoke-connection --name apollon"
+			);
+			return 2;
+		}
+		const prompter = ctx.services.prompter();
+		try {
+			await ctx.services.revokeConnection({
+				name,
+				...(values.yes ? { yes: true } : {}),
+				prompter,
+				stdout: ctx.stdout
+			});
+			return 0;
+		} catch (err) {
+			ctx.stderr(`✗ ${(err as Error).message ?? String(err)}`);
+			return 1;
+		} finally {
+			prompter.close?.();
+		}
+	}
+});

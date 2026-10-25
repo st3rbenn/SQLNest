@@ -1,0 +1,350 @@
+/**
+ * `sqlnest connect` — pairing (device flow interactif, ou mode CI avec
+ * `--token`), puis tunnel jusqu'à Ctrl-C.
+ */
+
+import { API_URL, FRONTEND_URL } from "../../app/build-info";
+import { defineCommand, parseCommandArgs } from "../../app/command";
+import type { CliContext } from "../../app/context";
+import { ApiClientError } from "../../services/api-client";
+import { loadConfig, type TunnelEntry } from "../../services/config";
+import { loadLocalConnections } from "../../services/local-connections";
+import { createSpinner, type SpinnerHandle } from "../../ui/spinner";
+import { ConnectError } from "./device-flow";
+
+export const connectCommand = defineCommand({
+	name: "connect",
+	help: [
+		["sqlnest connect", "Device flow interactif (menu ↑↓ si ≥2 DSN)"],
+		[
+			"sqlnest connect --connection <name>",
+			"Force la DSN locale à servir (skip menu)"
+		],
+		["sqlnest connect --no-browser", "Idem, sans ouverture browser"],
+		["sqlnest connect --token <sn> --name <n>", "CI mode (Bearer sn_...)"]
+	],
+	run: runConnect
+});
+
+async function runConnect(args: string[], ctx: CliContext): Promise<number> {
+	const values = parseCommandArgs(
+		ctx,
+		"connect",
+		args,
+		{
+			token: { type: "string" },
+			name: { type: "string" },
+			connection: { type: "string" },
+			"no-browser": { type: "boolean" }
+		},
+		{ seeHelp: true }
+	);
+	if (values === undefined) return 2;
+
+	const baseUrl = API_URL;
+	const frontendUrl = FRONTEND_URL;
+
+	// ─── Résolution de la DSN locale à servir ─────────────────────────
+	// Un même install CLI (une seule keypair) peut manager plusieurs DSN
+	// locales via `add-connection`. On envoie le nom choisi au backend :
+	// le fingerprint effectif est `SHA256(pubkey || "|" || cliConnectionName)`,
+	// donc chaque (CLI, DSN) devient une db_connection distincte côté
+	// serveur — sinon les 2 DSN collapse toutes sur la même db_connection.
+	let cliConnectionName: string | null;
+	try {
+		cliConnectionName = await resolveCliConnectionName(values.connection, ctx);
+	} catch (err) {
+		ctx.stderr(`sqlnest connect: ${(err as Error).message}`);
+		return 2;
+	}
+
+	let sessionId: string;
+	let token: string;
+	let connectionName: string;
+	try {
+		// ─── CI mode via --token ──────────────────────────────────────
+		if (values.token) {
+			if (!values.name) {
+				ctx.stderr(
+					"sqlnest connect --token: `--name <label>` est requis en CI."
+				);
+				return 2;
+			}
+			const result = await ctx.services.connectWithToken({
+				baseUrl,
+				bearerToken: values.token,
+				deviceName: values.name,
+				cliConnectionName
+			});
+			ctx.stdout(
+				`✓ Pairing CI OK : « ${result.connectionName} » — ${result.tunnelId}`
+			);
+			sessionId = result.tunnelId;
+			token = result.sessionToken;
+			connectionName = result.connectionName;
+		} else {
+			// ─── Device flow interactif ─────────────────────────────────
+			// Spinner Braille avec transitions in-place. Fallback plain-log
+			// préfixé `[sqlnest]` si non-TTY (CI, pipe, redirection) pour que
+			// `sqlnest connect | tee log.txt` et GHA restent lisibles.
+			let spinner: SpinnerHandle | null = null;
+			try {
+				const result = await ctx.services.connect({
+					baseUrl,
+					frontendUrl,
+					openBrowserOnDisplay: values["no-browser"] !== true,
+					cliConnectionName,
+					onCodeDisplayed: (info) => {
+						ctx.stdout("▲ SQLNest — device pairing");
+						if (cliConnectionName) {
+							ctx.stdout(`  DSN    : ${cliConnectionName}`);
+						}
+						ctx.stdout(`  Visite : ${info.connectUrl}`);
+						ctx.stdout(`  Code   : ${info.code}`);
+						ctx.stdout(
+							`  Expire : ${new Date(info.expiresAt).toLocaleTimeString()}`
+						);
+						ctx.stdout("");
+						spinner = createSpinner("En attente d'approbation…");
+					},
+					onStatus: (status) => {
+						if (status === "approved" && spinner !== null) {
+							spinner.update("Approuvé — ouverture du tunnel…");
+						}
+					}
+				});
+				if (result.resumed) {
+					// Auto-resume : `onCodeDisplayed` n'est pas appelé, pas
+					// de spinner à arrêter.
+					ctx.stdout(
+						`↻ Tunnel repris : « ${result.connectionName} » — ${result.tunnelId}`
+					);
+				} else if (spinner !== null) {
+					(spinner as SpinnerHandle).succeed(
+						`Pairing OK : « ${result.connectionName} » — ${result.tunnelId}`
+					);
+				} else {
+					ctx.stdout(
+						`✓ Pairing OK : « ${result.connectionName} » — ${result.tunnelId}`
+					);
+				}
+				sessionId = result.tunnelId;
+				token = result.sessionToken;
+				connectionName = result.connectionName;
+			} catch (err) {
+				// Nettoie la ligne du spinner avant que le handler stderr
+				// print le message d'erreur — sinon le `⠋ En attente…`
+				// reste collé devant l'erreur. Cast explicite : le TS narrow
+				// tombe à `never` sur le catch parce que l'assignation
+				// `spinner = createSpinner(...)` vit dans un callback closure
+				// (`onCodeDisplayed`) que le flow-analyzer ne peut pas prouver
+				// exécuté avant l'await. La déclaration `spinner: SpinnerHandle
+				// | null` reste la vérité.
+				(spinner as SpinnerHandle | null)?.stop();
+				throw err;
+			}
+		}
+	} catch (err) {
+		return handleConnectError(err, ctx.stderr);
+	}
+
+	// ─── Serve loop : ouvre le WS et bloque jusqu'à SIGINT ────────────
+	ctx.stdout("");
+	ctx.stdout(`▶ Tunnel actif — Ctrl-C pour arrêter.`);
+	try {
+		return await ctx.services.serveTunnel({
+			baseUrl,
+			sessionId,
+			token,
+			connectionName,
+			...(ctx.env ? { env: ctx.env } : {}),
+			onEvent: (event) => {
+				if (event.kind === "op-received") {
+					ctx.stdout(`  ← ${event.op}`);
+				} else if (event.kind === "op-completed") {
+					if (event.ok) {
+						ctx.stdout(`  → ${event.op} ✓`);
+					} else {
+						// Sortie sur stderr pour rester grep-able / redirigeable.
+						// Le message d'erreur (ex `connect ECONNREFUSED 127.0.0.1:5432`
+						// quand Postgres est down) évite le classique "✗ opaque" qui
+						// force le user à ouvrir les logs backend pour diagnostiquer.
+						const suffix = event.error ? ` — ${event.error}` : "";
+						ctx.stderr(`  → ${event.op} ✗${suffix}`);
+					}
+				} else if (event.kind === "error") {
+					ctx.stderr(`  ! ${event.message}`);
+				}
+			}
+		});
+	} catch (err) {
+		ctx.stderr(`✗ Tunnel : ${(err as Error).message ?? String(err)}`);
+		return 1;
+	}
+}
+
+/**
+ * Résout la DSN LOCALE que `sqlnest connect` doit servir cette session.
+ *
+ * Ordre de priorité :
+ *   1. Flag `--connection <name>` explicite (validé contre le fichier).
+ *   2. Si une seule DSN est configurée localement → celle-ci automatiquement.
+ *   3. Si ≥2 DSN → prompt interactif "1) apollon  2) delphi > ".
+ *   4. Si 0 DSN → `null` (le tunnel utilisera les env vars `SQLNEST_PG_URL`
+ *      ou throw à la résolution).
+ *
+ * La valeur retournée est envoyée au backend au POST /pairings pour scoper
+ * le fingerprint effectif ET utilisée dans le serve loop pour matérialiser
+ * la DSN via `resolveLocalConnectionUrl`.
+ */
+async function resolveCliConnectionName(
+	explicit: string | undefined,
+	ctx: CliContext
+): Promise<string | null> {
+	const local = loadLocalConnections();
+	const entries = local?.connections ?? [];
+
+	if (explicit) {
+		if (entries.length === 0) {
+			throw new Error(
+				`--connection ${explicit} : aucune DSN configurée localement.\n` +
+					"Ajoute-en une : sqlnest add-connection --name " +
+					explicit
+			);
+		}
+		const match = entries.find((c) => c.name === explicit);
+		if (!match) {
+			const names = entries.map((c) => c.name).join(", ");
+			throw new Error(
+				`--connection ${explicit} : aucune entrée nommée « ${explicit} » ` +
+					`dans local-connections.toml. Connues : ${names}`
+			);
+		}
+		return match.name;
+	}
+
+	if (entries.length === 0) {
+		// Compat legacy — pas de DSN locale = mode env var. Le backend
+		// fallback à `hashSha256Hex(pubkey)` seul.
+		return null;
+	}
+	if (entries.length === 1) {
+		return entries[0]?.name ?? null;
+	}
+
+	// ≥2 DSN : prompt select interactif (flèches ↑↓, Enter valide, Ctrl-C
+	// annule via `ExitPromptError`). Sur non-TTY (CI, stdin pipé), inquirer
+	// throw → fallback silencieux sur le prompt numéroté classique.
+	//
+	// Chaque item est enrichi avec le status du tunnel_session existant :
+	//   - `apollon (valide 20j)` → auto-resume (skip /pair) au select.
+	//   - `apollon (expiré il y a 3j)` → device flow au select.
+	//   - `apollon` (sans suffix) → jamais paired, device flow au select.
+	// Le branchement est géré côté `connect()` via `findResumableTunnel`.
+	const tunnels = loadConfig()?.tunnels ?? [];
+	const nowMs = Date.now();
+	const decorate = (name: string): string => {
+		const status = describeTunnelStatus(tunnels, name, nowMs);
+		return status === null ? name : `${name} (${status})`;
+	};
+	const prompter = ctx.services.prompter();
+	try {
+		if (process.stdin.isTTY === true) {
+			return await prompter.select({
+				message: "DSN à servir",
+				choices: entries.map((c) => ({
+					value: c.name,
+					label: decorate(c.name)
+				}))
+			});
+		}
+		// Fallback non-TTY : prompt numéroté ligne par ligne.
+		ctx.stdout("▲ Plusieurs DSN locales configurées :");
+		for (let i = 0; i < entries.length; i++) {
+			const name = entries[i]?.name;
+			if (name !== undefined) ctx.stdout(`  ${i + 1}) ${decorate(name)}`);
+		}
+		while (true) {
+			const raw = await prompter.line("Choisis la DSN à servir [1] : ");
+			const trimmed = raw.trim();
+			const idx = trimmed === "" ? 1 : Number.parseInt(trimmed, 10);
+			if (Number.isInteger(idx) && idx >= 1 && idx <= entries.length) {
+				return entries[idx - 1]?.name ?? null;
+			}
+			ctx.stderr(
+				`Réponse invalide — tape un numéro entre 1 et ${entries.length}.`
+			);
+		}
+	} finally {
+		prompter.close?.();
+	}
+}
+
+/**
+ * Cherche le tunnel le plus récent pour une DSN locale donnée dans la
+ * config et retourne un status human-readable :
+ *   - `"valide 20j"` — token pas expiré (matching strict par `connection_name`).
+ *   - `"expiré il y a 3j"` — token expiré.
+ *   - `null` — aucun tunnel taggé pour cette DSN (jamais paired ou entry
+ *     legacy sans `connection_name`).
+ * Utilisé pour enrichir le menu de sélection `sqlnest connect`.
+ */
+export function describeTunnelStatus(
+	tunnels: readonly TunnelEntry[],
+	connectionName: string,
+	nowMs: number
+): string | null {
+	// Le plus récent d'abord — reflète le dernier pair effectué.
+	for (let i = tunnels.length - 1; i >= 0; i--) {
+		const t = tunnels[i];
+		if (t?.connection_name !== connectionName) continue;
+		const expiresMs = Date.parse(t.expires_at);
+		if (Number.isNaN(expiresMs)) return null;
+		const delta = expiresMs - nowMs;
+		if (delta > 0) return `valide ${humanDuration(delta)}`;
+		return `expiré il y a ${humanDuration(-delta)}`;
+	}
+	return null;
+}
+
+const MINUTE_MS = 60 * 1000;
+const HOUR_MS = 60 * MINUTE_MS;
+const DAY_MS = 24 * HOUR_MS;
+
+function humanDuration(ms: number): string {
+	if (ms < MINUTE_MS) return "moins d'une minute";
+	if (ms < HOUR_MS) return `${Math.floor(ms / MINUTE_MS)}min`;
+	if (ms < DAY_MS) return `${Math.floor(ms / HOUR_MS)}h`;
+	return `${Math.floor(ms / DAY_MS)}j`;
+}
+
+function handleConnectError(
+	err: unknown,
+	stderr: (line: string) => void
+): number {
+	if (err instanceof ConnectError) {
+		switch (err.kind) {
+			case "timeout":
+				stderr(
+					"✗ Timeout — 5 minutes se sont écoulées sans approbation. Relance `sqlnest connect`."
+				);
+				return 1;
+			case "expired":
+				stderr(
+					"✗ Code expiré côté serveur. Relance `sqlnest connect` pour un nouveau code."
+				);
+				return 1;
+			case "consumed":
+				stderr(
+					"✗ Code déjà consommé (autre session ?). Relance `sqlnest connect`."
+				);
+				return 1;
+		}
+	}
+	if (err instanceof ApiClientError) {
+		stderr(`✗ Erreur backend : HTTP ${err.statusCode} — ${err.message}`);
+		return 1;
+	}
+	stderr(`✗ Erreur : ${(err as Error).message ?? String(err)}`);
+	return 1;
+}

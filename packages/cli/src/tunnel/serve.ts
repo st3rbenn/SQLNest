@@ -13,27 +13,17 @@
  * détecte la déconnexion et purge le slot du registry.
  */
 
-import { createApiClient } from "../api-client";
-import type { RemoteOp, RemoteResult } from "../ws-client";
-import { createTunnelWsClient } from "../ws-client";
-import { loadOrInitConfig } from "./connect";
-import { EngineExecutionError, runQuery } from "@sqlnest/engine";
-import type { SchemaModel } from "@sqlnest/snql";
+import { EngineExecutionError } from "@sqlnest/engine";
+import { createApiClient } from "../services/api-client";
+import { loadOrInitConfig } from "../services/config";
 import {
 	computeTunnelFingerprint,
 	computeTunnelSchemaChecksum,
-	detectEngineFromConnectionName,
-	openConnectionForTunnel
-} from "../engine";
-
-/**
- * Cache in-memory du SchemaModel par `connectionName`. Le schéma est
- * introspecté à la première query `runSnql` puis réutilisé pour typer
- * les colonnes du résultat (`inferResultColumns`). Invalidé sur restart
- * du process CLI — pas de TTL pour l'instant, une DB dont le schéma
- * change en cours de session n'est pas un cas courant sur un tunnel dev.
- */
-const schemaCache = new Map<string, SchemaModel>();
+	detectEngineFromConnectionName
+} from "../services/engine";
+import { createSchemaCache, dispatchOp } from "./ops";
+import type { RemoteOp } from "./ws-client";
+import { createTunnelWsClient } from "./ws-client";
 
 const HTTP_PREFIX_RE = /^http(s?):\/\//;
 
@@ -69,7 +59,7 @@ export type ServeEvent =
 
 /**
  * Démarre le tunnel et bloque jusqu'à SIGINT/SIGTERM. Retourne 0 à
- * l'arrêt propre. Le caller (cli.ts) fait `process.exit(await serveTunnel(...))`.
+ * l'arrêt propre — le code de sortie de `sqlnest connect`.
  */
 export async function serveTunnel(opts: ServeTunnelOptions): Promise<number> {
 	// Récupère la keypair Ed25519 du CLI (déjà générée par le device flow
@@ -96,6 +86,7 @@ export async function serveTunnel(opts: ServeTunnelOptions): Promise<number> {
 		// l'absence de fingerprint côté serveur n'empêche pas le serve loop.
 	});
 
+	const schema = createSchemaCache();
 	const client = createTunnelWsClient({
 		baseWsUrl,
 		sessionId: opts.sessionId,
@@ -105,7 +96,11 @@ export async function serveTunnel(opts: ServeTunnelOptions): Promise<number> {
 		async runOp(op) {
 			opts.onEvent?.({ kind: "op-received", op: op.op });
 			try {
-				const result = await dispatchOp(op, opts.connectionName, opts.env);
+				const result = await dispatchOp(op, {
+					connectionName: opts.connectionName,
+					env: opts.env ?? process.env,
+					schema
+				});
 				opts.onEvent?.({
 					kind: "op-completed",
 					op: op.op,
@@ -153,81 +148,6 @@ export async function serveTunnel(opts: ServeTunnelOptions): Promise<number> {
 	// Laisse un beat au WS pour flush le close côté serveur.
 	await new Promise((r) => setTimeout(r, 100));
 	return 0;
-}
-
-/**
- * Dispatch d'une op reçue du tunnel vers le moteur local Postgres.
- * Chaque op ouvre + ferme sa propre connexion (pas de pool partagé pour
- * le moment — un pool serait un ajout de v1.1 si le throughput l'exige).
- */
-async function dispatchOp(
-	op: RemoteOp,
-	connectionName: string,
-	env?: NodeJS.ProcessEnv
-): Promise<RemoteResult> {
-	if (op.op === "ping") {
-		const conn = await openConnectionForTunnel(connectionName, env ?? process.env);
-		try {
-			const ping = await conn.ping();
-			return { ok: true, data: ping };
-		} finally {
-			await conn.close();
-		}
-	}
-	if (op.op === "introspect") {
-		const conn = await openConnectionForTunnel(connectionName, env ?? process.env);
-		try {
-			const schema = await conn.introspect();
-			// Prime le cache pour les prochains `runSnql` — évite un aller-
-			// retour d'introspection dédié.
-			schemaCache.set(connectionName, schema);
-			return { ok: true, data: schema };
-		} finally {
-			await conn.close();
-		}
-	}
-	if (op.op === "runSnql") {
-		const conn = await openConnectionForTunnel(connectionName, env ?? process.env);
-		try {
-			// Charge le schéma une fois par process CLI (cache in-memory).
-			// Silence les erreurs d'introspection : si ça échoue, on execute
-			// quand même la query, juste sans les types de colonnes riches.
-			let schema = schemaCache.get(connectionName);
-			if (schema === undefined) {
-				try {
-					schema = await conn.introspect();
-					schemaCache.set(connectionName, schema);
-				} catch {
-					// Introspection non fatale — la query est primaire.
-				}
-			}
-			const rs = await runQuery(conn, op.src, schema);
-			// DDL Tier-2 (ADR-029) : un create/drop/alter modifie le schéma. Sans
-			// invalidation, la prochaine query typerait contre un cache stale
-			// (colonne connue absente, colonne nouvelle inconnue). Approche safe :
-			// tout write invalide — les mutations DML ne changent pas le schéma,
-			// donc l'invalidation est un no-op perf-quasi-nul (au pire un re-fetch
-			// au prochain runSnql, ~50ms). Cible : le DDL qui change le catalog.
-			// Aujourd'hui `written` couvre INSERT/UPDATE/DELETE aussi ; un check
-			// plus fin sur `operation === "ddl"` demanderait de parser deux fois
-			// le source — le coût actuel est acceptable.
-			if (rs.written) {
-				schemaCache.delete(connectionName);
-			}
-			return {
-				ok: true,
-				data: {
-					columns: rs.columns,
-					rows: rs.rows,
-					rowCount: rs.rowCount,
-					written: rs.written
-				}
-			};
-		} finally {
-			await conn.close();
-		}
-	}
-	return { ok: false, error: `op inconnue` };
 }
 
 /**

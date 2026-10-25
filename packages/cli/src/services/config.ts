@@ -39,6 +39,12 @@ import {
 import { homedir, platform } from "node:os";
 import { dirname, join } from "node:path";
 import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
+import {
+	decryptPrivateKey,
+	encryptPrivateKey,
+	generateKeypair,
+	generateSalt
+} from "./crypto";
 
 /** Version du format — bump si la struct change et nécessite migration. */
 export const CONFIG_VERSION = 1 as const;
@@ -287,4 +293,38 @@ function validateTunnelEntry(raw: unknown, index: number): TunnelEntry {
  */
 export function getConfigParent(): string {
 	return dirname(getConfigPath());
+}
+
+/**
+ * Init d'une config fraîche si absente — génère salt + keypair. Sinon
+ * décrypte la privkey de la config existante.
+ *
+ * Partagé par le device flow, le mode CI (`connect --token`) et le tunnel.
+ */
+export function loadOrInitConfig(): {
+	config: SqlnestConfig;
+	privateKeyHex: string;
+} {
+	const existing = loadConfig();
+	if (existing != null) {
+		const privateKeyHex = decryptPrivateKey(
+			existing.keypair.encrypted_private,
+			existing.salt
+		);
+		return { config: existing, privateKeyHex };
+	}
+
+	const salt = generateSalt();
+	const kp = generateKeypair();
+	const config: SqlnestConfig = {
+		version: CONFIG_VERSION,
+		salt,
+		keypair: {
+			public: kp.publicHex,
+			encrypted_private: encryptPrivateKey(kp.privateHex, salt)
+		},
+		tunnels: []
+	};
+	saveConfig(config);
+	return { config, privateKeyHex: kp.privateHex };
 }

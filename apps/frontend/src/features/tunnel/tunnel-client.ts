@@ -48,14 +48,13 @@ import {
 	type PeerCounterState,
 	PROTOCOL_VERSION,
 	signFrame,
+	type TunnelOp,
 	verifyFrame
 } from "@sqlnest/tunnel-protocol";
 import { pack, unpack } from "msgpackr";
 
-export type RemoteOp =
-	| { readonly op: "ping" }
-	| { readonly op: "introspect" }
-	| { readonly op: "runSnql"; readonly src: string };
+/** Op applicative envoyée au CLI : contrat partagé (`@sqlnest/tunnel-protocol`). */
+export type RemoteOp = TunnelOp;
 
 export type TunnelStatus =
 	| "connecting"

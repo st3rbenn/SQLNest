@@ -12,8 +12,8 @@ import {
 	type SqlnestConfig,
 	saveConfig,
 	type TunnelEntry
-} from "../config";
-import { encryptPrivateKey, generateKeypair, generateSalt } from "../crypto";
+} from "../services/config";
+import { encryptPrivateKey, generateKeypair, generateSalt } from "../services/crypto";
 import { logout } from "./logout";
 
 function seedConfig(tunnels: TunnelEntry[]): SqlnestConfig {

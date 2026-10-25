@@ -12,10 +12,13 @@
  */
 
 import { hostname } from "node:os";
-import { type ApiClient, createApiClient } from "../api-client";
-import { saveConfig, type TunnelEntry } from "../config";
-import type { ConnectResult } from "./connect";
-import { loadOrInitConfig } from "./connect";
+import { type ApiClient, createApiClient } from "../../services/api-client";
+import {
+	loadOrInitConfig,
+	saveConfig,
+	type TunnelEntry
+} from "../../services/config";
+import type { ConnectResult } from "./device-flow";
 
 export interface ConnectTokenOptions {
 	readonly baseUrl: string;

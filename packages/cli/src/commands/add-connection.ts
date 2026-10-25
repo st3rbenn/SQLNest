@@ -25,8 +25,12 @@
  * mode `--url`, la DSN est prise telle quelle (l'user gère lui-même).
  */
 
-import { addLocalConnection, loadLocalConnections } from "../local-connections";
-import type { Prompter } from "../prompts";
+import { defineCommand, parseCommandArgs } from "../app/command";
+import {
+	addLocalConnection,
+	loadLocalConnections
+} from "../services/local-connections";
+import type { Prompter } from "../ui/prompts";
 
 export class AddConnectionError extends Error {
 	readonly kind: "cancelled" | "invalid-input";
@@ -181,3 +185,58 @@ export async function addConnection(
 
 	return { name: opts.name, overwritten: alreadyExists };
 }
+
+export const addConnectionCommand = defineCommand({
+	name: "add-connection",
+	help: [
+		[
+			"sqlnest add-connection --name <n>",
+			"Ajoute une DSN locale (menu engine + prompts interactifs)"
+		],
+		[
+			"sqlnest add-connection --name <n> --url <dsn>",
+			"DSN inline (⚠ visible dans ps aux / historique shell)"
+		],
+		[
+			"sqlnest add-connection --name <n> --force",
+			"Écrase sans demander confirmation"
+		]
+	],
+	async run(args, ctx) {
+		const values = parseCommandArgs(ctx, "add-connection", args, {
+			name: { type: "string" },
+			force: { type: "boolean" },
+			url: { type: "string" }
+		});
+		if (values === undefined) return 2;
+		const name = values.name;
+		if (!name) {
+			ctx.stderr(
+				"sqlnest add-connection: `--name <label>` est requis. Ex: sqlnest add-connection --name apollon"
+			);
+			return 2;
+		}
+		const prompter = ctx.services.prompter();
+		try {
+			await ctx.services.addConnection({
+				name,
+				...(values.force ? { force: true } : {}),
+				...(values.url ? { url: values.url } : {}),
+				prompter,
+				stdout: ctx.stdout
+			});
+			return 0;
+		} catch (err) {
+			if (err instanceof AddConnectionError) {
+				ctx.stderr(`✗ ${err.message}`);
+				return err.kind === "cancelled" ? 1 : 2;
+			}
+			ctx.stderr(`✗ ${(err as Error).message ?? String(err)}`);
+			return 1;
+		} finally {
+			// Le prompter par défaut détient une readline.Interface — la close
+			// permet au process de se terminer naturellement (sans SIGKILL).
+			prompter.close?.();
+		}
+	}
+});

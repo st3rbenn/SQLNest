@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
 	LOCAL_CONNECTIONS_VERSION,
 	saveLocalConnections
-} from "../local-connections";
+} from "../services/local-connections";
 import { listConnections } from "./list-connections";
 
 let tempDir: string;

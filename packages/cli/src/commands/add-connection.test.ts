@@ -15,8 +15,8 @@ import {
 	LOCAL_CONNECTIONS_VERSION,
 	loadLocalConnections,
 	saveLocalConnections
-} from "../local-connections";
-import type { Prompter } from "../prompts";
+} from "../services/local-connections";
+import type { Prompter } from "../ui/prompts";
 import { AddConnectionError, addConnection } from "./add-connection";
 
 interface MockResponses {
