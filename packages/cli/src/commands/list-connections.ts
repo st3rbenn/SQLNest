@@ -9,7 +9,6 @@
  * l'user local qui les a saisis).
  */
 
-import { homedir } from "node:os";
 import { defineCommand } from "../app/command";
 import { ORM_LABELS } from "../orm/types";
 import {
@@ -21,6 +20,7 @@ import {
 	type LocalConnectionEntry,
 	loadLocalConnections
 } from "../services/local-connections";
+import { tildify } from "../ui/paths";
 
 export interface ListConnectionsOptions {
 	readonly stdout: (line: string) => void;
@@ -101,13 +101,6 @@ function summarize(entry: LocalConnectionEntry): SummarizedConnection {
 				}
 			: {})
 	};
-}
-
-function tildify(path: string): string {
-	const home = homedir();
-	return path === home || path.startsWith(`${home}/`)
-		? `~${path.slice(home.length)}`
-		: path;
 }
 
 function pad(s: string, width: number): string {

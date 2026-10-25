@@ -15,9 +15,9 @@ import {
 	LOCAL_CONNECTIONS_VERSION,
 	loadLocalConnections,
 	saveLocalConnections
-} from "../services/local-connections";
-import type { Prompter } from "../ui/prompts";
-import { AddConnectionError, addConnection } from "./add-connection";
+} from "../../services/local-connections";
+import type { Prompter } from "../../ui/prompts";
+import { AddConnectionError, addConnection } from ".";
 
 interface MockResponses {
 	lines?: string[];
@@ -297,9 +297,9 @@ describe("addConnection — mode --url (DSN inline)", () => {
 			prompter: prompter2,
 			stdout: (l) => out.push(l)
 		});
-		expect(
-			loadLocalConnections()?.connections.map((c) => c.url)
-		).toContain("sqlserver://u:p@corp-host:1433/prod");
+		expect(loadLocalConnections()?.connections.map((c) => c.url)).toContain(
+			"sqlserver://u:p@corp-host:1433/prod"
+		);
 	});
 
 	test("--url + entrée existante → prompt overwrite, PUIS skip inputs", async () => {

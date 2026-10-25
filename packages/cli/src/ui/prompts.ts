@@ -28,13 +28,26 @@ import {
 	createInterface,
 	type Interface as ReadlineInterface
 } from "node:readline";
-import { select } from "@inquirer/prompts";
+import { Separator, select } from "@inquirer/prompts";
 
 export interface SelectChoice<T> {
 	readonly value: T;
 	readonly label: string;
 	readonly description?: string;
+	/** Affiché grisé avec ce motif, non sélectionnable. */
+	readonly disabled?: string;
+	/** Rappel du choix une fois validé ; défaut : `label`. */
+	readonly short?: string;
 }
+
+/** Ligne non sélectionnable : titre de section, remarque. */
+export interface SelectSeparator {
+	readonly separator: string;
+}
+
+export type SelectEntry<T> = SelectChoice<T> | SelectSeparator;
+
+const SELECT_PAGE_SIZE = 20;
 
 export interface Prompter {
 	readonly line: (prompt: string) => Promise<string>;
@@ -46,7 +59,7 @@ export interface Prompter {
 	 *  avec un prompt numéroté. */
 	readonly select: <T>(opts: {
 		readonly message: string;
-		readonly choices: readonly SelectChoice<T>[];
+		readonly choices: readonly SelectEntry<T>[];
 	}) => Promise<T>;
 	/** Optionnel — le prompter par défaut détient un `readline.Interface`
 	 *  qu'il faut close en fin de commande. Les mocks n'en ont pas. */
@@ -95,7 +108,7 @@ export function defaultPrompter(): Prompter {
 		},
 		select: async <T>(opts: {
 			readonly message: string;
-			readonly choices: readonly SelectChoice<T>[];
+			readonly choices: readonly SelectEntry<T>[];
 		}): Promise<T> => {
 			// `@inquirer/prompts.select` — navigation clavier ↑↓ + Enter, Ctrl-C
 			// throw un `ExitPromptError` qu'on relaie brut au caller (le
@@ -107,11 +120,23 @@ export function defaultPrompter(): Prompter {
 			try {
 				const value = await select({
 					message: opts.message,
-					choices: opts.choices.map((c) => ({
-						name: c.label,
-						value: c.value,
-						...(c.description !== undefined ? { description: c.description } : {})
-					}))
+					choices: opts.choices.map((c) =>
+						"separator" in c
+							? new Separator(c.separator)
+							: {
+									name: c.label,
+									value: c.value,
+									...(c.description !== undefined
+										? { description: c.description }
+										: {}),
+									...(c.disabled !== undefined ? { disabled: c.disabled } : {}),
+									...(c.short !== undefined ? { short: c.short } : {})
+								}
+					),
+					pageSize: SELECT_PAGE_SIZE,
+					theme: {
+						i18n: { disabledError: "Ce choix n'est pas sélectionnable." }
+					}
 				});
 				return value as T;
 			} finally {

@@ -121,6 +121,45 @@ export async function probeConnection(url: string): Promise<ConnectionProbe> {
 	}
 }
 
+const MONGO_SYSTEM_DATABASES = new Set(["admin", "config", "local"]);
+
+/**
+ * Bases d'un serveur découvert, bases système exclues (ADR-038 S1). `url`
+ * vise la base de maintenance : `postgres`, `admin`, `master`.
+ */
+export async function listServerDatabases(url: string): Promise<string[]> {
+	const config = resolveEngineConfigFromUrl(url);
+	const conn = await engineConnect(config);
+	try {
+		if (config.engine === "mongodb") {
+			const result = await conn.execute({
+				engine: "mongodb",
+				kind: "mongo-raw",
+				command: { listDatabases: 1, nameOnly: true }
+			});
+			const databases = (result.rows[0]?.databases ?? []) as readonly {
+				readonly name?: unknown;
+			}[];
+			return databases
+				.map((d) => String(d.name))
+				.filter((name) => !MONGO_SYSTEM_DATABASES.has(name))
+				.sort();
+		}
+		const result = await conn.execute({
+			engine: config.engine,
+			kind: "sql",
+			text:
+				config.engine === "postgres"
+					? "select datname as name from pg_database where not datistemplate and datallowconn order by datname"
+					: "select name from sys.databases where database_id > 4 order by name",
+			params: []
+		});
+		return result.rows.map((row) => String(row.name));
+	} finally {
+		await conn.close();
+	}
+}
+
 /** Version courte d'un serveur : « PostgreSQL 16.13 », « MongoDB 7.0.39 »… */
 export function describeServer(
 	engine: "postgres" | "mongodb" | "mssql",

@@ -103,6 +103,21 @@ describe("parseConnectionString — JDBC, ADO.NET, libpq", () => {
 		});
 	});
 
+	it("SQL Server au format Prisma (JDBC sans `jdbc:`)", () => {
+		expect(
+			parseConnectionString(
+				"sqlserver://localhost:1433;database=Chinook;user=sa;password=p;trustServerCertificate=true"
+			)
+		).toEqual({
+			engine: "mssql",
+			url: "mssql://sa:p@localhost:1433/Chinook?trustServerCertificate=true",
+			host: "localhost",
+			port: 1433,
+			database: "Chinook",
+			user: "sa"
+		});
+	});
+
 	it("ADO.NET : tcp:hôte,port, Initial Catalog, mot de passe entre guillemets", () => {
 		expect(
 			parseConnectionString(

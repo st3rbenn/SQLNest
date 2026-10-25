@@ -1,0 +1,280 @@
+/**
+ * Choix d'une base découverte (ADR-038 S1, S2) : bases du projet courant,
+ * serveurs Docker dont les bases se listent en direct, chaîne collée, saisie
+ * guidée. Une base déjà configurée reste visible, grisée.
+ */
+
+import { relative } from "node:path";
+import { ORM_LABELS } from "../../orm/types";
+import {
+	connectionIdentity,
+	type DbEngine,
+	describeConnection,
+	type ParsedConnection,
+	parseConnectionString
+} from "../../services/connection-strings";
+import {
+	type DiscoveredDatabase,
+	type DiscoveredServer,
+	type DiscoveredSource,
+	type Discovery,
+	serverConnection
+} from "../../services/discovery";
+import type { LocalConnectionUrlRef } from "../../services/local-connections";
+import { tildify } from "../../ui/paths";
+import type { Prompter, SelectEntry } from "../../ui/prompts";
+import {
+	AddConnectionError,
+	describeFailure,
+	unrecognizedConnection
+} from "./errors";
+
+/** Ce qui sera testé puis enregistré : une URL, ou une référence au `.env`. */
+export interface ConnectionTarget {
+	readonly url: string;
+	readonly urlFrom?: LocalConnectionUrlRef;
+}
+
+export type DiscoveryPick =
+	| { readonly kind: "database"; readonly database: DiscoveredDatabase }
+	| { readonly kind: "server"; readonly server: DiscoveredServer }
+	| { readonly kind: "paste" }
+	| { readonly kind: "manual" };
+
+export interface ChooseOptions {
+	readonly prompter: Prompter;
+	readonly stdout: (line: string) => void;
+	/** Bases d'un serveur, lues en direct ; absent : nom de base demandé. */
+	readonly listDatabases?: (url: string) => Promise<readonly string[]>;
+	readonly manual: () => Promise<string>;
+}
+
+const ENGINE_LABELS: Readonly<Record<DbEngine, string>> = {
+	postgres: "PostgreSQL",
+	mongodb: "MongoDB",
+	mssql: "SQL Server"
+};
+
+export async function chooseDiscovered(
+	opts: ChooseOptions,
+	discovery: Discovery,
+	configured: ReadonlyMap<string, string>
+): Promise<ConnectionTarget> {
+	if (discovery.databases.length === 0 && discovery.servers.length === 0) {
+		opts.stdout("Aucune base trouvée dans ce dossier ni dans Docker.");
+	}
+	const pick = await opts.prompter.select({
+		message: "Base à ajouter",
+		choices: discoveryChoices(discovery, configured)
+	});
+	switch (pick.kind) {
+		case "database":
+			return {
+				url: pick.database.connection.url,
+				...(pick.database.urlFrom !== undefined
+					? { urlFrom: pick.database.urlFrom }
+					: {})
+			};
+		case "server":
+			return {
+				url: (await chooseServerDatabase(opts, pick.server, configured)).url
+			};
+		case "paste": {
+			const parsed = parseConnectionString(
+				await opts.prompter.password("Chaîne de connexion : ")
+			);
+			if (parsed === undefined) throw unrecognizedConnection();
+			opts.stdout(
+				`${ENGINE_LABELS[parsed.engine]} · ${describeConnection(parsed)}`
+			);
+			return { url: parsed.url };
+		}
+		case "manual":
+			return { url: await opts.manual() };
+	}
+}
+
+/** Lignes du menu : projet, Docker, puis les deux saisies. */
+export function discoveryChoices(
+	discovery: Discovery,
+	configured: ReadonlyMap<string, string>
+): SelectEntry<DiscoveryPick>[] {
+	const root = discovery.root;
+	const entries: SelectEntry<DiscoveryPick>[] = [];
+	if (discovery.databases.length > 0 || discovery.unresolved.length > 0) {
+		entries.push({
+			separator: `── ${root !== undefined ? tildify(root) : "Projet"}`
+		});
+		const rows = discovery.databases.map((database) => {
+			const c = database.connection;
+			return {
+				database,
+				cells: [
+					c.database ?? c.host,
+					database.orm !== undefined
+						? `${ORM_LABELS[database.orm.orm]} · ${shortPath(database.orm.dir, root)}`
+						: "",
+					`${ENGINE_LABELS[c.engine]} · ${describeServerOf(c)}`
+				]
+			};
+		});
+		const widths = columnWidths(rows.map((r) => r.cells));
+		for (const { database, cells } of rows) {
+			const already = configured.get(connectionIdentity(database.connection));
+			entries.push({
+				value: { kind: "database", database },
+				label: alignCells(cells, widths),
+				short: describeConnection(database.connection),
+				description: describeSource(database.source, root),
+				...(already !== undefined
+					? { disabled: `déjà configurée : ${already}` }
+					: {})
+			});
+		}
+		for (const { orm, reason } of discovery.unresolved) {
+			entries.push({
+				separator: `  ${ORM_LABELS[orm.orm]} · ${shortPath(orm.dir, root)} — ${reason}`
+			});
+		}
+	}
+	if (discovery.servers.length > 0) {
+		entries.push({ separator: "── Docker" });
+		const rows = discovery.servers.map((server) => ({
+			server,
+			cells: [
+				server.name,
+				`${ENGINE_LABELS[server.engine]} · ${server.host}:${server.port}${
+					server.running ? "" : " (arrêté)"
+				}`
+			]
+		}));
+		const widths = columnWidths(rows.map((r) => r.cells));
+		for (const { server, cells } of rows) {
+			entries.push({
+				value: { kind: "server", server },
+				label: alignCells(cells, widths),
+				short: server.name,
+				description:
+					server.compose !== undefined
+						? `${server.image} · compose ${server.compose.project}/${server.compose.service}`
+						: server.image
+			});
+		}
+	}
+	entries.push(
+		{ separator: "──" },
+		{
+			value: { kind: "paste" },
+			label: "Coller une chaîne de connexion",
+			description: "URL, JDBC, ADO.NET ou libpq"
+		},
+		{ value: { kind: "manual" }, label: "Saisir à la main" }
+	);
+	return entries;
+}
+
+/** Base d'un serveur : listée en direct, sinon demandée. */
+async function chooseServerDatabase(
+	opts: ChooseOptions,
+	server: DiscoveredServer,
+	configured: ReadonlyMap<string, string>
+): Promise<ParsedConnection> {
+	const password =
+		server.password !== undefined || server.passwordless
+			? server.password
+			: await opts.prompter.password(
+					`Mot de passe de ${server.user}@${server.host}:${server.port} : `
+				);
+	let names: readonly string[] = [];
+	if (opts.listDatabases !== undefined) {
+		try {
+			names = await opts.listDatabases(
+				serverConnection(server, server.maintenanceDatabase, password).url
+			);
+		} catch (err) {
+			opts.stdout(
+				`✗ Bases de ${server.name} illisibles : ${describeFailure(err)}`
+			);
+		}
+	}
+	if (names.length === 0) {
+		const fallback = server.defaultDatabase ?? server.maintenanceDatabase;
+		const typed = (await opts.prompter.line(`Base [${fallback}] : `)).trim();
+		return serverConnection(server, typed !== "" ? typed : fallback, password);
+	}
+	const choices = names.map((name) => {
+		const connection = serverConnection(server, name, password);
+		const already = configured.get(connectionIdentity(connection));
+		return {
+			value: connection,
+			label: name,
+			...(already !== undefined
+				? { disabled: `déjà configurée : ${already}` }
+				: {})
+		};
+	});
+	const free = choices.filter((c) => c.disabled === undefined);
+	const [first] = free;
+	if (first === undefined) {
+		throw new AddConnectionError(
+			"cancelled",
+			`Toutes les bases de ${server.name} sont déjà configurées.`
+		);
+	}
+	if (choices.length === 1) {
+		opts.stdout(`Base : ${first.label}`);
+		return first.value;
+	}
+	return opts.prompter.select({ message: `Base de ${server.name}`, choices });
+}
+
+function describeSource(
+	source: DiscoveredSource,
+	root: string | undefined
+): string {
+	switch (source.kind) {
+		case "env-file":
+			return `${source.key} · ${shortPath(source.file, root)}`;
+		case "orm-config":
+			return shortPath(source.file, root);
+		case "compose":
+			return `${source.key} · service ${source.service} · ${shortPath(source.file, root)}`;
+	}
+}
+
+/** `user@hôte:port`, sans la base (première colonne) ni le secret. */
+function describeServerOf(c: ParsedConnection): string {
+	return describeConnection({ ...c, database: undefined });
+}
+
+/** Chemin relatif à la racine du projet, sinon abrégé en `~`. */
+function shortPath(path: string, root: string | undefined): string {
+	if (root === undefined) return tildify(path);
+	const rel = relative(root, path);
+	return rel === "" ? "." : rel.startsWith("..") ? tildify(path) : rel;
+}
+
+function columnWidths(rows: readonly (readonly string[])[]): number[] {
+	const widths: number[] = [];
+	for (const cells of rows) {
+		cells.forEach((cell, i) => {
+			widths[i] = Math.max(widths[i] ?? 0, cell.length);
+		});
+	}
+	return widths;
+}
+
+/** Colonnes alignées ; une colonne vide sur toutes les lignes disparaît. */
+function alignCells(
+	cells: readonly string[],
+	widths: readonly number[]
+): string {
+	return cells
+		.flatMap((cell, i) =>
+			(widths[i] ?? 0) === 0
+				? []
+				: [i < cells.length - 1 ? cell.padEnd(widths[i] ?? 0) : cell]
+		)
+		.join("  ")
+		.trimEnd();
+}

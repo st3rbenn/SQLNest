@@ -26,7 +26,8 @@ import { listConnections } from "../commands/list-connections";
 import { logout } from "../commands/logout";
 import { ping } from "../commands/ping";
 import { revokeConnection } from "../commands/revoke-connection";
-import { probeConnection } from "../services/engine";
+import { discoverDatabases } from "../services/discovery";
+import { listServerDatabases, probeConnection } from "../services/engine";
 import { serveTunnel } from "../tunnel/serve";
 import { defaultPrompter, type Prompter } from "../ui/prompts";
 import { CLI_VERSION } from "./build-info";
@@ -64,6 +65,8 @@ function servicesFrom(io: CliIO): CliServices {
 		listConnections: io.listConnectionsFn ?? listConnections,
 		revokeConnection: io.revokeConnectionFn ?? revokeConnection,
 		probeConnection,
+		discoverDatabases,
+		listServerDatabases,
 		prompter: prompter !== undefined ? () => prompter : defaultPrompter,
 		...io.services
 	};

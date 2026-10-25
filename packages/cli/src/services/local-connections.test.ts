@@ -233,6 +233,28 @@ describe("version 2 : référence au .env et projet relié (ADR-038)", () => {
 		expect(describeConnectionForDiagnostics("apollon").source).toBe("env-file");
 	});
 
+	test("url_from : valeur JDBC ou au format SQL Server de Prisma → URL que l'engine ouvre", () => {
+		const { writeFileSync } = require("node:fs");
+		const envFile = join(tempDir, ".env");
+		writeFileSync(
+			envFile,
+			'DATABASE_URL="sqlserver://localhost:1433;database=Chinook;user=sa;password=p;trustServerCertificate=true"\nPG=jdbc:postgresql://localhost:5433/chinook?user=u&password=p\n'
+		);
+		saveLocalConnections({
+			version: 2,
+			connections: [
+				{ name: "mssql", urlFrom: { file: envFile, key: "DATABASE_URL" } },
+				{ name: "pg", urlFrom: { file: envFile, key: "PG" } }
+			]
+		});
+		expect(resolveLocalConnectionUrl("mssql")).toBe(
+			"mssql://sa:p@localhost:1433/Chinook?trustServerCertificate=true"
+		);
+		expect(resolveLocalConnectionUrl("pg")).toBe(
+			"postgres://u:p@localhost:5433/chinook"
+		);
+	});
+
 	test("url_from : fichier ou variable disparus → erreur qui le dit", () => {
 		const { writeFileSync } = require("node:fs");
 		const envFile = join(tempDir, ".env");

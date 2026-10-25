@@ -108,3 +108,16 @@ export function createSpinner(
 		}
 	};
 }
+
+/** `task` sous un spinner, effacé à la fin, succès ou échec. */
+export async function withSpinner<T>(
+	text: string,
+	task: () => Promise<T>
+): Promise<T> {
+	const spinner = createSpinner(text);
+	try {
+		return await task();
+	} finally {
+		spinner.stop();
+	}
+}

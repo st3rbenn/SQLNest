@@ -14,10 +14,10 @@ Usage :
   sqlnest logout --all                     Retire tous les tunnels locaux
   sqlnest logout --tunnel <id>             Retire un tunnel local
   sqlnest ping --tunnel <name>             Ping local DSN (diagnostic)
-  sqlnest add-connection --name <n>        Ajoute une DSN locale (menu engine + prompts interactifs)
-  sqlnest add-connection --name <n> --url <dsn>  DSN inline (⚠ visible dans ps aux / historique shell)
-  sqlnest add-connection --url <chaîne>    URL, JDBC, ADO.NET ou libpq ; nom proposé d'après la base
-  sqlnest add-connection --name <n> --force  Écrase sans demander confirmation
+  sqlnest add-connection                   Bases trouvées (projet courant, Docker), chaîne collée ou saisie
+  sqlnest add-connection --url <chaîne>    URL, JDBC, ADO.NET ou libpq (⚠ visible dans ps aux / historique shell)
+  sqlnest add-connection … --name <n>      Nom de la connexion (proposé d'après la base sinon)
+  sqlnest add-connection … --force         Écrase sans demander confirmation
   sqlnest add-connection … --no-test       Enregistre sans tester la connexion
   sqlnest list-connections                 Liste les DSN locales (sans les credentials)
   sqlnest revoke-connection --name <n>     Retire une DSN locale (avec confirm)

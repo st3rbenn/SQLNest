@@ -17,7 +17,8 @@ export interface ParsedConnection {
 	readonly user: string | undefined;
 }
 
-const DEFAULT_PORT: Readonly<Record<DbEngine, number>> = {
+/** Port par défaut de chaque moteur. */
+export const DEFAULT_PORT: Readonly<Record<DbEngine, number>> = {
 	postgres: 5432,
 	mongodb: 27017,
 	mssql: 1433
@@ -27,6 +28,8 @@ const URL_SCHEME_RE =
 	/^(postgres|postgresql|mongodb|mongodb\+srv|mssql|sqlserver):\/\//i;
 const JDBC_PG_RE = /^jdbc:postgresql:\/\//i;
 const JDBC_MSSQL_RE = /^jdbc:sqlserver:\/\//i;
+/** Format SQL Server de Prisma : du JDBC sans le préfixe `jdbc:`. */
+const PRISMA_MSSQL_RE = /^sqlserver:\/\/[^/?]*;/i;
 const ADO_SERVER_RE =
 	/(^|;)\s*(server|data source|address|addr|network address)\s*=/i;
 const LIBPQ_RE = /(^|\s)(host|hostaddr|dbname)\s*=/i;
@@ -53,6 +56,7 @@ export function parseConnectionString(
 	if (input === "") return undefined;
 	if (JDBC_PG_RE.test(input)) return parseJdbcPostgres(input);
 	if (JDBC_MSSQL_RE.test(input)) return parseJdbcSqlServer(input);
+	if (PRISMA_MSSQL_RE.test(input)) return parseJdbcSqlServer(`jdbc:${input}`);
 	if (URL_SCHEME_RE.test(input)) return parseUrlForm(input);
 	if (input.includes(";") && ADO_SERVER_RE.test(input))
 		return parseAdoNet(input);
@@ -102,6 +106,73 @@ export function suggestConnectionName(
 	}
 }
 
+/** Parties d'une connexion, secret compris. */
+export interface ConnectionParts {
+	readonly host: string;
+	readonly port: number | undefined;
+	readonly database: string | undefined;
+	readonly user: string | undefined;
+	readonly password: string | undefined;
+	readonly params: Readonly<Record<string, string>>;
+}
+
+/** URL d'une connexion décrite par ses parties (config d'ORM, conteneur…). */
+export function buildConnection(
+	engine: DbEngine,
+	parts: ConnectionParts
+): ParsedConnection {
+	const auth =
+		parts.user !== undefined && parts.user !== ""
+			? `${encodeURIComponent(parts.user)}${
+					parts.password !== undefined
+						? `:${encodeURIComponent(parts.password)}`
+						: ""
+				}@`
+			: "";
+	const port = parts.port !== undefined ? `:${parts.port}` : "";
+	const path =
+		parts.database !== undefined && parts.database !== ""
+			? `/${encodeURIComponent(parts.database)}`
+			: "";
+	const query = new URLSearchParams(parts.params).toString();
+	return {
+		engine,
+		url: `${engine}://${auth}${parts.host}${port}${path}${query !== "" ? `?${query}` : ""}`,
+		host: parts.host,
+		port: parts.port,
+		database: parts.database !== "" ? parts.database : undefined,
+		user: parts.user !== "" ? parts.user : undefined
+	};
+}
+
+/**
+ * La même base servie par `host:port` : une URL qui vise un service compose
+ * (`@db:5432`) passe par le port publié sur la machine (`localhost:5440`).
+ */
+export function withHostPort(
+	c: ParsedConnection,
+	host: string,
+	port: number
+): ParsedConnection {
+	const match = URL_SCHEME_RE.exec(c.url);
+	if (match === null || (match[1] as string).toLowerCase() === "mongodb+srv") {
+		return c;
+	}
+	const rest = c.url.slice(match[0].length);
+	const queryAt = rest.indexOf("?");
+	const authEnd =
+		rest.lastIndexOf("@", queryAt >= 0 ? queryAt : rest.length) + 1;
+	const afterAuth = rest.slice(authEnd);
+	const pathStart = afterAuth.search(PATH_START_RE);
+	const tail = pathStart >= 0 ? afterAuth.slice(pathStart) : "";
+	return {
+		...c,
+		url: `${match[0]}${rest.slice(0, authEnd)}${host}:${port}${tail}`,
+		host,
+		port
+	};
+}
+
 // ─── Formes reconnues ────────────────────────────────────────────────
 
 function parseUrlForm(input: string): ParsedConnection | undefined {
@@ -148,7 +219,7 @@ function parseJdbcPostgres(input: string): ParsedConnection | undefined {
 	const password = params.get("password") ?? undefined;
 	params.delete("user");
 	params.delete("password");
-	return build("postgres", {
+	return buildConnection("postgres", {
 		host: parsed.host,
 		port: parsed.port,
 		database: parsed.database,
@@ -172,10 +243,11 @@ function parseJdbcSqlServer(input: string): ParsedConnection | undefined {
 	const host = hostAndInstance.split("\\")[0] as string;
 	if (host === "") return undefined;
 	const port = inlinePort ?? toPort(values.portnumber ?? values.port);
-	return build("mssql", {
+	return buildConnection("mssql", {
 		host,
 		port,
-		database: values.databasename ?? values.database,
+		database:
+			values.databasename ?? values.database ?? values["initial catalog"],
 		user: values.user ?? values.username,
 		password: values.password,
 		params: sqlServerParams(values)
@@ -196,7 +268,7 @@ function parseAdoNet(input: string): ParsedConnection | undefined {
 	const [hostAndInstance = "", portText] = server.split(",");
 	const host = (hostAndInstance.split("\\")[0] as string).trim().toLowerCase();
 	if (host === "") return undefined;
-	return build("mssql", {
+	return buildConnection("mssql", {
 		host: host === "." || host === "(local)" ? "localhost" : host,
 		port: toPort(portText),
 		database: values.database ?? values["initial catalog"],
@@ -218,7 +290,7 @@ function parseLibpq(input: string): ParsedConnection | undefined {
 	}
 	const host = (values.host ?? values.hostaddr ?? "").toLowerCase();
 	if (host === "") return undefined;
-	return build("postgres", {
+	return buildConnection("postgres", {
 		host,
 		port: toPort(values.port),
 		database: values.dbname,
@@ -229,41 +301,6 @@ function parseLibpq(input: string): ParsedConnection | undefined {
 }
 
 // ─── Outils ──────────────────────────────────────────────────────────
-
-function build(
-	engine: DbEngine,
-	parts: {
-		readonly host: string;
-		readonly port: number | undefined;
-		readonly database: string | undefined;
-		readonly user: string | undefined;
-		readonly password: string | undefined;
-		readonly params: Readonly<Record<string, string>>;
-	}
-): ParsedConnection {
-	const auth =
-		parts.user !== undefined && parts.user !== ""
-			? `${encodeURIComponent(parts.user)}${
-					parts.password !== undefined
-						? `:${encodeURIComponent(parts.password)}`
-						: ""
-				}@`
-			: "";
-	const port = parts.port !== undefined ? `:${parts.port}` : "";
-	const path =
-		parts.database !== undefined && parts.database !== ""
-			? `/${encodeURIComponent(parts.database)}`
-			: "";
-	const query = new URLSearchParams(parts.params).toString();
-	return {
-		engine,
-		url: `${engine}://${auth}${parts.host}${port}${path}${query !== "" ? `?${query}` : ""}`,
-		host: parts.host,
-		port: parts.port,
-		database: parts.database !== "" ? parts.database : undefined,
-		user: parts.user !== "" ? parts.user : undefined
-	};
-}
 
 /** `encrypt` / `trustServerCertificate` d'une chaîne SQL Server, en paramètres d'URL. */
 function sqlServerParams(

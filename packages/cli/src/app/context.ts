@@ -5,7 +5,8 @@ import type { listConnections } from "../commands/list-connections";
 import type { logout } from "../commands/logout";
 import type { ping } from "../commands/ping";
 import type { revokeConnection } from "../commands/revoke-connection";
-import type { probeConnection } from "../services/engine";
+import type { discoverDatabases } from "../services/discovery";
+import type { listServerDatabases, probeConnection } from "../services/engine";
 import type { serveTunnel } from "../tunnel/serve";
 import type { Prompter } from "../ui/prompts";
 
@@ -21,6 +22,10 @@ export interface CliServices {
 	readonly revokeConnection: typeof revokeConnection;
 	/** Test d'une connexion avant de l'enregistrer (ADR-038 S2). */
 	readonly probeConnection: typeof probeConnection;
+	/** Bases du projet courant et des conteneurs Docker (ADR-038 S1). */
+	readonly discoverDatabases: typeof discoverDatabases;
+	/** Bases d'un serveur découvert, lues en direct. */
+	readonly listServerDatabases: typeof listServerDatabases;
 	/** Prompter d'une commande ; celui par défaut tient une readline à fermer. */
 	readonly prompter: () => Prompter;
 }

@@ -56,6 +56,7 @@ import { platform } from "node:os";
 import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
 import { ORM_NAMES, type OrmName } from "../orm/types";
 import { CONFIG_DIR_PERMS, getConfigDir, MAX_CONFIG_PERMS } from "./config";
+import { parseConnectionString } from "./connection-strings";
 import { parseDotenv } from "./dotenv";
 
 export const LOCAL_CONNECTIONS_VERSION = 1 as const;
@@ -260,7 +261,11 @@ function fileVersion(connections: readonly LocalConnectionEntry[]): 1 | 2 {
 		: LOCAL_CONNECTIONS_VERSION;
 }
 
-/** URL d'une entrée : copiée, ou relue dans le `.env` qu'elle référence. */
+/**
+ * URL d'une entrée : copiée, ou relue dans le `.env` qu'elle référence. Une
+ * valeur JDBC, ADO.NET, libpq ou au format SQL Server de Prisma est ramenée à
+ * l'URL que l'engine sait ouvrir (ADR-038 S3).
+ */
 export function entryUrl(entry: LocalConnectionEntry): string {
 	if (entry.url !== undefined) return entry.url;
 	const ref = entry.urlFrom as LocalConnectionUrlRef;
@@ -277,7 +282,7 @@ export function entryUrl(entry: LocalConnectionEntry): string {
 			`« ${entry.name} » lit ${ref.key} dans ${ref.file} : variable absente ou vide.`
 		);
 	}
-	return value;
+	return parseConnectionString(value)?.url ?? value;
 }
 
 /**
