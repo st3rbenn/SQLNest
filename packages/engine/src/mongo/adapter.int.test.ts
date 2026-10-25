@@ -455,8 +455,14 @@ describe.skipIf(!hasMongo)(
 					"create table e1b_kid { label: string, par_code: string nullable ref e1b_par.code }"
 				);
 				await runQuery(conn, "add index (phone) into e1b_par");
-				await runQuery(conn, 'add {code: "p1", phone: "01"} into e1b_par');
-				await runQuery(conn, 'add {code: "p2", phone: "02"} into e1b_par');
+				await runQuery(
+					conn,
+					'add {id: "a", code: "p1", phone: "01"} into e1b_par'
+				);
+				await runQuery(
+					conn,
+					'add {id: "b", code: "p2", phone: "02"} into e1b_par'
+				);
 				await runQuery(conn, 'add {label: "k1", par_code: "p1"} into e1b_kid');
 
 				// Reprise : un document déjà renommé (interruption simulée) ne gêne pas.
@@ -502,7 +508,7 @@ describe.skipIf(!hasMongo)(
 				await runQuery(conn, 'add {label: "k3", par_slug: "p2"} into e1b_kid');
 				// L'index unique suit le champ : un doublon de slug est refusé.
 				await expect(
-					runQuery(conn, 'add {slug: "p1", mobile: "03"} into e1b_par')
+					runQuery(conn, 'add {id: "c", slug: "p1", mobile: "03"} into e1b_par')
 				).rejects.toThrow();
 
 				// Conflit : un document porte déjà le nouveau nom.
@@ -1136,6 +1142,126 @@ describe.skipIf(!hasMongo)(
 					{ label: "k3", par_code: "x" },
 					{ label: "k6", par_code: "x" }
 				]);
+			} finally {
+				await drop();
+				await conn.close();
+			}
+		}, 60_000);
+	}
+);
+
+describe.skipIf(!hasMongo)(
+	"mongodb adapter — alias id ↔ _id (ADR-036 E/1f)",
+	() => {
+		it("`id` est `_id` : écritures, lectures, jointures, FK, describe, garde-fous", async () => {
+			const conn = await mongoAdapter.connect(loadConfig());
+			const q = async (src: string) =>
+				runQuery(conn, src, await conn.introspect());
+			const drop = async () => {
+				await runQuery(conn, "drop table e1f_kid if exists");
+				await runQuery(conn, "drop table e1f_num if exists");
+				await runQuery(conn, "drop table e1f_par if exists");
+			};
+			const uuid = "6f1c1a2e-0b5e-4c1e-9a3e-2f6b7c8d9e01";
+			try {
+				await drop();
+				await q(
+					"create table e1f_par { id: uuid default uuid(), name: text, primary key (id) }"
+				);
+				await q(`add {id: "${uuid}", name: "a"} into e1f_par`);
+				const added = await q('add {name: "b"} into e1f_par');
+				// Le défaut uuid() donne la clé, rendue sous `id`.
+				expect(added.rows[0]).toMatchObject({
+					id: expect.stringMatching(/^[0-9a-f-]{36}$/)
+				});
+				expect(added.rows[0]).not.toHaveProperty("_id");
+				const generated = String(added.rows[0]?.id);
+
+				// Lectures : `id` en filtre, projection, tri, groupe ; UUID stocké
+				// ou texte saisi, les deux formes répondent.
+				expect((await q("find e1f_par sort name")).rows).toEqual([
+					{ id: uuid, name: "a" },
+					{ id: generated, name: "b" }
+				]);
+				expect(
+					(await q(`find e1f_par where id = "${generated}" pick name`)).rows
+				).toEqual([{ name: "b" }]);
+				expect(
+					(await q(`find e1f_par where id = "${uuid}" pick id`)).rows
+				).toEqual([{ id: uuid }]);
+				expect(
+					(
+						await q("find e1f_par group by id pick id, count(*) as n sort id")
+					).columns.map((c) => c.name)
+				).toEqual(["id", "n"]);
+
+				// La métadonnée n'est pas une table ; describe et introspection montrent `id`.
+				const tables = (await runQuery(conn, "list tables")).rows.map(
+					(r) => r.name
+				);
+				expect(tables).not.toContain("_snql_pk");
+				expect((await q("describe e1f_par")).rows[0]).toMatchObject({
+					name: "id",
+					type: "uuid",
+					is_primary_key: true,
+					default: "uuid()"
+				});
+				const par = (await conn.introspect()).collections.find(
+					(c) => c.name === "e1f_par"
+				);
+				expect(par?.primaryKey).toEqual(["id"]);
+				expect(par?.fields.find((f) => f.name === "id")?.nativeName).toBe(
+					"_id"
+				);
+
+				// `_id` est immuable ; sans valeur ni défaut, la clé manque.
+				await expect(
+					q('update e1f_par where name = "a" set id = "x"')
+				).rejects.toThrow(/'id' est l'alias de '_id'/);
+				await expect(
+					q("alter column e1f_par.id set type string")
+				).rejects.toThrow(/'id' est l'alias de '_id'/);
+				await q("alter column e1f_par.id drop default");
+				await expect(q('add {name: "c"} into e1f_par')).rejects.toThrow(
+					/'id' manque/
+				);
+
+				// FK vers une clé aliasée (entière : un uuid saisi bute encore sur le
+				// validateur binData, traité à part) : contrôle, jointure, cascade.
+				await q(
+					"create table e1f_num { id: int, name: text, primary key (id) }"
+				);
+				await q(
+					'add [{id: 1, name: "un"}, {id: 2, name: "deux"}] into e1f_num'
+				);
+				await q(
+					"create table e1f_kid { id: int, num_id: int ref e1f_num.id on delete cascade, primary key (id) }"
+				);
+				await q("add [{id: 10, num_id: 1}, {id: 11, num_id: 2}] into e1f_kid");
+				await expect(q("add {id: 12, num_id: 9} into e1f_kid")).rejects.toThrow(
+					/ne référence aucune ligne de e1f_num\.id/
+				);
+				expect(
+					(await q("find e1f_kid with e1f_num as n on num_id = id sort id"))
+						.rows[0]
+				).toEqual({
+					id: 10,
+					num_id: 1,
+					n: [{ id: 1, name: "un" }]
+				});
+				await q("remove from e1f_num where id = 1");
+				expect((await q("find e1f_kid")).rows).toEqual([{ id: 11, num_id: 2 }]);
+
+				// drop table retire l'alias.
+				await drop();
+				expect(
+					(
+						await runQuery(
+							conn,
+							'raw {"aggregate": "_snql_pk", "pipeline": [{"$match": {"_id": {"$in": ["e1f_par", "e1f_num", "e1f_kid"]}}}]}'
+						)
+					).rows
+				).toEqual([]);
 			} finally {
 				await drop();
 				await conn.close();

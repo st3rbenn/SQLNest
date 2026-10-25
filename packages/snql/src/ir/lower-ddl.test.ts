@@ -1379,3 +1379,52 @@ describe("lower DDL — profil ORM prisma (ADR-036 E/1e)", () => {
 		).not.toHaveProperty("action.name");
 	});
 });
+
+describe("lower DDL — alias Mongo id ↔ _id (ADR-036 E/1f)", () => {
+	const schema: import("../schema/model").SchemaModel = {
+		engine: "mongodb",
+		collections: [
+			{
+				name: "seat",
+				source: "declared",
+				primaryKey: ["id"],
+				fields: [
+					{
+						name: "id",
+						type: "uuid",
+						nullable: false,
+						source: "declared",
+						nativeName: "_id"
+					},
+					{ name: "label", type: "string", nullable: true, source: "declared" }
+				]
+			}
+		],
+		relations: []
+	};
+	const lowerOn = (source: string) =>
+		lowerDDL(parse(tokenize(source)) as DDLStatement, schema);
+
+	it("nom, type, nullabilité et index de l'alias sont fixés", () => {
+		for (const src of [
+			"rename column seat.id to key",
+			"alter column seat.id set type string",
+			"alter column seat.id set nullable",
+			"drop column id from seat",
+			"add index (id) into seat"
+		]) {
+			expect(() => lowerOn(src), src).toThrow(/'id' est l'alias de '_id'/);
+		}
+	});
+
+	it("son défaut se pose sur `_id`", () => {
+		expect(lowerOn("alter column seat.id set default uuid()")).toMatchObject({
+			column: "_id",
+			action: { kind: "set-default", value: { kind: "fn", fn: "uuid" } }
+		});
+		expect(lowerOn("alter column seat.id drop default")).toMatchObject({
+			column: "_id",
+			action: { kind: "drop-default" }
+		});
+	});
+});

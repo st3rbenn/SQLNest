@@ -28,6 +28,7 @@ import type {
 	SnqlType
 } from "../schema/model";
 import { desugarForwardNav, desugarReverseNav } from "./forward-nav";
+import { applyNativeNames, applyNativeNamesToMutation } from "./native-names";
 import type {
 	CompareOp,
 	LogicalPlan,
@@ -114,7 +115,12 @@ export function lower(query: Query, schema?: SchemaModel): LogicalPlan {
 		outerScopeStack.push(previousCurrentScope);
 	}
 	try {
-		return lowerInternal(query, schema ?? moduleSchema);
+		const plan = lowerInternal(query, schema ?? moduleSchema);
+		// Les sous-requêtes sont réécrites avec la requête qui les contient,
+		// qui seule connaît les alias corrélés.
+		return previousCurrentScope === null
+			? applyNativeNames(plan, schema ?? moduleSchema)
+			: plan;
 	} finally {
 		if (previousCurrentScope !== null) outerScopeStack.pop();
 		currentScope = previousCurrentScope;
@@ -886,6 +892,16 @@ function lowerIntrospectStages(
 }
 
 export function lowerMutation(
+	statement: InsertStatement | UpdateStatement | DeleteStatement,
+	schema?: SchemaModel
+): MutationPlan {
+	return applyNativeNamesToMutation(
+		lowerMutationPlan(statement, schema),
+		schema
+	);
+}
+
+function lowerMutationPlan(
 	statement: InsertStatement | UpdateStatement | DeleteStatement,
 	schema?: SchemaModel
 ): MutationPlan {

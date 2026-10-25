@@ -448,5 +448,8 @@ function findField(
 ): Field | undefined {
 	const coll = findCollection(schema, collectionName);
 	if (coll === undefined) return undefined;
-	return coll.fields.find((f) => f.name === fieldName);
+	// Le plan porte le nom stocké d'un champ aliasé (`_id` pour `id`, ADR-036 E/1f).
+	return coll.fields.find(
+		(f) => f.name === fieldName || f.nativeName === fieldName
+	);
 }

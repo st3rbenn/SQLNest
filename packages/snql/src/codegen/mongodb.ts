@@ -20,6 +20,7 @@ import type {
 	MutationPlan,
 	PlanColumnValue,
 	PlanExpr,
+	PlanNativeNames,
 	PlanProjectField,
 	PlanSortKey,
 	RawPlan,
@@ -44,6 +45,7 @@ import type {
 	MongoDefaultSpec,
 	MongoIndexSpec,
 	MongoRefSpec,
+	MongoKeyRename,
 	MongoQuery,
 	MongoStage,
 	MongoTransaction,
@@ -62,6 +64,35 @@ import type {
  * Sûreté : les valeurs sont inline dans les objets BSON (données, pas de chaîne
  * concaténée) → pas de surface d'injection.
  */
+function keyRenames(
+	path: readonly string[],
+	nativeNames: PlanNativeNames
+): MongoKeyRename[] {
+	return Object.entries(nativeNames).map(([from, to]) => ({ path, from, to }));
+}
+
+/**
+ * Renommages de sortie des collections aliasées (ADR-036 E/1f). Un `_id` à la
+ * racine du résultat ne peut venir que de la source (projection et groupe
+ * l'écartent sinon) ; celui des documents d'une jointure, que de sa collection.
+ */
+function outputRenames(ops: readonly LogicalPlan[]): MongoKeyRename[] {
+	const renames: MongoKeyRename[] = [];
+	for (const op of ops) {
+		if (op.op === "scan" && op.nativeNames !== undefined) {
+			renames.push(...keyRenames([], op.nativeNames));
+		}
+		if (
+			op.op === "join" &&
+			op.kind !== "count" &&
+			op.nativeNames !== undefined
+		) {
+			renames.push(...keyRenames([op.as], op.nativeNames));
+		}
+	}
+	return renames;
+}
+
 export const mongoMapper: Mapper = {
 	engine: "mongodb",
 	map(plan: LogicalPlan): NativeQuery {
@@ -81,11 +112,13 @@ export const mongoMapper: Mapper = {
 				appendStage(pipeline, op, alias);
 			}
 		}
+		const renameKeys = outputRenames(ops);
 		return {
 			engine: "mongodb",
 			kind: "mongo",
 			collection: scan.collection,
-			pipeline
+			pipeline,
+			...(renameKeys.length > 0 ? { renameKeys } : {})
 		};
 	},
 	mapMutation(plan: MutationPlan): NativeQuery {
@@ -126,7 +159,14 @@ export const mongoMapper: Mapper = {
 						]
 					};
 				}
-				return { ...base, op: "insert", documents: renderDocuments(plan) };
+				return {
+					...base,
+					op: "insert",
+					documents: renderDocuments(plan),
+					...(plan.nativeNames !== undefined
+						? { renameKeys: keyRenames([], plan.nativeNames) }
+						: {})
+				};
 			case "update":
 				// write-join Mongo via aggregate + $merge natif.
 				// Emit un pipeline [$match?, $lookup+$unwind par join, $set, $unset
@@ -1716,6 +1756,9 @@ function renderAggregatePipeline(
 			if (groupKeys !== undefined && groupKeyLastSegs.has(lastSeg)) {
 				if (aliasName !== lastSeg) {
 					projectStage[aliasName] = `$_id.${lastSeg}`;
+					// Clé `_id` renommée (alias `id`, ADR-036 E/1f) : elle ne sort
+					// que sous son alias.
+					if (lastSeg === "_id") projectStage._id = 0;
 				}
 			} else {
 				throw new SnqlError(
@@ -3011,12 +3054,16 @@ function renderMongoCreateTable(
 		if (f.ref !== undefined) refs.push(mongoRefSpec(f.ref, plan.target));
 	}
 
+	// Le défaut de l'alias vaut pour `_id` : `default uuid()` donne la clé.
 	const defaults: MongoDefaultSpec[] = [];
 	for (const f of plan.fields) {
 		if (f.defaultValue === undefined) continue;
-		if (primaryKeyAlias !== undefined && f.name === primaryKeyAlias) continue;
-		defaults.push({ column: f.name, ...mongoDefaultSpec(f.defaultValue) });
+		const column = f.name === primaryKeyAlias ? "_id" : f.name;
+		defaults.push({ column, ...mongoDefaultSpec(f.defaultValue) });
 	}
+	const primaryKeyType = plan.fields.find(
+		(f) => f.name === primaryKeyAlias
+	)?.type;
 
 	const ddl: MongoDDLCreateCollectionQuery = {
 		engine: "mongodb",
@@ -3027,6 +3074,7 @@ function renderMongoCreateTable(
 		validator,
 		...(indexes.length > 0 ? { indexes } : {}),
 		...(primaryKeyAlias !== undefined ? { primaryKeyAlias } : {}),
+		...(primaryKeyType !== undefined ? { primaryKeyType } : {}),
 		...(refs.length > 0 ? { refs } : {}),
 		...(defaults.length > 0 ? { defaults } : {})
 	};

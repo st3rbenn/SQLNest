@@ -54,12 +54,24 @@ export interface SqlQuery {
 	readonly jsonColumns?: readonly string[];
 }
 
+/**
+ * Clé à renommer dans les documents rendus (ADR-036 E/1f) : `_id` → `id` d'une
+ * collection aliasée, à la racine (`path` vide) ou dans les documents d'une
+ * jointure (`path` = son `as`, tableau ou objet).
+ */
+export interface MongoKeyRename {
+	readonly path: readonly string[];
+	readonly from: string;
+	readonly to: string;
+}
+
 /** Requête MongoDB : collection + pipeline d'agrégation (valeurs inline, BSON — pas d'injection). */
 export interface MongoQuery {
 	readonly engine: string;
 	readonly kind: "mongo";
 	readonly collection: string;
 	readonly pipeline: readonly MongoStage[];
+	readonly renameKeys?: readonly MongoKeyRename[];
 }
 
 /**
@@ -79,6 +91,8 @@ export type MongoWriteQuery = {
 	| {
 			readonly op: "insert";
 			readonly documents: readonly Record<string, unknown>[];
+			/** Documents insérés rendus : `_id` → `id` d'une collection aliasée. */
+			readonly renameKeys?: readonly MongoKeyRename[];
 	  }
 	| {
 			readonly op: "update";
@@ -260,11 +274,12 @@ export interface MongoDDLCreateCollectionQuery {
 	readonly validator?: Record<string, unknown>;
 	readonly indexes?: readonly MongoIndexSpec[];
 	/**
-	 * Si présent, nom du field SNQL aliasé vers `_id` BSON (D13 single-field
-	 * id-like UUID). L'adapter renomme au read/write pour préserver le nom
-	 * SNQL côté user.
+	 * Si présent, nom du field SNQL aliasé vers `_id` BSON (D13). L'adapter
+	 * l'inscrit dans `_snql_pk` avec son type ; l'introspection le présente
+	 * à la place de `_id`, le lower réécrit ses références (ADR-036 E/1f).
 	 */
 	readonly primaryKeyAlias?: string;
+	readonly primaryKeyType?: string;
 	/** FK déclarées sur les colonnes (ADR-031 FK/1a) — stockées `_snql_refs`. */
 	readonly refs?: readonly MongoRefSpec[];
 	/** Défauts des colonnes (ADR-036 E/1d), appliqués à l'insertion. */

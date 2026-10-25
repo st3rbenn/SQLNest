@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { inferCollection, inferRelations, mergeValidatorFields, snqlTypeOf } from "./introspect";
+import {
+	applyPkAlias,
+	inferCollection,
+	inferRelations,
+	mergeValidatorFields,
+	snqlTypeOf
+} from "./introspect";
 
 describe("snqlTypeOf", () => {
 	it("mappe les types JS/BSON vers SnqlType", () => {
@@ -144,5 +150,37 @@ describe("mergeValidatorFields (ADR-031 — colonnes déclarées du validator)",
 			$jsonSchema: { properties: { weird: { bsonType: "javascript" } } }
 		});
 		expect(merged.fields[0]).toMatchObject({ name: "weird", type: "unknown" });
+	});
+});
+
+describe("applyPkAlias (ADR-036 E/1f)", () => {
+	it("présente `_id` sous son alias : champ SNQL, nom natif, clé primaire", () => {
+		const collection = applyPkAlias(
+			inferCollection("seat", [{ _id: 1, label: "a", id: "vestige" }]),
+			{ column: "id", type: "int" }
+		);
+		expect(collection.primaryKey).toEqual(["id"]);
+		expect(collection.fields[0]).toEqual({
+			name: "id",
+			type: "int",
+			nullable: false,
+			source: "declared",
+			nativeName: "_id"
+		});
+		expect(collection.fields.map((f) => f.name)).toEqual(["id", "label"]);
+	});
+
+	it("sans alias, la collection ne change pas ; les relations visent l'alias", () => {
+		const plain = inferCollection("seat", [{ _id: 1 }]);
+		expect(applyPkAlias(plain, undefined)).toBe(plain);
+		const seat = applyPkAlias(inferCollection("seat", [{ _id: 1 }]), {
+			column: "id",
+			type: "int"
+		});
+		const ticket = inferCollection("tickets", [{ _id: 1, seat_id: 1 }]);
+		expect(inferRelations([seat, ticket])[0]?.to).toEqual({
+			collection: "seat",
+			fields: ["id"]
+		});
 	});
 });

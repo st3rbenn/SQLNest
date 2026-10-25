@@ -59,6 +59,12 @@ export interface Field {
 	 */
 	readonly enumValues?: readonly string[];
 	/**
+	 * Nom sous lequel la base stocke le champ, quand il diffère du nom SNQL :
+	 * `id` alias de `_id` sous Mongo (ADR-029 D13, ADR-036 E/1f). Le lower
+	 * réécrit le nom SNQL, la sortie rend le nom SNQL.
+	 */
+	readonly nativeName?: string;
+	/**
 	 * Nom de l'enum type si la colonne est typée par un enum nommé
 	 * (ADR-030). Permet la résolution `type: role_type` dans le parser,
 	 * l'autocomplete du cast `"user" as role_type` et le round-trip PG

@@ -301,11 +301,19 @@ export interface PlanSortKey {
 	readonly provablyNotNull?: boolean;
 }
 
+/**
+ * Champs stockés sous un autre nom que leur nom SNQL, nom natif → nom SNQL
+ * (`{ _id: "id" }`, alias Mongo, ADR-036 E/1f) : le lower a réécrit les
+ * références, la sortie renomme les documents rendus entiers.
+ */
+export type PlanNativeNames = Readonly<Record<string, string>>;
+
 export type LogicalPlan =
 	| {
 			readonly op: "scan";
 			readonly collection: string;
 			readonly alias?: string;
+			readonly nativeNames?: PlanNativeNames;
 	  }
 	| {
 			readonly op: "filter";
@@ -357,6 +365,7 @@ export type LogicalPlan =
 			readonly localField: readonly string[];
 			readonly foreignField: readonly string[];
 			readonly kind: "embed" | "join" | "count";
+			readonly nativeNames?: PlanNativeNames;
 	  }
 	// agrégation scalaire fold — `pick count(*)`, `pick sum(x)`.
 	// `groupKeys` toujours undefined en (fold sur toute la collection,
@@ -457,6 +466,7 @@ export type MutationPlan =
 			 * Exige capability `insert-select` (PG only v1).
 			 */
 			readonly sourcePlan?: LogicalPlan;
+			readonly nativeNames?: PlanNativeNames;
 	  }
 	| {
 			readonly op: "update";

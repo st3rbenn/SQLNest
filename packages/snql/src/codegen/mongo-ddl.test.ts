@@ -207,6 +207,7 @@ describe("codegen Mongo — create table (ADR-029 DDL/1.6)", () => {
 			primaryKey: ["id"]
 		});
 		expect(q.primaryKeyAlias).toBe("id");
+		expect(q.primaryKeyType).toBe("uuid");
 		const schema = q.validator as { $jsonSchema: { properties: Record<string, unknown>; required: string[] } };
 		expect(schema.$jsonSchema.properties).not.toHaveProperty("id");
 		expect(schema.$jsonSchema.properties).toHaveProperty("email");
@@ -912,5 +913,78 @@ describe("codegen Mongo — drop ref (ADR-031 FK/3)", () => {
 			throw new Error("attendu drop-ref");
 		}
 		expect(q.ifExists).toBe(true);
+	});
+});
+
+describe("codegen Mongo — alias id ↔ _id (ADR-036 E/1f)", () => {
+	it("le défaut de `id` vaut pour `_id`", () => {
+		const q = mapDDL({
+			op: "ddl",
+			kind: "create-table",
+			target: "users",
+			ifNotExists: false,
+			fields: [
+				{
+					name: "id",
+					type: "uuid",
+					nullable: false,
+					unique: false,
+					defaultValue: { kind: "fn", fn: "uuid" }
+				}
+			],
+			primaryKey: ["id"]
+		});
+		expect(q.defaults).toEqual([{ column: "_id", fn: "uuid" }]);
+	});
+
+	it("lecture : `_id` rendu sous `id`, à la racine et dans les jointures", () => {
+		const q = mongoMapper.map({
+			op: "join",
+			kind: "embed",
+			collection: "seat",
+			as: "s",
+			localField: ["seat_id"],
+			foreignField: ["_id"],
+			nativeNames: { _id: "id" },
+			input: { op: "scan", collection: "ticket", nativeNames: { _id: "id" } }
+		});
+		expect(q).toMatchObject({
+			renameKeys: [
+				{ path: [], from: "_id", to: "id" },
+				{ path: ["s"], from: "_id", to: "id" }
+			]
+		});
+	});
+
+	it("insert : documents rendus sous `id`", () => {
+		expect(
+			mongoMapper.mapMutation({
+				op: "insert",
+				collection: "seat",
+				columns: ["_id"],
+				rows: [[{ kind: "scalar", value: 1 }]],
+				nativeNames: { _id: "id" }
+			})
+		).toMatchObject({ renameKeys: [{ path: [], from: "_id", to: "id" }] });
+	});
+
+	it("group by `_id` projeté sous `id` : `_id` écarté de la sortie", () => {
+		const q = mongoMapper.map({
+			op: "aggregate",
+			groupKeys: [["_id"]],
+			fields: [
+				{ path: ["_id"], alias: "id" },
+				{
+					path: [],
+					expr: { kind: "call", name: "count", args: [], star: true },
+					alias: "n"
+				}
+			],
+			input: { op: "scan", collection: "seat", nativeNames: { _id: "id" } }
+		});
+		if (q.kind !== "mongo") throw new Error("attendu mongo");
+		expect(q.pipeline.find((stage) => "$project" in stage)).toEqual({
+			$project: { _id: 0, id: "$_id._id", n: expect.anything() }
+		});
 	});
 });

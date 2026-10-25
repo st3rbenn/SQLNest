@@ -23,6 +23,7 @@ import type {
 	Expr,
 	RenameColumnStmt
 } from "../parser/ast";
+import type { Span } from "../lexer/token";
 import { DDL_DEFAULT_FUNCTIONS } from "../parser/parser";
 import type { OnUpdateRule, SchemaModel, SnqlType } from "../schema/model";
 import type {
@@ -109,6 +110,37 @@ function profileName(
 	return naming.prisma ? prismaName(naming, table, columns, suffix) : undefined;
 }
 
+/** Nom natif d'un champ du schéma (`_id` pour l'alias `id` sous Mongo). */
+function nativeNameOf(
+	schema: SchemaModel | undefined,
+	table: string,
+	column: string
+): string | undefined {
+	return schema?.collections
+		.find((c) => c.name === table)
+		?.fields.find((f) => f.name === column)?.nativeName;
+}
+
+/**
+ * `id` aliasé à `_id` (ADR-029 D13) : la clé primaire native de Mongo garde
+ * son nom, son type et sa nullabilité, et elle est déjà indexée, unique.
+ */
+function assertNotNativeKey(
+	schema: SchemaModel | undefined,
+	table: string,
+	column: string,
+	verb: string,
+	span: Span | undefined
+): void {
+	const native = nativeNameOf(schema, table, column);
+	if (native === undefined) return;
+	throw new SnqlError(
+		`'${verb}' sur '${table}.${column}' : '${column}' est l'alias de '${native}', la clé primaire native de Mongo — son nom, son type et sa nullabilité sont fixés à la création, et elle est déjà indexée, unique`,
+		"lower_ddl_native_key",
+		span
+	);
+}
+
 export function lowerDDL(
 	statement: DDLStatement,
 	schema?: SchemaModel,
@@ -122,6 +154,15 @@ export function lowerDDL(
 		return lowerAddColumn(statement, schema, naming);
 	}
 	if (statement.kind === "add-index" || statement.kind === "add-unique-index") {
+		for (const field of statement.fields) {
+			assertNotNativeKey(
+				schema,
+				statement.target,
+				field,
+				"add index",
+				statement.span
+			);
+		}
 		return lowerAddIndex(statement, naming, options.concurrentIndex ?? true);
 	}
 	if (statement.kind === "drop-index") {
@@ -131,6 +172,13 @@ export function lowerDDL(
 		return lowerDropTable(statement);
 	}
 	if (statement.kind === "drop-column") {
+		assertNotNativeKey(
+			schema,
+			statement.target,
+			statement.column,
+			"drop column",
+			statement.span
+		);
 		return lowerDropColumn(statement);
 	}
 	if (statement.kind === "create-enum") {
@@ -718,6 +766,13 @@ function lowerRenameColumn(
 				stmt.columnSpan
 			);
 		}
+		assertNotNativeKey(
+			schema,
+			stmt.target,
+			stmt.column,
+			"rename column",
+			stmt.columnSpan
+		);
 		if (table.fields.some((f) => f.name === stmt.newName)) {
 			throw new SnqlError(
 				`'rename column' : '${stmt.target}' a déjà une colonne '${stmt.newName}'`,
@@ -837,13 +892,28 @@ function lowerAlterColumn(
 			hasDefault: field.hasDefault ?? false
 		};
 	}
+	// L'alias `id` (Mongo) : seul son défaut se modifie, posé sur `_id`.
+	const native = nativeNameOf(schema, stmt.target, stmt.column);
+	if (
+		native !== undefined &&
+		stmt.action.kind !== "set-default" &&
+		stmt.action.kind !== "drop-default"
+	) {
+		assertNotNativeKey(
+			schema,
+			stmt.target,
+			stmt.column,
+			"alter column",
+			stmt.columnSpan
+		);
+	}
 	if (stmt.action.kind === "set-default") {
 		const name = profileName(naming, stmt.target, [stmt.column], "df");
 		return {
 			op: "ddl",
 			kind: "alter-column",
 			target: stmt.target,
-			column: stmt.column,
+			column: native ?? stmt.column,
 			action: {
 				kind: "set-default",
 				value: lowerDefault(
@@ -862,7 +932,7 @@ function lowerAlterColumn(
 			op: "ddl",
 			kind: "alter-column",
 			target: stmt.target,
-			column: stmt.column,
+			column: native ?? stmt.column,
 			action: { kind: stmt.action.kind },
 			...(current !== undefined ? { current } : {}),
 			...(stmt.span !== undefined ? { span: stmt.span } : {})

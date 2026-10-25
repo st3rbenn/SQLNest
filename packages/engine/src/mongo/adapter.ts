@@ -29,10 +29,13 @@ import {
 } from "./capability-probe";
 import { describeMongoConfig } from "./config";
 import {
+	applyPkAlias,
 	inferCollection,
 	introspectMongo,
+	loadPkAliases,
 	mergeValidatorFields,
 	mongoDefaultText,
+	SNQL_PK,
 	type SampledDoc
 } from "./introspect";
 
@@ -411,39 +414,85 @@ export function bsonMatchKey(value: unknown): string {
 	return `${typeof value}:${JSON.stringify(value)}`;
 }
 
-/** Les deux formes d'une valeur `_id` 24-hex : ObjectId + string brute. */
-function idBothForms(hex: string): unknown[] {
-	return [new ObjectId(hex), hex];
+type KeyRenames = readonly {
+	readonly path: readonly string[];
+	readonly from: string;
+	readonly to: string;
+}[];
+
+/**
+ * Renomme les clés des lignes rendues (ADR-036 E/1f) : `_id` → `id` d'une
+ * collection aliasée, à la racine ou dans les documents d'une jointure. La
+ * clé garde sa place.
+ */
+function renameRowKeys(rows: Row[], renames: KeyRenames | undefined): Row[] {
+	if (renames === undefined || renames.length === 0) return rows;
+	return rows.map(
+		(row) =>
+			renames.reduce<unknown>(
+				(r, x) => renameKeyAt(r, x.path, x.from, x.to),
+				row
+			) as Row
+	);
+}
+
+function renameKeyAt(
+	value: unknown,
+	path: readonly string[],
+	from: string,
+	to: string
+): unknown {
+	if (Array.isArray(value))
+		return value.map((v) => renameKeyAt(v, path, from, to));
+	if (value === null || typeof value !== "object") return value;
+	const obj = value as Record<string, unknown>;
+	const [head, ...rest] = path;
+	if (head !== undefined) {
+		return Object.hasOwn(obj, head)
+			? { ...obj, [head]: renameKeyAt(obj[head], rest, from, to) }
+			: obj;
+	}
+	if (!Object.hasOwn(obj, from) || Object.hasOwn(obj, to)) return obj;
+	return Object.fromEntries(
+		Object.entries(obj).map(([k, v]) => [k === from ? to : k, v])
+	);
+}
+
+const UUID_TEXT =
+	/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+/** Une clé `_id` écrite en texte peut être stockée en ObjectId ou en UUID
+ *  (alias `id: uuid`, ADR-036 E/1f) : les deux formes. */
+function idBothForms(value: unknown): unknown[] | undefined {
+	if (typeof value !== "string") return undefined;
+	if (OBJECT_ID_HEX.test(value)) return [new ObjectId(value), value];
+	if (UUID_TEXT.test(value)) return [new UUID(value), value];
+	return undefined;
 }
 
 /**
  * Expansion both-forms d'un filtre sur `_id` (fidélité BSON, lean-robuste #7).
- * Une valeur 24-hex matche ObjectId OU string via `$in`/`$nin` — robuste que le
+ * Une valeur 24-hex matche ObjectId OU string, un uuid texte UUID OU string,
+ * via `$in`/`$nin` — robuste que le
  * `_id` soit auto-généré (ObjectId) ou custom (string), sans schema ni thread.
  * `$eq`/`$ne` réécrits en `$in`/`$nin` both-forms ; ranges (`$gt`/`$lt`…) gardent
  * la coercion ObjectId simple ; le reste retombe sur l'hydratation normale.
  */
 function expandIdFilter(child: unknown): unknown {
-	if (typeof child === "string" && OBJECT_ID_HEX.test(child)) {
-		return { $in: idBothForms(child) };
-	}
+	const forms = idBothForms(child);
+	if (forms !== undefined) return { $in: forms };
 	if (child === null || typeof child !== "object" || Array.isArray(child)) {
 		return hydrateBson(child, true, true);
 	}
 	const entries = Object.entries(child as Record<string, unknown>);
 	if (entries.length === 1) {
 		const [op, v] = entries[0]!;
-		if (op === "$eq" && typeof v === "string" && OBJECT_ID_HEX.test(v)) {
-			return { $in: idBothForms(v) };
-		}
-		if (op === "$ne" && typeof v === "string" && OBJECT_ID_HEX.test(v)) {
-			return { $nin: idBothForms(v) };
-		}
+		const vForms = idBothForms(v);
+		if (op === "$eq" && vForms !== undefined) return { $in: vForms };
+		if (op === "$ne" && vForms !== undefined) return { $nin: vForms };
 		if ((op === "$in" || op === "$nin") && Array.isArray(v)) {
-			const expanded = v.flatMap((x) =>
-				typeof x === "string" && OBJECT_ID_HEX.test(x)
-					? idBothForms(x)
-					: [hydrateBson(x, true, true)]
+			const expanded = v.flatMap(
+				(x) => idBothForms(x) ?? [hydrateBson(x, true, true)]
 			);
 			return { [op]: expanded };
 		}
@@ -471,15 +520,57 @@ function writeErrorMessage(op: string, cause: unknown): string {
 	return `Écriture MongoDB échouée — ${detail}`;
 }
 
-/** FK chargée depuis `_snql_refs` pour l'enforcement runtime (ADR-031 FK/1b). */
+/**
+ * FK chargée depuis `_snql_refs` pour l'enforcement runtime (ADR-031 FK/1b).
+ * `fromColumn` / `toColumn` sont les champs stockés (`_id` pour un alias `id`,
+ * ADR-036 E/1f) ; `fromName` / `toName`, les noms SNQL des messages.
+ */
 interface RefMeta {
 	readonly name: string;
 	readonly fromCollection: string;
 	readonly fromColumn: string;
+	readonly fromName: string;
 	readonly toCollection: string;
 	readonly toColumn: string;
+	readonly toName: string;
 	readonly onDelete: string;
 	readonly onUpdate: string;
+}
+
+interface RefColumns {
+	readonly fromCollection: string;
+	readonly fromColumn: string;
+	readonly toCollection: string;
+	readonly toColumn: string;
+}
+
+/** Champs stockés d'une FK : l'alias `id` d'une collection est `_id`. */
+function physicalRef<T extends RefColumns>(
+	ref: T,
+	aliases: ReadonlyMap<string, { readonly column: string }>
+): T {
+	const stored = (collection: string, column: string) =>
+		aliases.get(collection)?.column === column ? "_id" : column;
+	return {
+		...ref,
+		fromColumn: stored(ref.fromCollection, ref.fromColumn),
+		toColumn: stored(ref.toCollection, ref.toColumn)
+	};
+}
+
+/** Formes équivalentes d'une clé : ObjectId ↔ hex, UUID ↔ texte. */
+function keyForms(value: unknown): unknown[] {
+	if (typeof value === "string") return idBothForms(value) ?? [value];
+	const text = normalizeBson(value);
+	return typeof text === "string" && text !== value ? [value, text] : [value];
+}
+
+/** Clé de comparaison d'une valeur `_id`, quelle que soit sa forme stockée. */
+function idMatchKey(value: unknown): string {
+	const text = normalizeBson(value);
+	return typeof text === "string"
+		? `s:${UUID_TEXT.test(text) ? text.toLowerCase() : text}`
+		: bsonMatchKey(value);
 }
 
 /** Clé référencée qui change de valeur sous un update (ADR-031 `on update`). */
@@ -919,7 +1010,10 @@ class MongoConnection implements Connection {
 				.collection(query.collection)
 				.aggregate(pipeline)
 				.toArray();
-			const rows = docs.map((doc) => normalizeBson(doc) as Row);
+			const rows = renameRowKeys(
+				docs.map((doc) => normalizeBson(doc) as Row),
+				query.renameKeys
+			);
 			return { columns: columnsOf(rows), rows, rowCount: rows.length };
 		} catch (cause) {
 			throw new EngineExecutionError(
@@ -958,7 +1052,10 @@ class MongoConnection implements Connection {
 			queryIn.op === "insert"
 				? {
 						...queryIn,
-						documents: await this.#withDefaults(queryIn.collection, queryIn.documents)
+						documents: await this.#prepareInsert(
+							queryIn.collection,
+							queryIn.documents
+						)
 					}
 				: queryIn;
 		const plan = await this.#fkPlan(query);
@@ -993,7 +1090,10 @@ class MongoConnection implements Connection {
 				const result = await collection.insertMany(documents);
 				// Les documents insérés portent maintenant leur `_id` (le driver le
 				// pose sur l'objet) → on peut les rendre, comme un RETURNING *.
-				const rows = documents.map((doc) => normalizeBson(doc) as Row);
+				const rows = renameRowKeys(
+					documents.map((doc) => normalizeBson(doc) as Row),
+					query.renameKeys
+				);
 				return {
 					columns: columnsOf(rows),
 					rows,
@@ -1075,6 +1175,7 @@ class MongoConnection implements Connection {
 				.collection("_snql_refs")
 				.find({ [field]: collection })
 				.toArray();
+			const aliases = await loadPkAliases(this.#requireDb());
 			const out: RefMeta[] = [];
 			for (const d of docs) {
 				const r = d as Record<string, unknown>;
@@ -1085,15 +1186,24 @@ class MongoConnection implements Connection {
 					typeof r.toCollection === "string" &&
 					typeof r.toColumn === "string"
 				) {
-					out.push({
-						name: r._id,
-						fromCollection: r.fromCollection,
-						fromColumn: r.fromColumn,
-						toCollection: r.toCollection,
-						toColumn: r.toColumn,
-						onDelete: typeof r.onDelete === "string" ? r.onDelete : "restrict",
-						onUpdate: typeof r.onUpdate === "string" ? r.onUpdate : "restrict"
-					});
+					out.push(
+						physicalRef(
+							{
+								name: r._id,
+								fromCollection: r.fromCollection,
+								fromColumn: r.fromColumn,
+								fromName: r.fromColumn,
+								toCollection: r.toCollection,
+								toColumn: r.toColumn,
+								toName: r.toColumn,
+								onDelete:
+									typeof r.onDelete === "string" ? r.onDelete : "restrict",
+								onUpdate:
+									typeof r.onUpdate === "string" ? r.onUpdate : "restrict"
+							},
+							aliases
+						)
+					);
 				}
 			}
 			return out;
@@ -1157,7 +1267,7 @@ class MongoConnection implements Connection {
 			case "delete":
 				return this.#deleteCascading(query, session, journal);
 			case "insert": {
-				const documents = await this.#withDefaults(
+				const documents = await this.#prepareInsert(
 					query.collection,
 					query.documents,
 					session
@@ -1369,7 +1479,7 @@ class MongoConnection implements Connection {
 				);
 				if (missing !== undefined) {
 					throw new EngineExecutionError(
-						`${op === "insert" ? "insert dans" : "update de"} '${collection}' viole la foreign key '${ref.name}' : '${ref.fromColumn}' = ${JSON.stringify(normalizeBson(missing))} ne référence aucune ligne de ${ref.toCollection}.${ref.toColumn}`
+						`${op === "insert" ? "insert dans" : "update de"} '${collection}' viole la foreign key '${ref.name}' : '${ref.fromName}' = ${JSON.stringify(normalizeBson(missing))} ne référence aucune ligne de ${ref.toCollection}.${ref.toName}`
 					);
 				}
 			}
@@ -1378,13 +1488,29 @@ class MongoConnection implements Connection {
 
 	/**
 	 * Valeurs d'un paquet (BSON) qu'aucune ligne de la cible ne porte : un
-	 * `$in` sur `toColumn`, et sur `_id` pour l'alias `id` (D13).
+	 * `$in` sur `toColumn` (champ stocké), et sur `_id` pour un champ `id`
+	 * d'une collection créée avant l'alias (D13).
 	 */
 	async #missingRefTargets(
 		ref: { readonly toCollection: string; readonly toColumn: string },
 		values: readonly unknown[],
 		session?: ClientSession
 	): Promise<unknown[]> {
+		// Clé `_id` : la valeur peut être stockée sous une autre forme
+		// (ObjectId / UUID d'un défaut, texte saisi).
+		if (ref.toColumn === "_id") {
+			const found = await this.#requireDb()
+				.collection(ref.toCollection)
+				.find(
+					{ _id: { $in: values.flatMap(keyForms) } } as Document,
+					session !== undefined
+						? { session, projection: { _id: 1 } }
+						: { projection: { _id: 1 } }
+				)
+				.toArray();
+			const keys = new Set(found.map((doc) => idMatchKey(doc._id)));
+			return values.filter((v) => !keys.has(idMatchKey(v)));
+		}
 		const or: Document[] = [{ [ref.toColumn]: { $in: [...values] } }];
 		if (ref.toColumn === "id") or.push({ _id: { $in: [...values] } });
 		const projection = { _id: 1, [ref.toColumn]: 1 };
@@ -1492,7 +1618,7 @@ class MongoConnection implements Connection {
 					bsonMatchKey(seen.to) !== bsonMatchKey(move.to)
 				) {
 					throw new EngineExecutionError(
-						`update de '${collection}' : la foreign key '${ref.name}' (CASCADE) ne peut pas propager ${JSON.stringify(normalizeBson(move.from))} — plusieurs lignes portant cette valeur sur '${ref.toColumn}' reçoivent des valeurs différentes. Une colonne référencée doit être unique.`
+						`update de '${collection}' : la foreign key '${ref.name}' (CASCADE) ne peut pas propager ${JSON.stringify(normalizeBson(move.from))} — plusieurs lignes portant cette valeur sur '${ref.toName}' reçoivent des valeurs différentes. Une colonne référencée doit être unique.`
 					);
 				}
 				byOld.set(key, move);
@@ -1508,7 +1634,7 @@ class MongoConnection implements Connection {
 				});
 				if (cnt > 0) {
 					throw new EngineExecutionError(
-						`update de '${collection}' viole la foreign key '${ref.name}' (RESTRICT) : ${ref.fromCollection} référence encore les anciennes valeurs de '${ref.toColumn}' via '${ref.fromColumn}'. Mets d'abord à jour les dépendants ou déclare 'on update cascade'.`
+						`update de '${collection}' viole la foreign key '${ref.name}' (RESTRICT) : ${ref.fromCollection} référence encore les anciennes valeurs de '${ref.toName}' via '${ref.fromName}'. Mets d'abord à jour les dépendants ou déclare 'on update cascade'.`
 					);
 				}
 				continue;
@@ -1606,8 +1732,9 @@ class MongoConnection implements Connection {
 			);
 			if (keyVals.length === 0) continue;
 			const childColl = db.collection(ref.fromCollection);
+			const keys = ref.toColumn === "_id" ? keyVals.flatMap(keyForms) : keyVals;
 			const childFilter = {
-				[ref.fromColumn]: { $in: keyVals.map((v) => hydrateBson(v, false)) }
+				[ref.fromColumn]: { $in: keys.map((v) => hydrateBson(v, false)) }
 			} as Document;
 			if (ref.onDelete === "restrict") {
 				const cnt = await childColl.countDocuments(childFilter, {
@@ -1616,7 +1743,7 @@ class MongoConnection implements Connection {
 				});
 				if (cnt > 0) {
 					throw new EngineExecutionError(
-						`delete de '${collection}' viole la foreign key '${ref.name}' (RESTRICT) : ${ref.fromCollection} référence encore ces lignes via '${ref.fromColumn}'. Supprime d'abord les dépendants ou déclare 'on delete cascade'.`
+						`delete de '${collection}' viole la foreign key '${ref.name}' (RESTRICT) : ${ref.fromCollection} référence encore ces lignes via '${ref.fromName}'. Supprime d'abord les dépendants ou déclare 'on delete cascade'.`
 					);
 				}
 			} else if (ref.onDelete === "set-null") {
@@ -1698,10 +1825,14 @@ class MongoConnection implements Connection {
 				const info = (await db.listCollections({ name: target }).toArray())[0] as
 					| { readonly options?: { readonly validator?: Record<string, unknown> } }
 					| undefined;
-				const fields = mergeValidatorFields(
-					inferCollection(target, docs as SampledDoc[]),
-					info?.options?.validator
-				).fields;
+				const collection = applyPkAlias(
+					mergeValidatorFields(
+						inferCollection(target, docs as SampledDoc[]),
+						info?.options?.validator
+					),
+					(await loadPkAliases(db)).get(target)
+				);
+				const { fields } = collection;
 				const defaults = new Map<string, string>();
 				for (const entry of await db
 					.collection("_snql_defaults")
@@ -1711,14 +1842,16 @@ class MongoConnection implements Connection {
 				}
 				const refs = await this.#loadRefs("fromCollection", target);
 				const rows: Row[] = fields.map((field) => {
-					const ref = refs.find((r) => r.fromColumn === field.name);
+					const ref = refs.find((r) => r.fromName === field.name);
 					return {
 						name: field.name,
 						type: field.type,
 						nullable: field.nullable,
-						default: defaults.get(field.name) ?? null,
-						is_primary_key: field.name === "_id",
-						foreign_key: ref !== undefined ? `${ref.toCollection}.${ref.toColumn}` : null
+						default: defaults.get(field.nativeName ?? field.name) ?? null,
+						is_primary_key:
+							collection.primaryKey?.includes(field.name) ?? false,
+						foreign_key:
+							ref !== undefined ? `${ref.toCollection}.${ref.toName}` : null
 					};
 				});
 				return { columns: DESCRIBE_COLUMNS, rows, rowCount: rows.length };
@@ -2266,7 +2399,12 @@ class MongoConnection implements Connection {
 					`add ref échouée : collection '${query.collection}' inexistante`
 				);
 			}
-			const unresolved = await this.#findUnresolvedRefValues(ref);
+			const unresolved = await this.#findUnresolvedRefValues(
+				physicalRef(
+					{ ...ref, fromCollection: query.collection },
+					await loadPkAliases(db)
+				)
+			);
 			if (unresolved.count > 0) {
 				const sample = unresolved.sample.map((v) => JSON.stringify(normalizeBson(v))).join(", ");
 				throw new EngineExecutionError(
@@ -2345,11 +2483,17 @@ class MongoConnection implements Connection {
 			// `_id` (ADR-029 D13), dont le nom est fixe. Renommer l'alias
 			// réécrirait les FK qui le visent et casserait leur résolution vers `_id`.
 			const declared = jsonSchema?.properties as Document | undefined;
+			const aliased =
+				(await loadPkAliases(db)).get(query.collection)?.column === from;
 			if (
-				from === "id" &&
-				jsonSchema !== undefined &&
-				!Object.hasOwn(declared ?? {}, "id") &&
-				(await col.countDocuments({ id: { $exists: true } }, { limit: 1 })) === 0
+				aliased ||
+				(from === "id" &&
+					jsonSchema !== undefined &&
+					!Object.hasOwn(declared ?? {}, "id") &&
+					(await col.countDocuments(
+						{ id: { $exists: true } },
+						{ limit: 1 }
+					)) === 0)
 			) {
 				throw new EngineExecutionError(
 					`rename column échouée : '${query.collection}.id' est l'alias de '_id', la clé primaire native de Mongo — son nom est fixe`
@@ -2642,8 +2786,11 @@ class MongoConnection implements Connection {
 				await db.collection("_snql_defaults").deleteMany({
 					collection: query.collection
 				});
+				await db
+					.collection(SNQL_PK)
+					.deleteOne({ _id: query.collection as unknown as ObjectId });
 			} catch {
-				// silence — _snql_refs / _snql_defaults absents
+				// silence — métadonnées absentes
 			}
 			return { columns: [], rows: [], rowCount: 0 };
 		} catch (cause) {
@@ -2817,6 +2964,7 @@ class MongoConnection implements Connection {
 			if (query.validator !== undefined) {
 				createOptions["validator"] = query.validator;
 			}
+			let created = true;
 			try {
 				await db.createCollection(query.collection, createOptions);
 			} catch (cause) {
@@ -2826,6 +2974,21 @@ class MongoConnection implements Connection {
 					cause !== null &&
 					(cause as { code?: unknown }).code === 48;
 				if (!isNamespaceExists) throw cause;
+				created = false;
+			}
+			// Alias `id` ↔ `_id` (ADR-036 E/1f), seulement à la création : une
+			// collection existante garde ses documents tels qu'ils sont.
+			if (created && query.primaryKeyAlias !== undefined) {
+				await db.collection(SNQL_PK).replaceOne(
+					{ _id: query.collection as unknown as ObjectId },
+					{
+						column: query.primaryKeyAlias,
+						...(query.primaryKeyType !== undefined
+							? { type: query.primaryKeyType }
+							: {})
+					},
+					{ upsert: true }
+				);
 			}
 			const indexes = query.indexes ?? [];
 			for (const spec of indexes) {
@@ -2849,6 +3012,49 @@ class MongoConnection implements Connection {
 				{ cause }
 			);
 		}
+	}
+
+	/**
+	 * Documents prêts à insérer : défauts posés, puis clé primaire aliasée
+	 * vérifiée (ADR-036 E/1f). Sans valeur ni défaut, Mongo poserait un
+	 * ObjectId à la place de l'`id` déclaré : refus, comme le NOT NULL d'une
+	 * clé primaire Postgres.
+	 */
+	async #prepareInsert<T extends object>(
+		collection: string,
+		documents: readonly T[],
+		session?: ClientSession
+	): Promise<T[]> {
+		const alias = (await loadPkAliases(this.#requireDb())).get(collection);
+		// Sans schéma, le lower n'a pas réécrit l'alias : la valeur passe à `_id`.
+		const keyed =
+			alias === undefined
+				? documents
+				: documents.map((doc) => {
+						const { [alias.column]: key, ...rest } = doc as Record<
+							string,
+							unknown
+						>;
+						return (
+							key !== undefined && rest._id === undefined
+								? { ...rest, _id: key }
+								: doc
+						) as T;
+					});
+		const prepared = await this.#withDefaults(collection, keyed, session);
+		if (
+			alias !== undefined &&
+			prepared.some((doc) => (doc as Record<string, unknown>)._id === undefined)
+		) {
+			const withDefault =
+				alias.type === "uuid" || alias.type === "string"
+					? ` ou donne-lui un défaut : alter column ${collection}.${alias.column} set default uuid()`
+					: "";
+			throw new EngineExecutionError(
+				`insert dans '${collection}' : '${alias.column}' manque — c'est la clé primaire (alias de '_id') ; fournis-la${withDefault}`
+			);
+		}
+		return prepared;
 	}
 
 	/**
@@ -3129,7 +3335,10 @@ class MongoConnection implements Connection {
 						.collection(step.query.collection)
 						.aggregate(pipeline, { session })
 						.toArray();
-					const rows = docs.map((doc) => normalizeBson(doc) as Row);
+					const rows = renameRowKeys(
+						docs.map((doc) => normalizeBson(doc) as Row),
+						step.query.renameKeys
+					);
 					lastResult = {
 						columns: columnsOf(rows),
 						rows,
@@ -3191,7 +3400,7 @@ class MongoConnection implements Connection {
 		const collection = this.#requireDb().collection(query.collection);
 		try {
 			if (query.op === "insert") {
-				const withDefaults = await this.#withDefaults(
+				const withDefaults = await this.#prepareInsert(
 					query.collection,
 					query.documents,
 					session
@@ -3200,7 +3409,10 @@ class MongoConnection implements Connection {
 					(doc) => hydrateBson(doc, false) as Document
 				);
 				const result = await collection.insertMany(documents, { session });
-				const rows = documents.map((doc) => normalizeBson(doc) as Row);
+				const rows = renameRowKeys(
+					documents.map((doc) => normalizeBson(doc) as Row),
+					query.renameKeys
+				);
 				return {
 					columns: columnsOf(rows),
 					rows,
@@ -3302,7 +3514,10 @@ class MongoConnection implements Connection {
 						.collection(bodyStep.query.collection)
 						.aggregate(pipeline, { session })
 						.toArray();
-					const rows = docs.map((doc) => normalizeBson(doc) as Row);
+					const rows = renameRowKeys(
+						docs.map((doc) => normalizeBson(doc) as Row),
+						bodyStep.query.renameKeys
+					);
 					lastResult = {
 						columns: columnsOf(rows),
 						rows,
@@ -3373,7 +3588,7 @@ class MongoConnection implements Connection {
 	): Promise<{ result: ResultSet; compensate: () => Promise<void> }> {
 		const collection = this.#requireDb().collection(query.collection);
 		if (query.op === "insert") {
-			const withDefaults = await this.#withDefaults(
+			const withDefaults = await this.#prepareInsert(
 				query.collection,
 				query.documents,
 				session
@@ -3385,7 +3600,10 @@ class MongoConnection implements Connection {
 				session
 			});
 			const insertedIds = Object.values(insertResult.insertedIds);
-			const rows = documents.map((doc) => normalizeBson(doc) as Row);
+			const rows = renameRowKeys(
+				documents.map((doc) => normalizeBson(doc) as Row),
+				query.renameKeys
+			);
 			return {
 				result: {
 					columns: columnsOf(rows),

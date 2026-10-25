@@ -154,8 +154,84 @@ export function inferCollection(
  */
 export function inferRelations(collections: readonly Collection[]): Relation[] {
 	return inferNamingRelations(collections, {
-		targetKeyFor: () => "_id"
+		// `_id`, ou son alias SNQL (ADR-036 E/1f).
+		targetKeyFor: (target) =>
+			target.fields.find((f) => f.nativeName === "_id")?.name ?? "_id"
 	});
+}
+
+/** Alias de clé primaire (ADR-036 E/1f) : `_id` = la collection. */
+export const SNQL_PK = "_snql_pk";
+
+export interface PkAlias {
+	readonly column: string;
+	readonly type: SnqlType;
+}
+
+/**
+ * Collections créées avec `primary key (id)` : `id` y est l'alias de `_id`.
+ * Best-effort : métadonnée absente ou illisible → aucune.
+ */
+export async function loadPkAliases(db: Db): Promise<Map<string, PkAlias>> {
+	const aliases = new Map<string, PkAlias>();
+	try {
+		for (const doc of await db.collection(SNQL_PK).find({}).toArray()) {
+			const d = doc as Record<string, unknown>;
+			if (typeof d._id !== "string" || typeof d.column !== "string") continue;
+			const type =
+				typeof d.type === "string" && d.type in SNQL_TYPES
+					? (d.type as SnqlType)
+					: "unknown";
+			aliases.set(d._id, { column: d.column, type });
+		}
+	} catch {
+		// silence — pas d'alias lisible
+	}
+	return aliases;
+}
+
+const SNQL_TYPES: Readonly<Record<SnqlType, true>> = {
+	string: true,
+	int: true,
+	bigint: true,
+	float: true,
+	decimal: true,
+	bool: true,
+	date: true,
+	json: true,
+	array: true,
+	uuid: true,
+	enum: true,
+	unknown: true
+};
+
+/**
+ * `_id` présenté sous son alias : champ SNQL `id`, nom natif `_id`, clé
+ * primaire. Un champ `id` stocké à côté (documents d'avant l'alias) est
+ * masqué : `id` désigne `_id`.
+ */
+export function applyPkAlias(
+	collection: Collection,
+	alias: PkAlias | undefined
+): Collection {
+	if (alias === undefined) return collection;
+	const key: Field = {
+		name: alias.column,
+		type: alias.type,
+		nullable: false,
+		source: "declared",
+		nativeName: "_id"
+	};
+	return {
+		...collection,
+		fields: [
+			key,
+			...collection.fields.filter(
+				(f) => f.name !== "_id" && f.name !== alias.column
+			)
+		],
+		primaryKey: [alias.column]
+	};
 }
 
 /**
@@ -178,14 +254,7 @@ export async function introspectMongo(
 			if (typeof name !== "string") continue;
 			// `system.*` = Mongo internal ; `_snql_*` = metadata SQLNest
 			// (introspectés séparément, jamais comme collection user).
-			if (
-				name.startsWith("system.") ||
-				name === "_snql_enums" ||
-				name === "_snql_refs" ||
-				name === "_snql_defaults"
-			) {
-				continue;
-			}
+			if (name.startsWith("system.") || name.startsWith("_snql_")) continue;
 			names.push(name);
 			const validator = (
 				info as { options?: { validator?: Record<string, unknown> } }
@@ -193,6 +262,7 @@ export async function introspectMongo(
 			if (validator !== undefined) validatorByName.set(name, validator);
 		}
 
+		const pkAliases = await loadPkAliases(db);
 		const collections = await Promise.all(
 			names.map(async (name) => {
 				const docs = await db
@@ -200,9 +270,9 @@ export async function introspectMongo(
 					.aggregate([{ $sample: { size: sampleSize } }])
 					.toArray();
 				const inferred = inferCollection(name, docs as SampledDoc[]);
-				const merged = mergeValidatorFields(
-					inferred,
-					validatorByName.get(name)
+				const merged = applyPkAlias(
+					mergeValidatorFields(inferred, validatorByName.get(name)),
+					pkAliases.get(name)
 				);
 				const indexes = await readIndexes(db, name);
 				return indexes.length > 0 ? { ...merged, indexes } : merged;
@@ -276,7 +346,7 @@ export async function introspectMongo(
 			withDefaults = collections.map((c) => ({
 				...c,
 				fields: c.fields.map((f) => {
-					const text = byColumn.get(`${c.name}.${f.name}`);
+					const text = byColumn.get(`${c.name}.${f.nativeName ?? f.name}`);
 					return text === undefined ? f : { ...f, hasDefault: true, defaultExpr: text };
 				})
 			}));
