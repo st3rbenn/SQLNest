@@ -28,7 +28,11 @@ import {
 	parseConnectionString,
 	suggestConnectionName
 } from "../../services/connection-strings";
-import { configuredIdentities, type Discovery } from "../../services/discovery";
+import {
+	configuredIdentities,
+	type DiscoveredServer,
+	type Discovery
+} from "../../services/discovery";
 import { type ConnectionProbe, describeServer } from "../../services/engine";
 import {
 	addLocalConnection,
@@ -61,6 +65,11 @@ export interface AddConnectionOptions {
 	readonly discover?: () => Promise<Discovery>;
 	/** Bases d'un serveur découvert, lues en direct. */
 	readonly listDatabases?: (url: string) => Promise<readonly string[]>;
+	/** Démarre un serveur découvert arrêté, puis attend que `url` réponde. */
+	readonly startServer?: (
+		server: DiscoveredServer,
+		url: string
+	) => Promise<void>;
 	/** `false` (stdin redirigé, script) : aucune question ; une base
 	 *  injoignable fait échouer la commande. Défaut `true`. */
 	readonly interactive?: boolean;
@@ -99,6 +108,9 @@ export async function addConnection(
 				stdout: opts.stdout,
 				...(opts.listDatabases !== undefined
 					? { listDatabases: opts.listDatabases }
+					: {}),
+				...(opts.startServer !== undefined
+					? { startServer: opts.startServer }
 					: {}),
 				manual: () => promptConnectionUrl(opts.prompter)
 			},
@@ -234,6 +246,11 @@ export const addConnectionCommand = defineCommand({
 					withSpinner("Lecture des bases du serveur…", () =>
 						ctx.services.listServerDatabases(url)
 					),
+				startServer: (server, url) =>
+					withSpinner(`Démarrage de ${server.name}…`, async () => {
+						await ctx.services.startDockerServer(server);
+						await ctx.services.waitForDatabase(url);
+					}),
 				interactive: process.stdin.isTTY === true,
 				prompter,
 				stdout: ctx.stdout

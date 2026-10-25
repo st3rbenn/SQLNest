@@ -114,6 +114,7 @@ function discovery(partial: Partial<Discovery>): () => Promise<Discovery> {
 	return async () => ({
 		root: "/p",
 		databases: [],
+		projectServers: [],
 		servers: [],
 		unresolved: [],
 		...partial
@@ -391,8 +392,139 @@ describe("add-connection sans argument", () => {
 	});
 });
 
+describe("add-connection — serveur arrêté (ADR-038 S1)", () => {
+	const STOPPED: DiscoveredServer = {
+		...LAB_SERVER,
+		name: "shop_postgres",
+		port: 5436,
+		user: "postgres",
+		password: "root",
+		maintenanceDatabase: "shop-db",
+		defaultDatabase: "shop-db",
+		running: false,
+		container: "shop_postgres"
+	};
+	const envFile = "/srv/shop/backend/.env";
+	const shopDb = (): DiscoveredDatabase =>
+		database("postgresql://postgres:root@localhost:5436/shop-db", {
+			source: { kind: "env-file", file: envFile, key: "DATABASE_URL" },
+			urlFrom: { file: envFile, key: "DATABASE_URL" },
+			server: STOPPED
+		});
+
+	test("base servie par un conteneur arrêté : démarrage proposé (Entrée = oui), puis enregistrée", async () => {
+		const startServer = vi.fn(async () => {});
+		const prompter = scriptedPrompter({ picks: ["shop-db"], lines: ["", ""] });
+		await addConnection({
+			discover: discovery({ databases: [shopDb()], projectServers: [STOPPED] }),
+			startServer,
+			test: okProbe,
+			prompter,
+			stdout: (l) => out.push(l)
+		});
+		expect(prompter.line).toHaveBeenNthCalledWith(
+			1,
+			"« shop_postgres » est arrêté. Le démarrer ? [Y/n] "
+		);
+		expect(startServer).toHaveBeenCalledWith(
+			STOPPED,
+			"postgresql://postgres:root@localhost:5436/shop-db"
+		);
+		expect(out).toContain("✓ shop_postgres démarré");
+		expect(loadLocalConnections()?.connections).toEqual([
+			{ name: "shop-db", urlFrom: { file: envFile, key: "DATABASE_URL" } }
+		]);
+	});
+
+	test("démarrage refusé : pas de démarrage, l'ajout continue", async () => {
+		const startServer = vi.fn(async () => {});
+		await addConnection({
+			discover: discovery({ databases: [shopDb()] }),
+			startServer,
+			prompter: scriptedPrompter({ picks: ["shop-db"], lines: ["n", ""] }),
+			stdout: (l) => out.push(l)
+		});
+		expect(startServer).not.toHaveBeenCalled();
+		expect(loadLocalConnections()?.connections.map((c) => c.name)).toEqual([
+			"shop-db"
+		]);
+	});
+
+	test("démarrage en échec : la cause, puis le test dit si la base répond", async () => {
+		const startServer = vi.fn(async () => {
+			throw new Error(
+				"Bind for 0.0.0.0:5436 failed: port is already allocated"
+			);
+		});
+		const failing = vi.fn(async () => {
+			throw new Error("connect ECONNREFUSED 127.0.0.1:5436");
+		});
+		await expect(
+			addConnection({
+				discover: discovery({ databases: [shopDb()] }),
+				startServer,
+				test: failing,
+				prompter: scriptedPrompter({
+					picks: ["shop-db"],
+					lines: ["", ""],
+					confirms: [false]
+				}),
+				stdout: (l) => out.push(l)
+			})
+		).rejects.toMatchObject({ kind: "cancelled" });
+		expect(out).toContain(
+			"✗ Démarrage de shop_postgres impossible : Bind for 0.0.0.0:5436 failed: port is already allocated"
+		);
+		expect(loadLocalConnections()).toBeNull();
+	});
+
+	test("serveur arrêté choisi : démarré avant de lister ses bases", async () => {
+		const calls: string[] = [];
+		const startServer = vi.fn(
+			async (_server: DiscoveredServer, url: string) => {
+				calls.push(`start ${url}`);
+			}
+		);
+		const listDatabases = vi.fn(async (url: string) => {
+			calls.push(`list ${url}`);
+			return ["shop-db", "shop-archive"];
+		});
+		await addConnection({
+			discover: discovery({ projectServers: [STOPPED] }),
+			startServer,
+			listDatabases,
+			prompter: scriptedPrompter({
+				picks: ["shop_postgres", "shop-archive"],
+				lines: ["y", ""]
+			}),
+			stdout: (l) => out.push(l)
+		});
+		expect(calls).toEqual([
+			"start postgres://postgres:root@localhost:5436/shop-db",
+			"list postgres://postgres:root@localhost:5436/shop-db"
+		]);
+		expect(loadLocalConnections()?.connections).toEqual([
+			{
+				name: "shop-archive",
+				url: "postgres://postgres:root@localhost:5436/shop-archive"
+			}
+		]);
+	});
+
+	test("sans moyen de démarrer : rien n'est proposé", async () => {
+		const prompter = scriptedPrompter({ picks: ["shop-db"], lines: [""] });
+		await addConnection({
+			discover: discovery({ databases: [shopDb()] }),
+			prompter,
+			stdout: (l) => out.push(l)
+		});
+		expect(prompter.line).toHaveBeenCalledTimes(1);
+		expect(prompter.line).toHaveBeenCalledWith("Nom [shop-db] : ");
+	});
+});
+
 describe("discoveryChoices", () => {
-	test("sections projet et Docker, colonnes alignées, ORM, source, serveur arrêté, ORM sans base", () => {
+	test("sections projet (bases, serveurs) et Docker, colonnes alignées, ORM, source, arrêtés, ORM sans base", () => {
 		const choices = discoveryChoices(
 			{
 				root: "/p",
@@ -412,13 +544,18 @@ describe("discoveryChoices", () => {
 						}
 					}),
 					database("mongodb://localhost:27017/events", {
-						source: { kind: "env-file", file: "/p/.env", key: "MONGO_URL" }
+						source: { kind: "env-file", file: "/p/.env", key: "MONGO_URL" },
+						server: {
+							...LAB_SERVER,
+							engine: "mongodb",
+							name: "events-mongo",
+							port: 27017,
+							running: false
+						}
 					})
 				],
-				servers: [
-					LAB_SERVER,
-					{ ...LAB_SERVER, name: "db", port: 5441, running: false }
-				],
+				projectServers: [LAB_SERVER],
+				servers: [{ ...LAB_SERVER, name: "db", port: 5441, running: false }],
 				unresolved: [
 					{
 						orm: {
@@ -440,18 +577,21 @@ describe("discoveryChoices", () => {
 		).toEqual([
 			"── /p",
 			[
-				"apollon_prisma  Prisma · prisma  PostgreSQL · lab@localhost:5440",
+				"apollon_prisma    Prisma · prisma  PostgreSQL · lab@localhost:5440",
 				"DATABASE_URL · service prisma · docker-compose.yml"
 			],
-			[`events${" ".repeat(27)}MongoDB · localhost:27017`, "MONGO_URL · .env"],
-			"  Doctrine · api — DATABASE_URL introuvable",
-			"── Docker",
+			[
+				`events${" ".repeat(29)}MongoDB · localhost:27017 (arrêté)`,
+				"MONGO_URL · .env · conteneur events-mongo"
+			],
 			[
 				"orm-lab-postgres  PostgreSQL · localhost:5440",
 				"postgres:16-alpine · compose sqlnest-orm-lab/db"
 			],
+			"  Doctrine · api — DATABASE_URL introuvable",
+			"── Docker",
 			[
-				"db                PostgreSQL · localhost:5441 (arrêté)",
+				"db  PostgreSQL · localhost:5441 (arrêté)",
 				"postgres:16-alpine · compose sqlnest-orm-lab/db"
 			],
 			"──",

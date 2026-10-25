@@ -21,12 +21,14 @@ export interface DiscoveredDatabase {
 	readonly urlFrom?: LocalConnectionUrlRef;
 	/** ORM du projet qui lit cette base. */
 	readonly orm?: OrmDetection;
+	/** Serveur Docker qui la sert (même port de la machine), en cours ou arrêté. */
+	readonly server?: DiscoveredServer;
 }
 
 /** Un serveur (conteneur, service compose) dont les bases se listent en direct. */
 export interface DiscoveredServer {
 	readonly engine: DbEngine;
-	/** Nom du conteneur, ou du service compose arrêté. */
+	/** Nom du conteneur, ou du service compose jamais créé. */
 	readonly name: string;
 	readonly image: string;
 	readonly host: string;
@@ -42,7 +44,14 @@ export interface DiscoveredServer {
 	readonly defaultDatabase: string | undefined;
 	readonly params: Readonly<Record<string, string>>;
 	readonly running: boolean;
-	readonly compose?: { readonly project: string; readonly service: string };
+	/** Conteneur existant, en cours ou arrêté ; absent : service compose jamais créé. */
+	readonly container?: string;
+	/** `dir` : dossier du projet compose, d'où le démarrer. */
+	readonly compose?: {
+		readonly project: string;
+		readonly service: string;
+		readonly dir?: string;
+	};
 }
 
 /** Un ORM trouvé dont la base n'a pas pu être lue. */
@@ -55,6 +64,9 @@ export interface Discovery {
 	/** Racine du projet courant, absente hors projet. */
 	readonly root: string | undefined;
 	readonly databases: readonly DiscoveredDatabase[];
+	/** Serveurs du projet : ses services compose, les conteneurs lancés depuis lui. */
+	readonly projectServers: readonly DiscoveredServer[];
+	/** Autres conteneurs de bases, ceux en cours d'abord. */
 	readonly servers: readonly DiscoveredServer[];
 	readonly unresolved: readonly UnresolvedOrm[];
 }

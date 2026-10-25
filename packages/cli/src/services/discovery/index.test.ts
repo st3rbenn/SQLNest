@@ -31,50 +31,123 @@ const COMPOSE = {
 	}
 };
 
-const docker: DockerRunner = async (args) => {
-	if (args[0] === "compose") return JSON.stringify(COMPOSE);
-	if (args[0] === "ps") {
-		return [
-			{ ID: "1", Image: "postgres:16-alpine", Ports: "0.0.0.0:5440->5432/tcp" },
-			{ ID: "2", Image: "postgres:15", Ports: "0.0.0.0:5433->5432/tcp" }
-		]
-			.map((l) => JSON.stringify(l))
-			.join("\n");
-	}
-	if (args[0] === "inspect") {
-		return JSON.stringify([
-			{
-				Name: "/lab-db-1",
-				Config: {
-					Image: "postgres:16-alpine",
-					Env: ["POSTGRES_USER=lab", "POSTGRES_PASSWORD=lab"],
-					Labels: {
-						"com.docker.compose.project": "lab",
-						"com.docker.compose.service": "db"
-					}
-				},
-				NetworkSettings: { Ports: { "5432/tcp": [{ HostPort: "5440" }] } }
-			},
-			{
-				Name: "/other-pg",
-				Config: { Image: "postgres:15", Env: ["POSTGRES_PASSWORD=x"] },
-				NetworkSettings: { Ports: { "5432/tcp": [{ HostPort: "5433" }] } }
-			}
-		]);
-	}
-	return undefined;
+/** `docker` qui rend le compose ci-dessus et ces conteneurs. */
+function dockerWith(inspected: readonly object[]): DockerRunner {
+	return async (args) => {
+		if (args[0] === "compose") return JSON.stringify(COMPOSE);
+		if (args[0] === "ps") {
+			return inspected
+				.map((_, i) =>
+					JSON.stringify({ ID: String(i), Image: "postgres:16", Ports: "" })
+				)
+				.join("\n");
+		}
+		if (args[0] === "inspect") return JSON.stringify(inspected);
+		return undefined;
+	};
+}
+
+const LAB_DB = {
+	Name: "/lab-db-1",
+	State: { Running: true },
+	Config: {
+		Image: "postgres:16-alpine",
+		Env: ["POSTGRES_USER=lab", "POSTGRES_PASSWORD=lab"],
+		Labels: {
+			"com.docker.compose.project": "lab",
+			"com.docker.compose.service": "db"
+		}
+	},
+	NetworkSettings: { Ports: { "5432/tcp": [{ HostPort: "5440" }] } }
+};
+const OTHER_PG = {
+	Name: "/other-pg",
+	State: { Running: true },
+	Config: { Image: "postgres:15", Env: ["POSTGRES_PASSWORD=x"] },
+	NetworkSettings: { Ports: { "5432/tcp": [{ HostPort: "5433" }] } }
+};
+const OLD_PG = {
+	Name: "/old-pg",
+	State: { Running: false },
+	Config: { Image: "postgres:15", Env: [] },
+	HostConfig: { PortBindings: { "5432/tcp": [{ HostPort: "5450" }] } }
 };
 
+const closed = async () => false;
+
 describe("discoverDatabases", () => {
-	it("service compose en cours = son conteneur ; arrêté = gardé ; autres conteneurs ensuite", async () => {
-		const found = await discoverDatabases({ cwd: root, home, env: {}, docker });
+	it("serveurs du projet : service compose en cours = son conteneur, arrêté gardé ; autres en cours d'abord", async () => {
+		const found = await discoverDatabases({
+			cwd: root,
+			home,
+			env: {},
+			docker: dockerWith([OLD_PG, LAB_DB, OTHER_PG]),
+			portOpen: closed
+		});
 		expect(
-			found.servers.map((s) => [s.name, s.port, s.running, s.compose?.service])
+			found.projectServers.map((s) => [
+				s.name,
+				s.port,
+				s.running,
+				s.compose?.service
+			])
 		).toEqual([
 			["lab-db-1", 5440, true, "db"],
-			["mongo", 27018, false, "mongo"],
-			["other-pg", 5433, true, undefined]
+			["mongo", 27018, false, "mongo"]
 		]);
+		expect(found.servers.map((s) => [s.name, s.running])).toEqual([
+			["other-pg", true],
+			["old-pg", false]
+		]);
+	});
+
+	it("conteneur lancé depuis le projet (working_dir) : du projet, même sans compose lu", async () => {
+		const app = join(root, "backend");
+		const found = await discoverDatabases({
+			cwd: root,
+			home,
+			env: {},
+			docker: dockerWith([
+				{
+					...OLD_PG,
+					Name: "/app_postgres",
+					Config: {
+						...OLD_PG.Config,
+						Labels: {
+							"com.docker.compose.project": "backend",
+							"com.docker.compose.service": "postgres",
+							"com.docker.compose.project.working_dir": app
+						}
+					}
+				}
+			]),
+			portOpen: closed
+		});
+		expect(found.projectServers.map((s) => s.name)).toContain("app_postgres");
+		expect(found.servers).toEqual([]);
+	});
+
+	it("base du .env sur le port d'un conteneur arrêté : servie par lui, sauf si le port répond déjà", async () => {
+		writeFileSync(
+			join(root, ".env"),
+			"DATABASE_URL=postgres://u:p@localhost:5450/legacy\n"
+		);
+		const options = {
+			cwd: root,
+			home,
+			env: {},
+			docker: dockerWith([OLD_PG])
+		};
+		const stopped = await discoverDatabases({ ...options, portOpen: closed });
+		expect(stopped.databases[0]?.server).toMatchObject({
+			name: "old-pg",
+			running: false
+		});
+		const servedElsewhere = await discoverDatabases({
+			...options,
+			portOpen: async () => true
+		});
+		expect(servedElsewhere.databases[0]?.server).toBeUndefined();
 	});
 });
 

@@ -1,7 +1,8 @@
 /**
- * Choix d'une base découverte (ADR-038 S1, S2) : bases du projet courant,
- * serveurs Docker dont les bases se listent en direct, chaîne collée, saisie
- * guidée. Une base déjà configurée reste visible, grisée.
+ * Choix d'une base découverte (ADR-038 S1, S2) : bases et serveurs du projet
+ * courant, autres serveurs Docker dont les bases se listent en direct, chaîne
+ * collée, saisie guidée. Une base déjà configurée reste visible, grisée ; un
+ * serveur arrêté est démarré si l'utilisateur le veut.
  */
 
 import { relative } from "node:path";
@@ -46,8 +47,15 @@ export interface ChooseOptions {
 	readonly stdout: (line: string) => void;
 	/** Bases d'un serveur, lues en direct ; absent : nom de base demandé. */
 	readonly listDatabases?: (url: string) => Promise<readonly string[]>;
+	/** Démarre un serveur arrêté et attend que `url` réponde ; absent : jamais proposé. */
+	readonly startServer?: (
+		server: DiscoveredServer,
+		url: string
+	) => Promise<void>;
 	readonly manual: () => Promise<string>;
 }
+
+const YES_ANSWERS = new Set(["", "y", "yes", "o", "oui"]);
 
 const ENGINE_LABELS: Readonly<Record<DbEngine, string>> = {
 	postgres: "PostgreSQL",
@@ -60,7 +68,11 @@ export async function chooseDiscovered(
 	discovery: Discovery,
 	configured: ReadonlyMap<string, string>
 ): Promise<ConnectionTarget> {
-	if (discovery.databases.length === 0 && discovery.servers.length === 0) {
+	if (
+		discovery.databases.length === 0 &&
+		discovery.projectServers.length === 0 &&
+		discovery.servers.length === 0
+	) {
 		opts.stdout("Aucune base trouvée dans ce dossier ni dans Docker.");
 	}
 	const pick = await opts.prompter.select({
@@ -68,13 +80,16 @@ export async function chooseDiscovered(
 		choices: discoveryChoices(discovery, configured)
 	});
 	switch (pick.kind) {
-		case "database":
+		case "database": {
+			const { connection, server, urlFrom } = pick.database;
+			if (server !== undefined && !server.running) {
+				await ensureRunning(opts, server, connection.url);
+			}
 			return {
-				url: pick.database.connection.url,
-				...(pick.database.urlFrom !== undefined
-					? { urlFrom: pick.database.urlFrom }
-					: {})
+				url: connection.url,
+				...(urlFrom !== undefined ? { urlFrom } : {})
 			};
+		}
 		case "server":
 			return {
 				url: (await chooseServerDatabase(opts, pick.server, configured)).url
@@ -101,7 +116,11 @@ export function discoveryChoices(
 ): SelectEntry<DiscoveryPick>[] {
 	const root = discovery.root;
 	const entries: SelectEntry<DiscoveryPick>[] = [];
-	if (discovery.databases.length > 0 || discovery.unresolved.length > 0) {
+	if (
+		discovery.databases.length > 0 ||
+		discovery.projectServers.length > 0 ||
+		discovery.unresolved.length > 0
+	) {
 		entries.push({
 			separator: `── ${root !== undefined ? tildify(root) : "Projet"}`
 		});
@@ -114,23 +133,35 @@ export function discoveryChoices(
 					database.orm !== undefined
 						? `${ORM_LABELS[database.orm.orm]} · ${shortPath(database.orm.dir, root)}`
 						: "",
-					`${ENGINE_LABELS[c.engine]} · ${describeServerOf(c)}`
+					`${ENGINE_LABELS[c.engine]} · ${describeServerOf(c)}${stoppedMark(database.server)}`
 				]
 			};
 		});
+		// Bases et serveurs du projet partagent leur première colonne.
+		const nameWidth = Math.max(
+			0,
+			...rows.map((r) => (r.cells[0] as string).length),
+			...discovery.projectServers.map((s) => s.name.length)
+		);
 		const widths = columnWidths(rows.map((r) => r.cells));
+		widths[0] = nameWidth;
 		for (const { database, cells } of rows) {
 			const already = configured.get(connectionIdentity(database.connection));
+			const container =
+				database.server !== undefined
+					? ` · conteneur ${database.server.name}`
+					: "";
 			entries.push({
 				value: { kind: "database", database },
 				label: alignCells(cells, widths),
 				short: describeConnection(database.connection),
-				description: describeSource(database.source, root),
+				description: `${describeSource(database.source, root)}${container}`,
 				...(already !== undefined
 					? { disabled: `déjà configurée : ${already}` }
 					: {})
 			});
 		}
+		entries.push(...serverChoices(discovery.projectServers, nameWidth));
 		for (const { orm, reason } of discovery.unresolved) {
 			entries.push({
 				separator: `  ${ORM_LABELS[orm.orm]} · ${shortPath(orm.dir, root)} — ${reason}`
@@ -138,28 +169,10 @@ export function discoveryChoices(
 		}
 	}
 	if (discovery.servers.length > 0) {
-		entries.push({ separator: "── Docker" });
-		const rows = discovery.servers.map((server) => ({
-			server,
-			cells: [
-				server.name,
-				`${ENGINE_LABELS[server.engine]} · ${server.host}:${server.port}${
-					server.running ? "" : " (arrêté)"
-				}`
-			]
-		}));
-		const widths = columnWidths(rows.map((r) => r.cells));
-		for (const { server, cells } of rows) {
-			entries.push({
-				value: { kind: "server", server },
-				label: alignCells(cells, widths),
-				short: server.name,
-				description:
-					server.compose !== undefined
-						? `${server.image} · compose ${server.compose.project}/${server.compose.service}`
-						: server.image
-			});
-		}
+		entries.push(
+			{ separator: "── Docker" },
+			...serverChoices(discovery.servers)
+		);
 	}
 	entries.push(
 		{ separator: "──" },
@@ -171,6 +184,55 @@ export function discoveryChoices(
 		{ value: { kind: "manual" }, label: "Saisir à la main" }
 	);
 	return entries;
+}
+
+function serverChoices(
+	servers: readonly DiscoveredServer[],
+	nameWidth = 0
+): SelectEntry<DiscoveryPick>[] {
+	const rows = servers.map((server) => ({
+		server,
+		cells: [
+			server.name,
+			`${ENGINE_LABELS[server.engine]} · ${server.host}:${server.port}${stoppedMark(server)}`
+		]
+	}));
+	const widths = columnWidths(rows.map((r) => r.cells));
+	widths[0] = Math.max(widths[0] ?? 0, nameWidth);
+	return rows.map(({ server, cells }) => ({
+		value: { kind: "server", server },
+		label: alignCells(cells, widths),
+		short: server.name,
+		description:
+			server.compose !== undefined
+				? `${server.image} · compose ${server.compose.project}/${server.compose.service}`
+				: server.image
+	}));
+}
+
+function stoppedMark(server: DiscoveredServer | undefined): string {
+	return server !== undefined && !server.running ? " (arrêté)" : "";
+}
+
+/** Propose de démarrer un serveur arrêté ; un échec n'arrête pas l'ajout. */
+async function ensureRunning(
+	opts: ChooseOptions,
+	server: DiscoveredServer,
+	url: string
+): Promise<void> {
+	if (opts.startServer === undefined) return;
+	const answer = await opts.prompter.line(
+		`« ${server.name} » est arrêté. Le démarrer ? [Y/n] `
+	);
+	if (!YES_ANSWERS.has(answer.trim().toLowerCase())) return;
+	try {
+		await opts.startServer(server, url);
+		opts.stdout(`✓ ${server.name} démarré`);
+	} catch (err) {
+		opts.stdout(
+			`✗ Démarrage de ${server.name} impossible : ${describeFailure(err)}`
+		);
+	}
 }
 
 /** Base d'un serveur : listée en direct, sinon demandée. */
@@ -185,12 +247,16 @@ async function chooseServerDatabase(
 			: await opts.prompter.password(
 					`Mot de passe de ${server.user}@${server.host}:${server.port} : `
 				);
+	const maintenanceUrl = serverConnection(
+		server,
+		server.maintenanceDatabase,
+		password
+	).url;
+	if (!server.running) await ensureRunning(opts, server, maintenanceUrl);
 	let names: readonly string[] = [];
 	if (opts.listDatabases !== undefined) {
 		try {
-			names = await opts.listDatabases(
-				serverConnection(server, server.maintenanceDatabase, password).url
-			);
+			names = await opts.listDatabases(maintenanceUrl);
 		} catch (err) {
 			opts.stdout(
 				`✗ Bases de ${server.name} illisibles : ${describeFailure(err)}`

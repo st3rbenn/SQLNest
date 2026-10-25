@@ -5,8 +5,15 @@ import type { listConnections } from "../commands/list-connections";
 import type { logout } from "../commands/logout";
 import type { ping } from "../commands/ping";
 import type { revokeConnection } from "../commands/revoke-connection";
-import type { discoverDatabases } from "../services/discovery";
-import type { listServerDatabases, probeConnection } from "../services/engine";
+import type {
+	discoverDatabases,
+	startDockerServer
+} from "../services/discovery";
+import type {
+	listServerDatabases,
+	probeConnection,
+	waitForDatabase
+} from "../services/engine";
 import type { serveTunnel } from "../tunnel/serve";
 import type { Prompter } from "../ui/prompts";
 
@@ -26,6 +33,10 @@ export interface CliServices {
 	readonly discoverDatabases: typeof discoverDatabases;
 	/** Bases d'un serveur découvert, lues en direct. */
 	readonly listServerDatabases: typeof listServerDatabases;
+	/** Démarre un conteneur de base arrêté (ADR-038 S1). */
+	readonly startDockerServer: typeof startDockerServer;
+	/** Attend qu'un serveur qui démarre réponde. */
+	readonly waitForDatabase: typeof waitForDatabase;
 	/** Prompter d'une commande ; celui par défaut tient une readline à fermer. */
 	readonly prompter: () => Prompter;
 }

@@ -30,6 +30,7 @@ import type {
 	DiscoveredServer,
 	UnresolvedOrm
 } from "./types";
+import { workspaceDirs } from "./workspace";
 
 /** Fichiers lus, dans l'ordre où dotenv, Next ou Symfony les superposent. */
 export const ENV_FILES = [
@@ -55,7 +56,7 @@ const LARAVEL_ENGINES: Readonly<Record<string, DbEngine>> = {
 export interface ProjectDiscovery {
 	readonly root: string | undefined;
 	readonly databases: readonly DiscoveredDatabase[];
-	/** Services compose de bases, arrêtés ou non. */
+	/** Services compose de bases, comme décrits par leur fichier. */
 	readonly servers: readonly DiscoveredServer[];
 	readonly unresolved: readonly UnresolvedOrm[];
 }
@@ -102,18 +103,21 @@ export async function discoverProject(
 	if (scope === undefined) {
 		return { root: undefined, databases: [], servers: [], unresolved: [] };
 	}
+	// Un monorepo range ses applications dans des sous-dossiers : membres
+	// déclarés, dossiers à manifeste, puis ceux des services compose
+	// (contexte de build, montages).
+	const dirs = [...scope.dirs];
+	for (const dir of workspaceDirs(scope.root)) {
+		if (!dirs.includes(dir)) dirs.push(dir);
+	}
 	const composes = (
 		await Promise.all(
-			scope.dirs
+			dirs
 				.filter((d) => findComposeFile(d) !== undefined)
 				.map((d) => loadComposeProject(d, docker))
 		)
 	).filter((p): p is ComposeProject => p !== undefined);
 	const route = composeRouter(composes);
-
-	// Les dossiers des services compose (contexte de build, montages) sont des
-	// projets aussi : un monorepo y range ses applications.
-	const dirs = [...scope.dirs];
 	for (const service of composes.flatMap((p) => p.services)) {
 		for (const dir of service.dirs) {
 			if (isInside(dir, scope.root) && !dirs.includes(dir) && existsSync(dir)) {
@@ -386,7 +390,11 @@ function composeServers(
 					host: publishedHost(port.hostIp),
 					port: port.published as number,
 					running: false,
-					compose: { project: project.name, service: service.name }
+					compose: {
+						project: project.name,
+						service: service.name,
+						dir: dirname(project.file)
+					}
 				})
 			];
 		})
@@ -398,7 +406,7 @@ function sourceFile(d: DiscoveredDatabase): string {
 }
 
 /** `path` est `dir` ou l'un de ses sous-dossiers. */
-function isInside(path: string, dir: string): boolean {
+export function isInside(path: string, dir: string): boolean {
 	return (
 		path === dir || path.startsWith(dir.endsWith(sep) ? dir : `${dir}${sep}`)
 	);

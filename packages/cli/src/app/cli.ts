@@ -26,8 +26,12 @@ import { listConnections } from "../commands/list-connections";
 import { logout } from "../commands/logout";
 import { ping } from "../commands/ping";
 import { revokeConnection } from "../commands/revoke-connection";
-import { discoverDatabases } from "../services/discovery";
-import { listServerDatabases, probeConnection } from "../services/engine";
+import { discoverDatabases, startDockerServer } from "../services/discovery";
+import {
+	listServerDatabases,
+	probeConnection,
+	waitForDatabase
+} from "../services/engine";
 import { serveTunnel } from "../tunnel/serve";
 import { defaultPrompter, type Prompter } from "../ui/prompts";
 import { CLI_VERSION } from "./build-info";
@@ -67,6 +71,8 @@ function servicesFrom(io: CliIO): CliServices {
 		probeConnection,
 		discoverDatabases,
 		listServerDatabases,
+		startDockerServer,
+		waitForDatabase,
 		prompter: prompter !== undefined ? () => prompter : defaultPrompter,
 		...io.services
 	};

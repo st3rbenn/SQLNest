@@ -47,7 +47,7 @@ export function serverFromEnv(
 	env: Readonly<Record<string, string | undefined>>,
 	where: Pick<
 		DiscoveredServer,
-		"name" | "image" | "host" | "port" | "running" | "compose"
+		"name" | "image" | "host" | "port" | "running" | "container" | "compose"
 	>
 ): DiscoveredServer {
 	const value = (...keys: string[]): string | undefined => {

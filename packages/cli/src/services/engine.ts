@@ -122,6 +122,49 @@ export async function probeConnection(url: string): Promise<ConnectionProbe> {
 }
 
 const MONGO_SYSTEM_DATABASES = new Set(["admin", "config", "local"]);
+/** Erreurs d'un serveur qui démarre encore : on réessaie. */
+const STARTING_UP_RE =
+	/ECONNREFUSED|ECONNRESET|EPIPE|ETIMEDOUT|starting up|shutting down|57P03|socket|terminated|ESOCKET|ServerSelection|script upgrade/i;
+const STARTUP_POLL_MS = 500;
+
+/**
+ * Attend qu'un serveur qui vient de démarrer réponde (ADR-038 S1), au plus
+ * `timeoutMs`. Une erreur qui n'est pas celle d'un serveur en démarrage
+ * (identifiants refusés…) remonte tout de suite.
+ */
+export async function waitForDatabase(
+	url: string,
+	timeoutMs = 60_000
+): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	for (;;) {
+		try {
+			const conn = await engineConnect(resolveEngineConfigFromUrl(url));
+			try {
+				await conn.ping();
+				return;
+			} finally {
+				await conn.close();
+			}
+		} catch (err) {
+			if (!isStartingUp(err) || Date.now() >= deadline) throw err;
+			await new Promise((resolve) => setTimeout(resolve, STARTUP_POLL_MS));
+		}
+	}
+}
+
+function isStartingUp(err: unknown): boolean {
+	const messages: string[] = [];
+	const visit = (e: unknown, depth: number): void => {
+		if (!(e instanceof Error) || depth > 3) return;
+		messages.push(e.message, String((e as { code?: unknown }).code ?? ""));
+		visit((e as { cause?: unknown }).cause, depth + 1);
+		const inner = (e as { errors?: unknown }).errors;
+		if (Array.isArray(inner)) for (const i of inner) visit(i, depth + 1);
+	};
+	visit(err, 0);
+	return STARTING_UP_RE.test(messages.join(" "));
+}
 
 /**
  * Bases d'un serveur découvert, bases système exclues (ADR-038 S1). `url`

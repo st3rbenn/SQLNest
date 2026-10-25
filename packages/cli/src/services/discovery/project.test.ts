@@ -262,7 +262,7 @@ describe("discoverProject — docker compose", () => {
 				password: "lab",
 				defaultDatabase: "lab",
 				running: false,
-				compose: { project: "shop", service: "db" }
+				compose: { project: "shop", service: "db", dir: root }
 			})
 		]);
 	});
@@ -302,5 +302,71 @@ describe("discoverProject — docker compose", () => {
 		const found = await discoverProject(root, home, {}, noDocker);
 		expect(found.databases).toHaveLength(1);
 		expect(found.servers).toEqual([]);
+	});
+});
+
+describe("discoverProject — monorepo", () => {
+	it("lancé à la racine : l'application déclarée dans pnpm-workspace.yaml est lue", async () => {
+		write("package.json", "{}");
+		write("pnpm-workspace.yaml", "packages:\n  - backend\n  - frontend\n");
+		write("frontend/package.json", "{}");
+		write(
+			"backend/package.json",
+			JSON.stringify({ devDependencies: { prisma: "6" } })
+		);
+		write(
+			"backend/prisma/schema.prisma",
+			'datasource db {\n  provider = "postgresql"\n  url = env("DATABASE_URL")\n}'
+		);
+		write(
+			"backend/.env",
+			"DATABASE_URL=postgresql://postgres:root@localhost:5436/shop-db"
+		);
+		write("backend/docker-compose.yml", "services: {}\n");
+		const docker = composeRunner({
+			name: "backend",
+			services: {
+				postgres: {
+					image: "postgres:16-alpine",
+					container_name: "shop_postgres",
+					environment: { POSTGRES_USER: "postgres", POSTGRES_DB: "shop-db" },
+					ports: [{ target: 5432, published: "5432" }]
+				}
+			}
+		});
+		const found = await discoverProject(root, home, {}, docker);
+		expect(docker).toHaveBeenCalledWith(
+			["compose", "config", "--format", "json"],
+			join(root, "backend")
+		);
+		expect(found.databases).toEqual([
+			{
+				connection: expect.objectContaining({
+					port: 5436,
+					database: "shop-db"
+				}),
+				source: {
+					kind: "env-file",
+					file: join(root, "backend", ".env"),
+					key: "DATABASE_URL"
+				},
+				urlFrom: { file: join(root, "backend", ".env"), key: "DATABASE_URL" },
+				orm: expect.objectContaining({
+					orm: "prisma",
+					dir: join(root, "backend")
+				})
+			}
+		]);
+		expect(found.servers).toEqual([
+			expect.objectContaining({
+				name: "shop_postgres",
+				running: false,
+				compose: {
+					project: "backend",
+					service: "postgres",
+					dir: join(root, "backend")
+				}
+			})
+		]);
 	});
 });

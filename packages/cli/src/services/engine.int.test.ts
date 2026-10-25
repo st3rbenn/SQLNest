@@ -23,9 +23,11 @@ import {
 } from "vitest";
 import {
 	introspectTunnel,
+	listServerDatabases,
 	openConnectionForTunnel,
 	pingTunnel,
-	runSnqlOnTunnel
+	runSnqlOnTunnel,
+	waitForDatabase
 } from "./engine";
 
 const TEST_PG_URL =
@@ -123,3 +125,31 @@ describe.skipIf(!dockerAvailable)(
 		});
 	}
 );
+
+describe.skipIf(!dockerAvailable)("serveur découvert (ADR-038 S1)", () => {
+	test("listServerDatabases — bases du serveur, sans les modèles", async () => {
+		const names = await listServerDatabases(TEST_PG_URL);
+		expect(names).toContain("sqlnest_shop");
+		expect(names).not.toContain("template0");
+		expect(names).not.toContain("template1");
+	});
+
+	test("waitForDatabase — serveur prêt : rend la main tout de suite", async () => {
+		await waitForDatabase(TEST_PG_URL, 2000);
+	});
+
+	test("waitForDatabase — identifiants refusés : l'erreur remonte sans attendre", async () => {
+		const wrong = TEST_PG_URL.replace("sqlnest:sqlnest@", "sqlnest:wrong@");
+		const started = Date.now();
+		await expect(waitForDatabase(wrong, 20_000)).rejects.toThrow();
+		expect(Date.now() - started).toBeLessThan(5000);
+	});
+});
+
+test("waitForDatabase — port fermé : réessaie jusqu'au délai", async () => {
+	const started = Date.now();
+	await expect(
+		waitForDatabase("postgres://u:p@localhost:5999/x", 1500)
+	).rejects.toThrow();
+	expect(Date.now() - started).toBeGreaterThanOrEqual(1400);
+});
