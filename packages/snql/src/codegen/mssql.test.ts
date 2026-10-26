@@ -550,7 +550,7 @@ describe("codegen mssql — DDL (M/6)", () => {
 			}
 		});
 		expect(text).toBe(
-			`ALTER TABLE [dbo].[users] ADD [note] nvarchar(max) DEFAULT N'aucune' WITH VALUES`
+			`ALTER TABLE [dbo].[users] ADD [note] nvarchar(max) DEFAULT 'aucune' WITH VALUES`
 		);
 	});
 
@@ -853,7 +853,7 @@ describe("codegen mssql — DDL (M/6)", () => {
 			ifNotExists: false
 		});
 		expect(text).toBe(
-			`IF OBJECT_ID(N'[dbo].[_snql_enums]', N'U') IS NULL CREATE TABLE [dbo].[_snql_enums] ([name] nvarchar(128) NOT NULL PRIMARY KEY, [members] nvarchar(max) NOT NULL); INSERT INTO [dbo].[_snql_enums] ([name], [members]) VALUES (@p1, @p2)`
+			`IF OBJECT_ID(N'[dbo].[_snql_enums]', N'U') IS NULL CREATE TABLE [dbo].[_snql_enums] ([name] nvarchar(128) NOT NULL, [members] nvarchar(max) NOT NULL, CONSTRAINT [_snql_enums_pkey] PRIMARY KEY ([name])); INSERT INTO [dbo].[_snql_enums] ([name], [members]) VALUES (@p1, @p2)`
 		);
 		expect(params).toEqual(["statut", '["brouillon","publie"]']);
 	});
@@ -958,7 +958,7 @@ describe("codegen mssql — profil ORM (ADR-036 E/1e)", () => {
 				]
 			}).text
 		).toBe(
-			"CREATE TABLE [dbo].[agency] ([id] int NOT NULL, [code] nvarchar(450) NOT NULL CONSTRAINT [agency_code_key] UNIQUE, [tier] nvarchar(max) NOT NULL CONSTRAINT [agency_tier_df] DEFAULT N'free', CONSTRAINT [agency_pkey] PRIMARY KEY ([id]))"
+			"CREATE TABLE [dbo].[agency] ([id] int NOT NULL, [code] nvarchar(450) NOT NULL CONSTRAINT [agency_code_key] UNIQUE, [tier] nvarchar(max) NOT NULL CONSTRAINT [agency_tier_df] DEFAULT 'free', CONSTRAINT [agency_pkey] PRIMARY KEY ([id]))"
 		);
 	});
 
@@ -971,7 +971,22 @@ describe("codegen mssql — profil ORM (ADR-036 E/1e)", () => {
 				column: "tier",
 				action: { kind: "set-default", value: "pro", name: "agency_tier_df" }
 			}).text
-		).toContain("ADD CONSTRAINT [agency_tier_df] DEFAULT N'pro' FOR [tier];");
+		).toContain("ADD CONSTRAINT [agency_tier_df] DEFAULT 'pro' FOR [tier];");
+	});
+
+	it("défaut écrit comme un ORM le relit : N'…' hors ASCII seulement, bigint sans CAST", () => {
+		const setDefault = (value: string | bigint): string =>
+			ddlText({
+				op: "ddl",
+				kind: "alter-column",
+				target: "agency",
+				column: "tier",
+				action: { kind: "set-default", value, name: "agency_tier_df" }
+			}).text;
+		expect(setDefault("l'été")).toContain("DEFAULT N'l''été' FOR [tier];");
+		expect(setDefault(9007199254740993n)).toContain(
+			"DEFAULT 9007199254740993 FOR [tier];"
+		);
 	});
 
 	it("rename column : index, FK et défaut conventionnels renommés dans la même transaction", () => {

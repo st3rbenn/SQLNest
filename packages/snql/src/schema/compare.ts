@@ -64,6 +64,16 @@ export function ddlScope(plan: DDLPlan, before: SchemaModel): SchemaScope {
 					.map((c) => c.name),
 				enums: [plan.name]
 			};
+		case "alter-column":
+			return {
+				collections: [
+					...new Set([
+						plan.target,
+						...(plan.partners ?? []).map((p) => p.table)
+					])
+				],
+				enums: []
+			};
 		default:
 			return { collections: [plan.target], enums: [] };
 	}

@@ -797,6 +797,22 @@ describe("lower DDL — alter column (ADR-036 E/1c)", () => {
 		);
 	});
 
+	it("set type : les colonnes liées par FK suivent sous PG et MSSQL, pas sous Mongo", () => {
+		const uuidToUuid = "alter column agency.id set type uuid";
+		expect(lowerAlter(uuidToUuid)).toMatchObject({
+			partners: [{ table: "booking", column: "agency_id" }]
+		});
+		expect(
+			lowerAlter("alter column booking.agency_id set type uuid", {
+				...schema,
+				engine: "mssql"
+			})
+		).toMatchObject({ partners: [{ table: "agency", column: "id" }] });
+		expect(
+			lowerAlter(uuidToUuid, { ...schema, engine: "mongodb" })
+		).not.toHaveProperty("partners");
+	});
+
 	it("set default : littéral ou fonction, typé par la colonne (E/1d)", () => {
 		expect(lowerAlter('alter column agency.zip set default "75000"')).toMatchObject({
 			action: { kind: "set-default", value: "75000" }
@@ -1287,6 +1303,42 @@ describe("lower DDL — profil ORM prisma (ADR-036 E/1e)", () => {
 			uniqueName: "booking_manager_id_key",
 			ref: { name: "booking_manager_id_fkey" }
 		});
+	});
+
+	it("SQL Server : on update NO ACTION quand CASCADE ouvrirait un 2ᵉ chemin ou un cycle", () => {
+		const mssql = { ...schema, engine: "mssql" };
+		// booking.agency_id cascade déjà depuis agency.
+		expect(
+			lowerWith(
+				"add ref (referrer_id) references agency.id into booking",
+				prisma,
+				mssql
+			)
+		).toMatchObject({ ref: { onUpdate: "restrict" } });
+		expect(
+			lowerWith(
+				"add ref (referrer_id) references agency.id into booking",
+				prisma,
+				schema
+			)
+		).toMatchObject({ ref: { onUpdate: "cascade" } });
+		const pair = lowerWith(
+			"create table tag { id: int, owner_id: uuid ref agency.id, backup_id: uuid nullable ref agency.id, parent_id: int nullable ref self.id, primary key (id) }",
+			prisma,
+			mssql
+		) as CreateTablePlan;
+		const onUpdate = new Map(pair.fields.map((f) => [f.name, f.ref?.onUpdate]));
+		expect(onUpdate.get("owner_id")).toBe("cascade");
+		expect(onUpdate.get("backup_id")).toBe("restrict");
+		expect(onUpdate.get("parent_id")).toBe("restrict");
+		// Une action écrite reste celle du SNQL.
+		expect(
+			lowerWith(
+				"add ref (referrer_id) references agency.id on update cascade into booking",
+				prisma,
+				mssql
+			)
+		).toMatchObject({ ref: { onUpdate: "cascade" } });
 	});
 
 	it("add index : `_idx` / `_key`, nom explicite gardé", () => {

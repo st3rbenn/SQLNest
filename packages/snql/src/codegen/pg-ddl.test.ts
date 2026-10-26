@@ -660,6 +660,21 @@ describe("codegen PG — alter column (ADR-036 E/1c)", () => {
 		expect(q.text).toContain(`TYPE "TIER" USING "zip"::"TIER"`);
 	});
 
+	it("set type : les colonnes liées par FK prennent le type dans la même transaction", () => {
+		const q = mapDDL({
+			...base,
+			action: { kind: "set-type", type: "bigint" },
+			partners: [{ table: "booking", column: "agency_zip" }]
+		});
+		if (q.kind !== "transaction") throw new Error("attendu transaction");
+		expect(
+			q.steps.map((s) => (s.kind === "statement" ? s.query.text : ""))
+		).toEqual([
+			`ALTER TABLE "agency" ALTER COLUMN "zip" TYPE bigint USING "zip"::bigint`,
+			`ALTER TABLE "booking" ALTER COLUMN "agency_zip" TYPE bigint USING "agency_zip"::bigint`
+		]);
+	});
+
 	it("set type avec un défaut : retiré puis reposé converti", () => {
 		const q = mapDDL({
 			...base,
@@ -669,6 +684,11 @@ describe("codegen PG — alter column (ADR-036 E/1c)", () => {
 		if (q.kind !== "sql") throw new Error("attendu sql");
 		expect(q.text).toContain("DO $$");
 		expect(q.text).toContain(`EXECUTE 'ALTER TABLE "agency" ALTER COLUMN "zip" DROP DEFAULT';`);
+		// Constant : reposé en littéral du nouveau type ; sinon converti par un cast.
+		expect(q.text).toContain(
+			`EXECUTE format('SELECT ((%s)::integer)::text', d) INTO v;`
+		);
+		expect(q.text).toContain(`SET DEFAULT %L::integer', v)`);
 		expect(q.text).toContain(`SET DEFAULT (%s)::integer', d)`);
 	});
 });
@@ -686,6 +706,17 @@ describe("codegen PG — défauts (ADR-036 E/1d)", () => {
 		expect(set.text).toBe(`ALTER TABLE "agency" ALTER COLUMN "zip" SET DEFAULT '75000'`);
 		expect(fn.text).toBe(`ALTER TABLE "agency" ALTER COLUMN "zip" SET DEFAULT gen_random_uuid()`);
 		expect(drop.text).toBe(`ALTER TABLE "agency" ALTER COLUMN "zip" DROP DEFAULT`);
+	});
+
+	it("bigint : littéral sans cast, relu comme une valeur", () => {
+		const q = mapDDL({
+			...base,
+			action: { kind: "set-default", value: 9007199254740993n }
+		});
+		if (q.kind !== "sql") throw new Error("attendu sql");
+		expect(q.text).toBe(
+			`ALTER TABLE "agency" ALTER COLUMN "zip" SET DEFAULT 9007199254740993`
+		);
 	});
 });
 

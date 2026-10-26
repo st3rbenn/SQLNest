@@ -166,13 +166,29 @@ export function applyDdlToSchema(
 		}
 		case "rename-column":
 			return renameColumn(schema, plan);
-		case "alter-column":
-			return updateCollection(schema, plan.target, (c) => ({
-				...c,
-				fields: c.fields.map((f) =>
-					f.name === plan.column ? alterField(f, plan.action) : f
-				)
-			}));
+		case "alter-column": {
+			// `set type` emmène les colonnes liées par FK (PG, MSSQL).
+			const columns = [
+				{ table: plan.target, column: plan.column },
+				...(plan.partners ?? [])
+			];
+			return {
+				...schema,
+				collections: schema.collections.map((c) => {
+					const touched = columns
+						.filter((t) => t.table === c.name)
+						.map((t) => t.column);
+					return touched.length === 0
+						? c
+						: {
+								...c,
+								fields: c.fields.map((f) =>
+									touched.includes(f.name) ? alterField(f, plan.action) : f
+								)
+							};
+				})
+			};
+		}
 	}
 }
 

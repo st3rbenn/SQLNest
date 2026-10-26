@@ -626,7 +626,9 @@ function pgRefClause(ref: import("../ir/plan").FieldRefPlan): string {
  *  - string : `'…'` avec `E'…'` si backslash présent (escape strings), doublement
  *    des simple quotes internes.
  *  - number : text brut (raw safe car number JS).
- *  - bigint : `123::bigint` (préserve la précision > 2^53).
+ *  - bigint : texte brut, que PG lit en int8 au-delà de 2^31. Un cast
+ *    `::bigint` resterait écrit dans le défaut (`(5)::bigint`), qu'un ORM ne
+ *    relit pas comme une valeur.
  *  - SqlDecimal : `123.456::numeric` (précision arbitraire).
  *  - boolean : `TRUE` / `FALSE`.
  *  - null : `NULL`.
@@ -639,7 +641,7 @@ function pgInlineDefault(value: DdlDefault): string {
 		return `'${escaped}'`;
 	}
 	if (typeof value === "number") return String(value);
-	if (typeof value === "bigint") return `${value.toString()}::bigint`;
+	if (typeof value === "bigint") return value.toString();
 	if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
 	if (isSqlDecimal(value)) return `${value.raw}::numeric`;
 	if (isSqlJsonLiteral(value)) {
@@ -800,13 +802,18 @@ function renderDropIndex(plan: DropIndexPlan): NativeQuery {
 /**
  * `alter column` (ADR-036 E/1c). PG reconstruit index et contraintes. Un
  * défaut existant n'est pas converti par `USING` : quand le schéma en signale
- * un, il est retiré, puis reposé converti vers le nouveau type.
+ * un, il est retiré, puis reposé converti vers le nouveau type. Un défaut
+ * constant (sans fonction autre qu'immuable) est reposé en littéral du
+ * nouveau type, comme un `DEFAULT` écrit à la main : un cast laissé dans le
+ * défaut (`(0)::bigint`) n'est pas relu comme une valeur par un ORM. Les
+ * colonnes liées par FK (`partners`) prennent le type dans la même
+ * transaction.
  */
 function renderAlterColumn(plan: import("../ir/plan").AlterColumnPlan): NativeQuery {
 	const table = quoteIdent(plan.target);
 	const column = quoteIdent(plan.column);
 	const head = `ALTER TABLE ${table} ALTER COLUMN ${column}`;
-	const sql = (text: string): NativeQuery => ({
+	const sql = (text: string): SqlQuery => ({
 		engine: "postgres",
 		kind: "sql",
 		text,
@@ -825,19 +832,49 @@ function renderAlterColumn(plan: import("../ir/plan").AlterColumnPlan): NativeQu
 			? quoteIdent(action.enumTypeName)
 			: PG_DDL_TYPE[action.type];
 	const alter = `${head} TYPE ${type} USING ${column}::${type}`;
-	if (plan.current?.hasDefault !== true) return sql(alter);
-	return sql(
-		[
-			"DO $$",
-			"DECLARE d text;",
-			"BEGIN",
-			`SELECT pg_get_expr(ad.adbin, ad.adrelid) INTO d FROM pg_attrdef ad JOIN pg_attribute a ON a.attrelid = ad.adrelid AND a.attnum = ad.adnum WHERE ad.adrelid = '${table}'::regclass AND a.attname = '${plan.column}';`,
-			`EXECUTE '${head} DROP DEFAULT';`,
-			`EXECUTE '${alter}';`,
-			`IF d IS NOT NULL THEN EXECUTE format('${head} SET DEFAULT (%s)::${type}', d); END IF;`,
-			"END $$"
-		].join("\n")
+	const main =
+		plan.current?.hasDefault !== true
+			? sql(alter)
+			: sql(alterWithDefault(head, alter, table, plan.column, type));
+	const partners = (plan.partners ?? []).map((p) =>
+		sql(
+			`ALTER TABLE ${quoteIdent(p.table)} ALTER COLUMN ${quoteIdent(p.column)} TYPE ${type} USING ${quoteIdent(p.column)}::${type}`
+		)
 	);
+	if (partners.length === 0) return main;
+	return {
+		engine: "postgres",
+		kind: "transaction",
+		steps: [main, ...partners].map((query) => ({
+			kind: "statement" as const,
+			query
+		}))
+	};
+}
+
+/** `ALTER … TYPE` d'une colonne qui a un défaut, retiré puis reposé converti. */
+function alterWithDefault(
+	head: string,
+	alter: string,
+	table: string,
+	column: string,
+	type: string
+): string {
+	return [
+		"DO $$",
+		"DECLARE d text; fixed boolean; v text;",
+		"BEGIN",
+		`SELECT pg_get_expr(ad.adbin, ad.adrelid), NOT EXISTS (SELECT 1 FROM pg_depend dep JOIN pg_proc p ON p.oid = dep.refobjid WHERE dep.classid = 'pg_attrdef'::regclass AND dep.objid = ad.oid AND dep.refclassid = 'pg_proc'::regclass AND p.provolatile <> 'i') INTO d, fixed FROM pg_attrdef ad JOIN pg_attribute a ON a.attrelid = ad.adrelid AND a.attnum = ad.adnum WHERE ad.adrelid = '${table}'::regclass AND a.attname = '${column}';`,
+		`EXECUTE '${head} DROP DEFAULT';`,
+		`EXECUTE '${alter}';`,
+		"IF d IS NOT NULL AND fixed THEN",
+		`EXECUTE format('SELECT ((%s)::${type})::text', d) INTO v;`,
+		`EXECUTE format('${head} SET DEFAULT %L::${type}', v);`,
+		"ELSIF d IS NOT NULL THEN",
+		`EXECUTE format('${head} SET DEFAULT (%s)::${type}', d);`,
+		"END IF;",
+		"END $$"
+	].join("\n");
 }
 
 /** `add ref` → contrainte de table : PG valide les lignes existantes et

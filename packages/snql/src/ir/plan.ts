@@ -879,6 +879,15 @@ export interface AlterColumnPlan {
 		readonly nullable: boolean;
 		readonly hasDefault: boolean;
 	};
+	/**
+	 * `set type` sous PG / MSSQL : colonnes liées à celle-ci par une FK,
+	 * d'après le schéma. Elles prennent le même type, que SQL Server et les
+	 * ORM exigent identique des deux côtés.
+	 */
+	readonly partners?: readonly {
+		readonly table: string;
+		readonly column: string;
+	}[];
 	readonly span?: Span;
 }
 

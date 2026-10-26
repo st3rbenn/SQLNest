@@ -137,23 +137,32 @@ export {
 	lowerRaw,
 	lowerTransaction
 } from "./ir/lower";
-export { type DdlLowerOptions, lowerDDL } from "./ir/lower-ddl";
+export {
+	type DdlLowerOptions,
+	lowerDDL,
+	prismaConventionalName
+} from "./ir/lower-ddl";
 export type {
 	AddColumnPlan,
+	AddEnumMemberPlan,
 	AddIndexPlan,
 	AddRefPlan,
 	AlterColumnPlan,
 	AlterColumnPlanAction,
 	Capability,
 	CompareOp,
+	CreateEnumPlan,
 	CreateTableField,
 	CreateTablePlan,
+	DdlDefault,
 	DdlObjectRename,
 	DDLPlan,
 	DropColumnPlan,
+	DropEnumPlan,
 	DropIndexPlan,
 	DropRefPlan,
 	DropTablePlan,
+	FieldRefPlan,
 	IntrospectPlan,
 	LogicalPlan,
 	MutationPlan,

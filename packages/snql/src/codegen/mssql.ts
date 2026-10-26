@@ -841,6 +841,13 @@ const MSSQL_DDL_TYPE: Readonly<Record<import("../schema/model").SnqlType, string
 	unknown: "nvarchar(max)"
 };
 
+const PRINTABLE_ASCII_RE = /^[\x20-\x7e]*$/;
+
+function mssqlTextLiteral(value: string): string {
+	const escaped = value.replace(/'/g, "''");
+	return PRINTABLE_ASCII_RE.test(value) ? `'${escaped}'` : `N'${escaped}'`;
+}
+
 /** Taille maximale d'une clé d'index clustered, et de toute clé avant 2016. */
 const MSSQL_INDEX_KEY_BYTES = 900;
 
@@ -860,17 +867,20 @@ function mssqlFieldTypeSql(
 /**
  * Littéral T-SQL inline pour un default DDL — T-SQL refuse un paramètre
  * dans une contrainte DEFAULT (même famille que le 08P01 PG, pattern
- * pg-ddl-inline-defaults). Escape : doubling des quotes, préfixe N
- * (unicode) ; PAS d'escape backslash (T-SQL ne le traite pas).
+ * pg-ddl-inline-defaults). Escape : doubling des quotes ; PAS d'escape
+ * backslash (T-SQL ne le traite pas). Le défaut s'écrit comme l'écrirait un
+ * ORM, qui le relit ensuite comme une valeur : texte ASCII sans préfixe `N`
+ * (Prisma relit `(N'x')` comme la chaîne `N'x'`), `N'…'` au-delà pour garder
+ * l'unicode ; bigint sans `CAST`.
  */
 function mssqlInlineDefault(value: import("../ir/plan").DdlDefault): string {
 	if (value === null) return "NULL";
-	if (typeof value === "string") return `N'${value.replace(/'/g, "''")}'`;
+	if (typeof value === "string") return mssqlTextLiteral(value);
 	if (typeof value === "number") return String(value);
-	if (typeof value === "bigint") return `CAST(${value.toString()} AS bigint)`;
+	if (typeof value === "bigint") return value.toString();
 	if (typeof value === "boolean") return value ? "1" : "0";
 	if (isSqlDecimal(value)) return value.raw;
-	if (isSqlJsonLiteral(value)) return `N'${value.raw.replace(/'/g, "''")}'`;
+	if (isSqlJsonLiteral(value)) return mssqlTextLiteral(value.raw);
 	// `date` est un datetimeoffset côté MSSQL : SYSDATETIMEOFFSET, pas SYSUTCDATETIME.
 	if (isDdlDefaultFn(value)) {
 		return value.fn === "now" ? "SYSDATETIMEOFFSET()" : "NEWID()";
@@ -1463,10 +1473,11 @@ function enumsMetaTable(namespace: string): string {
 	return `${quoteIdent(namespace)}.[_snql_enums]`;
 }
 
+/** Clé nommée comme Prisma la nommerait : un modèle peut déclarer la table sans `map:`. */
 function ensureEnumsTableSql(namespace: string): string {
 	return (
 		`IF OBJECT_ID(${nstr(`${quoteIdent(namespace)}.[_snql_enums]`)}, N'U') IS NULL ` +
-		`CREATE TABLE ${enumsMetaTable(namespace)} ([name] nvarchar(128) NOT NULL PRIMARY KEY, [members] nvarchar(max) NOT NULL)`
+		`CREATE TABLE ${enumsMetaTable(namespace)} ([name] nvarchar(128) NOT NULL, [members] nvarchar(max) NOT NULL, CONSTRAINT [_snql_enums_pkey] PRIMARY KEY ([name]))`
 	);
 }
 

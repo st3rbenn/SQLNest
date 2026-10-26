@@ -184,6 +184,16 @@ describe("applyDdlToSchema", () => {
 		});
 	});
 
+	it("set type : les colonnes liées par FK suivent", () => {
+		let next = apply(
+			BASE,
+			"create table orders { id: int, user_id: int ref users.id, primary key (id) }"
+		);
+		next = apply(next, "alter column users.id set type bigint");
+		expect(table(next, "users")?.fields[0]?.type).toBe("bigint");
+		expect(table(next, "orders")?.fields[1]?.type).toBe("bigint");
+	});
+
 	it("enums : valeur ajoutée suivie par ses colonnes ; drop cascade retire les colonnes", () => {
 		let next = apply(BASE, "add column plan tier nullable into users");
 		next = apply(next, 'add enum member tier "team"');

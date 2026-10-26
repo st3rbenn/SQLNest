@@ -25,7 +25,13 @@ import type {
 } from "../parser/ast";
 import type { Span } from "../lexer/token";
 import { DDL_DEFAULT_FUNCTIONS } from "../parser/parser";
-import type { OnUpdateRule, SchemaModel, SnqlType } from "../schema/model";
+import type {
+	OnDeleteRule,
+	OnUpdateRule,
+	RefDef,
+	SchemaModel,
+	SnqlType
+} from "../schema/model";
 import type {
 	AddColumnPlan,
 	AddEnumMemberPlan,
@@ -98,6 +104,29 @@ function prismaName(
 ): string {
 	const base = [table, ...columns].join("_");
 	return `${base.slice(0, naming.maxLength - suffix.length - 1)}_${suffix}`;
+}
+
+/**
+ * Nom que Prisma donne lui-même à une clé (`pkey`), une contrainte d'unicité
+ * (`key`), un index (`idx`), une FK (`fkey`) ou un défaut SQL Server (`df`) :
+ * celui du profil `prisma` (ADR-036 D6). Le modèle n'écrit `map:` que pour
+ * un nom qui s'en écarte.
+ */
+export function prismaConventionalName(
+	engine: string,
+	table: string,
+	columns: readonly string[],
+	suffix: "pkey" | "key" | "idx" | "fkey" | "df"
+): string {
+	return prismaName(
+		ddlNaming(
+			{ ormProfile: "prisma" },
+			{ engine, collections: [], relations: [] }
+		),
+		table,
+		columns,
+		suffix
+	);
 }
 
 /** Nom imposé par le profil ; `undefined` = le moteur nomme l'objet. */
@@ -571,6 +600,7 @@ function lowerCreateTable(
 		type: r.type
 	}));
 	// Pass 2 : construit les CreateTableField + attache defaults + refs.
+	const pending: CascadeEdge[] = [];
 	const fields: CreateTableField[] = resolvedFields.map(
 		({ f, type, resolved, nullable }) => {
 			const unique = f.unique ?? false;
@@ -584,9 +614,13 @@ function lowerCreateTable(
 							nullable,
 							schema,
 							currentFieldTypes,
-							naming
+							naming,
+							pending
 						)
 					: undefined;
+			if (ref !== undefined && cascades(ref)) {
+				pending.push({ from: ref.targetCollection, to: stmt.target });
+			}
 			const base: CreateTableField = {
 				name: f.name,
 				type,
@@ -889,6 +923,9 @@ function conventionalRenames(
  * compatible avec chaque FK qui part de la colonne ou y arrive (sinon le
  * moteur refuserait la FK, ou Mongo la casserait en silence).
  */
+/** Moteurs où une FK lie aussi les types : `set type` emmène la colonne partenaire. */
+const FK_TYPED_ENGINES = new Set(["postgres", "mssql"]);
+
 function lowerAlterColumn(
 	stmt: AlterColumnStmt,
 	schema: SchemaModel | undefined,
@@ -975,6 +1012,7 @@ function lowerAlterColumn(
 		schema,
 		stmt.action.typeSpan
 	);
+	const partners: { table: string; column: string }[] = [];
 	for (const ref of schema?.refs ?? []) {
 		const outgoing = ref.fromCollection === stmt.target && ref.fromColumn === stmt.column;
 		const incoming = ref.toCollection === stmt.target && ref.toColumn === stmt.column;
@@ -982,6 +1020,13 @@ function lowerAlterColumn(
 		const other = outgoing
 			? { table: ref.toCollection, column: ref.toColumn }
 			: { table: ref.fromCollection, column: ref.fromColumn };
+		const same = other.table === stmt.target && other.column === stmt.column;
+		const listed = partners.some(
+			(p) => p.table === other.table && p.column === other.column
+		);
+		if (!same && !listed && FK_TYPED_ENGINES.has(schema?.engine ?? "")) {
+			partners.push(other);
+		}
 		const otherType = schema?.collections
 			.find((c) => c.name === other.table)
 			?.fields.find((f) => f.name === other.column)?.type;
@@ -1009,6 +1054,7 @@ function lowerAlterColumn(
 				: {})
 		},
 		...(current !== undefined ? { current } : {}),
+		...(partners.length > 0 ? { partners } : {}),
 		...(stmt.span !== undefined ? { span: stmt.span } : {})
 	};
 }
@@ -1021,7 +1067,8 @@ function resolveFieldRef(
 	fromNullable: boolean,
 	schema: SchemaModel | undefined,
 	currentFields: readonly { name: string; type: SnqlType }[],
-	naming: DdlNaming
+	naming: DdlNaming,
+	pending: readonly CascadeEdge[] = []
 ): import("./plan").FieldRefPlan {
 	const targetCollection =
 		mod.targetCollection === "self" ? fromCollection : mod.targetCollection;
@@ -1030,7 +1077,15 @@ function resolveFieldRef(
 	if (mod.name !== undefined) assertIdent(mod.name, "field");
 
 	const onDelete = mod.onDelete ?? "restrict";
-	const onUpdate = mod.onUpdate ?? naming.onUpdate;
+	const onUpdate =
+		mod.onUpdate ??
+		defaultOnUpdate(
+			naming,
+			schema,
+			{ from: targetCollection, to: fromCollection },
+			onDelete,
+			pending
+		);
 
 	const setNullOn =
 		onDelete === "set-null"
@@ -1105,6 +1160,83 @@ function resolveFieldRef(
 		onDelete,
 		onUpdate
 	};
+}
+
+/** FK vue comme un chemin de cascade : de la table référencée vers celle qui la porte. */
+interface CascadeEdge {
+	readonly from: string;
+	readonly to: string;
+}
+
+/** Une FK compte comme cascade dès qu'une de ses actions n'est pas NO ACTION. */
+function cascades(ref: {
+	readonly onDelete: OnDeleteRule;
+	readonly onUpdate: OnUpdateRule;
+}): boolean {
+	return ref.onDelete !== "restrict" || ref.onUpdate !== "restrict";
+}
+
+/**
+ * `on update` d'une FK sans action écrite. Sous SQL Server, une FK en cascade
+ * ne doit ni boucler ni ouvrir un 2ᵉ chemin de cascade vers une table : le
+ * moteur (1785) et Prisma la refusent. Le profil `prisma` y garde alors
+ * NO ACTION, ce que Prisma demande d'écrire sur l'une des relations.
+ */
+function defaultOnUpdate(
+	naming: DdlNaming,
+	schema: SchemaModel | undefined,
+	edge: CascadeEdge,
+	onDelete: OnDeleteRule,
+	pending: readonly CascadeEdge[]
+): OnUpdateRule {
+	if (
+		naming.onUpdate === "restrict" ||
+		schema?.engine !== "mssql" ||
+		onDelete !== "restrict"
+	) {
+		return naming.onUpdate;
+	}
+	const edges = [
+		...(schema.refs ?? [])
+			.filter(cascades)
+			.map((r: RefDef) => ({ from: r.toCollection, to: r.fromCollection })),
+		...pending
+	];
+	return cascadeConflict(edges, edge) ? "restrict" : naming.onUpdate;
+}
+
+/**
+ * La FK `edge` fermerait un cycle, ou ouvrirait un 2ᵉ chemin de cascade d'une
+ * table vers une autre : une table qui atteint déjà sa cible atteint aussi,
+ * sans elle, la table qui la porte ou l'une de ses suivantes.
+ */
+function cascadeConflict(
+	edges: readonly CascadeEdge[],
+	edge: CascadeEdge
+): boolean {
+	const next = new Map<string, string[]>();
+	for (const e of edges) next.set(e.from, [...(next.get(e.from) ?? []), e.to]);
+	const reach = (table: string): Set<string> => {
+		const seen = new Set<string>();
+		const queue = [...(next.get(table) ?? [])];
+		while (queue.length > 0) {
+			const t = queue.shift() as string;
+			if (seen.has(t)) continue;
+			seen.add(t);
+			queue.push(...(next.get(t) ?? []));
+		}
+		return seen;
+	};
+	const after = reach(edge.to);
+	if (edge.from === edge.to || after.has(edge.from)) return true;
+	const below = new Set([edge.to, ...after]);
+	const tables = new Set([...next.keys(), edge.from]);
+	for (const table of tables) {
+		const reached = reach(table);
+		if (table !== edge.from && !reached.has(edge.from)) continue;
+		for (const t of reached) if (below.has(t)) return true;
+	}
+	return false;
 }
 
 /**
