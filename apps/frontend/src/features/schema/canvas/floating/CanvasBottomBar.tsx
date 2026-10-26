@@ -1,15 +1,31 @@
+import { useMemo } from "react";
 import { CanvasToolbar } from "../../CanvasToolbar";
+import { shouldOfferInference } from "../../relation-inference/candidates";
 import { AutoLayoutModal } from "../AutoLayoutModal";
-import { useCanvasActionsCtx, useCanvasUI } from "../CanvasContext";
+import {
+	useCanvasActionsCtx,
+	useCanvasData,
+	useCanvasUI
+} from "../CanvasContext";
 
 /**
  * Barre du bas : toolbar canvas (Select/Frame/Console + Auto-layout
  * button) + modal de confirmation Auto-layout.
  */
 export function CanvasBottomBar() {
-	const { activeTool, setActiveTool, layoutConfirmOpen, setLayoutConfirmOpen } =
-		useCanvasUI();
+	const { schema } = useCanvasData();
+	const {
+		activeTool,
+		setActiveTool,
+		layoutConfirmOpen,
+		setLayoutConfirmOpen,
+		inferencePanelOpen,
+		setInferencePanelOpen
+	} = useCanvasUI();
 	const { relayoutAll, createConsole } = useCanvasActionsCtx();
+	// Le bouton d'inférence n'apparaît que sur une base sans relation où des
+	// candidats existent — sinon il n'y a rien à inférer.
+	const canInfer = useMemo(() => shouldOfferInference(schema), [schema]);
 	return (
 		<>
 			<CanvasToolbar
@@ -18,6 +34,10 @@ export function CanvasBottomBar() {
 				bottomOffset={0}
 				activeTool={activeTool}
 				onSelectTool={setActiveTool}
+				{...(canInfer
+					? { onToggleInference: () => setInferencePanelOpen((v) => !v) }
+					: {})}
+				inferenceActive={inferencePanelOpen}
 			/>
 			<AutoLayoutModal
 				opened={layoutConfirmOpen}

@@ -1,6 +1,7 @@
 import { Box } from "@mantine/core";
 import { SelectionChip, Spotlight } from "@sqlnest/design-system";
 import { CanvasContextMenu } from "../../CanvasContextMenu";
+import { RelationInferenceLayer } from "../../relation-inference/RelationInferenceLayer";
 import {
 	useCanvasActionsCtx,
 	useCanvasData,
@@ -101,6 +102,8 @@ export function CanvasOverlays() {
 				highlightQuery
 				shortcut={null}
 			/>
+
+			<RelationInferenceLayer />
 		</>
 	);
 }

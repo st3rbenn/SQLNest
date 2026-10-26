@@ -440,6 +440,10 @@ function CanvasInner({
 	// la table matching, pour aider à la repérer sans cliquer.
 	const [hoveredTableName, setHoveredTableName] = useState<string | null>(null);
 
+	// Panneau d'inférence de relations (base sans FK). État remonté ici pour
+	// être piloté à la fois par la bannière d'arrivée et le bouton toolbar.
+	const [inferencePanelOpen, setInferencePanelOpen] = useState(false);
+
 	// Nœuds table affichés : positions vivantes (drag) + drapeaux focus + masqués.
 	// Injecte aussi le callback `onResizeEnd` — TableNode s'en sert pour le
 	// NodeResizer 4 côtés. Absent = pas de handles (utile aux tests / rendus
@@ -935,7 +939,9 @@ function CanvasInner({
 			selectedTables,
 			clearSelection,
 			hoveredTableName,
-			setHoveredTableName
+			setHoveredTableName,
+			inferencePanelOpen,
+			setInferencePanelOpen
 		}),
 		[
 			search,
@@ -949,7 +955,8 @@ function CanvasInner({
 			setLayoutConfirmOpen,
 			selectedTables,
 			clearSelection,
-			hoveredTableName
+			hoveredTableName,
+			inferencePanelOpen
 		]
 	);
 	const actionsCtxValue = useMemo(

@@ -98,6 +98,12 @@ export interface CanvasUIContextValue {
 	 *  survolé. */
 	readonly hoveredTableName: string | null;
 	readonly setHoveredTableName: (name: string | null) => void;
+	/** Panneau d'inférence de relations ouvert ? (base sans FK — LR). Piloté
+	 *  à la fois par la bannière d'arrivée et le bouton de la toolbar. */
+	readonly inferencePanelOpen: boolean;
+	readonly setInferencePanelOpen: (
+		v: boolean | ((prev: boolean) => boolean)
+	) => void;
 }
 
 // ─── 4. Actions — callbacks bindés (stables) ───────────────────────────

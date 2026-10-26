@@ -8,6 +8,7 @@ import {
 	IconArrowsShuffle,
 	IconDeviceFloppy,
 	IconDownload,
+	IconLink,
 	IconMessage,
 	IconMoon,
 	IconPointer,
@@ -40,6 +41,11 @@ interface Props {
 	readonly onSelectTool: (tool: CanvasTool) => void;
 	/** T5 : crée un node console SNQL au centre du viewport courant. */
 	readonly onCreateConsole?: () => void;
+	/** Bascule le panneau d'inférence de relations. Absent (base avec FK) →
+	 * le bouton n'est pas rendu (rien à inférer). */
+	readonly onToggleInference?: () => void;
+	/** Panneau d'inférence ouvert → bouton en état actif. */
+	readonly inferenceActive?: boolean;
 }
 
 const ICON = { size: 18, stroke: 1.8 } as const;
@@ -50,7 +56,9 @@ export function CanvasToolbar({
 	bottomOffset = 0,
 	activeTool,
 	onSelectTool,
-	onCreateConsole
+	onCreateConsole,
+	onToggleInference,
+	inferenceActive = false
 }: Props) {
 	// Le tool « comment » reste local — pas d'implémentation côté canvas
 	// donc pas la peine de le remonter. Basculer sur select/frame quitte
@@ -114,6 +122,15 @@ export function CanvasToolbar({
 				>
 					<IconArrowsShuffle {...ICON} />
 				</ToolbarButton>
+				{onToggleInference ? (
+					<ToolbarButton
+						label="Inférer les liens"
+						active={inferenceActive}
+						onClick={onToggleInference}
+					>
+						<IconLink {...ICON} />
+					</ToolbarButton>
+				) : null}
 				<ToolbarButton
 					label="IA (bientôt)"
 					statusDot="warning"
