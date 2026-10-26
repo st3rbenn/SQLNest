@@ -1,6 +1,6 @@
 import { Decimal128, Double, Long, UUID } from "mongodb";
 import { describe, expect, it } from "vitest";
-import { pipelineWithUuidForms, withUuidForms } from "./adapter";
+import { pipelineWithStoredForms, withStoredForms } from "./adapter";
 import {
 	convertValue,
 	declaredPipeline,
@@ -190,9 +190,9 @@ describe("documents, updates et pipelines d'écriture", () => {
 	});
 });
 
-describe("withUuidForms — un uuid texte matche aussi sa forme binaire", () => {
+describe("withStoredForms — un littéral matche ses formes stockées", () => {
 	it("égalité, `$nin` de `!=`, `$in`, `$and` ; `_id`, `$expr`, dates et sous-documents gardés", () => {
-		const out = withUuidForms({
+		const out = withStoredForms({
 			u: U1,
 			v: { $nin: [U1, null] },
 			$and: [{ w: { $in: ["a", U1] } }],
@@ -213,7 +213,7 @@ describe("withUuidForms — un uuid texte matche aussi sa forme binaire", () => 
 	});
 
 	it("pipeline : `$match` et sous-pipeline de `$lookup`, jamais `$project`", () => {
-		const out = pipelineWithUuidForms([
+		const out = pipelineWithStoredForms([
 			{ $match: { u: U1 } },
 			{ $lookup: { from: "x", pipeline: [{ $match: { u: U1 } }], as: "j" } },
 			{ $project: { u: U1 } }
@@ -229,5 +229,53 @@ describe("withUuidForms — un uuid texte matche aussi sa forme binaire", () => 
 			},
 			{ $project: { u: U1 } }
 		]);
+	});
+
+	it("décimal : égalité et listes en double et Decimal128, bornes séparées par type", () => {
+		const out = withStoredForms({
+			d: { $eq: dec("0.1") },
+			e: { $nin: [dec("0.2"), null] },
+			f: { $gte: dec("0.1") },
+			$and: [{ g: { $lt: dec("1.5") } }],
+			n: { $gt: 3 }
+		});
+		expect(out).toEqual({
+			d: { $in: [0.1, Decimal128.fromString("0.1")] },
+			e: { $nin: [0.2, Decimal128.fromString("0.2"), null] },
+			$or: [
+				{ f: { $type: "decimal", $gte: Decimal128.fromString("0.1") } },
+				{ f: { $not: { $type: "decimal" }, $gte: 0.1 } }
+			],
+			$and: [
+				{
+					$or: [
+						{ g: { $type: "decimal", $lt: Decimal128.fromString("1.5") } },
+						{ g: { $not: { $type: "decimal" }, $lt: 1.5 } }
+					]
+				}
+			],
+			n: { $gt: 3 }
+		});
+		// Un `$or` déjà là : les bornes passent par `$and`.
+		expect(
+			withStoredForms({ $or: [{ a: 1 }], f: { $gt: dec("0.5") } })
+		).toEqual({
+			$or: [{ a: 1 }],
+			$and: [
+				{
+					$or: [
+						{ f: { $type: "decimal", $gt: Decimal128.fromString("0.5") } },
+						{ f: { $not: { $type: "decimal" }, $gt: 0.5 } }
+					]
+				}
+			]
+		});
+	});
+
+	it("décimal au-delà de 34 chiffres : la forme double seule", () => {
+		const raw = "1.2345678901234567890123456789012345";
+		expect(withStoredForms({ d: { $eq: dec(raw) } })).toEqual({
+			d: { $in: [Number(raw)] }
+		});
 	});
 });

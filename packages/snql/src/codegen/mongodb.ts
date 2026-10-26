@@ -472,7 +472,7 @@ function renderUpsertOperations(
 				return;
 			}
 			if (cell.kind === "scalar") {
-				bsonMapping.set(column, bsonStoreValue(cell.value));
+				bsonMapping.set(column, bsonValue(cell.value));
 				literalMapping.set(column, { kind: "literal", value: cell.value });
 			} else {
 				// jsonLiteral (composite — object/array). Non substituable en literal
@@ -505,10 +505,10 @@ function renderUpsertOperations(
 		for (const a of onConflict.action.assignments) {
 			const substituted = substUpsertNewToLiteral(a.value, literalMapping);
 			// Après subst : accepte uniquement literal ou jsonLiteral pur — pas
-			// d'expression composite (v1). Rend en BSON via bsonStoreValue (pas
+			// d'expression composite (v1). Rend en BSON via bsonValue (pas
 			// toExprOperand qui produit du $expr indexed differently).
 			if (substituted.kind === "literal") {
-				set[a.column] = bsonStoreValue(substituted.value);
+				set[a.column] = bsonValue(substituted.value);
 			} else if (
 				substituted.kind === "object" ||
 				substituted.kind === "array"
@@ -590,11 +590,11 @@ function renderDocuments(
 				doc[column] = null;
 				return;
 			}
-			// Sprint object-literals : dispatch scalar (bsonStoreValue historique)
+			// Sprint object-literals : dispatch scalar (bsonValue historique)
 			// vs jsonLiteral (composite → BSON récursif via toExprOperand).
 			doc[column] =
 				cell.kind === "scalar"
-					? bsonStoreValue(cell.value)
+					? bsonValue(cell.value)
 					: toExprOperand(cell.expr, undefined);
 		});
 		return doc;
@@ -683,7 +683,7 @@ function renderUpdate(
 	const set: Record<string, unknown> = {};
 	for (const { column, value } of assignments) {
 		if (value.kind === "literal" && literalOnly) {
-			set[column] = bsonStoreValue(value.value);
+			set[column] = bsonValue(value.value);
 			continue;
 		}
 		const operand = toExprOperand(value, undefined);
@@ -1275,7 +1275,10 @@ function renderMongoAggExpr(
 ): unknown {
 	switch (expr.kind) {
 		case "literal": {
-			const value = bsonValue(expr.value);
+			// Sous `$expr`, l'adapter ne voit pas de condition de champ : un
+			// décimal y reste un double, comme avant ADR-029 D17.
+			const raw = bsonValue(expr.value);
+			const value = isSqlDecimal(raw) ? Number(raw.raw) : raw;
 			return typeof value === "string" && value.startsWith("$")
 				? { $literal: value }
 				: value;
@@ -1625,7 +1628,7 @@ function renderAggregatePipeline(
 			});
 		}
 		if (expr.kind === "literal") {
-			const value = bsonStoreValue(expr.value);
+			const value = bsonValue(expr.value);
 			return typeof value === "string" && value.startsWith("$")
 				? { $literal: value }
 				: value;
@@ -1822,7 +1825,7 @@ function renderAggregatePipeline(
 			);
 		}
 		if (expr.kind === "literal") {
-			const value = bsonStoreValue(expr.value);
+			const value = bsonValue(expr.value);
 			return typeof value === "string" && value.startsWith("$")
 				? { $literal: value }
 				: value;
@@ -2617,22 +2620,13 @@ function assertInt64(value: SqlValue): void {
 }
 
 /**
- * Valeur d'un **filtre** (comparaison, `$in`). Un décimal exact est ramené à un
- * `double` : c'est ce que stocke la plupart des données Mongo (et la lecture
- * historique), donc `where price = 1.5` matche les doubles stockés. La fidélité
- * Decimal128 est réservée à l'ÉCRITURE de valeurs ({@link bsonStoreValue}).
+ * Valeur littérale envoyée à Mongo : document inséré, `set col = littéral`,
+ * filtre. Le marqueur {@link SqlDecimal} est préservé : l'engine l'hydrate en
+ * **Decimal128** dans un document (un `Number()` perdrait la précision que
+ * Postgres conserve) ; dans un filtre, il le compare en double aux valeurs
+ * stockées en double et en Decimal128 aux decimal (ADR-029 D17).
  */
 function bsonValue(value: SqlValue): unknown {
-	assertInt64(value);
-	return isSqlDecimal(value) ? Number(value.raw) : value;
-}
-
-/**
- * Valeur **stockée** (document inséré, `set col = littéral`). Le marqueur
- * {@link SqlDecimal} est préservé → l'engine l'hydrate en **Decimal128** (exact) ;
- * un `Number()` ici perdrait la précision que Postgres conserve.
- */
-function bsonStoreValue(value: SqlValue): unknown {
 	assertInt64(value);
 	return value;
 }
@@ -2649,7 +2643,7 @@ function toExprOperand(expr: PlanExpr, alias: string | undefined): unknown {
 	}
 	if (expr.kind === "literal") {
 		// Opérande d'un `set` en forme pipeline = valeur stockée → fidélité BSON.
-		const value = bsonStoreValue(expr.value);
+		const value = bsonValue(expr.value);
 		return typeof value === "string" && value.startsWith("$")
 			? { $literal: value }
 			: value;

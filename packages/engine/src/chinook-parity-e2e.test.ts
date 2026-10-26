@@ -118,6 +118,23 @@ describe.skipIf(!hasBoth)("Chinook parité PG ↔ Mongo", () => {
 		expect(normalize(mongo)).toEqual(normalize(pg));
 	}, 20_000);
 
+	it("where sur un littéral décimal : égalité, in, !=, bornes (ADR-029 D17)", async () => {
+		for (const where of [
+			"unit_price = 0.99",
+			"unit_price in [0.99, 1.99]",
+			"unit_price != 0.99",
+			"unit_price >= 1.99",
+			"unit_price < 1.99"
+		]) {
+			const q = `find track where ${where} pick count(*) as n`;
+			const [pg, mongo] = await Promise.all([
+				runOn(pgConn, q),
+				runOn(mongoConn, q)
+			]);
+			expect(normalize(mongo)).toEqual(normalize(pg));
+		}
+	}, 20_000);
+
 	it("sort desc + limit", async () => {
 		const q = `find track pick track_id, milliseconds sort milliseconds desc limit 5`;
 		const [pg, mongo] = await Promise.all([runOn(pgConn, q), runOn(mongoConn, q)]);

@@ -345,7 +345,7 @@ describe("write context — object literal + call safe", () => {
 		).not.toThrow();
 	});
 
-	it("insert Mongo avec object literal — BSON natif via bsonStoreValue dispatch", () => {
+	it("insert Mongo avec object literal — BSON natif via bsonValue dispatch", () => {
 		const nat = mongoMutation('add {meta: {tier: "gold"}} into u');
 		if (nat.kind !== "mongo-write") throw new Error("mongo-write attendu");
 		const serialized = JSON.stringify(nat);

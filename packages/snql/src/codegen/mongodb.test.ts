@@ -163,11 +163,11 @@ describe("codegen mongodb — expressions", () => {
 		]);
 	});
 
-	it("un décimal dans un filtre de LECTURE est un double (matche les doubles stockés)", () => {
-		// Contraste avec l'écriture de valeurs (Decimal128 exact) : un filtre reste
-		// en double, sinon `where price = 1.5` ne matcherait plus les données double.
+	it("un décimal de filtre garde son texte exact, l'engine choisit sa forme", () => {
+		// Comparé en double aux valeurs double, en Decimal128 aux decimal
+		// (ADR-029 D17) : `where price = 1.5` matche les unes et les autres.
 		expect(mongo("get products where price = 1.5").pipeline).toEqual([
-			{ $match: { price: { $eq: 1.5 } } }
+			{ $match: { price: { $eq: { kind: "decimal", raw: "1.5" } } } }
 		]);
 	});
 

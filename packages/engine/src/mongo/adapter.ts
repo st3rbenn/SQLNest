@@ -510,34 +510,100 @@ function expandIdFilter(child: unknown): unknown {
 }
 
 /**
- * Filtre où un uuid écrit en texte matche aussi sa forme binaire : une
- * colonne uuid est stockée en binData (ADR-029 D15). Même expansion que
- * `_id`, qui garde la sienne ({@link expandIdFilter}). Ne descend que dans
- * les conditions de champ et `$and` / `$or` / `$nor` : sous `$expr`, les
- * clés ne sont pas des champs.
+ * Formes d'un littéral décimal de filtre : double, puis Decimal128 quand il
+ * le représente (34 chiffres significatifs au plus).
  */
-export function withUuidForms(query: Document): Document {
+function decimalForms(value: unknown): unknown[] | undefined {
+	if (!isSqlDecimal(value)) return undefined;
+	const double = Number(value.raw);
+	try {
+		return [double, Decimal128.fromString(value.raw)];
+	} catch {
+		return [double];
+	}
+}
+
+function storedForms(value: unknown): unknown[] | undefined {
+	return uuidForms(value) ?? decimalForms(value);
+}
+
+/** `value` dont chaque littéral décimal prend sa forme Decimal128 ou double. */
+function decimalAs(value: unknown, decimal: boolean): unknown {
+	const forms = decimalForms(value);
+	if (forms !== undefined) return decimal ? (forms[1] ?? forms[0]) : forms[0];
+	return Array.isArray(value) ? value.map((v) => decimalAs(v, decimal)) : value;
+}
+
+/**
+ * Condition de champ où reste un littéral décimal (une borne) : un `$or` qui
+ * compare en Decimal128 les valeurs stockées en decimal, en double les
+ * autres. Mongo compare un double et un Decimal128 exactement : le double
+ * 0.1 n'est pas le Decimal128 0.1.
+ */
+function decimalBranches(field: string, cond: Document): Document | undefined {
+	const ops = Object.entries(cond);
+	const pending = ops.some(
+		([, v]) => isSqlDecimal(v) || (Array.isArray(v) && v.some(isSqlDecimal))
+	);
+	if (!pending) return undefined;
+	const branch = (decimal: boolean): Document => ({
+		[field]: {
+			...(decimal ? { $type: "decimal" } : { $not: { $type: "decimal" } }),
+			...Object.fromEntries(ops.map(([op, v]) => [op, decimalAs(v, decimal)]))
+		}
+	});
+	return { $or: [branch(true), branch(false)] };
+}
+
+function isOperators(value: unknown): value is Document {
+	if (value === null || typeof value !== "object" || Array.isArray(value)) {
+		return false;
+	}
+	const keys = Object.keys(value);
+	return keys.length > 0 && keys.every((k) => k.startsWith("$"));
+}
+
+/**
+ * Filtre où chaque littéral matche les formes sous lesquelles sa valeur peut
+ * être stockée : un uuid texte aussi sa forme binaire (une colonne uuid est en
+ * binData, ADR-029 D15), un décimal le double et le Decimal128 (D17). Même
+ * expansion que `_id`, qui garde la sienne ({@link expandIdFilter}). Ne
+ * descend que dans les conditions de champ et `$and` / `$or` / `$nor` : sous
+ * `$expr`, les clés ne sont pas des champs.
+ */
+export function withStoredForms(query: Document): Document {
 	const out: Document = {};
+	const branches: Document[] = [];
 	for (const [key, value] of Object.entries(query)) {
 		if (key === "$and" || key === "$or" || key === "$nor") {
 			out[key] = Array.isArray(value)
-				? value.map((q) => withUuidForms(q as Document))
+				? value.map((q) => withStoredForms(q as Document))
 				: value;
+		} else if (key.startsWith("$") || key === "_id") {
+			out[key] = value;
 		} else {
-			out[key] =
-				key.startsWith("$") || key === "_id"
-					? value
-					: expandForms(value, uuidForms, (v) => v);
+			const cond = expandForms(value, storedForms, (v) => v);
+			const split = isOperators(cond) ? decimalBranches(key, cond) : undefined;
+			if (split === undefined) out[key] = cond;
+			else branches.push(split);
 		}
 	}
-	return out;
+	const [only] = branches;
+	if (only === undefined) return out;
+	if (branches.length === 1 && out.$or === undefined) {
+		return { ...out, ...only };
+	}
+	const and = Array.isArray(out.$and) ? (out.$and as Document[]) : [];
+	return { ...out, $and: [...and, ...branches] };
 }
 
-/** {@link withUuidForms} sur les `$match` d'un pipeline, sous-pipelines de `$lookup` compris. */
-export function pipelineWithUuidForms(stages: readonly Document[]): Document[] {
+/** {@link withStoredForms} sur les `$match` d'un pipeline, sous-pipelines de `$lookup` compris. */
+export function pipelineWithStoredForms(
+	stages: readonly Document[]
+): Document[] {
 	return stages.map((stage) => {
 		if (stage.$match !== undefined) {
-			return { ...stage, $match: withUuidForms(stage.$match as Document) };
+			return { ...stage, $match: withStoredForms(stage.$match as Document) };
 		}
 		const lookup = stage.$lookup as Document | undefined;
 		return Array.isArray(lookup?.pipeline)
@@ -545,7 +611,7 @@ export function pipelineWithUuidForms(stages: readonly Document[]): Document[] {
 					...stage,
 					$lookup: {
 						...lookup,
-						pipeline: pipelineWithUuidForms(lookup.pipeline)
+						pipeline: pipelineWithStoredForms(lookup.pipeline)
 					}
 				}
 			: stage;
@@ -1109,7 +1175,7 @@ class MongoConnection implements Connection {
 			// `filter: true` → une chaîne 24-hex comparée à `_id` dans un `$match`
 			// redevient un ObjectId (cf. hydrateBson), pour que `where _id = "…"` matche.
 			const pipeline = hydrateBson(
-				pipelineWithUuidForms(query.pipeline),
+				pipelineWithStoredForms(query.pipeline),
 				true
 			) as Document[];
 			const docs = await db
@@ -1182,10 +1248,10 @@ class MongoConnection implements Connection {
 		session?: ClientSession
 	): Promise<MongoWrite> {
 		if (query.op === "delete") {
-			return { ...query, filter: withUuidForms(query.filter) };
+			return { ...query, filter: withStoredForms(query.filter) };
 		}
 		if (query.op === "insert-select-agg-merge") {
-			return { ...query, pipeline: pipelineWithUuidForms(query.pipeline) };
+			return { ...query, pipeline: pipelineWithStoredForms(query.pipeline) };
 		}
 		const types = await this.#declaredTypes(query.collection);
 		const inserting = `insert dans '${query.collection}'`;
@@ -1207,14 +1273,14 @@ class MongoConnection implements Connection {
 			case "update":
 				return {
 					...query,
-					filter: withUuidForms(query.filter),
+					filter: withStoredForms(query.filter),
 					update: declaredUpdate(query.update, types, updating)
 				};
 			case "update-agg-merge":
 				return {
 					...query,
 					pipeline: declaredPipeline(
-						pipelineWithUuidForms(query.pipeline),
+						pipelineWithStoredForms(query.pipeline),
 						types,
 						updating
 					)
@@ -3613,7 +3679,7 @@ class MongoConnection implements Connection {
 			for (const step of query.steps) {
 				if (step.kind === "query") {
 					const pipeline = hydrateBson(
-						pipelineWithUuidForms(step.query.pipeline),
+						pipelineWithStoredForms(step.query.pipeline),
 						true
 					) as Document[];
 					const docs = await db
@@ -3786,7 +3852,7 @@ class MongoConnection implements Connection {
 			for (const bodyStep of step.body) {
 				if (bodyStep.kind === "query") {
 					const pipeline = hydrateBson(
-						pipelineWithUuidForms(bodyStep.query.pipeline),
+						pipelineWithStoredForms(bodyStep.query.pipeline),
 						true
 					) as Document[];
 					const docs = await db
