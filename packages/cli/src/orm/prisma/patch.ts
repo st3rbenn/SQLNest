@@ -757,10 +757,12 @@ function addRelation(
 		{ key: "fields", value: `[${from.name}]` },
 		{ key: "references", value: `[${to.name}]` },
 		...referentialArguments(
-			{
-				onDelete: prismaAction(ref.onDelete, p.provider),
-				onUpdate: prismaAction(ref.onUpdate, p.provider)
-			},
+			ref.emulated === true
+				? { onDelete: "NoAction", onUpdate: "NoAction" }
+				: {
+						onDelete: prismaAction(ref.onDelete, p.provider),
+						onUpdate: prismaAction(ref.onUpdate, p.provider)
+					},
 			from.optional,
 			p.provider
 		),
@@ -776,7 +778,7 @@ function addRelation(
 			list: false,
 			optional: from.optional,
 			attributes: [{ name: "@relation", args: renderArguments(args) }],
-			tail: ""
+			tail: ref.emulated === true ? emulatedComment(ref) : ""
 		}),
 		true
 	);
@@ -796,6 +798,23 @@ function addRelation(
 		false
 	);
 	p.relations[key] = { field, back, ...(name !== undefined ? { name } : {}) };
+}
+
+/**
+ * FK compensée sous SQL Server (cycle ou 2ᵉ chemin de cascade, que Prisma
+ * refuse aussi) : la base la porte en NO ACTION, des triggers font ses
+ * actions. Le modèle décrit la base ; le commentaire dit ce qui se passe.
+ */
+function emulatedComment(ref: FieldRefPlan): string {
+	const actions = [
+		...(ref.onDelete !== "restrict"
+			? [`on delete ${ref.onDelete.replace("-", " ")}`]
+			: []),
+		...(ref.onUpdate !== "restrict"
+			? [`on update ${ref.onUpdate.replace("-", " ")}`]
+			: [])
+	];
+	return `// SQLNest : ${actions.join(", ")} par trigger`;
 }
 
 /** Nom `@relation("…")` posé sur une relation existante et son champ retour. */

@@ -62,6 +62,8 @@ export interface RelationalFkRow {
 	readonly toColumn: string;
 	readonly onDelete: OnDeleteRule;
 	readonly onUpdate: OnUpdateRule;
+	/** SQL Server : FK compensée par triggers (ADR-031 D9). */
+	readonly emulated?: boolean;
 }
 
 /**
@@ -84,7 +86,8 @@ export function buildRefsFromFkRows(rows: readonly RelationalFkRow[]): RefDef[] 
 			toColumn: fk.toColumn,
 			onDelete: fk.onDelete,
 			onUpdate: fk.onUpdate,
-			source: "declared"
+			source: "declared",
+			...(fk.emulated === true ? { emulated: true } : {})
 		});
 	}
 	return refs;

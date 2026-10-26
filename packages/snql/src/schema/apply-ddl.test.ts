@@ -184,6 +184,17 @@ describe("applyDdlToSchema", () => {
 		});
 	});
 
+	it("FK compensée (SQL Server) : le drapeau suit la FK", () => {
+		const next = apply(
+			{ ...BASE, engine: "mssql" },
+			"create table node { id: int, parent_id: int nullable ref self.id on delete cascade, primary key (id) }"
+		);
+		expect(next.refs?.[0]).toMatchObject({
+			onDelete: "cascade",
+			emulated: true
+		});
+	});
+
 	it("set type : les colonnes liées par FK suivent", () => {
 		let next = apply(
 			BASE,

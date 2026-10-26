@@ -86,12 +86,20 @@ export interface CollectionIndex {
 	readonly unique: boolean;
 }
 
+/** Écriture qui déclenche un trigger. */
+export type TriggerEvent = "insert" | "update" | "delete";
+
 export interface Collection {
 	readonly name: string;
 	readonly fields: readonly Field[];
 	readonly primaryKey?: readonly string[];
 	/** Absent = aucun index connu : la table n'en a pas, ou l'introspection ne les lit pas. */
 	readonly indexes?: readonly CollectionIndex[];
+	/**
+	 * Écritures qui déclenchent un trigger actif sur la table (SQL Server :
+	 * `OUTPUT` sans `INTO` y est refusé, 334).
+	 */
+	readonly triggers?: readonly TriggerEvent[];
 	readonly source: SchemaSource;
 }
 
@@ -154,6 +162,12 @@ export interface RefDef {
 	readonly onDelete: OnDeleteRule;
 	readonly onUpdate: OnUpdateRule;
 	readonly source: SchemaSource;
+	/**
+	 * SQL Server : règle sans équivalent natif (cycle ou 2ᵉ chemin de cascade,
+	 * 1785). La FK est posée NO ACTION et désactivée ; ses actions et le
+	 * contrôle des valeurs passent par des triggers (ADR-031 D9).
+	 */
+	readonly emulated?: boolean;
 }
 
 /** Structure complète d'une base pour un moteur donné. */

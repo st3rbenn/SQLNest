@@ -467,6 +467,7 @@ export type MutationPlan =
 			 */
 			readonly sourcePlan?: LogicalPlan;
 			readonly nativeNames?: PlanNativeNames;
+			readonly triggered?: TriggeredWrite;
 	  }
 	| {
 			readonly op: "update";
@@ -482,13 +483,24 @@ export type MutationPlan =
 			// Absent = toutes les lignes (write non filtré, assumé).
 			readonly predicate?: PlanExpr;
 			readonly returnRowCount?: true;
+			readonly triggered?: TriggeredWrite;
 	  }
 	| {
 			readonly op: "delete";
 			readonly collection: string;
 			readonly predicate?: PlanExpr;
 			readonly returnRowCount?: true;
+			readonly triggered?: TriggeredWrite;
 	  };
+
+/**
+ * SQL Server : la table a un trigger pour cette écriture, et `OUTPUT` sans
+ * `INTO` y est refusé (334). Les lignes écrites sont relues par `keys` (clé
+ * primaire, sinon une unicité ; vide : recopiées dans une table temporaire).
+ */
+export interface TriggeredWrite {
+	readonly keys: readonly string[];
+}
 
 /**
  * item de body d'un TransactionPlan — soit une lecture
@@ -599,6 +611,37 @@ export interface FieldRefPlan {
 	readonly targetColumn: string;
 	readonly onDelete: import("../schema/model").OnDeleteRule;
 	readonly onUpdate: import("../schema/model").OnUpdateRule;
+	/** SQL Server : FK compensée par triggers (voir `RefDef.emulated`). */
+	readonly emulated?: true;
+}
+
+/** FK compensée par triggers (SQL Server), telle que ses tables la portent. */
+export interface EmulatedRefPlan {
+	readonly name: string;
+	readonly fromCollection: string;
+	readonly fromColumn: string;
+	readonly toCollection: string;
+	readonly toColumn: string;
+	readonly onDelete: import("../schema/model").OnDeleteRule;
+	readonly onUpdate: import("../schema/model").OnUpdateRule;
+}
+
+/**
+ * Triggers d'une table qui portent les FK compensées (SQL Server), recréés
+ * après l'opération : contrôle des valeurs écrites pour ses FK sortantes,
+ * actions à la suppression et au changement de clé pour ses FK entrantes.
+ * Listes vides : triggers retirés.
+ */
+export interface RefTriggersPlan {
+	readonly table: string;
+	readonly outgoing: readonly EmulatedRefPlan[];
+	readonly incoming: readonly EmulatedRefPlan[];
+	/**
+	 * Clés de la table, primaire puis unicités : l'une d'elles, inchangée par
+	 * l'instruction, relie ancienne et nouvelle valeur quand plusieurs lignes
+	 * changent la valeur référencée.
+	 */
+	readonly keys: readonly (readonly string[])[];
 }
 
 export interface CreateTableField {
@@ -632,6 +675,8 @@ export interface CreateTablePlan {
 	readonly primaryKey?: readonly string[];
 	/** Nom de la contrainte de clé primaire, imposé par un profil ORM (ADR-036 D6). */
 	readonly primaryKeyName?: string;
+	/** SQL Server : triggers des FK compensées, recréés après l'opération. */
+	readonly refTriggers?: readonly RefTriggersPlan[];
 	readonly span?: Span;
 }
 
@@ -652,6 +697,8 @@ export interface AddColumnPlan {
 	readonly target: string;
 	readonly ifNotExists: boolean;
 	readonly column: CreateTableField;
+	/** SQL Server : triggers des FK compensées, recréés après l'opération. */
+	readonly refTriggers?: readonly RefTriggersPlan[];
 	readonly span?: Span;
 }
 
@@ -703,6 +750,8 @@ export interface DropTablePlan {
 	readonly kind: "drop-table";
 	readonly target: string;
 	readonly ifExists: boolean;
+	/** SQL Server : triggers des FK compensées, recréés après l'opération. */
+	readonly refTriggers?: readonly RefTriggersPlan[];
 	readonly span?: Span;
 }
 
@@ -718,6 +767,8 @@ export interface DropColumnPlan {
 	readonly target: string;
 	readonly column: string;
 	readonly ifExists: boolean;
+	/** SQL Server : triggers des FK compensées, recréés après l'opération. */
+	readonly refTriggers?: readonly RefTriggersPlan[];
 	readonly span?: Span;
 }
 
@@ -793,6 +844,8 @@ export interface DropRefPlan {
 	readonly target: string;
 	readonly name: string;
 	readonly ifExists: boolean;
+	/** SQL Server : triggers des FK compensées, recréés après l'opération. */
+	readonly refTriggers?: readonly RefTriggersPlan[];
 	readonly span?: Span;
 }
 
@@ -807,6 +860,8 @@ export interface AddRefPlan {
 	readonly kind: "add-ref";
 	readonly target: string;
 	readonly ref: FieldRefPlan;
+	/** SQL Server : triggers des FK compensées, recréés après l'opération. */
+	readonly refTriggers?: readonly RefTriggersPlan[];
 	readonly span?: Span;
 }
 
@@ -840,6 +895,8 @@ export interface RenameColumnPlan {
 	 * puis reposé.
 	 */
 	readonly enumMembers?: readonly string[];
+	/** SQL Server : triggers des FK compensées, recréés après l'opération. */
+	readonly refTriggers?: readonly RefTriggersPlan[];
 	readonly span?: Span;
 }
 

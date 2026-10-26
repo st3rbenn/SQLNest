@@ -682,6 +682,20 @@ describe("patchPrismaSchema — SQL Server", () => {
 	});
 });
 
+describe("patchPrismaSchema — FK compensée sous SQL Server", () => {
+	it("2ᵉ chemin de cascade : la relation décrit la base (NoAction), le commentaire dit l'action", () => {
+		const out = run(
+			[
+				"add column backup_agency_id int nullable ref agency.id on delete set null into note"
+			],
+			{ text: MSSQL, db: MSSQL_DB }
+		);
+		expect(block(out.text, "model Note")).toContain(
+			'BackupAgency Agency? @relation("NoteBackup", fields: [backup_agency_id], references: [id], onDelete: NoAction, onUpdate: NoAction) // SQLNest : on delete set null par trigger'
+		);
+	});
+});
+
 describe("patchPrismaSchema — cohérence", () => {
 	it("fournisseur du fichier ≠ moteur de la connexion : refusé", () => {
 		const plan = lowerDDL(

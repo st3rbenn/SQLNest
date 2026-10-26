@@ -362,29 +362,7 @@ export const mssqlMapper: Mapper = {
 		ctx?: import("./mapper").MapperContext
 	): NativeQuery {
 		const namespace = ctx?.namespace ?? "dbo";
-		if (plan.kind === "create-table") return renderCreateTable(plan, namespace);
-		if (plan.kind === "add-column") return renderAddColumn(plan, namespace);
-		if (plan.kind === "add-index" || plan.kind === "add-unique-index") {
-			return renderAddIndex(plan, namespace);
-		}
-		if (plan.kind === "drop-index") return renderDropIndex(plan, namespace);
-		if (plan.kind === "drop-table") return renderDropTable(plan, namespace);
-		if (plan.kind === "drop-column") return renderDropColumn(plan, namespace);
-		if (plan.kind === "create-enum") return renderCreateEnum(plan, namespace);
-		if (plan.kind === "add-enum-member") return renderAddEnumMember(plan, namespace);
-		if (plan.kind === "drop-enum") return renderDropEnum(plan, namespace);
-		if (plan.kind === "drop-ref") return renderDropRef(plan, namespace);
-		if (plan.kind === "add-ref") return renderAddRef(plan, namespace);
-		if (plan.kind === "rename-column") return renderRenameColumn(plan, namespace);
-		if (plan.kind === "alter-column") {
-			return plan.action.kind === "set-default" || plan.action.kind === "drop-default"
-				? renderColumnDefault(plan, namespace)
-				: renderAlterColumn(plan, namespace);
-		}
-		throw new SnqlError(
-			`DDL kind '${(plan as { kind: string }).kind}' non supporté par le codegen MSSQL M/6`,
-			"codegen_ddl_unsupported"
-		);
+		return withRefCompensation(renderDDL(plan, namespace), plan, namespace);
 	},
 	/**
 	 * `raw "SQL"` → SqlQuery text-only, params vides (l'adapter M/1 exécute
@@ -406,6 +384,294 @@ export const mssqlMapper: Mapper = {
 		};
 	}
 };
+
+function renderDDL(
+	plan: import("../ir/plan").DDLPlan,
+	namespace: string
+): NativeQuery {
+	if (plan.kind === "create-table") return renderCreateTable(plan, namespace);
+	if (plan.kind === "add-column") return renderAddColumn(plan, namespace);
+	if (plan.kind === "add-index" || plan.kind === "add-unique-index") {
+		return renderAddIndex(plan, namespace);
+	}
+	if (plan.kind === "drop-index") return renderDropIndex(plan, namespace);
+	if (plan.kind === "drop-table") return renderDropTable(plan, namespace);
+	if (plan.kind === "drop-column") return renderDropColumn(plan, namespace);
+	if (plan.kind === "create-enum") return renderCreateEnum(plan, namespace);
+	if (plan.kind === "add-enum-member")
+		return renderAddEnumMember(plan, namespace);
+	if (plan.kind === "drop-enum") return renderDropEnum(plan, namespace);
+	if (plan.kind === "drop-ref") return renderDropRef(plan, namespace);
+	if (plan.kind === "add-ref") return renderAddRef(plan, namespace);
+	if (plan.kind === "rename-column") return renderRenameColumn(plan, namespace);
+	if (plan.kind === "alter-column") {
+		return plan.action.kind === "set-default" ||
+			plan.action.kind === "drop-default"
+			? renderColumnDefault(plan, namespace)
+			: renderAlterColumn(plan, namespace);
+	}
+	throw new SnqlError(
+		`DDL kind '${(plan as { kind: string }).kind}' non supporté par le codegen MSSQL M/6`,
+		"codegen_ddl_unsupported"
+	);
+}
+
+// ─── FK compensées (ADR-031 D9) ─────────────────────────────────────────
+
+/**
+ * Propriété étendue d'une FK compensée : ses actions, que le catalogue montre
+ * NO ACTION. L'introspection la relit.
+ */
+export const MSSQL_EMULATED_REF_PROPERTY = "snql_actions";
+
+type RefTriggerKind = "check" | "delete" | "update";
+
+/**
+ * FK compensées du plan finalisées (désactivées, actions gardées), puis
+ * triggers des tables touchées recréés, dans la transaction du DDL.
+ */
+function withRefCompensation(
+	native: NativeQuery,
+	plan: import("../ir/plan").DDLPlan,
+	namespace: string
+): NativeQuery {
+	const statements = [
+		...emulatedRefsOf(plan).flatMap(({ table, ref }) =>
+			emulatedRefStatements(table, ref, namespace)
+		),
+		...("refTriggers" in plan && plan.refTriggers !== undefined
+			? plan.refTriggers.flatMap((set) => refTriggerStatements(set, namespace))
+			: [])
+	];
+	if (statements.length === 0) return native;
+	if (native.kind === "transaction") {
+		return {
+			...native,
+			steps: [
+				...native.steps,
+				{ kind: "statement", query: ddlQuery(statements.join("\n")) }
+			]
+		};
+	}
+	if (native.kind !== "sql") return native;
+	return ddlQuery(
+		[
+			"SET NOCOUNT ON;",
+			"SET XACT_ABORT ON;",
+			"BEGIN TRAN;",
+			`${native.text};`,
+			...statements,
+			"COMMIT;"
+		].join("\n")
+	);
+}
+
+function emulatedRefsOf(
+	plan: import("../ir/plan").DDLPlan
+): { table: string; ref: import("../ir/plan").FieldRefPlan }[] {
+	const of = (
+		table: string,
+		ref: import("../ir/plan").FieldRefPlan | undefined
+	) => (ref?.emulated === true ? [{ table, ref }] : []);
+	switch (plan.kind) {
+		case "create-table":
+			return plan.fields.flatMap((f) => of(plan.target, f.ref));
+		case "add-column":
+			return of(plan.target, plan.column.ref);
+		case "add-ref":
+			return of(plan.target, plan.ref);
+		default:
+			return [];
+	}
+}
+
+/**
+ * FK compensée : posée NO ACTION (sans quoi SQL Server la refuse, 1785), puis
+ * désactivée, pour que ses triggers agissent avant toute vérification du
+ * moteur ; ses actions sont gardées en propriété étendue.
+ */
+function emulatedRefStatements(
+	table: string,
+	ref: import("../ir/plan").FieldRefPlan,
+	namespace: string
+): string[] {
+	const actions = JSON.stringify({
+		onDelete: ref.onDelete,
+		onUpdate: ref.onUpdate
+	});
+	return [
+		`ALTER TABLE ${qualified(namespace, table)} NOCHECK CONSTRAINT ${quoteIdent(ref.name)};`,
+		`IF NOT EXISTS (SELECT 1 FROM sys.extended_properties WHERE class = 1 AND major_id = OBJECT_ID(${objectLiteral(namespace, ref.name)}) AND minor_id = 0 AND name = ${nstr(MSSQL_EMULATED_REF_PROPERTY)}) EXEC sys.sp_addextendedproperty @name = ${nstr(MSSQL_EMULATED_REF_PROPERTY)}, @value = ${nstr(actions)}, @level0type = N'SCHEMA', @level0name = ${nstr(namespace)}, @level1type = N'TABLE', @level1name = ${nstr(table)}, @level2type = N'CONSTRAINT', @level2name = ${nstr(ref.name)};`
+	];
+}
+
+/** Triggers d'une table retirés, puis recréés pour les FK compensées qu'elle porte encore. */
+function refTriggerStatements(
+	set: import("../ir/plan").RefTriggersPlan,
+	namespace: string
+): string[] {
+	const name = (kind: RefTriggerKind): string => `snql_${set.table}_${kind}`;
+	const drops = (["check", "delete", "update"] as const).map(
+		(kind) =>
+			`IF OBJECT_ID(${objectLiteral(namespace, name(kind))}, N'TR') IS NOT NULL DROP TRIGGER ${qualified(namespace, name(kind))};`
+	);
+	const creates = [
+		...(set.outgoing.length > 0
+			? [checkTrigger(set, name("check"), namespace)]
+			: []),
+		...(set.incoming.length > 0
+			? [
+					deleteTrigger(set, name("delete"), namespace),
+					updateTrigger(set, name("update"), namespace)
+				]
+			: [])
+	];
+	return [...drops, ...creates.map((text) => `EXEC (${nstr(text)});`)];
+}
+
+/** Valeur d'une colonne pour un message : entre guillemets pour un texte, comme le JSON du message Mongo. */
+function messageValue(column: string): string {
+	return `CASE WHEN SQL_VARIANT_PROPERTY(CAST(${column} AS sql_variant), 'BaseType') IN ('char', 'nchar', 'varchar', 'nvarchar', 'uniqueidentifier') THEN N'"' + CONVERT(nvarchar(4000), ${column}) + N'"' ELSE CONVERT(nvarchar(4000), ${column}) END`;
+}
+
+/** Valeurs écrites dans les colonnes des FK sortantes : elles doivent exister dans la table référencée. */
+function checkTrigger(
+	set: import("../ir/plan").RefTriggersPlan,
+	name: string,
+	namespace: string
+): string {
+	const checks = set.outgoing.flatMap((r) => {
+		const c = quoteIdent(r.fromColumn);
+		const missing = `FROM inserted AS i WHERE i.${c} IS NOT NULL AND NOT EXISTS (SELECT 1 FROM ${qualified(namespace, r.toCollection)} AS r WHERE r.${quoteIdent(r.toColumn)} = i.${c})`;
+		return [
+			`IF UPDATE(${c}) AND EXISTS (SELECT 1 ${missing})`,
+			"BEGIN",
+			`SELECT TOP 1 @v = ${messageValue(`i.${c}`)} ${missing};`,
+			`SET @m = CASE WHEN EXISTS (SELECT 1 FROM deleted) THEN N'update de' ELSE N'insert dans' END + ${nstr(` '${set.table}' viole la foreign key '${r.name}' : '${r.fromColumn}' = `)} + @v + ${nstr(` ne référence aucune ligne de ${r.toCollection}.${r.toColumn}`)};`,
+			"THROW 50547, @m, 1;",
+			"END"
+		];
+	});
+	return [
+		`CREATE TRIGGER ${qualified(namespace, name)} ON ${qualified(namespace, set.table)} AFTER INSERT, UPDATE AS`,
+		"BEGIN",
+		"SET NOCOUNT ON;",
+		"IF NOT EXISTS (SELECT 1 FROM inserted) RETURN;",
+		"DECLARE @v nvarchar(4000), @m nvarchar(2048);",
+		...checks,
+		"END"
+	].join("\n");
+}
+
+/**
+ * `on delete` des FK entrantes : refus (restrict), mise à null, suppression
+ * des lignes dépendantes. D'une table vers elle-même, la suppression descend
+ * de niveau en niveau : le trigger ne se redéclenche pas sur ses propres
+ * suppressions (RECURSIVE_TRIGGERS, désactivé par défaut).
+ */
+function deleteTrigger(
+	set: import("../ir/plan").RefTriggersPlan,
+	name: string,
+	namespace: string
+): string {
+	const table = qualified(namespace, set.table);
+	const byRule = (rule: import("../schema/model").OnDeleteRule) =>
+		set.incoming.filter((r) => r.onDelete === rule);
+	const dependents = (r: import("../ir/plan").EmulatedRefPlan): string =>
+		`${qualified(namespace, r.fromCollection)} AS x JOIN deleted AS d ON x.${quoteIdent(r.fromColumn)} = d.${quoteIdent(r.toColumn)}`;
+	const statements = [
+		...byRule("restrict").map(
+			(r) =>
+				`IF EXISTS (SELECT 1 FROM ${dependents(r)}) THROW 50547, ${nstr(`delete de '${set.table}' viole la foreign key '${r.name}' (RESTRICT) : ${r.fromCollection} référence encore ces lignes via '${r.fromColumn}'. Supprime d'abord les dépendants ou déclare 'on delete cascade'.`)}, 1;`
+		),
+		...byRule("set-null").map(
+			(r) =>
+				`UPDATE x SET x.${quoteIdent(r.fromColumn)} = NULL FROM ${dependents(r)};`
+		),
+		...byRule("cascade").flatMap((r, i) => {
+			if (r.fromCollection !== set.table)
+				return [`DELETE x FROM ${dependents(r)};`];
+			const keys = `@k${i}`;
+			return [
+				`DECLARE ${keys} TABLE (k sql_variant);`,
+				`INSERT ${keys} SELECT d.${quoteIdent(r.toColumn)} FROM deleted AS d;`,
+				`WHILE @@ROWCOUNT > 0 DELETE x OUTPUT DELETED.${quoteIdent(r.toColumn)} INTO ${keys} FROM ${table} AS x WHERE EXISTS (SELECT 1 FROM ${keys} AS s WHERE s.k = x.${quoteIdent(r.fromColumn)});`
+			];
+		})
+	];
+	return [
+		`CREATE TRIGGER ${qualified(namespace, name)} ON ${table} AFTER DELETE AS`,
+		"BEGIN",
+		"SET NOCOUNT ON;",
+		"IF NOT EXISTS (SELECT 1 FROM deleted) RETURN;",
+		...statements,
+		"END"
+	].join("\n");
+}
+
+/**
+ * `on update` des FK entrantes, quand une valeur référencée disparaît : refus,
+ * mise à null ou report de la nouvelle valeur. Le report relie ancienne et
+ * nouvelle valeur pour une ligne, sinon par une clé de la table que
+ * l'instruction ne change pas ; sans elle, rien ne relie les lignes.
+ */
+function updateTrigger(
+	set: import("../ir/plan").RefTriggersPlan,
+	name: string,
+	namespace: string
+): string {
+	const table = qualified(namespace, set.table);
+	const columns = [...new Set(set.incoming.map((r) => r.toColumn))];
+	const blocks = columns.flatMap((column) => {
+		const k = quoteIdent(column);
+		const refs = set.incoming.filter((r) => r.toColumn === column);
+		const stale = (r: import("../ir/plan").EmulatedRefPlan): string =>
+			`FROM ${qualified(namespace, r.fromCollection)} AS x JOIN deleted AS d ON x.${quoteIdent(r.fromColumn)} = d.${k} WHERE NOT EXISTS (SELECT 1 FROM ${table} AS p WHERE p.${k} = d.${k})`;
+		const stable = set.keys.filter((key) => !key.includes(column));
+		const statements = [
+			...refs
+				.filter((r) => r.onUpdate === "restrict")
+				.map(
+					(r) =>
+						`IF EXISTS (SELECT 1 ${stale(r)}) THROW 50547, ${nstr(`update de '${set.table}' viole la foreign key '${r.name}' (RESTRICT) : ${r.fromCollection} référence encore les anciennes valeurs de '${column}' via '${r.fromColumn}'. Mets d'abord à jour les dépendants ou déclare 'on update cascade'.`)}, 1;`
+				),
+			...refs
+				.filter((r) => r.onUpdate === "set-null")
+				.map(
+					(r) =>
+						`UPDATE x SET x.${quoteIdent(r.fromColumn)} = NULL ${stale(r)};`
+				),
+			...refs
+				.filter((r) => r.onUpdate === "cascade")
+				.flatMap((r) => {
+					const c = quoteIdent(r.fromColumn);
+					const byKey = stable.flatMap((key) => [
+						`ELSE IF NOT (${key.map((p) => `UPDATE(${quoteIdent(p)})`).join(" OR ")})`,
+						`UPDATE x SET x.${c} = i.${k} FROM ${qualified(namespace, r.fromCollection)} AS x JOIN deleted AS d ON x.${c} = d.${k} JOIN inserted AS i ON ${key.map((p) => `i.${quoteIdent(p)} = d.${quoteIdent(p)}`).join(" AND ")} WHERE NOT EXISTS (SELECT 1 FROM ${table} AS p WHERE p.${k} = d.${k});`
+					]);
+					return [
+						`IF EXISTS (SELECT 1 ${stale(r)})`,
+						"BEGIN",
+						"IF (SELECT COUNT(*) FROM deleted) = 1",
+						`UPDATE x SET x.${c} = (SELECT i.${k} FROM inserted AS i) ${stale(r)};`,
+						...byKey,
+						"ELSE",
+						`THROW 50547, ${nstr(`update de '${set.table}' : plusieurs lignes changent '${column}' sans autre clé inchangée pour les relier ; la foreign key '${r.name}' (on update cascade, compensée par trigger sous SQL Server) suit une ligne à la fois`)}, 1;`,
+						"END"
+					];
+				})
+		];
+		return [`IF UPDATE(${k})`, "BEGIN", ...statements, "END"];
+	});
+	return [
+		`CREATE TRIGGER ${qualified(namespace, name)} ON ${table} AFTER UPDATE AS`,
+		"BEGIN",
+		"SET NOCOUNT ON;",
+		"IF NOT EXISTS (SELECT 1 FROM deleted) RETURN;",
+		...blocks,
+		"END"
+	].join("\n");
+}
 
 /**
  * SQL de `describe <table>` — miroir du describeTableSql PG : une ligne par
@@ -575,14 +841,82 @@ function renderWriteAsSqlQuery(plan: MutationPlan): SqlQuery {
  * alors seulement rowCount.
  */
 function renderMutation(plan: MutationPlan, params: ParamList): string {
+	if (plan.returnRowCount === true) return renderWrite(plan, params, "");
+	if (plan.triggered !== undefined) {
+		return renderTriggeredWrite(plan, plan.triggered.keys, params);
+	}
+	return renderWrite(
+		plan,
+		params,
+		plan.op === "delete" ? " OUTPUT DELETED.*" : " OUTPUT INSERTED.*"
+	);
+}
+
+const TRIGGERED_ROW = "__sqlnest_row";
+const TRIGGERED_KEY = "__sqlnest_key";
+
+/**
+ * Écriture sur une table à trigger, où `OUTPUT` sans `INTO` est refusé (334) :
+ * les clés des lignes écrites passent par une table, puis les lignes sont
+ * relues. Une suppression copie d'abord les lignes, puis les supprime par
+ * clé. Sans clé, les lignes passent par une table temporaire de même forme.
+ */
+function renderTriggeredWrite(
+	plan: MutationPlan,
+	keys: readonly string[],
+	params: ParamList
+): string {
+	const table = quoteIdent(plan.collection);
+	const row = quoteIdent(TRIGGERED_ROW);
+	const key = quoteIdent(TRIGGERED_KEY);
+	const cols = keys.map(quoteIdent);
+	const sameKey = cols.map((c) => `${key}.${c} = ${row}.${c}`).join(" AND ");
+	const resetRows =
+		"IF OBJECT_ID(N'tempdb..#snql_rows') IS NOT NULL DROP TABLE #snql_rows;";
+	if (plan.op === "delete") {
+		const where = renderWhere(plan.predicate, params);
+		const remove =
+			cols.length > 0
+				? `DELETE ${row} FROM ${table} AS ${row} WHERE EXISTS (SELECT 1 FROM #snql_rows AS ${key} WHERE ${sameKey});`
+				: `DELETE FROM ${table}${renderWhere(plan.predicate, params)};`;
+		return [
+			resetRows,
+			`SELECT * INTO #snql_rows FROM ${table}${where};`,
+			remove,
+			"SELECT * FROM #snql_rows;",
+			"DROP TABLE #snql_rows;"
+		].join("\n");
+	}
+	if (cols.length === 0) {
+		return [
+			resetRows,
+			// UNION ALL : la copie ne garde pas l'IDENTITY de la table.
+			`SELECT TOP 0 * INTO #snql_rows FROM ${table} UNION ALL SELECT TOP 0 * FROM ${table};`,
+			`${renderWrite(plan, params, " OUTPUT INSERTED.* INTO #snql_rows")};`,
+			"SELECT * FROM #snql_rows;",
+			"DROP TABLE #snql_rows;"
+		].join("\n");
+	}
+	return [
+		`DECLARE @snql_keys TABLE (${cols.map((c) => `${c} sql_variant`).join(", ")});`,
+		`${renderWrite(plan, params, ` OUTPUT ${cols.map((c) => `INSERTED.${c}`).join(", ")} INTO @snql_keys`)};`,
+		`SELECT ${row}.* FROM ${table} AS ${row} WHERE EXISTS (SELECT 1 FROM @snql_keys AS ${key} WHERE ${sameKey});`
+	].join("\n");
+}
+
+/** Écriture T-SQL, avec la clause `output` donnée (vide : sans OUTPUT). */
+function renderWrite(
+	plan: MutationPlan,
+	params: ParamList,
+	output: string
+): string {
 	switch (plan.op) {
 		case "insert": {
 			// Upsert : route MERGE dédiée (ON CONFLICT n'existe pas en T-SQL).
 			if (plan.onConflict !== undefined) {
-				return renderMergeUpsert(plan, params);
+				return renderMergeUpsert(plan, params, output);
 			}
 			const cols = plan.columns.map(quoteIdent).join(", ");
-			const output = plan.returnRowCount === true ? "" : " OUTPUT INSERTED.*";
 			if (plan.sourcePlan !== undefined) {
 				const selectText = renderPlan(plan.sourcePlan, params);
 				return `INSERT INTO ${quoteIdent(plan.collection)} (${cols})${output} ${selectText}`;
@@ -604,7 +938,6 @@ function renderMutation(plan: MutationPlan, params: ParamList): string {
 				.map((a) => `${quoteIdent(a.column)} = ${renderExpr(a.value, params)}`)
 				.join(", ");
 			const joins = plan.joins ?? [];
-			const output = plan.returnRowCount === true ? "" : " OUTPUT INSERTED.*";
 			// T-SQL mutation join : `UPDATE <alias> SET … FROM [t] AS <alias>,
 			// [x] AS b WHERE …` — la cible DOIT référencer l'alias déclaré dans
 			// le FROM (forme old-style alignée sur l'UPDATE…FROM PG).
@@ -632,7 +965,6 @@ function renderMutation(plan: MutationPlan, params: ParamList): string {
 			return `UPDATE ${quoteIdent(plan.collection)} SET ${set}${output}${where}`;
 		}
 		case "delete": {
-			const output = plan.returnRowCount === true ? "" : " OUTPUT DELETED.*";
 			const where = renderWhere(plan.predicate, params);
 			return `DELETE FROM ${quoteIdent(plan.collection)}${output}${where}`;
 		}
@@ -661,7 +993,8 @@ function renderMutation(plan: MutationPlan, params: ParamList): string {
  */
 function renderMergeUpsert(
 	plan: Extract<MutationPlan, { op: "insert" }>,
-	params: ParamList
+	params: ParamList,
+	output: string
 ): string {
 	const clause = plan.onConflict;
 	if (clause === undefined) {
@@ -715,9 +1048,7 @@ function renderMergeUpsert(
 	parts.push(
 		`WHEN NOT MATCHED THEN INSERT (${cols.join(", ")}) VALUES (${cols.map((c) => `${source}.${c}`).join(", ")})`
 	);
-	if (plan.returnRowCount !== true) {
-		parts.push("OUTPUT INSERTED.*");
-	}
+	if (output !== "") parts.push(output.trim());
 	return `${parts.join(" ")};`;
 }
 
@@ -914,9 +1245,14 @@ function mssqlRefClause(
 	return (
 		`CONSTRAINT ${quoteIdent(ref.name)} REFERENCES ` +
 		`${qualified(namespace, ref.targetCollection)} (${quoteIdent(ref.targetColumn)}) ` +
-		`ON DELETE ${MSSQL_REF_ACTION[ref.onDelete]} ` +
-		`ON UPDATE ${MSSQL_REF_ACTION[ref.onUpdate]}`
+		mssqlRefActions(ref)
 	);
+}
+
+/** Actions d'une FK ; NO ACTION pour une FK compensée, dont les triggers font les actions. */
+function mssqlRefActions(ref: import("../ir/plan").FieldRefPlan): string {
+	if (ref.emulated === true) return "ON DELETE NO ACTION ON UPDATE NO ACTION";
+	return `ON DELETE ${MSSQL_REF_ACTION[ref.onDelete]} ON UPDATE ${MSSQL_REF_ACTION[ref.onUpdate]}`;
 }
 
 /** CHECK IN des members d'un field enum (compensation type enum). Nom de
@@ -1319,7 +1655,8 @@ const MSSQL_ALTER_TARGETS =
  * qu'un index, une contrainte (PK, UNIQUE, CHECK, DEFAULT), une FK ou une
  * statistique créée à la main dépend de la colonne (5074) : les dépendants,
  * relus au catalogue à l'exécution, sont retirés, puis recréés à l'identique
- * après les `ALTER COLUMN`. Les statistiques automatiques, elles, sont
+ * après les `ALTER COLUMN` — une FK désactivée le reste, avec ses propriétés
+ * (FK compensée, ADR-031 D9). Les statistiques automatiques, elles, sont
  * retirées par le moteur.
  * `droppedCheck` est retiré sans être reposé. S'exécute dans la transaction
  * de l'appelant, une fois `@targets` rempli.
@@ -1346,8 +1683,11 @@ function mssqlAlterTargets(droppedCheck?: string): string[] {
 		"DECLARE @dropSt nvarchar(max) = N'', @addSt nvarchar(max) = N'';",
 		"DECLARE @alter nvarchar(max) = N'';",
 		`SELECT @dropFk = @dropFk + N'ALTER TABLE ' + ${mssqlQualified("fk.parent_object_id")} + N' DROP CONSTRAINT ' + QUOTENAME(fk.name) + N';',
-	@addFk = @addFk + N'ALTER TABLE ' + ${mssqlQualified("fk.parent_object_id")} + N' WITH CHECK ADD CONSTRAINT ' + QUOTENAME(fk.name) + N' FOREIGN KEY (' + ${fkCols("parent")} + N') REFERENCES ' + ${mssqlQualified("fk.referenced_object_id")} + N' (' + ${fkCols("referenced")} + N') ON DELETE ' + REPLACE(fk.delete_referential_action_desc, N'_', N' ') + N' ON UPDATE ' + REPLACE(fk.update_referential_action_desc, N'_', N' ') + N';'
+	@addFk = @addFk + N'ALTER TABLE ' + ${mssqlQualified("fk.parent_object_id")} + CASE WHEN fk.is_disabled = 1 THEN N' WITH NOCHECK' ELSE N' WITH CHECK' END + N' ADD CONSTRAINT ' + QUOTENAME(fk.name) + N' FOREIGN KEY (' + ${fkCols("parent")} + N') REFERENCES ' + ${mssqlQualified("fk.referenced_object_id")} + N' (' + ${fkCols("referenced")} + N') ON DELETE ' + REPLACE(fk.delete_referential_action_desc, N'_', N' ') + N' ON UPDATE ' + REPLACE(fk.update_referential_action_desc, N'_', N' ') + N';'
+		+ CASE WHEN fk.is_disabled = 1 THEN N'ALTER TABLE ' + ${mssqlQualified("fk.parent_object_id")} + N' NOCHECK CONSTRAINT ' + QUOTENAME(fk.name) + N';' ELSE N'' END
+		+ ISNULL(N'EXEC sys.sp_addextendedproperty @name = N''${MSSQL_EMULATED_REF_PROPERTY}'', @value = N''' + REPLACE(CONVERT(nvarchar(4000), ep.value), N'''', N'''''') + N''', @level0type = N''SCHEMA'', @level0name = N''' + REPLACE(OBJECT_SCHEMA_NAME(fk.parent_object_id), N'''', N'''''') + N''', @level1type = N''TABLE'', @level1name = N''' + REPLACE(OBJECT_NAME(fk.parent_object_id), N'''', N'''''') + N''', @level2type = N''CONSTRAINT'', @level2name = N''' + REPLACE(fk.name, N'''', N'''''') + N''';', N'')
 FROM sys.foreign_keys fk
+LEFT JOIN sys.extended_properties ep ON ep.class = 1 AND ep.major_id = fk.object_id AND ep.minor_id = 0 AND ep.name = N'${MSSQL_EMULATED_REF_PROPERTY}'
 WHERE EXISTS (SELECT 1 FROM sys.foreign_key_columns fkc WHERE fkc.constraint_object_id = fk.object_id AND (${onTarget("fkc.parent_object_id", "fkc.parent_column_id")} OR ${onTarget("fkc.referenced_object_id", "fkc.referenced_column_id")}));`,
 		`SELECT @dropIdx = @dropIdx + CASE WHEN i.is_primary_key = 1 OR i.is_unique_constraint = 1 THEN N'ALTER TABLE ' + ${mssqlQualified("i.object_id")} + N' DROP CONSTRAINT ' + QUOTENAME(i.name) ELSE N'DROP INDEX ' + QUOTENAME(i.name) + N' ON ' + ${mssqlQualified("i.object_id")} END + N';',
 	@addIdx = @addIdx + CASE
@@ -1448,8 +1788,7 @@ function renderAddRef(
 		`ALTER TABLE ${qualified(namespace, plan.target)} WITH CHECK ADD CONSTRAINT ${quoteIdent(ref.name)} ` +
 			`FOREIGN KEY (${quoteIdent(ref.fromColumn)}) REFERENCES ` +
 			`${qualified(namespace, ref.targetCollection)} (${quoteIdent(ref.targetColumn)}) ` +
-			`ON DELETE ${MSSQL_REF_ACTION[ref.onDelete]} ` +
-			`ON UPDATE ${MSSQL_REF_ACTION[ref.onUpdate]}`
+			mssqlRefActions(ref)
 	);
 }
 

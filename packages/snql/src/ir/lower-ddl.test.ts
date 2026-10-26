@@ -1539,3 +1539,150 @@ describe("lower DDL — colonnes d'un enum (E/2c)", () => {
 		expect(lower("drop enum tier cascade")).toMatchObject({ cascade: true });
 	});
 });
+
+describe("lower DDL — FK compensées sous SQL Server (ADR-031 D9)", () => {
+	const column = (name: string): import("../schema/model").Field => ({
+		name,
+		type: "int",
+		nullable: true,
+		source: "declared"
+	});
+	const schema: import("../schema/model").SchemaModel = {
+		engine: "mssql",
+		collections: [
+			{
+				name: "agency",
+				source: "declared",
+				primaryKey: ["id"],
+				fields: [column("id"), column("code")],
+				indexes: [{ name: "agency_code_key", columns: ["code"], unique: true }]
+			},
+			{
+				name: "tag",
+				source: "declared",
+				primaryKey: ["id"],
+				fields: [column("id"), column("owner_id"), column("backup_id")]
+			}
+		],
+		relations: [],
+		refs: [
+			{
+				name: "fk_tag_owner_id_agency",
+				fromCollection: "tag",
+				fromColumn: "owner_id",
+				toCollection: "agency",
+				toColumn: "id",
+				onDelete: "cascade",
+				onUpdate: "restrict",
+				source: "declared"
+			}
+		]
+	};
+	const lower = (
+		source: string,
+		withSchema: import("../schema/model").SchemaModel = schema,
+		options: import("./lower-ddl").DdlLowerOptions = {}
+	): DDLPlan =>
+		lowerDDL(parse(tokenize(source)) as DDLStatement, withSchema, options);
+	const backup = {
+		name: "fk_tag_backup_id_agency",
+		fromCollection: "tag",
+		fromColumn: "backup_id",
+		toCollection: "agency",
+		toColumn: "id",
+		onDelete: "set-null",
+		onUpdate: "restrict"
+	} as const;
+
+	it("2ᵉ chemin de cascade pour la même action : compensée, triggers des deux tables", () => {
+		const plan = lower(
+			"add ref (backup_id) references agency.id on delete set null into tag"
+		);
+		expect(plan).toMatchObject({ ref: { emulated: true } });
+		expect((plan as { refTriggers?: unknown }).refTriggers).toEqual([
+			{ table: "tag", outgoing: [backup], incoming: [], keys: [["id"]] },
+			{
+				table: "agency",
+				outgoing: [],
+				incoming: [backup],
+				keys: [["id"], ["code"]]
+			}
+		]);
+		// Postgres accepte les chemins multiples : rien à compenser.
+		const pg = lower(
+			"add ref (backup_id) references agency.id on delete set null into tag",
+			{ ...schema, engine: "postgres" }
+		);
+		expect(pg).not.toHaveProperty("refTriggers");
+		expect(pg).toMatchObject({ ref: { onDelete: "set-null" } });
+		expect((pg as { ref: { emulated?: true } }).ref.emulated).toBeUndefined();
+	});
+
+	it("règle par action ; sous le profil prisma, celle de Prisma (une FK compte dès qu'une action n'est pas NO ACTION)", () => {
+		const updateOnly =
+			"add ref (backup_id) references agency.id on update cascade into tag";
+		expect(
+			(lower(updateOnly) as { ref: { emulated?: true } }).ref.emulated
+		).toBeUndefined();
+		expect(lower(updateOnly, schema, { ormProfile: "prisma" })).toMatchObject({
+			ref: { emulated: true, onUpdate: "cascade" }
+		});
+	});
+
+	it("auto-référence en cascade, et FK compensée hors des chemins natifs", () => {
+		const tree = lower(
+			"create table node { id: int, parent_id: int nullable ref self.id on delete cascade, primary key (id) }"
+		) as CreateTablePlan;
+		expect(tree.fields[1]?.ref).toMatchObject({ emulated: true });
+		// Une FK compensée est NO ACTION en base : elle n'ouvre pas de chemin.
+		const withEmulated = {
+			...schema,
+			refs: [
+				{
+					...backup,
+					onDelete: "cascade" as const,
+					source: "declared" as const,
+					emulated: true
+				}
+			]
+		};
+		expect(
+			(
+				lower(
+					"add ref (owner_id) references agency.id on delete cascade into tag",
+					{ ...withEmulated, refs: withEmulated.refs }
+				) as { ref: { emulated?: true } }
+			).ref.emulated
+		).toBeUndefined();
+	});
+
+	it("drop ref, rename et drop column d'une FK compensée : triggers recréés d'après le schéma d'après", () => {
+		const emulated = {
+			...schema,
+			refs: [
+				...(schema.refs ?? []),
+				{ ...backup, source: "declared" as const, emulated: true }
+			]
+		};
+		expect(
+			(
+				lower("drop ref fk_tag_backup_id_agency from tag", emulated) as {
+					refTriggers?: unknown;
+				}
+			).refTriggers
+		).toEqual([
+			{ table: "tag", outgoing: [], incoming: [], keys: [["id"]] },
+			{ table: "agency", outgoing: [], incoming: [], keys: [["id"], ["code"]] }
+		]);
+		const renamed = lower(
+			"rename column tag.backup_id to backup",
+			emulated
+		) as {
+			refTriggers?: readonly { outgoing: readonly { fromColumn: string }[] }[];
+		};
+		expect(renamed.refTriggers?.[0]?.outgoing[0]?.fromColumn).toBe("backup");
+		expect(lower("drop column owner_id from tag", emulated)).not.toHaveProperty(
+			"refTriggers"
+		);
+	});
+});

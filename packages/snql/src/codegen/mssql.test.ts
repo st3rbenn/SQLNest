@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { compile, getMapper } from "../index";
+import { compile, getMapper, MSSQL_EMULATED_REF_PROPERTY } from "../index";
+import { lowerDDL } from "../ir/lower-ddl";
 import * as lowerModule from "../ir/lower";
 import { lowerMutation, lowerRaw, lowerTransaction } from "../ir/lower";
 import { parse } from "../parser/parser";
@@ -1072,5 +1073,164 @@ describe("codegen mssql — schéma de la connexion (E/2c)", () => {
 				ifExists: false
 			})
 		).toBe("DROP INDEX [idx] ON [sales].[orders]");
+	});
+});
+
+describe("codegen mssql — FK compensées (ADR-031 D9)", () => {
+	const field = (name: string): import("../schema/model").Field => ({
+		name,
+		type: "int",
+		nullable: true,
+		source: "declared"
+	});
+	const schema: import("../schema/model").SchemaModel = {
+		engine: "mssql",
+		collections: [
+			{
+				name: "agency",
+				source: "declared",
+				primaryKey: ["id"],
+				fields: [field("id"), field("code")],
+				indexes: [{ name: "agency_code_key", columns: ["code"], unique: true }]
+			},
+			{
+				name: "tag",
+				source: "declared",
+				primaryKey: ["id"],
+				fields: [field("id"), field("owner_id"), field("backup_id")]
+			}
+		],
+		relations: [],
+		refs: [
+			{
+				name: "fk_tag_owner_id_agency",
+				fromCollection: "tag",
+				fromColumn: "owner_id",
+				toCollection: "agency",
+				toColumn: "id",
+				onDelete: "cascade",
+				onUpdate: "restrict",
+				source: "declared"
+			}
+		]
+	};
+	const ddl = (source: string, withSchema = schema): string =>
+		ddlText(
+			lowerDDL(
+				parse(tokenize(source)) as import("../parser/ast").DDLStatement,
+				withSchema
+			)
+		).text;
+
+	it("FK posée NO ACTION, désactivée, actions en propriété ; triggers des deux tables, dans une transaction", () => {
+		const text = ddl(
+			"add ref (backup_id) references agency.id on delete set null on update cascade into tag"
+		);
+		expect(text).toContain(
+			"ADD CONSTRAINT [fk_tag_backup_id_agency] FOREIGN KEY ([backup_id]) REFERENCES [dbo].[agency] ([id]) ON DELETE NO ACTION ON UPDATE NO ACTION"
+		);
+		expect(text).toContain(
+			"ALTER TABLE [dbo].[tag] NOCHECK CONSTRAINT [fk_tag_backup_id_agency];"
+		);
+		expect(text).toContain(
+			`EXEC sys.sp_addextendedproperty @name = N'${MSSQL_EMULATED_REF_PROPERTY}', @value = N'{"onDelete":"set-null","onUpdate":"cascade"}'`
+		);
+		expect(
+			text.startsWith("SET NOCOUNT ON;\nSET XACT_ABORT ON;\nBEGIN TRAN;")
+		).toBe(true);
+		expect(text.endsWith("COMMIT;")).toBe(true);
+		for (const trigger of [
+			"snql_tag_check",
+			"snql_agency_delete",
+			"snql_agency_update"
+		]) {
+			expect(text).toContain(
+				`IF OBJECT_ID(N'[dbo].[${trigger}]', N'TR') IS NOT NULL DROP TRIGGER [dbo].[${trigger}];`
+			);
+			expect(text).toContain(`EXEC (N'CREATE TRIGGER [dbo].[${trigger}] ON `);
+		}
+		// Valeur écrite absente de la table référencée : refusée.
+		expect(text).toContain(
+			"IF UPDATE([backup_id]) AND EXISTS (SELECT 1 FROM inserted AS i WHERE i.[backup_id] IS NOT NULL AND NOT EXISTS (SELECT 1 FROM [dbo].[agency] AS r WHERE r.[id] = i.[backup_id]))"
+		);
+		// Suppression : mise à null des dépendants.
+		expect(text).toContain(
+			"UPDATE x SET x.[backup_id] = NULL FROM [dbo].[tag] AS x JOIN deleted AS d ON x.[backup_id] = d.[id];"
+		);
+		// Changement de clé : une ligne, ou plusieurs reliées par une clé inchangée.
+		expect(text).toContain("ELSE IF NOT (UPDATE([code]))");
+		expect(text).toContain("JOIN inserted AS i ON i.[code] = d.[code]");
+	});
+
+	it("auto-référence en cascade : suppression de niveau en niveau", () => {
+		const text = ddl(
+			"create table node { id: int, parent_id: int nullable ref self.id on delete cascade, primary key (id) }"
+		);
+		expect(text).toContain(
+			"WHILE @@ROWCOUNT > 0 DELETE x OUTPUT DELETED.[id] INTO @k0 FROM [dbo].[node] AS x WHERE EXISTS (SELECT 1 FROM @k0 AS s WHERE s.k = x.[parent_id]);"
+		);
+	});
+
+	it("FK compensée retirée : triggers retirés, aucun recréé", () => {
+		const emulated = {
+			...schema,
+			refs: [
+				...(schema.refs ?? []),
+				{
+					name: "fk_tag_backup_id_agency",
+					fromCollection: "tag",
+					fromColumn: "backup_id",
+					toCollection: "agency",
+					toColumn: "id",
+					onDelete: "set-null" as const,
+					onUpdate: "restrict" as const,
+					source: "declared" as const,
+					emulated: true
+				}
+			]
+		};
+		const text = ddl("drop ref fk_tag_backup_id_agency from tag", emulated);
+		expect(text).toContain("DROP TRIGGER [dbo].[snql_agency_delete];");
+		expect(text).not.toContain("CREATE TRIGGER");
+	});
+
+	it("dépendants retirés puis recréés (D9) : une FK désactivée le reste, avec sa propriété", () => {
+		const text = ddl("alter column tag.backup_id set not null");
+		expect(text).toContain(
+			"CASE WHEN fk.is_disabled = 1 THEN N' WITH NOCHECK' ELSE N' WITH CHECK' END"
+		);
+		expect(text).toContain(
+			`N'EXEC sys.sp_addextendedproperty @name = N''${MSSQL_EMULATED_REF_PROPERTY}''`
+		);
+	});
+
+	it("écriture sur une table à trigger : OUTPUT … INTO, lignes relues par clé ; suppression copiée avant", () => {
+		const triggered = {
+			...schema,
+			collections: schema.collections.map((c) =>
+				c.name === "tag"
+					? { ...c, triggers: ["insert", "update", "delete"] as const }
+					: c
+			)
+		};
+		const write = (source: string, withSchema = triggered): string => {
+			const native = getMapper("mssql").mapMutation(
+				lowerMutation(
+					parse(tokenize(source)) as Parameters<typeof lowerMutation>[0],
+					withSchema
+				)
+			);
+			return native.kind === "sql" ? native.text : "";
+		};
+		const insert = write("add { id: 1, owner_id: 2 } into tag");
+		expect(insert).toBe(
+			"DECLARE @snql_keys TABLE ([id] sql_variant);\nINSERT INTO [tag] ([id], [owner_id]) OUTPUT INSERTED.[id] INTO @snql_keys VALUES (@p1, @p2);\nSELECT [__sqlnest_row].* FROM [tag] AS [__sqlnest_row] WHERE EXISTS (SELECT 1 FROM @snql_keys AS [__sqlnest_key] WHERE [__sqlnest_key].[id] = [__sqlnest_row].[id]);"
+		);
+		expect(write("remove from tag where id = 1")).toBe(
+			"IF OBJECT_ID(N'tempdb..#snql_rows') IS NOT NULL DROP TABLE #snql_rows;\nSELECT * INTO #snql_rows FROM [tag] WHERE [id] = @p1;\nDELETE [__sqlnest_row] FROM [tag] AS [__sqlnest_row] WHERE EXISTS (SELECT 1 FROM #snql_rows AS [__sqlnest_key] WHERE [__sqlnest_key].[id] = [__sqlnest_row].[id]);\nSELECT * FROM #snql_rows;\nDROP TABLE #snql_rows;"
+		);
+		expect(write("add { id: 1, owner_id: 2 } into tag", schema)).toContain(
+			"OUTPUT INSERTED.* VALUES"
+		);
 	});
 });

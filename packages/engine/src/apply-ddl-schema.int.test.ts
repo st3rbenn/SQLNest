@@ -94,6 +94,8 @@ const SCENARIO = [
 	"drop index idx_e2c_child_qty from e2c_child",
 	"drop ref fk_e2c_child_parent_id_e2c_parent from e2c_child",
 	"add ref (parent_id) references e2c_parent.id on delete set null into e2c_child",
+	// 2ᵉ chemin de cascade vers e2c_child : compensé par triggers sous SQL Server (ADR-031 D9).
+	"add column alt_parent_id int nullable ref e2c_parent.id on delete cascade into e2c_child",
 	"add index (qty, tag) into e2c_child",
 	"drop column remark from e2c_child",
 	"drop column state from e2c_child",

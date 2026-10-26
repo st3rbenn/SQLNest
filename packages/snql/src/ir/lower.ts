@@ -895,10 +895,34 @@ export function lowerMutation(
 	statement: InsertStatement | UpdateStatement | DeleteStatement,
 	schema?: SchemaModel
 ): MutationPlan {
-	return applyNativeNamesToMutation(
-		lowerMutationPlan(statement, schema),
+	return withTriggeredWrite(
+		applyNativeNamesToMutation(lowerMutationPlan(statement, schema), schema),
 		schema
 	);
+}
+
+/**
+ * SQL Server : une table qui a un trigger pour l'écriture refuse `OUTPUT` sans
+ * `INTO` (334) ; le codegen relit alors les lignes écrites par leur clé. Un
+ * upsert (MERGE) peut insérer comme mettre à jour.
+ */
+function withTriggeredWrite(
+	plan: MutationPlan,
+	schema: SchemaModel | undefined
+): MutationPlan {
+	if (schema?.engine !== "mssql" || plan.returnRowCount === true) return plan;
+	const collection = schema.collections.find((c) => c.name === plan.collection);
+	const events = new Set(collection?.triggers ?? []);
+	const fires =
+		plan.op === "insert" && plan.onConflict !== undefined
+			? events.has("insert") || events.has("update")
+			: events.has(plan.op);
+	if (!fires || collection === undefined) return plan;
+	const unique = collection.indexes?.find((i) => i.unique)?.columns;
+	return {
+		...plan,
+		triggered: { keys: collection.primaryKey ?? unique ?? [] }
+	};
 }
 
 function lowerMutationPlan(

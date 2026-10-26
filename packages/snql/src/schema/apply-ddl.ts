@@ -220,7 +220,8 @@ function refOf(table: string, ref: FieldRefPlan): RefDef {
 		toColumn: ref.targetColumn,
 		onDelete: ref.onDelete,
 		onUpdate: ref.onUpdate,
-		source: "declared"
+		source: "declared",
+		...(ref.emulated === true ? { emulated: true } : {})
 	};
 }
 

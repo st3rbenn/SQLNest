@@ -87,7 +87,7 @@ export function planFor(
 
 export { mapKvDDL } from "./codegen/kv-ddl";
 export { mongoMapper } from "./codegen/mongodb";
-export { mssqlMapper } from "./codegen/mssql";
+export { MSSQL_EMULATED_REF_PROPERTY, mssqlMapper } from "./codegen/mssql";
 export { postgresMapper } from "./codegen/postgres";
 export { DISTINCT_ON_RN_COLUMN } from "./codegen/sql-core";
 export type {
@@ -162,6 +162,7 @@ export type {
 	DropIndexPlan,
 	DropRefPlan,
 	DropTablePlan,
+	EmulatedRefPlan,
 	FieldRefPlan,
 	IntrospectPlan,
 	LogicalPlan,
@@ -171,9 +172,11 @@ export type {
 	PlanExpr,
 	PlanProjectField,
 	PlanSortKey,
+	RefTriggersPlan,
 	RenameColumnPlan,
 	SqlDecimal,
-	SqlValue
+	SqlValue,
+	TriggeredWrite
 } from "./ir/plan";
 export { isDdlDefaultFn, isSqlDecimal } from "./ir/plan";
 // --- Language service (éditeur : complétion schema-aware) ---
@@ -291,7 +294,8 @@ export type {
 	RelationOrigin,
 	SchemaModel,
 	SchemaSource,
-	SnqlType
+	SnqlType,
+	TriggerEvent
 } from "./schema/model";
 export { applyDdlToSchema } from "./schema/apply-ddl";
 export type { SchemaDiff, SchemaScope } from "./schema/compare";

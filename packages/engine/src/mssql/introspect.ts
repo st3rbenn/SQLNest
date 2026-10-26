@@ -1,13 +1,17 @@
-import type {
-	Collection,
-	EnumTypeDef,
-	Field,
-	OnDeleteRule,
-	OnUpdateRule,
-	ResultSet,
-	SchemaModel,
-	SnqlType
+import {
+	type Collection,
+	type EnumTypeDef,
+	type Field,
+	MSSQL_EMULATED_REF_PROPERTY,
+	type OnDeleteRule,
+	type OnUpdateRule,
+	type ResultSet,
+	type SchemaModel,
+	type SnqlType,
+	type TriggerEvent
 } from "@sqlnest/snql";
+
+const TRIGGER_EVENTS: readonly TriggerEvent[] = ["insert", "update", "delete"];
 import { EngineIntrospectionError } from "../errors";
 import {
 	inferNamingRelations,
@@ -85,6 +89,15 @@ interface MssqlFkRow {
 	 * 2=SET NULL, 3=SET DEFAULT. */
 	readonly on_delete: number;
 	readonly on_update: number;
+	/** FK compensée (ADR-031 D9) : ses actions, en JSON, que le catalogue montre NO ACTION. */
+	readonly snql_actions?: string | null;
+}
+
+/** Écriture qui déclenche un trigger actif d'une table. */
+interface MssqlTriggerRow {
+	readonly table_name: string;
+	/** `INSERT`, `UPDATE`, `DELETE`. */
+	readonly event: string;
 }
 
 // Le schéma cible est un paramètre bindé (@p1) — jamais interpolé. Même
@@ -163,13 +176,25 @@ const FK_SQL = `
 		ft.name AS from_table,
 		COL_NAME(fkc.parent_object_id, fkc.parent_column_id) AS from_column,
 		tt.name AS to_table,
-		COL_NAME(fkc.referenced_object_id, fkc.referenced_column_id) AS to_column
+		COL_NAME(fkc.referenced_object_id, fkc.referenced_column_id) AS to_column,
+		CONVERT(nvarchar(4000), ep.value) AS snql_actions
 	FROM sys.foreign_keys fk
 	JOIN sys.foreign_key_columns fkc ON fkc.constraint_object_id = fk.object_id
 	JOIN sys.tables ft ON ft.object_id = fk.parent_object_id
 	JOIN sys.tables tt ON tt.object_id = fk.referenced_object_id
+	LEFT JOIN sys.extended_properties ep ON ep.class = 1 AND ep.major_id = fk.object_id
+		AND ep.minor_id = 0 AND ep.name = N'${MSSQL_EMULATED_REF_PROPERTY}' AND fk.is_disabled = 1
 	WHERE SCHEMA_NAME(ft.schema_id) = @p1 AND SCHEMA_NAME(tt.schema_id) = @p1
 	ORDER BY fk.object_id, fkc.constraint_column_id`;
+
+// Triggers DML actifs : une table qui en a un pour une écriture refuse
+// `OUTPUT` sans `INTO` (334), le codegen en tient compte.
+const TRIGGERS_SQL = `
+	SELECT t.name AS table_name, te.type_desc AS event
+	FROM sys.triggers tr
+	JOIN sys.trigger_events te ON te.object_id = tr.object_id
+	JOIN sys.tables t ON t.object_id = tr.parent_id
+	WHERE SCHEMA_NAME(t.schema_id) = @p1 AND tr.is_disabled = 0`;
 
 /** Type T-SQL (`INFORMATION_SCHEMA.DATA_TYPE`, lowercase) → type unifié SNQL. */
 export function mapMssqlType(dataType: string): SnqlType {
@@ -223,7 +248,7 @@ function mssqlRefRule(action: number): OnDeleteRule & OnUpdateRule {
 }
 
 function normalizeMssqlFkRow(fk: MssqlFkRow): RelationalFkRow {
-	return {
+	const row: RelationalFkRow = {
 		constraintId: fk.constraint_id,
 		constraintName: fk.constraint_name,
 		fromTable: fk.from_table,
@@ -233,6 +258,42 @@ function normalizeMssqlFkRow(fk: MssqlFkRow): RelationalFkRow {
 		onDelete: mssqlRefRule(fk.on_delete),
 		onUpdate: mssqlRefRule(fk.on_update)
 	};
+	const actions = emulatedActions(fk.snql_actions);
+	return actions !== undefined ? { ...row, ...actions, emulated: true } : row;
+}
+
+const REF_RULES: ReadonlySet<string> = new Set([
+	"restrict",
+	"cascade",
+	"set-null"
+]);
+
+/** Actions d'une FK compensée, gardées en propriété étendue ; `undefined` si absente ou illisible. */
+function emulatedActions(
+	value: string | null | undefined
+): { onDelete: OnDeleteRule; onUpdate: OnUpdateRule } | undefined {
+	if (value === null || value === undefined) return undefined;
+	try {
+		const parsed = JSON.parse(value) as {
+			onDelete?: unknown;
+			onUpdate?: unknown;
+		};
+		const { onDelete, onUpdate } = parsed;
+		if (
+			typeof onDelete !== "string" ||
+			typeof onUpdate !== "string" ||
+			!REF_RULES.has(onDelete) ||
+			!REF_RULES.has(onUpdate)
+		) {
+			return undefined;
+		}
+		return {
+			onDelete: onDelete as OnDeleteRule,
+			onUpdate: onUpdate as OnUpdateRule
+		};
+	} catch {
+		return undefined;
+	}
 }
 
 /**
@@ -247,7 +308,8 @@ export function buildMssqlSchemaModel(
 	fks: readonly MssqlFkRow[],
 	enums: readonly MssqlEnumRow[] = [],
 	indexRows: readonly RelationalIndexRow[] = [],
-	enumChecks: readonly MssqlEnumCheckRow[] = []
+	enumChecks: readonly MssqlEnumCheckRow[] = [],
+	triggerRows: readonly MssqlTriggerRow[] = []
 ): SchemaModel {
 	// Enums compensés — members JSON parsés defensivement (une ligne
 	// corrompue est ignorée plutôt que de bloquer tout le schéma).
@@ -313,10 +375,20 @@ export function buildMssqlSchemaModel(
 	}
 
 	const indexesByTable = buildIndexesFromRows(indexRows);
+	const triggersByTable = new Map<string, Set<TriggerEvent>>();
+	for (const row of triggerRows) {
+		const event = row.event.toLowerCase();
+		if (event !== "insert" && event !== "update" && event !== "delete")
+			continue;
+		const events = triggersByTable.get(row.table_name) ?? new Set();
+		events.add(event);
+		triggersByTable.set(row.table_name, events);
+	}
 	const collections: Collection[] = tables.map((name) => {
 		const fields = fieldsByTable.get(name) ?? [];
 		const primaryKey = pkByTable.get(name);
 		const indexes = indexesByTable.get(name);
+		const triggers = triggersByTable.get(name);
 		return {
 			name,
 			fields,
@@ -324,6 +396,9 @@ export function buildMssqlSchemaModel(
 				? { primaryKey }
 				: {}),
 			...(indexes !== undefined ? { indexes } : {}),
+			...(triggers !== undefined
+				? { triggers: TRIGGER_EVENTS.filter((e) => triggers.has(e)) }
+				: {}),
 			source: "declared"
 		};
 	});
@@ -396,7 +471,7 @@ export async function introspectMssql(
 			{ cause }
 		);
 	}
-	const [pks, fks, enums, indexes, enumChecks] = await Promise.all([
+	const [pks, fks, enums, indexes, enumChecks, triggers] = await Promise.all([
 		softQuery(run, PK_SQL, params, "primary keys"),
 		softQuery(run, FK_SQL, params, "foreign keys"),
 		// Enums compensés (M/6) : la table metadata `_snql_enums` n'existe
@@ -404,7 +479,8 @@ export async function introspectMssql(
 		// dans les codes soft → 0 enum, jamais un blocage.
 		softQuery(run, ENUMS_SQL, params, "enums"),
 		softQuery(run, INDEXES_SQL, params, "indexes"),
-		softQuery(run, ENUM_CHECKS_SQL, params, "enum checks")
+		softQuery(run, ENUM_CHECKS_SQL, params, "enum checks"),
+		softQuery(run, TRIGGERS_SQL, params, "triggers")
 	]);
 	return buildMssqlSchemaModel(
 		tables.rows.map((row) => String(row["table_name"])),
@@ -413,7 +489,8 @@ export async function introspectMssql(
 		fks as unknown as MssqlFkRow[],
 		enums as unknown as MssqlEnumRow[],
 		indexes as unknown as RelationalIndexRow[],
-		enumChecks as unknown as MssqlEnumCheckRow[]
+		enumChecks as unknown as MssqlEnumCheckRow[],
+		triggers as unknown as MssqlTriggerRow[]
 	);
 }
 

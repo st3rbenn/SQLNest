@@ -80,6 +80,59 @@ describe("buildMssqlSchemaModel", () => {
 		]);
 	});
 
+	it("FK compensée (ADR-031 D9) : actions relues dans sa propriété ; triggers par table", () => {
+		const fk = (name: string, column: string, actions: string | null) => ({
+			constraint_id: name,
+			constraint_name: name,
+			from_table: "tag",
+			from_column: column,
+			to_table: "agency",
+			to_column: "id",
+			on_delete: 1,
+			on_update: 0,
+			snql_actions: actions
+		});
+		const model = buildMssqlSchemaModel(
+			["agency", "tag"],
+			[
+				col("agency", "id", "int"),
+				col("tag", "owner_id", "int"),
+				col("tag", "backup_id", "int", true)
+			],
+			[],
+			[
+				fk("tag_owner_id_fkey", "owner_id", null),
+				{
+					...fk(
+						"tag_backup_id_fkey",
+						"backup_id",
+						'{"onDelete":"set-null","onUpdate":"cascade"}'
+					),
+					on_delete: 0
+				}
+			],
+			[],
+			[],
+			[],
+			[
+				{ table_name: "agency", event: "DELETE" },
+				{ table_name: "agency", event: "UPDATE" },
+				{ table_name: "tag", event: "INSERT" },
+				{ table_name: "tag", event: "UPDATE" }
+			]
+		);
+		expect(
+			model.refs?.map((r) => [r.name, r.onDelete, r.onUpdate, r.emulated])
+		).toEqual([
+			["tag_owner_id_fkey", "cascade", "restrict", undefined],
+			["tag_backup_id_fkey", "set-null", "cascade", true]
+		]);
+		expect(model.collections.map((c) => c.triggers)).toEqual([
+			["update", "delete"],
+			["insert", "update"]
+		]);
+	});
+
 	it("COLUMN_DEFAULT non-null → hasDefault", () => {
 		const model = buildMssqlSchemaModel(
 			["T"],

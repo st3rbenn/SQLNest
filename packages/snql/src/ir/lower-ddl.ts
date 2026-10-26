@@ -49,10 +49,14 @@ import type {
 	DropIndexPlan,
 	DropRefPlan,
 	DropTablePlan,
+	EmulatedRefPlan,
+	FieldRefPlan,
+	RefTriggersPlan,
 	RenameColumnPlan,
 	SqlJsonLiteral,
 	SqlValue
 } from "./plan";
+import { applyDdlToSchema } from "../schema/apply-ddl";
 
 /**
  * Longueur max = 63 chars (WiredTiger + PG NAMEDATALEN aligné). D1 ADR-029.
@@ -174,6 +178,117 @@ export function lowerDDL(
 	statement: DDLStatement,
 	schema?: SchemaModel,
 	options: DdlLowerOptions = {}
+): DDLPlan {
+	return withRefTriggers(lowerDDLPlan(statement, schema, options), schema);
+}
+
+/**
+ * SQL Server : les triggers des FK compensées sont recréés pour chaque table
+ * dont l'opération change ces FK ou les colonnes qu'elles citent (leur texte
+ * nomme les colonnes), d'après le schéma d'après.
+ */
+function withRefTriggers(
+	plan: DDLPlan,
+	schema: SchemaModel | undefined
+): DDLPlan {
+	if (schema?.engine !== "mssql") return plan;
+	const tables = refTriggerTables(plan, schema);
+	if (tables.size === 0) return plan;
+	const after = applyDdlToSchema(schema, plan);
+	const emulated = (after.refs ?? []).filter((r) => r.emulated === true);
+	const refTriggers: RefTriggersPlan[] = [];
+	for (const table of tables) {
+		const collection = after.collections.find((c) => c.name === table);
+		if (collection === undefined) continue;
+		refTriggers.push({
+			table,
+			outgoing: emulated
+				.filter((r) => r.fromCollection === table)
+				.map(emulatedRefPlan),
+			incoming: emulated
+				.filter((r) => r.toCollection === table)
+				.map(emulatedRefPlan),
+			keys: [
+				...(collection.primaryKey !== undefined &&
+				collection.primaryKey.length > 0
+					? [collection.primaryKey]
+					: []),
+				...(collection.indexes ?? [])
+					.filter((i) => i.unique)
+					.map((i) => i.columns)
+			]
+		});
+	}
+	return refTriggers.length > 0 ? ({ ...plan, refTriggers } as DDLPlan) : plan;
+}
+
+/** Tables dont les triggers de FK compensées changent avec l'opération. */
+function refTriggerTables(plan: DDLPlan, schema: SchemaModel): Set<string> {
+	const created = (table: string, refs: readonly FieldRefPlan[]): string[] =>
+		refs
+			.filter((r) => r.emulated === true)
+			.flatMap((r) => [table, r.targetCollection]);
+	const touching = (keep: (r: RefDef) => boolean): string[] =>
+		(schema.refs ?? [])
+			.filter((r) => r.emulated === true && keep(r))
+			.flatMap((r) => [r.fromCollection, r.toCollection]);
+	const citesColumn = (table: string, column: string) => (r: RefDef) =>
+		(r.fromCollection === table && r.fromColumn === column) ||
+		(r.toCollection === table && r.toColumn === column);
+	switch (plan.kind) {
+		case "create-table":
+			return new Set(
+				created(
+					plan.target,
+					plan.fields.flatMap((f) => (f.ref !== undefined ? [f.ref] : []))
+				)
+			);
+		case "add-column":
+			return new Set(
+				created(
+					plan.target,
+					plan.column.ref !== undefined ? [plan.column.ref] : []
+				)
+			);
+		case "add-ref":
+			return new Set(created(plan.target, [plan.ref]));
+		case "drop-ref":
+			return new Set(
+				touching(
+					(r) => r.fromCollection === plan.target && r.name === plan.name
+				)
+			);
+		case "drop-column":
+		case "rename-column":
+			return new Set(touching(citesColumn(plan.target, plan.column)));
+		case "drop-table":
+			return new Set(
+				touching(
+					(r) =>
+						r.fromCollection === plan.target || r.toCollection === plan.target
+				)
+			);
+		default:
+			return new Set();
+	}
+}
+
+function emulatedRefPlan(ref: RefDef): EmulatedRefPlan {
+	return {
+		name: ref.name,
+		fromCollection: ref.fromCollection,
+		fromColumn: ref.fromColumn,
+		toCollection: ref.toCollection,
+		toColumn: ref.toColumn,
+		onDelete: ref.onDelete,
+		onUpdate: ref.onUpdate
+	};
+}
+
+function lowerDDLPlan(
+	statement: DDLStatement,
+	schema: SchemaModel | undefined,
+	options: DdlLowerOptions
 ): DDLPlan {
 	const naming = ddlNaming(options, schema);
 	if (statement.kind === "create-table") {
@@ -618,8 +733,13 @@ function lowerCreateTable(
 							pending
 						)
 					: undefined;
-			if (ref !== undefined && cascades(ref)) {
-				pending.push({ from: ref.targetCollection, to: stmt.target });
+			if (ref !== undefined && ref.emulated !== true) {
+				pending.push({
+					from: ref.targetCollection,
+					to: stmt.target,
+					onDelete: ref.onDelete,
+					onUpdate: ref.onUpdate
+				});
 			}
 			const base: CreateTableField = {
 				name: f.name,
@@ -1076,16 +1196,17 @@ function resolveFieldRef(
 	assertIdent(mod.targetColumn, "field");
 	if (mod.name !== undefined) assertIdent(mod.name, "field");
 
+	const edge = { from: targetCollection, to: fromCollection };
 	const onDelete = mod.onDelete ?? "restrict";
 	const onUpdate =
-		mod.onUpdate ??
-		defaultOnUpdate(
-			naming,
-			schema,
-			{ from: targetCollection, to: fromCollection },
-			onDelete,
-			pending
-		);
+		mod.onUpdate ?? defaultOnUpdate(naming, schema, edge, pending);
+	const emulated = needsEmulation(
+		naming,
+		schema,
+		edge,
+		{ onDelete, onUpdate },
+		pending
+	);
 
 	const setNullOn =
 		onDelete === "set-null"
@@ -1158,14 +1279,21 @@ function resolveFieldRef(
 		targetCollection,
 		targetColumn: mod.targetColumn,
 		onDelete,
-		onUpdate
+		onUpdate,
+		...(emulated ? { emulated: true as const } : {})
 	};
 }
 
-/** FK vue comme un chemin de cascade : de la table référencée vers celle qui la porte. */
-interface CascadeEdge {
+/** Chemin de cascade d'une FK : de la table référencée vers celle qui la porte. */
+interface CascadePath {
 	readonly from: string;
 	readonly to: string;
+}
+
+/** FK native, vue comme un chemin de cascade avec ses actions. */
+interface CascadeEdge extends CascadePath {
+	readonly onDelete: OnDeleteRule;
+	readonly onUpdate: OnUpdateRule;
 }
 
 /** Une FK compte comme cascade dès qu'une de ses actions n'est pas NO ACTION. */
@@ -1185,24 +1313,67 @@ function cascades(ref: {
 function defaultOnUpdate(
 	naming: DdlNaming,
 	schema: SchemaModel | undefined,
-	edge: CascadeEdge,
-	onDelete: OnDeleteRule,
+	edge: CascadePath,
 	pending: readonly CascadeEdge[]
 ): OnUpdateRule {
-	if (
-		naming.onUpdate === "restrict" ||
-		schema?.engine !== "mssql" ||
-		onDelete !== "restrict"
-	) {
+	if (naming.onUpdate === "restrict" || schema?.engine !== "mssql") {
 		return naming.onUpdate;
 	}
-	const edges = [
+	return cascadeConflict(nativeEdges(schema, pending).filter(cascades), edge)
+		? "restrict"
+		: naming.onUpdate;
+}
+
+/**
+ * SQL Server : une FK ne cascade (cascade, set null) ni en fermant un cycle ni
+ * en ouvrant un 2ᵉ chemin de cascade vers une table pour la même action
+ * (1785). Sous le profil `prisma`, la règle de Prisma, plus large : une FK y
+ * compte dès qu'une de ses actions n'est pas NO ACTION. Une FK qui l'enfreint
+ * est compensée : posée NO ACTION et désactivée, ses actions et le contrôle
+ * des valeurs passent par des triggers (ADR-031 D9).
+ */
+function needsEmulation(
+	naming: DdlNaming,
+	schema: SchemaModel | undefined,
+	edge: CascadePath,
+	rules: { readonly onDelete: OnDeleteRule; readonly onUpdate: OnUpdateRule },
+	pending: readonly CascadeEdge[]
+): boolean {
+	if (schema?.engine !== "mssql") return false;
+	const native = nativeEdges(schema, pending);
+	if (naming.prisma) {
+		return cascades(rules) && cascadeConflict(native.filter(cascades), edge);
+	}
+	return (
+		(rules.onDelete !== "restrict" &&
+			cascadeConflict(
+				native.filter((e) => e.onDelete !== "restrict"),
+				edge
+			)) ||
+		(rules.onUpdate !== "restrict" &&
+			cascadeConflict(
+				native.filter((e) => e.onUpdate !== "restrict"),
+				edge
+			))
+	);
+}
+
+/** FK natives du schéma (les compensées sont NO ACTION en base), plus celles du même `create table`. */
+function nativeEdges(
+	schema: SchemaModel,
+	pending: readonly CascadeEdge[]
+): CascadeEdge[] {
+	return [
 		...(schema.refs ?? [])
-			.filter(cascades)
-			.map((r: RefDef) => ({ from: r.toCollection, to: r.fromCollection })),
+			.filter((r: RefDef) => r.emulated !== true)
+			.map((r: RefDef) => ({
+				from: r.toCollection,
+				to: r.fromCollection,
+				onDelete: r.onDelete,
+				onUpdate: r.onUpdate
+			})),
 		...pending
 	];
-	return cascadeConflict(edges, edge) ? "restrict" : naming.onUpdate;
 }
 
 /**
@@ -1211,8 +1382,8 @@ function defaultOnUpdate(
  * sans elle, la table qui la porte ou l'une de ses suivantes.
  */
 function cascadeConflict(
-	edges: readonly CascadeEdge[],
-	edge: CascadeEdge
+	edges: readonly CascadePath[],
+	edge: CascadePath
 ): boolean {
 	const next = new Map<string, string[]>();
 	for (const e of edges) next.set(e.from, [...(next.get(e.from) ?? []), e.to]);
