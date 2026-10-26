@@ -1,6 +1,8 @@
 import type { SpotlightActionGroupData } from "@sqlnest/design-system";
 import { createContext, type ReactNode, useContext, useMemo } from "react";
 import type { CanvasTool } from "../CanvasToolbar";
+import type { ChangeGesture } from "../editor/changeSnql";
+import type { EditMode } from "../editor/editMode";
 import type { Frame } from "../frames";
 import type { SchemaModel } from "../schema-model";
 import type { FramesApi } from "../useFrames";
@@ -38,6 +40,10 @@ export interface CanvasDataContextValue {
 	 *  le back button top-left. Différent de `schemaLabel` qui désigne le
 	 *  schéma Postgres cible (`public`). */
 	readonly dbName: string;
+	/** Team courante : les changements de schéma passent par ses routes. */
+	readonly teamSlug: string;
+	/** Mode d'édition du schéma (ADR-039 D1). */
+	readonly editMode: EditMode;
 	readonly framesApi: FramesApi;
 	readonly hiddenIds: ReadonlySet<string>;
 }
@@ -104,6 +110,9 @@ export interface CanvasUIContextValue {
 	readonly setInferencePanelOpen: (
 		v: boolean | ((prev: boolean) => boolean)
 	) => void;
+	/** Geste de changement de schéma ouvert dans le panneau de droite (ADR-039). */
+	readonly gesture: ChangeGesture | null;
+	readonly setGesture: (gesture: ChangeGesture | null) => void;
 }
 
 // ─── 4. Actions — callbacks bindés (stables) ───────────────────────────

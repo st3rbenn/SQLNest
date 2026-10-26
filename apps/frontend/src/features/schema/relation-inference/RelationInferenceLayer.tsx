@@ -3,6 +3,7 @@ import { Button } from "@sqlnest/design-system";
 import { IconLink, IconX } from "@tabler/icons-react";
 import { useMemo, useState } from "react";
 import { useCanvasData, useCanvasUI } from "../canvas/CanvasContext";
+import { CanvasSidePanel } from "../canvas/floating/CanvasSidePanel";
 import { type CandidateAnchor, detectRelationCandidates } from "./candidates";
 
 /**
@@ -125,52 +126,33 @@ export function RelationInferenceLayer() {
 			) : null}
 
 			{panelOpen ? (
-				<Paper
-					radius={12}
-					shadow="lg"
-					withBorder
-					bg="var(--sqlnest-elevated)"
-					style={{
-						position: "absolute",
-						top: 64,
-						right: 12,
-						bottom: 88,
-						width: 344,
-						zIndex: 7,
-						borderColor: "var(--sqlnest-border-subtle)",
-						display: "flex",
-						flexDirection: "column",
-						overflow: "hidden"
-					}}
+				<CanvasSidePanel
+					icon={<IconLink size={15} color="var(--sqlnest-text-secondary)" />}
+					title="Liens à inférer"
+					onClose={() => setPanelOpen(false)}
+					{...(collapsible
+						? {
+								footer: (
+									<Text
+										component="button"
+										size="xs"
+										onClick={() => setShowAll((v) => !v)}
+										style={{
+											color: "var(--sqlnest-accent)",
+											background: "none",
+											border: "none",
+											cursor: "pointer",
+											padding: 0
+										}}
+									>
+										{useThreshold
+											? `voir tout (${hiddenCount} de plus)`
+											: "voir moins"}
+									</Text>
+								)
+							}
+						: {})}
 				>
-					<Group
-						justify="space-between"
-						wrap="nowrap"
-						px="md"
-						py="sm"
-						style={{ borderBottom: "1px solid var(--sqlnest-border-subtle)" }}
-					>
-						<Group gap={8} wrap="nowrap">
-							<IconLink size={15} color="var(--sqlnest-text-secondary)" />
-							<Text
-								size="sm"
-								fw={600}
-								style={{ color: "var(--sqlnest-text-primary)" }}
-							>
-								Liens à inférer
-							</Text>
-						</Group>
-						<ActionIcon
-							size="sm"
-							variant="subtle"
-							color="gray"
-							aria-label="Fermer"
-							onClick={() => setPanelOpen(false)}
-						>
-							<IconX size={15} />
-						</ActionIcon>
-					</Group>
-
 					<Text
 						size="xs"
 						px="md"
@@ -249,32 +231,7 @@ export function RelationInferenceLayer() {
 							);
 						})}
 					</ScrollArea>
-
-					{collapsible ? (
-						<Box
-							px="md"
-							py="xs"
-							style={{ borderTop: "1px solid var(--sqlnest-border-subtle)" }}
-						>
-							<Text
-								component="button"
-								size="xs"
-								onClick={() => setShowAll((v) => !v)}
-								style={{
-									color: "var(--sqlnest-accent)",
-									background: "none",
-									border: "none",
-									cursor: "pointer",
-									padding: 0
-								}}
-							>
-								{useThreshold
-									? `voir tout (${hiddenCount} de plus)`
-									: "voir moins"}
-							</Text>
-						</Box>
-					) : null}
-				</Paper>
+				</CanvasSidePanel>
 			) : null}
 		</>
 	);

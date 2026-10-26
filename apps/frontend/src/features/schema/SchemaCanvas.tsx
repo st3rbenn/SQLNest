@@ -25,6 +25,9 @@ import { CanvasOverlays } from "./canvas/floating/CanvasOverlays";
 import { CanvasTopRightHUD } from "./canvas/floating/CanvasTopRightHUD";
 import { canReparentNode, withFrameParents } from "./canvas/frameTree";
 import { createTableDecorator } from "./canvas/tableDecorator";
+import type { ChangeGesture } from "./editor/changeSnql";
+import { editModeOf } from "./editor/editMode";
+import { useProjectStatus } from "./editor/useProjectStatus";
 import { useCanvasActions } from "./canvas/useCanvasActions";
 import { useCanvasCommands } from "./canvas/useCanvasCommands";
 import { useCanvasEdges } from "./canvas/useCanvasEdges";
@@ -300,6 +303,7 @@ function CanvasInner({
 		handleTableResize
 	} = useCanvasNodes({
 		base,
+		schema,
 		tablePositions,
 		tableSizes,
 		framesApi,
@@ -443,6 +447,30 @@ function CanvasInner({
 	// Panneau d'inférence de relations (base sans FK). État remonté ici pour
 	// être piloté à la fois par la bannière d'arrivée et le bouton toolbar.
 	const [inferencePanelOpen, setInferencePanelOpen] = useState(false);
+
+	// Changement de schéma (ADR-039) : mode déduit du projet relié et de la
+	// base ; un seul panneau à droite, le geste ferme celui des liens.
+	const projectStatus = useProjectStatus(teamSlug, connectionId);
+	const editMode = useMemo(
+		() =>
+			editModeOf(
+				schema,
+				projectStatus.data !== undefined
+					? { data: projectStatus.data }
+					: projectStatus.error !== null
+						? { error: projectStatus.error.message }
+						: undefined
+			),
+		[schema, projectStatus.data, projectStatus.error]
+	);
+	const [gesture, setGestureState] = useState<ChangeGesture | null>(null);
+	const setGesture = useCallback((next: ChangeGesture | null) => {
+		setGestureState(next);
+		if (next !== null) setInferencePanelOpen(false);
+	}, []);
+	useEffect(() => {
+		if (inferencePanelOpen) setGestureState(null);
+	}, [inferencePanelOpen]);
 
 	// Nœuds table affichés : positions vivantes (drag) + drapeaux focus + masqués.
 	// Injecte aussi le callback `onResizeEnd` — TableNode s'en sert pour le
@@ -888,10 +916,21 @@ function CanvasInner({
 			schemaLabel,
 			connectionId,
 			dbName,
+			teamSlug,
+			editMode,
 			framesApi,
 			hiddenIds
 		}),
-		[schema, schemaLabel, connectionId, dbName, framesApi, hiddenIds]
+		[
+			schema,
+			schemaLabel,
+			connectionId,
+			dbName,
+			teamSlug,
+			editMode,
+			framesApi,
+			hiddenIds
+		]
 	);
 	const focusCtxValue = useMemo(
 		() => ({
@@ -941,7 +980,9 @@ function CanvasInner({
 			hoveredTableName,
 			setHoveredTableName,
 			inferencePanelOpen,
-			setInferencePanelOpen
+			setInferencePanelOpen,
+			gesture,
+			setGesture
 		}),
 		[
 			search,
@@ -956,7 +997,9 @@ function CanvasInner({
 			selectedTables,
 			clearSelection,
 			hoveredTableName,
-			inferencePanelOpen
+			inferencePanelOpen,
+			gesture,
+			setGesture
 		]
 	);
 	const actionsCtxValue = useMemo(

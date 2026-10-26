@@ -24,6 +24,8 @@ const fakeData: CanvasDataContextValue = {
 	schemaLabel: undefined,
 	connectionId: "conn-1",
 	dbName: "demo",
+	teamSlug: "team",
+	editMode: { kind: "direct" },
 	framesApi: {} as CanvasDataContextValue["framesApi"],
 	hiddenIds: new Set()
 };
@@ -65,7 +67,9 @@ const fakeUI: CanvasUIContextValue = {
 	hoveredTableName: null,
 	setHoveredTableName: noop,
 	inferencePanelOpen: false,
-	setInferencePanelOpen: noop
+	setInferencePanelOpen: noop,
+	gesture: null,
+	setGesture: noop
 };
 const fakeActions: CanvasActionsContextValue = {
 	hideTable: noop,

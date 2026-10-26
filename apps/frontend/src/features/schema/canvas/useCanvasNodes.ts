@@ -1,7 +1,8 @@
 import { type NodeChange, useNodesState } from "@sqlnest/canvas";
 import { useCallback, useEffect, useRef } from "react";
 import type { LayoutResult } from "../layout";
-import type { TableNodeType } from "../TableNode";
+import type { SchemaModel } from "../schema-model";
+import { nodeHeight, type TableNodeType } from "../TableNode";
 import type { FramesApi } from "../useFrames";
 import type { PositionsApi, XY } from "../useTablePositions";
 import type { SizesApi } from "../useTableSizes";
@@ -9,6 +10,8 @@ import { applyCanvasChanges } from "./frameTree";
 
 export interface UseCanvasNodesOptions {
 	readonly base: LayoutResult | null;
+	/** Schéma courant : relu après un changement, il met à jour les colonnes des tables. */
+	readonly schema: SchemaModel;
 	readonly tablePositions: PositionsApi;
 	readonly tableSizes: SizesApi;
 	readonly framesApi: FramesApi;
@@ -60,7 +63,7 @@ export interface UseCanvasNodesReturn {
 export function useCanvasNodes(
 	opts: UseCanvasNodesOptions
 ): UseCanvasNodesReturn {
-	const { base, tablePositions, tableSizes, framesApi, history } = opts;
+	const { base, schema, tablePositions, tableSizes, framesApi, history } = opts;
 	const [nodes, setNodes, onNodesChange] = useNodesState<TableNodeType>([]);
 
 	// Refs pour les closures — évite la re-création à chaque persistance.
@@ -97,6 +100,29 @@ export function useCanvasNodes(
 			);
 		}
 	}, [base, setNodes]);
+
+	// Le layout est calculé une fois par connexion : un schéma relu (après un
+	// changement, ADR-039 D5) redonne à chaque table ses colonnes, et sa
+	// hauteur tant qu'elle n'a pas été redimensionnée à la main.
+	useEffect(() => {
+		setNodes((current) => {
+			let changed = false;
+			const next = current.map((n) => {
+				const collection = schema.collections.find((c) => c.name === n.id);
+				if (collection === undefined || collection === n.data.collection) {
+					return n;
+				}
+				changed = true;
+				const resized = tableSizesRef.current[n.id]?.height !== undefined;
+				return {
+					...n,
+					data: { ...n.data, collection },
+					...(resized ? {} : { height: nodeHeight(collection) })
+				};
+			});
+			return changed ? next : current;
+		});
+	}, [schema, setNodes]);
 
 	const handleNodesChange = useCallback(
 		(changes: NodeChange<TableNodeType>[]) => {

@@ -7,6 +7,7 @@ import {
 	showNotification
 } from "@sqlnest/design-system";
 import {
+	IconColumnInsertRight,
 	IconCopy,
 	IconEyeOff,
 	IconHash,
@@ -17,7 +18,7 @@ import {
 	IconTerminal2
 } from "@tabler/icons-react";
 import { useNavigate } from "@tanstack/react-router";
-import { useCanvasData } from "./canvas/CanvasContext";
+import { useCanvasData, useCanvasUI } from "./canvas/CanvasContext";
 import { colorFor } from "./colors";
 import type { Frame } from "./frames";
 import type { SchemaModel } from "./schema-model";
@@ -76,6 +77,7 @@ export function CanvasContextMenu({
 }: Props) {
 	const navigate = useNavigate();
 	const { connectionId } = useCanvasData();
+	const { setGesture } = useCanvasUI();
 	const collection = schema.collections.find((c) => c.name === tableName);
 
 	const goToEditor = (source: string, autorun: boolean) => {
@@ -238,6 +240,13 @@ export function CanvasContextMenu({
 		},
 		{ kind: "divider" },
 		{ kind: "section-label", label: "STRUCTURE" },
+		{
+			kind: "action",
+			id: "add-column",
+			label: "Ajouter une colonne",
+			icon: <IconColumnInsertRight {...ICON} />,
+			onClick: () => setGesture({ kind: "add-column", table: tableName })
+		},
 		...(frameItem ? [frameItem] : []),
 		{
 			kind: "action",

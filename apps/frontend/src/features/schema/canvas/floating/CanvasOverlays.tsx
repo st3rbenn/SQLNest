@@ -1,6 +1,7 @@
 import { Box } from "@mantine/core";
 import { SelectionChip, Spotlight } from "@sqlnest/design-system";
 import { CanvasContextMenu } from "../../CanvasContextMenu";
+import { ChangePanel } from "../../editor/ChangePanel";
 import { RelationInferenceLayer } from "../../relation-inference/RelationInferenceLayer";
 import {
 	useCanvasActionsCtx,
@@ -104,6 +105,7 @@ export function CanvasOverlays() {
 			/>
 
 			<RelationInferenceLayer />
+			<ChangePanel />
 		</>
 	);
 }
