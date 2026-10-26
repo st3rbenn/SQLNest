@@ -128,9 +128,12 @@ const FK_SQL = `
 
 // Index hors clé primaire, colonnes de clé dans l'ordre (`indnkeyatts` écarte
 // les INCLUDE). Un index sur expression n'a pas de colonnes nommables : exclu.
+// Un index invalide est signalé, pas écarté : il occupe son nom et peut
+// encore refuser des doublons (ADR-029 D18).
 const INDEXES_SQL = `
 	SELECT t.relname AS table_name, i.relname AS index_name,
-		ix.indisunique AS is_unique, a.attname AS column_name
+		ix.indisunique AS is_unique, a.attname AS column_name,
+		ix.indisvalid AS is_valid
 	FROM pg_index ix
 	JOIN pg_class t ON t.oid = ix.indrelid
 	JOIN pg_class i ON i.oid = ix.indexrelid

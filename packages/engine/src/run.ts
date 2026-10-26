@@ -1,4 +1,5 @@
 import type {
+	DDLPlan,
 	NativeQuery,
 	ResultColumn,
 	ResultSet,
@@ -40,6 +41,7 @@ import {
 import type { Connection } from "./adapter";
 import { EngineExecutionError, UnknownEngineError } from "./errors";
 import { materializeSubplan } from "./mongo/materialize";
+import { dropFailedIndex } from "./postgres/failed-index";
 
 /** ResultSet enrichi d'un drapeau `written` : distingue une écriture d'une lecture. */
 export type QueryOutcome = ResultSet & {
@@ -209,7 +211,10 @@ export async function runQuery(
 				identSpans
 			);
 		}
-		return { ...(await connection.execute(native)), written: true };
+		return {
+			...(await executeDDL(connection, native, ddlPlan, schema)),
+			written: true
+		};
 	}
 
 	if (statement.operation !== "select") {
@@ -287,6 +292,38 @@ export async function runQuery(
 		rowCount: rows.length,
 		written: false
 	};
+}
+
+/**
+ * Un `CREATE INDEX CONCURRENTLY` en échec laisse un index invalide, retiré
+ * avant de rendre l'erreur (ADR-029 D18) ; un retrait en échec s'ajoute au
+ * message. Une requête qui n'a pas atteint la base n'a rien laissé.
+ */
+async function executeDDL(
+	connection: Connection,
+	native: NativeQuery,
+	plan: DDLPlan,
+	schema: SchemaModel | undefined
+): Promise<ResultSet> {
+	try {
+		return await connection.execute(native);
+	} catch (err) {
+		if (!(err instanceof EngineExecutionError)) throw err;
+		try {
+			await dropFailedIndex(connection, plan, schema, err);
+		} catch (cleanup) {
+			const reason =
+				cleanup instanceof Error ? cleanup.message : String(cleanup);
+			throw new EngineExecutionError(
+				`${err.message}\n(Index invalide non retiré : ${reason})`,
+				{
+					cause: err.cause,
+					...(err.pgError !== undefined ? { pgError: err.pgError } : {})
+				}
+			);
+		}
+		throw err;
+	}
 }
 
 /**

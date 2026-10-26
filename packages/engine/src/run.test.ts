@@ -6,7 +6,11 @@ import type {
 } from "@sqlnest/snql";
 import { describe, expect, it } from "vitest";
 import type { Connection } from "./adapter";
-import { UnknownEngineError } from "./errors";
+import {
+	EngineConnectionError,
+	EngineExecutionError,
+	UnknownEngineError
+} from "./errors";
 import { runQuery } from "./run";
 
 /** Connexion factice : enregistre la requête reçue, renvoie un ResultSet canné. */
@@ -92,5 +96,69 @@ describe("runQuery", () => {
 			expect(fake.lastQuery.text).toContain("RETURNING");
 		}
 		expect(rs.rowCount).toBe(1);
+	});
+});
+
+describe("runQuery — add index Postgres en échec (ADR-029 D18)", () => {
+	const SRC = "add unique index (name) into agency";
+
+	/**
+	 * Le `CREATE INDEX CONCURRENTLY` échoue sur `failure`, le contrôle du
+	 * catalogue trouve l'index resté invalide, le retrait échoue sur `dropFailure`.
+	 */
+	function failing(failure: Error, dropFailure?: Error) {
+		const texts: string[] = [];
+		const conn = {
+			engine: "postgres",
+			namespace: "public",
+			execute: async (query: NativeQuery): Promise<ResultSet> => {
+				texts.push(query.kind === "sql" ? query.text : query.kind);
+				if (texts.length === 1) throw failure;
+				if (texts.length === 3 && dropFailure !== undefined) throw dropFailure;
+				const rows = texts.length === 2 ? [{}] : [];
+				return { columns: [], rows, rowCount: rows.length };
+			}
+		} as unknown as Connection;
+		return { conn, texts };
+	}
+
+	const duplicates = () =>
+		new EngineExecutionError("could not create unique index", {
+			pgError: { message: "could not create unique index", code: "23505" }
+		});
+
+	it("l'index invalide est retiré, puis l'erreur d'origine rendue telle quelle", async () => {
+		const failure = duplicates();
+		const { conn, texts } = failing(failure);
+		await expect(runQuery(conn, SRC)).rejects.toBe(failure);
+		expect(texts[0]).toBe(
+			'CREATE UNIQUE INDEX CONCURRENTLY "unique_agency_name" ON "agency" ("name")'
+		);
+		expect(texts[2]).toBe(
+			'DROP INDEX CONCURRENTLY IF EXISTS "unique_agency_name"'
+		);
+	});
+
+	it("retrait en échec : ajouté au message, détail Postgres gardé", async () => {
+		const failure = duplicates();
+		const { conn } = failing(
+			failure,
+			new Error("canceling statement due to lock timeout")
+		);
+		const err = await runQuery(conn, SRC).catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(EngineExecutionError);
+		expect((err as EngineExecutionError).message).toBe(
+			"could not create unique index\n(Index invalide non retiré : canceling statement due to lock timeout)"
+		);
+		expect((err as EngineExecutionError).pgError).toBe(failure.pgError);
+	});
+
+	it("requête qui n'a pas atteint la base : rien n'est tenté", async () => {
+		const failure = new EngineConnectionError(
+			"Exécution Postgres : acquisition d'une connexion échouée"
+		);
+		const { conn, texts } = failing(failure);
+		await expect(runQuery(conn, SRC)).rejects.toBe(failure);
+		expect(texts).toHaveLength(1);
 	});
 });

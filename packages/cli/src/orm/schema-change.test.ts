@@ -201,14 +201,20 @@ describe("applySchemaChange (ADR-037 D3, D4, D5)", () => {
 
 	it("index Postgres en échec : l'index invalide laissé par CONCURRENTLY est retiré", async () => {
 		const conn = connection(BEFORE);
+		// Contrôle du catalogue : l'index est resté invalide.
+		vi.mocked(conn.execute).mockResolvedValueOnce({
+			columns: [],
+			rows: [{ "?column?": 1 }],
+			rowCount: 1
+		});
 		await expect(
 			run(adapter({ apply: async () => fail("P3018 : doublons")() }), conn, {
 				src: "add unique index (name) into agency"
 			})
 		).rejects.toThrow(/^P3018 : doublons$/);
-		expect(conn.execute).toHaveBeenCalledWith(
+		expect(conn.execute).toHaveBeenLastCalledWith(
 			expect.objectContaining({
-				text: 'DROP INDEX IF EXISTS "agency_name_key"'
+				text: 'DROP INDEX CONCURRENTLY IF EXISTS "agency_name_key"'
 			})
 		);
 	});

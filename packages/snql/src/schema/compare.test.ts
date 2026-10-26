@@ -129,6 +129,36 @@ describe("compareSchemas", () => {
 		]);
 	});
 
+	it("index invalide : différent de l'index attendu, et signalé comme tel en trop (ADR-029 D18)", () => {
+		const unique = { columns: ["a"], unique: true };
+		const expected = schema({
+			fields: [field("a")],
+			indexes: [{ name: "t_a_key", ...unique }]
+		});
+		const invalid = schema({
+			fields: [field("a")],
+			indexes: [{ name: "t_a_key", ...unique, valid: false }]
+		});
+		expect(compareSchemas(expected, invalid)).toEqual([
+			{
+				target: "t",
+				subject: "index",
+				name: "t_a_key",
+				expected: "unique (a)",
+				actual: "unique (a), invalide"
+			}
+		]);
+		expect(compareSchemas(schema({ fields: [field("a")] }), invalid)).toEqual([
+			{
+				target: "t",
+				subject: "index",
+				name: "t_a_key",
+				expected: "absent",
+				actual: "unique (a), invalide"
+			}
+		]);
+	});
+
 	it("FK : cible et actions", () => {
 		const ref = {
 			name: "fk",

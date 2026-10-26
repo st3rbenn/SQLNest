@@ -21,6 +21,8 @@ export interface RelationalIndexRow {
 	readonly index_name: string;
 	readonly is_unique: boolean;
 	readonly column_name: string;
+	/** Postgres `indisvalid` ; absent : valide. */
+	readonly is_valid?: boolean;
 }
 
 /** Lignes d'index → index par table (ADR-036 D6). */
@@ -40,7 +42,8 @@ export function buildIndexesFromRows(
 			list.push({
 				name: row.index_name,
 				columns: [row.column_name],
-				unique: Boolean(row.is_unique)
+				unique: Boolean(row.is_unique),
+				...(row.is_valid === false ? { valid: false as const } : {})
 			});
 		}
 		byTable.set(row.table_name, list);

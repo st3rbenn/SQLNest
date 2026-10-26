@@ -785,11 +785,14 @@ function renderAddIndex(plan: AddIndexPlan): NativeQuery {
 /**
  * Rend `drop index NAME from T` en `DROP INDEX [IF EXISTS] "name"` (PG le
  * scope au schema courant — pas besoin du nom de table dans le SQL). Pas de
- * CONCURRENTLY sur DROP INDEX v1 : l'opération est déjà rapide (~ms).
+ * CONCURRENTLY sur `drop index` v1 : l'opération est déjà rapide (~ms).
+ * `concurrently` : retrait de l'index invalide d'un `CREATE INDEX
+ * CONCURRENTLY` en échec (ADR-029 D18).
  */
 function renderDropIndex(plan: DropIndexPlan): NativeQuery {
+	const concurrently = plan.concurrently === true ? "CONCURRENTLY " : "";
 	const ifExists = plan.ifExists ? "IF EXISTS " : "";
-	const text = `DROP INDEX ${ifExists}${quoteIdent(plan.name)}`;
+	const text = `DROP INDEX ${concurrently}${ifExists}${quoteIdent(plan.name)}`;
 	return {
 		engine: "postgres",
 		kind: "sql",

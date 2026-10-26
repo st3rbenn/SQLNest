@@ -737,6 +737,12 @@ export interface DropIndexPlan {
 	readonly target: string;
 	readonly name: string;
 	readonly ifExists: boolean;
+	/**
+	 * `true` : Postgres `DROP INDEX CONCURRENTLY`, sans verrou exclusif sur la
+	 * table — retrait de l'index invalide d'un `CREATE INDEX CONCURRENTLY` en
+	 * échec (D18). Absent : `DROP INDEX`.
+	 */
+	readonly concurrently?: true;
 	readonly span?: Span;
 }
 

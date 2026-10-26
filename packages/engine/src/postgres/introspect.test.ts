@@ -161,6 +161,50 @@ describe("buildSchemaModel", () => {
 		expect(model.collections[1]?.indexes).toBeUndefined();
 	});
 
+	it("index invalide (CONCURRENTLY en échec) : signalé, pas écarté (ADR-029 D18)", () => {
+		const model = buildSchemaModel(
+			["agency"],
+			[
+				{
+					table_name: "agency",
+					column_name: "name",
+					data_type: "text",
+					is_nullable: "YES",
+					column_default: null,
+					udt_name: "text"
+				}
+			],
+			[],
+			[],
+			[],
+			[
+				{
+					table_name: "agency",
+					index_name: "agency_name_key",
+					is_unique: true,
+					column_name: "name",
+					is_valid: false
+				},
+				{
+					table_name: "agency",
+					index_name: "agency_name_idx",
+					is_unique: false,
+					column_name: "name",
+					is_valid: true
+				}
+			]
+		);
+		expect(model.collections[0]?.indexes).toEqual([
+			{
+				name: "agency_name_key",
+				columns: ["name"],
+				unique: true,
+				valid: false
+			},
+			{ name: "agency_name_idx", columns: ["name"], unique: false }
+		]);
+	});
+
 	it("FK composite : colonnes alignées dans l'ordre", () => {
 		const model = buildSchemaModel(
 			["a", "b"],

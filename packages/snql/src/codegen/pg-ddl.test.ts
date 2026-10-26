@@ -318,6 +318,19 @@ describe("codegen PG — add/drop index (ADR-029 DDL/3.3, D11 CONCURRENTLY)", ()
 		expect(q.text).toBe(`DROP INDEX IF EXISTS "idx_users_email"`);
 	});
 
+	it("DROP INDEX CONCURRENTLY : retrait d'un index invalide (D18)", () => {
+		const q = mapDDL({
+			op: "ddl",
+			kind: "drop-index",
+			target: "users",
+			name: "idx_users_email",
+			ifExists: true,
+			concurrently: true
+		});
+		if (q.kind !== "sql") throw new Error("attendu sql");
+		expect(q.text).toBe(`DROP INDEX CONCURRENTLY IF EXISTS "idx_users_email"`);
+	});
+
 	it("interdit un name non-quoté-safe (safety-net quoteIdent)", () => {
 		expect(() =>
 			mapDDL({

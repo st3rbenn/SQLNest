@@ -84,6 +84,13 @@ export interface CollectionIndex {
 	/** Colonnes de la clé, dans l'ordre de l'index. */
 	readonly columns: readonly string[];
 	readonly unique: boolean;
+	/**
+	 * `false` : index invalide (Postgres `indisvalid`), laissé par un `CREATE
+	 * INDEX CONCURRENTLY` en échec. Ignoré des lectures, il garde son nom ;
+	 * passé la première construction, il reste maintenu par les écritures, et
+	 * un unique y refuse les doublons (ADR-029 D18). Absent : valide.
+	 */
+	readonly valid?: false;
 }
 
 /** Écriture qui déclenche un trigger. */

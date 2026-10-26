@@ -294,7 +294,7 @@ function describeField(f: Field): string {
 }
 
 function describeIndex(i: CollectionIndex): string {
-	return `${i.unique ? "unique " : ""}(${i.columns.join(", ")})`;
+	return `${i.unique ? "unique " : ""}(${i.columns.join(", ")})${i.valid === false ? ", invalide" : ""}`;
 }
 
 function isMongoId(f: Field | undefined): boolean {

@@ -7,7 +7,7 @@
  * rapporté.
  */
 
-import type { Connection } from "@sqlnest/engine";
+import { type Connection, dropFailedIndex } from "@sqlnest/engine";
 import {
 	applyDdlToSchema,
 	compareSchemas,
@@ -133,7 +133,7 @@ export async function applySchemaChange(
 				`Retour arrière de l'historique incomplet : ${messageOf(rollbackErr)}`
 			);
 		}
-		const left = await restoreDatabase(change);
+		const left = await restoreDatabase(change, err);
 		if (left !== undefined) notes.push(left);
 		undo(written);
 		throw notes.length === 0
@@ -188,10 +188,16 @@ async function structureCheck(
  * est signalé.
  */
 async function restoreDatabase(
-	change: SchemaChange
+	change: SchemaChange,
+	failure: unknown
 ): Promise<string | undefined> {
 	try {
-		await dropFailedIndex(change);
+		await dropFailedIndex(
+			change.connection,
+			change.plan,
+			change.before,
+			failure
+		);
 		const left = compareSchemas(
 			change.before,
 			await change.connection.introspect(),
@@ -203,27 +209,6 @@ async function restoreDatabase(
 	} catch (err) {
 		return `Base non vérifiée après l'échec : ${messageOf(err)}`;
 	}
-}
-
-async function dropFailedIndex(change: SchemaChange): Promise<void> {
-	const { plan, connection } = change;
-	if (plan.kind !== "add-index" && plan.kind !== "add-unique-index") return;
-	if (connection.engine !== "postgres" || plan.concurrently === false) return;
-	const existed = change.before.collections
-		.find((c) => c.name === plan.target)
-		?.indexes?.some((i) => i.name === plan.name);
-	if (existed === true) return;
-	const drop = getMapper("postgres").mapDDL?.(
-		{
-			op: "ddl",
-			kind: "drop-index",
-			target: plan.target,
-			name: plan.name,
-			ifExists: true
-		},
-		mapperContext(connection)
-	);
-	if (drop !== undefined) await connection.execute(drop);
 }
 
 function describeDiff(d: SchemaDiff): string {

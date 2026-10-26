@@ -82,6 +82,7 @@ export {
 	RUNTIME_MONGO_MATERIALIZE_OVERFLOW
 } from "./mongo/materialize";
 export { postgresAdapter } from "./postgres/adapter";
+export { dropFailedIndex } from "./postgres/failed-index";
 export {
 	buildSchemaModel,
 	introspectPostgres,
