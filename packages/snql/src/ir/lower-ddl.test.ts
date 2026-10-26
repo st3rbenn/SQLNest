@@ -1428,3 +1428,62 @@ describe("lower DDL — alias Mongo id ↔ _id (ADR-036 E/1f)", () => {
 		});
 	});
 });
+
+describe("lower DDL — colonnes d'un enum (E/2c)", () => {
+	const schema = {
+		engine: "mssql",
+		collections: [
+			{
+				name: "agency",
+				fields: [
+					{
+						name: "id",
+						type: "int" as const,
+						nullable: false,
+						source: "declared" as const
+					},
+					{
+						name: "tier",
+						type: "enum" as const,
+						nullable: true,
+						source: "declared" as const,
+						enumValues: ["free", "pro"],
+						enumTypeName: "tier"
+					}
+				],
+				source: "declared" as const
+			}
+		],
+		relations: [],
+		enums: [
+			{ name: "tier", members: ["free", "pro"], source: "declared" as const }
+		]
+	};
+	const lower = (src: string) =>
+		lowerDDL(parse(tokenize(src)) as DDLStatement, schema);
+
+	it("add enum member : colonnes de l'enum et valeurs actuelles, pour réécrire leur CHECK", () => {
+		expect(lower('add enum member tier "team"')).toMatchObject({
+			usage: {
+				members: ["free", "pro"],
+				columns: [{ table: "agency", column: "tier" }]
+			}
+		});
+	});
+
+	it("rename column d'une colonne d'enum : valeurs portées par le plan", () => {
+		expect(lower("rename column agency.tier to plan")).toMatchObject({
+			enumMembers: ["free", "pro"]
+		});
+		expect(lower("rename column agency.id to uid")).not.toHaveProperty(
+			"enumMembers"
+		);
+	});
+
+	it("drop enum encore utilisé : refusé sans cascade, pour tous les moteurs", () => {
+		expect(() => lower("drop enum tier")).toThrow(
+			"Enum 'tier' utilisé par agency.tier — 'drop enum tier cascade' le retire quand même"
+		);
+		expect(lower("drop enum tier cascade")).toMatchObject({ cascade: true });
+	});
+});

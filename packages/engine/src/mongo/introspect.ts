@@ -354,10 +354,11 @@ export async function introspectMongo(
 			// silence — pas de défauts lisibles
 		}
 
+		const withEnums = linkEnumColumns(withDefaults, enumsList);
 		return {
 			engine: "mongodb",
-			collections: withDefaults,
-			relations: inferRelations(withDefaults),
+			collections: withEnums,
+			relations: inferRelations(withEnums),
 			...(enumsList.length > 0 ? { enums: enumsList } : {}),
 			...(refsList.length > 0 ? { refs: refsList } : {})
 		};
@@ -366,6 +367,35 @@ export async function introspectMongo(
 			cause
 		});
 	}
+}
+
+/**
+ * Colonne d'enum : son validateur porte les valeurs de l'enum, pas son nom.
+ * Elle est rattachée à l'enum aux mêmes valeurs — la règle qu'`add enum
+ * member` suit pour mettre ces validateurs à jour.
+ */
+export function linkEnumColumns(
+	collections: readonly Collection[],
+	enums: readonly EnumTypeDef[]
+): Collection[] {
+	if (enums.length === 0) return [...collections];
+	return collections.map((c) => ({
+		...c,
+		fields: c.fields.map((f) => {
+			const values = f.enumValues;
+			const enumDef =
+				values !== undefined
+					? enums.find(
+							(e) =>
+								e.members.length === values.length &&
+								e.members.every((m, i) => m === values[i])
+						)
+					: undefined;
+			return enumDef !== undefined
+				? { ...f, type: "enum" as const, enumTypeName: enumDef.name }
+				: f;
+		})
+	}));
 }
 
 /**

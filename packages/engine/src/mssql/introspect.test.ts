@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildMssqlSchemaModel, mapMssqlType } from "./introspect";
+import {
+	buildMssqlSchemaModel,
+	mapMssqlType,
+	parseEnumCheck
+} from "./introspect";
 
 describe("mapMssqlType", () => {
 	it("mappe les types T-SQL vers les types unifiés SNQL", () => {
@@ -331,5 +335,50 @@ describe("buildMssqlSchemaModel — relations inférées par nommage (heuristiqu
 			[]
 		);
 		expect(model.relations).toEqual([]);
+	});
+});
+
+describe("colonnes d'enum lues dans leur CHECK (E/2c)", () => {
+	it("parseEnumCheck : colonne et valeurs, quotes doublées ; autre forme → undefined", () => {
+		expect(parseEnumCheck("([tier]=N'free' OR [tier]=N'it''s')")).toEqual({
+			column: "tier",
+			members: ["free", "it's"]
+		});
+		expect(parseEnumCheck("([a]=N'x' OR [b]=N'y')")).toBeUndefined();
+		expect(parseEnumCheck("([qty]>(0))")).toBeUndefined();
+	});
+
+	it("colonne rattachée à l'enum aux mêmes valeurs ; sans enum, valeurs seules", () => {
+		const column = (name: string) => ({
+			table_name: "agency",
+			column_name: name,
+			data_type: "nvarchar",
+			is_nullable: "YES",
+			column_default: null
+		});
+		const model = buildMssqlSchemaModel(
+			["agency"],
+			[column("tier"), column("legacy"), column("note")],
+			[],
+			[],
+			[{ name: "tier", members: '["free","pro"]' }],
+			[],
+			[
+				{
+					table_name: "agency",
+					definition: "([tier]=N'pro' OR [tier]=N'free')"
+				},
+				{ table_name: "agency", definition: "([legacy]=N'a' OR [legacy]=N'b')" }
+			]
+		);
+		const fields = model.collections[0]?.fields ?? [];
+		expect(fields[0]).toMatchObject({
+			type: "enum",
+			enumTypeName: "tier",
+			enumValues: ["free", "pro"]
+		});
+		expect(fields[1]).toMatchObject({ type: "string", enumValues: ["a", "b"] });
+		expect(fields[1]).not.toHaveProperty("enumTypeName");
+		expect(fields[2]).not.toHaveProperty("enumValues");
 	});
 });

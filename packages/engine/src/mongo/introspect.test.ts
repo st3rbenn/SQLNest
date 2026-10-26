@@ -3,6 +3,7 @@ import {
 	applyPkAlias,
 	inferCollection,
 	inferRelations,
+	linkEnumColumns,
 	mergeValidatorFields,
 	snqlTypeOf
 } from "./introspect";
@@ -182,5 +183,41 @@ describe("applyPkAlias (ADR-036 E/1f)", () => {
 			collection: "seat",
 			fields: ["id"]
 		});
+	});
+});
+
+describe("linkEnumColumns (E/2c)", () => {
+	it("colonne aux valeurs d'un enum : type enum et nom ; valeurs différentes : inchangée", () => {
+		const [linked] = linkEnumColumns(
+			[
+				{
+					name: "agency",
+					source: "declared",
+					fields: [
+						{
+							name: "tier",
+							type: "string",
+							nullable: true,
+							source: "declared",
+							enumValues: ["free", "pro"]
+						},
+						{
+							name: "other",
+							type: "string",
+							nullable: true,
+							source: "declared",
+							enumValues: ["pro", "free"]
+						}
+					]
+				}
+			],
+			[{ name: "tier", members: ["free", "pro"], source: "declared" }]
+		);
+		expect(linked?.fields[0]).toMatchObject({
+			type: "enum",
+			enumTypeName: "tier"
+		});
+		expect(linked?.fields[1]).toMatchObject({ type: "string" });
+		expect(linked?.fields[1]).not.toHaveProperty("enumTypeName");
 	});
 });

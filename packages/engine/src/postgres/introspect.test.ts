@@ -297,3 +297,32 @@ describe("buildSchemaModel", () => {
 		]);
 	});
 });
+
+describe("buildSchemaModel — colonne d'enum (E/2c)", () => {
+	it("type enum, valeurs et nom du type", () => {
+		const model = buildSchemaModel(
+			["agency"],
+			[
+				{
+					table_name: "agency",
+					column_name: "tier",
+					data_type: "USER-DEFINED",
+					is_nullable: "YES",
+					column_default: null,
+					udt_name: "tier"
+				}
+			],
+			[],
+			[],
+			[
+				{ typname: "tier", enumlabel: "free" },
+				{ typname: "tier", enumlabel: "pro" }
+			]
+		);
+		expect(model.collections[0]?.fields[0]).toMatchObject({
+			type: "enum",
+			enumValues: ["free", "pro"],
+			enumTypeName: "tier"
+		});
+	});
+});

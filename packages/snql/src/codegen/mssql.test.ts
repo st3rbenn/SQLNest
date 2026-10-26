@@ -454,7 +454,7 @@ describe("codegen mssql — DDL (M/6)", () => {
 			primaryKey: ["id"]
 		});
 		expect(text).toBe(
-			`CREATE TABLE [users] ([id] nvarchar(450) NOT NULL, [age] int NOT NULL, [bio] nvarchar(max), [active] bit NOT NULL DEFAULT 1, PRIMARY KEY ([id]))`
+			`CREATE TABLE [dbo].[users] ([id] nvarchar(450) NOT NULL, [age] int NOT NULL, [bio] nvarchar(max), [active] bit NOT NULL DEFAULT 1, PRIMARY KEY ([id]))`
 		);
 		expect(params).toEqual([]);
 	});
@@ -477,7 +477,7 @@ describe("codegen mssql — DDL (M/6)", () => {
 		expect(lock.query.text).toContain("sp_getapplock");
 		expect(lock.query.params).toEqual(["sqlnest_ddl:t"]);
 		expect(create.query.text).toBe(
-			`IF OBJECT_ID(N'[dbo].[t]', N'U') IS NULL CREATE TABLE [t] ([id] int NOT NULL, PRIMARY KEY ([id]))`
+			`IF OBJECT_ID(N'[dbo].[t]', N'U') IS NULL CREATE TABLE [dbo].[t] ([id] int NOT NULL, PRIMARY KEY ([id]))`
 		);
 	});
 
@@ -507,7 +507,7 @@ describe("codegen mssql — DDL (M/6)", () => {
 			primaryKey: ["id"]
 		});
 		expect(text).toContain(
-			`[user_id] int NOT NULL CONSTRAINT [fk_orders_user_id] REFERENCES [users] ([id]) ON DELETE NO ACTION ON UPDATE NO ACTION`
+			`[user_id] int NOT NULL CONSTRAINT [fk_orders_user_id] REFERENCES [dbo].[users] ([id]) ON DELETE NO ACTION ON UPDATE NO ACTION`
 		);
 	});
 
@@ -550,7 +550,7 @@ describe("codegen mssql — DDL (M/6)", () => {
 			}
 		});
 		expect(text).toBe(
-			`ALTER TABLE [users] ADD [note] nvarchar(max) DEFAULT N'aucune' WITH VALUES`
+			`ALTER TABLE [dbo].[users] ADD [note] nvarchar(max) DEFAULT N'aucune' WITH VALUES`
 		);
 	});
 
@@ -563,7 +563,7 @@ describe("codegen mssql — DDL (M/6)", () => {
 			column: { name: "age", type: "int", nullable: false, unique: false }
 		});
 		expect(text).toBe(
-			`IF COL_LENGTH(N'[dbo].[users]', N'age') IS NULL ALTER TABLE [users] ADD [age] int NOT NULL`
+			`IF COL_LENGTH(N'[dbo].[users]', N'age') IS NULL ALTER TABLE [dbo].[users] ADD [age] int NOT NULL`
 		);
 	});
 
@@ -656,7 +656,7 @@ describe("codegen mssql — DDL (M/6)", () => {
 			name: "idx_users_email",
 			ifExists: false
 		});
-		expect(text).toBe(`DROP INDEX [idx_users_email] ON [users]`);
+		expect(text).toBe(`DROP INDEX [idx_users_email] ON [dbo].[users]`);
 	});
 
 	it("drop table / drop column / drop ref", () => {
@@ -667,16 +667,26 @@ describe("codegen mssql — DDL (M/6)", () => {
 				target: "tmp",
 				ifExists: true
 			}).text
-		).toBe(`IF OBJECT_ID(N'[dbo].[tmp]', N'U') IS NOT NULL DROP TABLE [tmp]`);
-		expect(
-			ddlText({
-				op: "ddl",
-				kind: "drop-column",
-				target: "users",
-				column: "note",
-				ifExists: false
-			}).text
-		).toBe(`ALTER TABLE [users] DROP COLUMN [note]`);
+		).toBe(
+			`IF OBJECT_ID(N'[dbo].[tmp]', N'U') IS NOT NULL DROP TABLE [dbo].[tmp]`
+		);
+		const dropColumn = ddlText({
+			op: "ddl",
+			kind: "drop-column",
+			target: "users",
+			column: "note",
+			ifExists: false
+		}).text;
+		// Dépendants (FK portées, index, CHECK, DEFAULT, statistiques) retirés
+		// avant la colonne, relus au catalogue à l'exécution.
+		expect(dropColumn).toContain(
+			"IF @col IS NULL THROW 50000, N'colonne ''users.note'' inconnue', 1;"
+		);
+		expect(dropColumn).toContain("FROM sys.default_constraints dc");
+		expect(dropColumn).toContain("FROM sys.check_constraints cc");
+		expect(dropColumn).toContain(
+			"EXEC (N'ALTER TABLE [dbo].[users] DROP COLUMN [note]');"
+		);
 		expect(
 			ddlText({
 				op: "ddl",
@@ -685,7 +695,7 @@ describe("codegen mssql — DDL (M/6)", () => {
 				name: "fk_orders_user_id",
 				ifExists: false
 			}).text
-		).toBe(`ALTER TABLE [orders] DROP CONSTRAINT [fk_orders_user_id]`);
+		).toBe(`ALTER TABLE [dbo].[orders] DROP CONSTRAINT [fk_orders_user_id]`);
 	});
 
 	it("alter column → transaction : dépendants retirés, ALTER COLUMN, dépendants recréés", () => {
@@ -750,16 +760,68 @@ describe("codegen mssql — DDL (M/6)", () => {
 		expect(drop).not.toContain("ADD CONSTRAINT");
 	});
 
-	it("rename column → sp_rename, nouveau nom sans crochets", () => {
-		expect(ddlText({
+	it("rename column → sp_rename, nouveau nom sans crochets, une erreur annule tout", () => {
+		expect(
+			ddlText({
+				op: "ddl",
+				kind: "rename-column",
+				target: "agency",
+				column: "phone",
+				newName: "mobile"
+			}).text.split("\n")
+		).toEqual([
+			"SET NOCOUNT ON;",
+			"SET XACT_ABORT ON;",
+			"BEGIN TRY",
+			"BEGIN TRAN;",
+			"EXEC sp_rename N'[dbo].[agency].[phone]', N'mobile', N'COLUMN';",
+			"COMMIT;",
+			"END TRY",
+			"BEGIN CATCH",
+			"IF @@TRANCOUNT > 0 ROLLBACK;",
+			"THROW;",
+			"END CATCH"
+		]);
+	});
+
+	it("rename column d'enum : CHECK retiré, colonne renommée, CHECK reposé sous le nouveau nom", () => {
+		const lines = ddlText({
 			op: "ddl",
 			kind: "rename-column",
 			target: "agency",
-			column: "phone",
-			newName: "mobile"
-		}).text).toBe(
-			`EXEC sp_rename N'[dbo].[agency].[phone]', N'mobile', N'COLUMN'`
+			column: "tier",
+			newName: "plan",
+			enumMembers: ["free", "pro"]
+		}).text.split("\n");
+		expect(lines.slice(3, 7)).toEqual([
+			"BEGIN TRAN;",
+			"ALTER TABLE [dbo].[agency] DROP CONSTRAINT IF EXISTS [ck_agency_tier_enum];",
+			"EXEC sp_rename N'[dbo].[agency].[tier]', N'plan', N'COLUMN';",
+			"EXEC sp_executesql N'ALTER TABLE [dbo].[agency] WITH CHECK ADD CONSTRAINT [ck_agency_plan_enum] CHECK ([plan] IN (N''free'', N''pro''))';"
+		]);
+	});
+
+	it("add enum member : métadonnée, puis CHECK des colonnes de l'enum réécrits", () => {
+		const { text } = ddlText({
+			op: "ddl",
+			kind: "add-enum-member",
+			name: "tier",
+			member: "gold",
+			ifNotExists: false,
+			usage: {
+				members: ["free", "pro"],
+				columns: [{ table: "agency", column: "tier" }]
+			}
+		});
+		const lines = text.split("\n");
+		expect(lines[0]).toBe("SET XACT_ABORT ON;");
+		expect(lines[2]).toMatch(
+			/^UPDATE \[dbo\]\.\[_snql_enums\] SET \[members\]/
 		);
+		expect(lines[3]).toBe(
+			"ALTER TABLE [dbo].[agency] DROP CONSTRAINT IF EXISTS [ck_agency_tier_enum]; ALTER TABLE [dbo].[agency] WITH CHECK ADD CONSTRAINT [ck_agency_tier_enum] CHECK ([tier] IN (N'free', N'pro', N'gold'));"
+		);
+		expect(lines.at(-1)).toBe("COMMIT;");
 	});
 
 	it("add ref → WITH CHECK ADD CONSTRAINT (orphelins vérifiés)", () => {
@@ -778,7 +840,7 @@ describe("codegen mssql — DDL (M/6)", () => {
 				}
 			}).text
 		).toBe(
-			`ALTER TABLE [orders] WITH CHECK ADD CONSTRAINT [fk_orders_user_id] FOREIGN KEY ([user_id]) REFERENCES [users] ([id]) ON DELETE NO ACTION ON UPDATE CASCADE`
+			`ALTER TABLE [dbo].[orders] WITH CHECK ADD CONSTRAINT [fk_orders_user_id] FOREIGN KEY ([user_id]) REFERENCES [dbo].[users] ([id]) ON DELETE NO ACTION ON UPDATE CASCADE`
 		);
 	});
 
@@ -896,7 +958,7 @@ describe("codegen mssql — profil ORM (ADR-036 E/1e)", () => {
 				]
 			}).text
 		).toBe(
-			"CREATE TABLE [agency] ([id] int NOT NULL, [code] nvarchar(450) NOT NULL CONSTRAINT [agency_code_key] UNIQUE, [tier] nvarchar(max) NOT NULL CONSTRAINT [agency_tier_df] DEFAULT N'free', CONSTRAINT [agency_pkey] PRIMARY KEY ([id]))"
+			"CREATE TABLE [dbo].[agency] ([id] int NOT NULL, [code] nvarchar(450) NOT NULL CONSTRAINT [agency_code_key] UNIQUE, [tier] nvarchar(max) NOT NULL CONSTRAINT [agency_tier_df] DEFAULT N'free', CONSTRAINT [agency_pkey] PRIMARY KEY ([id]))"
 		);
 	});
 
@@ -932,12 +994,68 @@ describe("codegen mssql — profil ORM (ADR-036 E/1e)", () => {
 		expect(text.split("\n")).toEqual([
 			"SET NOCOUNT ON;",
 			"SET XACT_ABORT ON;",
+			"BEGIN TRY",
 			"BEGIN TRAN;",
 			"EXEC sp_rename N'[dbo].[agency].[code]', N'slug', N'COLUMN';",
 			"EXEC sp_rename N'[dbo].[agency].[agency_code_key]', N'agency_slug_key', N'INDEX';",
 			"EXEC sp_rename N'[dbo].[agency_code_fkey]', N'agency_slug_fkey', N'OBJECT';",
 			"IF EXISTS (SELECT 1 FROM sys.default_constraints WHERE name = N'agency_code_df' AND parent_object_id = OBJECT_ID(N'[dbo].[agency]')) EXEC sp_rename N'[dbo].[agency_code_df]', N'agency_slug_df', N'OBJECT';",
-			"COMMIT;"
+			"COMMIT;",
+			"END TRY",
+			"BEGIN CATCH",
+			"IF @@TRANCOUNT > 0 ROLLBACK;",
+			"THROW;",
+			"END CATCH"
 		]);
+	});
+});
+
+describe("codegen mssql — schéma de la connexion (E/2c)", () => {
+	it("le DDL vise le schéma `?schema=`, pas dbo", () => {
+		const ddl = getMapper("mssql").mapDDL;
+		if (ddl === undefined) throw new Error("mapDDL absent");
+		const text = (plan: import("../ir/plan").DDLPlan): string => {
+			const native = ddl(plan, { namespace: "sales" });
+			if (native.kind !== "sql") throw new Error(native.kind);
+			return native.text;
+		};
+		expect(
+			text({
+				op: "ddl",
+				kind: "create-table",
+				target: "orders",
+				ifNotExists: false,
+				fields: [
+					{
+						name: "user_id",
+						type: "int",
+						nullable: false,
+						unique: false,
+						ref: {
+							name: "fk_orders_user_id",
+							fromColumn: "user_id",
+							targetCollection: "users",
+							targetColumn: "id",
+							onDelete: "restrict",
+							onUpdate: "restrict"
+						}
+					}
+				]
+			})
+		).toBe(
+			"CREATE TABLE [sales].[orders] ([user_id] int NOT NULL CONSTRAINT [fk_orders_user_id] REFERENCES [sales].[users] ([id]) ON DELETE NO ACTION ON UPDATE NO ACTION)"
+		);
+		expect(
+			text({ op: "ddl", kind: "drop-table", target: "orders", ifExists: false })
+		).toBe("DROP TABLE [sales].[orders]");
+		expect(
+			text({
+				op: "ddl",
+				kind: "drop-index",
+				target: "orders",
+				name: "idx",
+				ifExists: false
+			})
+		).toBe("DROP INDEX [idx] ON [sales].[orders]");
 	});
 });

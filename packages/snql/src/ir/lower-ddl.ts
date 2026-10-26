@@ -263,6 +263,7 @@ function lowerAddEnumMember(
 	schema?: SchemaModel
 ): AddEnumMemberPlan {
 	assertIdent(stmt.name, "enum name");
+	let usage: AddEnumMemberPlan["usage"];
 	if (schema?.enums !== undefined) {
 		const enumDef = schema.enums.find((e) => e.name === stmt.name);
 		if (enumDef === undefined) {
@@ -273,6 +274,12 @@ function lowerAddEnumMember(
 				stmt.span
 			);
 		}
+		const columns = schema.collections.flatMap((c) =>
+			c.fields
+				.filter((f) => f.enumTypeName === stmt.name)
+				.map((f) => ({ table: c.name, column: f.name }))
+		);
+		if (columns.length > 0) usage = { members: enumDef.members, columns };
 	}
 	return {
 		op: "ddl",
@@ -280,6 +287,7 @@ function lowerAddEnumMember(
 		name: stmt.name,
 		member: stmt.member,
 		ifNotExists: stmt.ifNotExists ?? false,
+		...(usage !== undefined ? { usage } : {}),
 		...(stmt.span !== undefined ? { span: stmt.span } : {})
 	};
 }
@@ -307,6 +315,21 @@ function lowerDropEnum(
 				stmt.span
 			);
 		}
+	}
+	// RESTRICT (ADR-030 D8) vérifié sur le schéma, pour tous les moteurs :
+	// SQL Server ne relie pas une colonne à son enum.
+	const usedBy =
+		schema?.collections.flatMap((c) =>
+			c.fields
+				.filter((f) => f.enumTypeName === stmt.name)
+				.map((f) => `${c.name}.${f.name}`)
+		) ?? [];
+	if (!(stmt.cascade ?? false) && usedBy.length > 0) {
+		throw new SnqlError(
+			`Enum '${stmt.name}' utilisé par ${usedBy.join(", ")} — 'drop enum ${stmt.name} cascade' le retire quand même`,
+			"lower_ddl_drop_enum_in_use",
+			stmt.span
+		);
 	}
 	return {
 		op: "ddl",
@@ -790,6 +813,11 @@ function lowerRenameColumn(
 				stmt.newName
 			)
 		: [];
+	const enumMembers = schema?.collections
+		.find((c) => c.name === stmt.target)
+		?.fields.find(
+			(f) => f.name === stmt.column && f.type === "enum"
+		)?.enumValues;
 	return {
 		op: "ddl",
 		kind: "rename-column",
@@ -797,6 +825,9 @@ function lowerRenameColumn(
 		column: stmt.column,
 		newName: stmt.newName,
 		...(renames.length > 0 ? { renames } : {}),
+		...(enumMembers !== undefined && enumMembers.length > 0
+			? { enumMembers }
+			: {}),
 		...(stmt.span !== undefined ? { span: stmt.span } : {})
 	};
 }

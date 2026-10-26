@@ -52,6 +52,26 @@ interface MssqlEnumRow {
 	readonly members: string;
 }
 
+interface MssqlEnumCheckRow {
+	readonly table_name: string;
+	readonly definition: string;
+}
+
+/** Colonne et valeurs d'un CHECK d'enum ; `undefined` s'il n'en a pas la forme. */
+export function parseEnumCheck(
+	definition: string
+): { readonly column: string; readonly members: string[] } | undefined {
+	let column: string | undefined;
+	const members: string[] = [];
+	for (const m of definition.matchAll(ENUM_CHECK_TERM_RE)) {
+		const name = (m[1] as string).replaceAll("]]", "]");
+		if (column !== undefined && column !== name) return undefined;
+		column = name;
+		members.push((m[2] as string).replaceAll("''", "'"));
+	}
+	return column !== undefined ? { column, members } : undefined;
+}
+
 interface MssqlFkRow {
 	/** object_id de sys.foreign_keys — identité STABLE (les noms de
 	 * contraintes ne sont uniques que par schéma+table parent). */
@@ -101,13 +121,22 @@ const PK_SQL = `
 
 // Enums compensés (M/6) : table metadata `(name, members JSON array)` écrite
 // par le DDL `create enum`. Alimente `schema.enums` — la résolution
-// `type: <enum>` au lower create-table ET le node Enums du canvas. Le lien
-// colonne↔enum n'est pas reconstruit (le CHECK T-SQL porte les members
-// inline, pas le nom) : pas de Field.enumValues V1.
+// `type: <enum>` au lower create-table ET le node Enums du canvas.
 const ENUMS_SQL = `
 	SELECT [name], [members]
 	FROM [_snql_enums]
 	ORDER BY [name]`;
+
+// CHECK `ck_<t>_<c>_enum` des colonnes d'enum : ils portent les valeurs, pas
+// le nom de l'enum — la colonne est rattachée à l'enum aux mêmes valeurs.
+const ENUM_CHECKS_SQL = `
+	SELECT t.name AS table_name, cc.definition AS definition
+	FROM sys.check_constraints cc
+	JOIN sys.tables t ON t.object_id = cc.parent_object_id
+	WHERE SCHEMA_NAME(t.schema_id) = @p1 AND cc.name LIKE N'ck[_]%[_]enum'`;
+
+// T-SQL range `[c] IN (N'a', N'b')` en `([c]=N'a' OR [c]=N'b')`.
+const ENUM_CHECK_TERM_RE = /\[((?:[^\]]|\]\])+)\]\s*=\s*N?'((?:[^']|'')*)'/g;
 
 // Index hors clé primaire (contraintes UNIQUE comprises), colonnes de clé dans
 // l'ordre ; les colonnes INCLUDE et les tables metadata sont écartées.
@@ -217,21 +246,61 @@ export function buildMssqlSchemaModel(
 	pks: readonly MssqlPkRow[],
 	fks: readonly MssqlFkRow[],
 	enums: readonly MssqlEnumRow[] = [],
-	indexRows: readonly RelationalIndexRow[] = []
+	indexRows: readonly RelationalIndexRow[] = [],
+	enumChecks: readonly MssqlEnumCheckRow[] = []
 ): SchemaModel {
+	// Enums compensés — members JSON parsés defensivement (une ligne
+	// corrompue est ignorée plutôt que de bloquer tout le schéma).
+	const enumsList: EnumTypeDef[] = [];
+	for (const e of enums) {
+		try {
+			const members = JSON.parse(e.members) as unknown;
+			if (
+				Array.isArray(members) &&
+				members.every((m) => typeof m === "string")
+			) {
+				enumsList.push({ name: e.name, members, source: "declared" });
+			}
+		} catch {
+			// ligne metadata corrompue — skip.
+		}
+	}
+	const checkedValues = new Map<string, string[]>();
+	for (const row of enumChecks) {
+		const parsed = parseEnumCheck(row.definition);
+		if (parsed !== undefined) {
+			checkedValues.set(
+				`${row.table_name}\u0000${parsed.column}`,
+				parsed.members
+			);
+		}
+	}
+
 	const fieldsByTable = new Map<string, Field[]>();
 	for (const col of columns) {
 		const list = fieldsByTable.get(col.table_name) ?? [];
 		const hasDefault =
 			col.column_default !== null && col.column_default !== undefined;
+		const values = checkedValues.get(
+			`${col.table_name}\u0000${col.column_name}`
+		);
+		const enumDef =
+			values !== undefined
+				? enumsList.find((e) => sameMembers(e.members, values))
+				: undefined;
 		list.push({
 			name: col.column_name,
-			type: mapMssqlType(col.data_type),
+			type: enumDef !== undefined ? "enum" : mapMssqlType(col.data_type),
 			nullable: col.is_nullable === "YES",
 			source: "declared",
 			...(hasDefault
 				? { hasDefault: true as const, defaultExpr: col.column_default as string }
-				: {})
+				: {}),
+			...(enumDef !== undefined
+				? { enumValues: [...enumDef.members], enumTypeName: enumDef.name }
+				: values !== undefined
+					? { enumValues: values }
+					: {})
 		});
 		fieldsByTable.set(col.table_name, list);
 	}
@@ -258,23 +327,6 @@ export function buildMssqlSchemaModel(
 			source: "declared"
 		};
 	});
-
-	// Enums compensés — members JSON parsés defensivement (une ligne
-	// corrompue est ignorée plutôt que de bloquer tout le schéma).
-	const enumsList: EnumTypeDef[] = [];
-	for (const e of enums) {
-		try {
-			const members = JSON.parse(e.members) as unknown;
-			if (
-				Array.isArray(members) &&
-				members.every((m) => typeof m === "string")
-			) {
-				enumsList.push({ name: e.name, members, source: "declared" });
-			}
-		} catch {
-			// ligne metadata corrompue — skip.
-		}
-	}
 
 	const fkRows = fks.map(normalizeMssqlFkRow);
 	const refs = buildRefsFromFkRows(fkRows);
@@ -326,9 +378,10 @@ export type MssqlQueryRunner = (
  * l'adapter les sérialise (tedious = 1 request à la fois).
  */
 export async function introspectMssql(
-	run: MssqlQueryRunner,
+	runQuery: MssqlQueryRunner,
 	schema: string
 ): Promise<SchemaModel> {
+	const run = retryOnDeadlock(runQuery);
 	const params = [schema];
 	let tables: ResultSet;
 	let columns: ResultSet;
@@ -343,14 +396,15 @@ export async function introspectMssql(
 			{ cause }
 		);
 	}
-	const [pks, fks, enums, indexes] = await Promise.all([
+	const [pks, fks, enums, indexes, enumChecks] = await Promise.all([
 		softQuery(run, PK_SQL, params, "primary keys"),
 		softQuery(run, FK_SQL, params, "foreign keys"),
 		// Enums compensés (M/6) : la table metadata `_snql_enums` n'existe
 		// qu'après le premier `create enum` — 208 (invalid object) est déjà
 		// dans les codes soft → 0 enum, jamais un blocage.
 		softQuery(run, ENUMS_SQL, params, "enums"),
-		softQuery(run, INDEXES_SQL, params, "indexes")
+		softQuery(run, INDEXES_SQL, params, "indexes"),
+		softQuery(run, ENUM_CHECKS_SQL, params, "enum checks")
 	]);
 	return buildMssqlSchemaModel(
 		tables.rows.map((row) => String(row["table_name"])),
@@ -358,8 +412,36 @@ export async function introspectMssql(
 		pks as unknown as MssqlPkRow[],
 		fks as unknown as MssqlFkRow[],
 		enums as unknown as MssqlEnumRow[],
-		indexes as unknown as RelationalIndexRow[]
+		indexes as unknown as RelationalIndexRow[],
+		enumChecks as unknown as MssqlEnumCheckRow[]
 	);
+}
+
+const DEADLOCK_VICTIM = 1205;
+const DEADLOCK_RETRIES = 3;
+
+/**
+ * Lecture du catalogue reprise quand T-SQL la choisit comme victime d'un
+ * interblocage (1205, « Rerun the transaction ») — un DDL concurrent, une
+ * migration par exemple, verrouille le catalogue. Lecture seule : la
+ * reprendre est sans effet de bord.
+ */
+function retryOnDeadlock(run: MssqlQueryRunner): MssqlQueryRunner {
+	return async (sql, params) => {
+		for (let attempt = 1; ; attempt += 1) {
+			try {
+				return await run(sql, params);
+			} catch (cause) {
+				if (
+					attempt >= DEADLOCK_RETRIES ||
+					extractMssqlErrorNumber(cause) !== DEADLOCK_VICTIM
+				) {
+					throw cause;
+				}
+				await new Promise((resolve) => setTimeout(resolve, 50 * attempt));
+			}
+		}
+	};
 }
 
 /**
@@ -399,4 +481,9 @@ function extractMssqlErrorNumber(cause: unknown): number | undefined {
 		current = current.cause;
 	}
 	return undefined;
+}
+
+/** Mêmes valeurs ; T-SQL peut les rendre dans un autre ordre. */
+function sameMembers(a: readonly string[], b: readonly string[]): boolean {
+	return a.length === b.length && a.every((m) => b.includes(m));
 }

@@ -2164,15 +2164,17 @@ class MongoConnection implements Connection {
 				const newProperties: Record<string, unknown> = { ...properties };
 				for (const [propName, propRaw] of Object.entries(properties)) {
 					const prop = propRaw as { enum?: unknown };
-					if (!Array.isArray(prop.enum)) continue;
-					const enumArr = prop.enum as unknown[];
-					const isSameSnapshot =
-						enumArr.length === oldMembers.length &&
-						enumArr.every(
-							(v, i) => typeof v === "string" && v === oldMembers[i]
-						);
-					if (!isSameSnapshot) continue;
-					newProperties[propName] = { ...prop, enum: newMembers };
+					const snapshot = enumSnapshot(prop.enum);
+					if (
+						snapshot === undefined ||
+						!sameValues(snapshot.values, oldMembers)
+					) {
+						continue;
+					}
+					newProperties[propName] = {
+						...prop,
+						enum: snapshot.nullable ? [...newMembers, null] : newMembers
+					};
 					touched = true;
 				}
 				if (touched) {
@@ -2250,14 +2252,10 @@ class MongoConnection implements Connection {
 				if (jsonSchema === undefined || properties === undefined) continue;
 				for (const [propName, propRaw] of Object.entries(properties)) {
 					const prop = propRaw as { enum?: unknown };
-					if (!Array.isArray(prop.enum)) continue;
-					const enumArr = prop.enum as unknown[];
-					const isSameSnapshot =
-						enumArr.length === members.length &&
-						enumArr.every(
-							(v, i) => typeof v === "string" && v === members[i]
-						);
-					if (!isSameSnapshot) continue;
+					const snapshot = enumSnapshot(prop.enum);
+					if (snapshot === undefined || !sameValues(snapshot.values, members)) {
+						continue;
+					}
 					usages.push({
 						collection: collName,
 						property: propName,
@@ -2855,6 +2853,25 @@ class MongoConnection implements Connection {
 				}
 			}
 
+			// Comme PG : une FK d'une autre collection qui la référence fait
+			// échouer ; ses index et les FK qu'elle porte partent avec elle.
+			const refs = db.collection<{ _id: string }>("_snql_refs");
+			const inbound = await refs
+				.find({ toCollection: query.collection, toColumn: fieldName })
+				.toArray();
+			if (inbound.length > 0) {
+				throw new EngineExecutionError(
+					`drop column échouée : '${query.collection}.${fieldName}' est référencée par ${inbound.map((r) => r._id).join(", ")}`
+				);
+			}
+			// Avant la purge : un index unique verrait des doublons de champ absent.
+			for (const index of await col.listIndexes().toArray()) {
+				const key = (index as { key?: Record<string, unknown> }).key ?? {};
+				if (index.name !== "_id_" && Object.hasOwn(key, fieldName)) {
+					await col.dropIndex(String(index.name));
+				}
+			}
+
 			// collMod validator sans la property + retire required.
 			const newProperties: Record<string, unknown> = { ...existingProperties };
 			delete newProperties[fieldName];
@@ -2880,6 +2897,10 @@ class MongoConnection implements Connection {
 			await db
 				.collection("_snql_defaults")
 				.deleteOne({ _id: `${query.collection}.${fieldName}` as unknown as ObjectId });
+			await refs.deleteMany({
+				fromCollection: query.collection,
+				fromColumn: fieldName
+			});
 
 			return { columns: [], rows: [], rowCount: 0 };
 		} catch (cause) {
@@ -3790,3 +3811,24 @@ export const mongoAdapter: EngineAdapter = {
 		}
 	}
 };
+
+/**
+ * Valeurs d'un `enum` de validateur, `null` à part : une colonne d'enum
+ * nullable déclare `[...valeurs, null]`.
+ */
+function enumSnapshot(
+	raw: unknown
+):
+	| { readonly values: readonly string[]; readonly nullable: boolean }
+	| undefined {
+	if (!Array.isArray(raw)) return undefined;
+	const values = raw.filter((v): v is string => typeof v === "string");
+	const nullable = raw.includes(null);
+	return values.length + (nullable ? 1 : 0) === raw.length
+		? { values, nullable }
+		: undefined;
+}
+
+function sameValues(a: readonly string[], b: readonly string[]): boolean {
+	return a.length === b.length && a.every((v, i) => v === b[i]);
+}

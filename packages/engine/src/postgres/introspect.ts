@@ -217,7 +217,9 @@ export function buildSchemaModel(
 			...(hasDefault
 				? { hasDefault: true as const, defaultExpr: col.column_default as string }
 				: {}),
-			...(enumLabels !== undefined ? { enumValues: enumLabels } : {})
+			...(enumLabels !== undefined
+				? { enumValues: enumLabels, enumTypeName: col.udt_name }
+				: {})
 		});
 		fieldsByTable.set(col.table_name, list);
 	}

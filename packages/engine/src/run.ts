@@ -197,7 +197,17 @@ export async function runQuery(
 					`Aucun codegen 'ddl' pour le moteur '${engine}'`
 				);
 			}
-			native = withIdentSpans(mapper.mapDDL(ddlPlan), identSpans);
+			// Le schéma de la connexion (`?schema=` MSSQL) : le DDL vise celui
+			// que l'introspection lit.
+			native = withIdentSpans(
+				mapper.mapDDL(
+					ddlPlan,
+					connection.namespace !== undefined
+						? { namespace: connection.namespace }
+						: undefined
+				),
+				identSpans
+			);
 		}
 		return { ...(await connection.execute(native)), written: true };
 	}

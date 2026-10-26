@@ -750,6 +750,17 @@ export interface AddEnumMemberPlan {
 	readonly name: string;
 	readonly member: string;
 	readonly ifNotExists: boolean;
+	/**
+	 * Colonnes typées par l'enum et ses valeurs actuelles, d'après le schéma :
+	 * SQL Server, sans type enum, réécrit leur CHECK.
+	 */
+	readonly usage?: {
+		readonly members: readonly string[];
+		readonly columns: readonly {
+			readonly table: string;
+			readonly column: string;
+		}[];
+	};
 	readonly span?: Span;
 }
 
@@ -823,6 +834,12 @@ export interface RenameColumnPlan {
 	readonly column: string;
 	readonly newName: string;
 	readonly renames?: readonly DdlObjectRename[];
+	/**
+	 * Valeurs de l'enum qui type la colonne, d'après le schéma : SQL Server
+	 * refuse de renommer une colonne que son CHECK cite, le CHECK est retiré
+	 * puis reposé.
+	 */
+	readonly enumMembers?: readonly string[];
 	readonly span?: Span;
 }
 

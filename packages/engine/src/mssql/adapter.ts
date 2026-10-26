@@ -47,6 +47,15 @@ interface MssqlRow {
 }
 
 function describeTediousError(cause: unknown): string {
+	// Plusieurs erreurs pour une requête : une `AggregateError` au message
+	// vide, dont les erreurs internes portent la cause.
+	if (cause instanceof AggregateError && cause.message === "") {
+		return [
+			...new Set(
+				cause.errors.map((e) => (e instanceof Error ? e.message : String(e)))
+			)
+		].join(" ; ");
+	}
 	if (cause instanceof Error) {
 		return cause.message;
 	}

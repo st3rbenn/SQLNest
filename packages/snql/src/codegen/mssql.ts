@@ -367,14 +367,14 @@ export const mssqlMapper: Mapper = {
 		if (plan.kind === "add-index" || plan.kind === "add-unique-index") {
 			return renderAddIndex(plan, namespace);
 		}
-		if (plan.kind === "drop-index") return renderDropIndex(plan);
+		if (plan.kind === "drop-index") return renderDropIndex(plan, namespace);
 		if (plan.kind === "drop-table") return renderDropTable(plan, namespace);
 		if (plan.kind === "drop-column") return renderDropColumn(plan, namespace);
 		if (plan.kind === "create-enum") return renderCreateEnum(plan, namespace);
 		if (plan.kind === "add-enum-member") return renderAddEnumMember(plan, namespace);
 		if (plan.kind === "drop-enum") return renderDropEnum(plan, namespace);
-		if (plan.kind === "drop-ref") return renderDropRef(plan);
-		if (plan.kind === "add-ref") return renderAddRef(plan);
+		if (plan.kind === "drop-ref") return renderDropRef(plan, namespace);
+		if (plan.kind === "add-ref") return renderAddRef(plan, namespace);
 		if (plan.kind === "rename-column") return renderRenameColumn(plan, namespace);
 		if (plan.kind === "alter-column") {
 			return plan.action.kind === "set-default" || plan.action.kind === "drop-default"
@@ -897,10 +897,13 @@ const MSSQL_REF_ACTION: Readonly<
 	"set-null": "SET NULL"
 };
 
-function mssqlRefClause(ref: import("../ir/plan").FieldRefPlan): string {
+function mssqlRefClause(
+	ref: import("../ir/plan").FieldRefPlan,
+	namespace: string
+): string {
 	return (
 		`CONSTRAINT ${quoteIdent(ref.name)} REFERENCES ` +
-		`${quoteIdent(ref.targetCollection)} (${quoteIdent(ref.targetColumn)}) ` +
+		`${qualified(namespace, ref.targetCollection)} (${quoteIdent(ref.targetColumn)}) ` +
 		`ON DELETE ${MSSQL_REF_ACTION[ref.onDelete]} ` +
 		`ON UPDATE ${MSSQL_REF_ACTION[ref.onUpdate]}`
 	);
@@ -920,6 +923,11 @@ function enumCheckClause(
 	return `CONSTRAINT ${checkName} CHECK (${quoteIdent(f.name)} IN (${members}))`;
 }
 
+/** `[schéma].[table]` : le DDL vise le schéma de la connexion (`?schema=`). */
+function qualified(namespace: string, table: string): string {
+	return `${quoteIdent(namespace)}.${quoteIdent(table)}`;
+}
+
 /** `CONSTRAINT [n] ` quand un profil ORM impose le nom (ADR-036 D6), sinon
  *  le moteur nomme. */
 function constraintPrefix(name: string | undefined): string {
@@ -929,7 +937,8 @@ function constraintPrefix(name: string | undefined): string {
 function renderFieldDef(
 	f: import("../ir/plan").CreateTableField,
 	table: string,
-	primaryKey: readonly string[] | undefined
+	primaryKey: readonly string[] | undefined,
+	namespace: string
 ): string {
 	const inPk = primaryKey?.includes(f.name) ?? false;
 	const parts: string[] = [quoteIdent(f.name), mssqlFieldTypeSql(f, inPk)];
@@ -942,7 +951,7 @@ function renderFieldDef(
 	}
 	const check = enumCheckClause(table, f);
 	if (check !== undefined) parts.push(check);
-	if (f.ref !== undefined) parts.push(mssqlRefClause(f.ref));
+	if (f.ref !== undefined) parts.push(mssqlRefClause(f.ref, namespace));
 	return parts.join(" ");
 }
 
@@ -968,14 +977,14 @@ function renderCreateTable(
 	namespace: string
 ): NativeQuery {
 	const cols = plan.fields.map((f) =>
-		renderFieldDef(f, plan.target, plan.primaryKey)
+		renderFieldDef(f, plan.target, plan.primaryKey, namespace)
 	);
 	if (plan.primaryKey !== undefined && plan.primaryKey.length > 0) {
 		cols.push(
 			`${constraintPrefix(plan.primaryKeyName)}PRIMARY KEY (${plan.primaryKey.map(quoteIdent).join(", ")})`
 		);
 	}
-	const createText = `CREATE TABLE ${quoteIdent(plan.target)} (${cols.join(", ")})`;
+	const createText = `CREATE TABLE ${qualified(namespace, plan.target)} (${cols.join(", ")})`;
 	if (!plan.ifNotExists) return ddlQuery(createText);
 
 	const guarded = `IF OBJECT_ID(${objectLiteral(namespace, plan.target)}, N'U') IS NULL ${createText}`;
@@ -1010,10 +1019,10 @@ function renderAddColumn(
 	namespace: string
 ): NativeQuery {
 	const f = plan.column;
-	const def = renderFieldDef(f, plan.target, undefined);
+	const def = renderFieldDef(f, plan.target, undefined, namespace);
 	const withValues =
 		f.defaultValue !== undefined && f.nullable ? " WITH VALUES" : "";
-	const alterText = `ALTER TABLE ${quoteIdent(plan.target)} ADD ${def}${withValues}`;
+	const alterText = `ALTER TABLE ${qualified(namespace, plan.target)} ADD ${def}${withValues}`;
 	if (!plan.ifNotExists) return ddlQuery(alterText);
 	const table = nstr(`${quoteIdent(namespace)}.${quoteIdent(plan.target)}`);
 	return ddlQuery(
@@ -1095,12 +1104,14 @@ END`;
  *  `IF EXISTS` natif est 2016+ : idempotence via guard sys.indexes,
  *  universel 2005+ (passe 2014 M/7). */
 function renderDropIndex(
-	plan: import("../ir/plan").DropIndexPlan
+	plan: import("../ir/plan").DropIndexPlan,
+	namespace: string
 ): NativeQuery {
-	const dropText = `DROP INDEX ${quoteIdent(plan.name)} ON ${quoteIdent(plan.target)}`;
+	const table = qualified(namespace, plan.target);
+	const dropText = `DROP INDEX ${quoteIdent(plan.name)} ON ${table}`;
 	if (!plan.ifExists) return ddlQuery(dropText);
 	return ddlQuery(
-		`IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = ${nstr(plan.name)} AND object_id = OBJECT_ID(${nstr(quoteIdent(plan.target))})) ${dropText}`
+		`IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = ${nstr(plan.name)} AND object_id = OBJECT_ID(${nstr(table)})) ${dropText}`
 	);
 }
 
@@ -1110,33 +1121,75 @@ function renderDropTable(
 	plan: import("../ir/plan").DropTablePlan,
 	namespace: string
 ): NativeQuery {
-	const dropText = `DROP TABLE ${quoteIdent(plan.target)}`;
+	const dropText = `DROP TABLE ${qualified(namespace, plan.target)}`;
 	if (!plan.ifExists) return ddlQuery(dropText);
 	return ddlQuery(
 		`IF OBJECT_ID(${objectLiteral(namespace, plan.target)}, N'U') IS NOT NULL ${dropText}`
 	);
 }
 
-/** `drop column` — refus natif si contrainte/index dépendant (défaut T-SQL
- *  ≡ RESTRICT). `IF EXISTS` natif = 2016+ → guard COL_LENGTH universel. */
+/**
+ * `drop column` : T-SQL refuse de retirer une colonne dont dépend un index,
+ * une contrainte (PK, UNIQUE, CHECK, DEFAULT), une FK qu'elle porte ou une
+ * statistique créée à la main ; PG les retire avec elle. Ils sont retirés
+ * d'abord, relus au catalogue à l'exécution. Une FK d'une autre table qui la
+ * référence fait échouer, comme sous PG.
+ */
 function renderDropColumn(
 	plan: import("../ir/plan").DropColumnPlan,
 	namespace: string
 ): NativeQuery {
-	const dropText = `ALTER TABLE ${quoteIdent(plan.target)} DROP COLUMN ${quoteIdent(plan.column)}`;
-	if (!plan.ifExists) return ddlQuery(dropText);
-	const table = nstr(`${quoteIdent(namespace)}.${quoteIdent(plan.target)}`);
-	return ddlQuery(
-		`IF COL_LENGTH(${table}, ${nstr(plan.column)}) IS NOT NULL ${dropText}`
-	);
+	const table = `${quoteIdent(namespace)}.${quoteIdent(plan.target)}`;
+	const dropColumn = `ALTER TABLE ${table} DROP COLUMN ${quoteIdent(plan.column)}`;
+	const dependents = [
+		"DECLARE @drop nvarchar(max) = N'';",
+		`SELECT @drop = @drop + N'ALTER TABLE ${table} DROP CONSTRAINT ' + QUOTENAME(fk.name) + N';'
+FROM sys.foreign_keys fk
+WHERE fk.parent_object_id = @obj AND EXISTS (SELECT 1 FROM sys.foreign_key_columns fkc WHERE fkc.constraint_object_id = fk.object_id AND fkc.parent_column_id = @col);`,
+		`SELECT @drop = @drop + CASE WHEN i.is_primary_key = 1 OR i.is_unique_constraint = 1 THEN N'ALTER TABLE ${table} DROP CONSTRAINT ' + QUOTENAME(i.name) ELSE N'DROP INDEX ' + QUOTENAME(i.name) + N' ON ${table}' END + N';'
+FROM sys.indexes i
+WHERE i.object_id = @obj AND i.type IN (1, 2) AND EXISTS (SELECT 1 FROM sys.index_columns ic WHERE ic.object_id = @obj AND ic.index_id = i.index_id AND ic.column_id = @col);`,
+		`SELECT @drop = @drop + N'ALTER TABLE ${table} DROP CONSTRAINT ' + QUOTENAME(cc.name) + N';'
+FROM sys.check_constraints cc
+WHERE cc.parent_object_id = @obj AND (cc.parent_column_id = @col OR cc.definition LIKE N'%[[]' + COL_NAME(@obj, @col) + N']%');`,
+		`SELECT @drop = @drop + N'ALTER TABLE ${table} DROP CONSTRAINT ' + QUOTENAME(dc.name) + N';'
+FROM sys.default_constraints dc
+WHERE dc.parent_object_id = @obj AND dc.parent_column_id = @col;`,
+		`SELECT @drop = @drop + N'DROP STATISTICS ${table}.' + QUOTENAME(s.name) + N';'
+FROM sys.stats s
+WHERE s.object_id = @obj AND s.user_created = 1 AND EXISTS (SELECT 1 FROM sys.stats_columns sc WHERE sc.object_id = @obj AND sc.stats_id = s.stats_id AND sc.column_id = @col);`,
+		"EXEC (@drop);",
+		`EXEC (${nstr(dropColumn)});`
+	];
+	const lines = [
+		"SET NOCOUNT ON;",
+		"SET XACT_ABORT ON;",
+		"BEGIN TRY",
+		"BEGIN TRAN;",
+		`DECLARE @obj int = OBJECT_ID(${nstr(table)});`,
+		`DECLARE @col int = COLUMNPROPERTY(@obj, ${nstr(plan.column)}, 'ColumnId');`,
+		...(plan.ifExists
+			? ["IF @col IS NOT NULL", "BEGIN", ...dependents, "END"]
+			: [
+					`IF @col IS NULL THROW 50000, ${nstr(`colonne '${plan.target}.${plan.column}' inconnue`)}, 1;`,
+					...dependents
+				]),
+		"COMMIT;",
+		"END TRY",
+		"BEGIN CATCH",
+		"IF @@TRANCOUNT > 0 ROLLBACK;",
+		"THROW;",
+		"END CATCH"
+	];
+	return ddlQuery(lines.join("\n"));
 }
 
 /**
  * `rename column` → `sp_rename` : le nouveau nom passe sans crochets (ils
- * feraient partie du nom). FK, index et CHECK suivent la colonne. Sous un
- * profil ORM, les noms conventionnels suivent aussi, dans la même
- * transaction ; la contrainte de défaut seulement si elle existe sous ce nom
- * (ADR-036 D6).
+ * feraient partie du nom). FK et index suivent la colonne ; son CHECK d'enum
+ * est reposé sous le nouveau nom. Sous un profil ORM, les noms conventionnels
+ * suivent, dans la même transaction ; la contrainte de défaut seulement si
+ * elle existe sous ce nom (ADR-036 D6).
  */
 function renderRenameColumn(
 	plan: import("../ir/plan").RenameColumnPlan,
@@ -1145,13 +1198,30 @@ function renderRenameColumn(
 	const schema = quoteIdent(namespace);
 	const table = `${schema}.${quoteIdent(plan.target)}`;
 	const renameColumn = `EXEC sp_rename ${nstr(`${table}.${quoteIdent(plan.column)}`)}, ${nstr(plan.newName)}, N'COLUMN'`;
+	// T-SQL refuse de renommer une colonne que son CHECK d'enum cite : retiré,
+	// puis reposé sous le nouveau nom (`ck_<t>_<c>_enum`).
+	const enumMembers = plan.enumMembers ?? [];
 	const renames = plan.renames ?? [];
-	if (renames.length === 0) return ddlQuery(renameColumn);
 	const lines = [
 		"SET NOCOUNT ON;",
 		"SET XACT_ABORT ON;",
+		// Une erreur de `sp_rename` n'interrompt pas le lot : sans TRY, la
+		// suite s'exécuterait et serait validée.
+		"BEGIN TRY",
 		"BEGIN TRAN;",
-		`${renameColumn};`
+		...(enumMembers.length > 0
+			? [
+					`ALTER TABLE ${table} DROP CONSTRAINT IF EXISTS ${quoteIdent(`ck_${plan.target}_${plan.column}_enum`)};`
+				]
+			: []),
+		`${renameColumn};`,
+		// Dynamique : compilé après le renommage, sinon T-SQL refuse le lot
+		// entier (colonne encore inconnue à la compilation).
+		...(enumMembers.length > 0
+			? [
+					`EXEC sp_executesql ${nstr(`ALTER TABLE ${table} WITH CHECK ADD CONSTRAINT ${quoteIdent(`ck_${plan.target}_${plan.newName}_enum`)} CHECK (${quoteIdent(plan.newName)} IN (${enumMembers.map(nstr).join(", ")}))`)};`
+				]
+			: [])
 	];
 	for (const r of renames) {
 		if (r.kind === "index") {
@@ -1168,7 +1238,14 @@ function renderRenameColumn(
 			);
 		}
 	}
-	lines.push("COMMIT;");
+	lines.push(
+		"COMMIT;",
+		"END TRY",
+		"BEGIN CATCH",
+		"IF @@TRANCOUNT > 0 ROLLBACK;",
+		"THROW;",
+		"END CATCH"
+	);
 	return ddlQuery(lines.join("\n"));
 }
 
@@ -1352,12 +1429,15 @@ WHERE (c.object_id = @obj AND c.column_id = @col)${
 
 /** `add ref` → contrainte de table. `WITH CHECK` : les lignes existantes
  *  sont vérifiées (orphelins refusés) et la contrainte est approuvée. */
-function renderAddRef(plan: import("../ir/plan").AddRefPlan): NativeQuery {
+function renderAddRef(
+	plan: import("../ir/plan").AddRefPlan,
+	namespace: string
+): NativeQuery {
 	const { ref } = plan;
 	return ddlQuery(
-		`ALTER TABLE ${quoteIdent(plan.target)} WITH CHECK ADD CONSTRAINT ${quoteIdent(ref.name)} ` +
+		`ALTER TABLE ${qualified(namespace, plan.target)} WITH CHECK ADD CONSTRAINT ${quoteIdent(ref.name)} ` +
 			`FOREIGN KEY (${quoteIdent(ref.fromColumn)}) REFERENCES ` +
-			`${quoteIdent(ref.targetCollection)} (${quoteIdent(ref.targetColumn)}) ` +
+			`${qualified(namespace, ref.targetCollection)} (${quoteIdent(ref.targetColumn)}) ` +
 			`ON DELETE ${MSSQL_REF_ACTION[ref.onDelete]} ` +
 			`ON UPDATE ${MSSQL_REF_ACTION[ref.onUpdate]}`
 	);
@@ -1366,11 +1446,14 @@ function renderAddRef(plan: import("../ir/plan").AddRefPlan): NativeQuery {
 /** `drop ref` → `ALTER TABLE … DROP CONSTRAINT` — natif, miroir PG (D7
  *  typing gate côté frontend). `IF EXISTS` → guard OBJECT_ID(…, 'F')
  *  universel 2005+. */
-function renderDropRef(plan: import("../ir/plan").DropRefPlan): NativeQuery {
-	const dropText = `ALTER TABLE ${quoteIdent(plan.target)} DROP CONSTRAINT ${quoteIdent(plan.name)}`;
+function renderDropRef(
+	plan: import("../ir/plan").DropRefPlan,
+	namespace: string
+): NativeQuery {
+	const dropText = `ALTER TABLE ${qualified(namespace, plan.target)} DROP CONSTRAINT ${quoteIdent(plan.name)}`;
 	if (!plan.ifExists) return ddlQuery(dropText);
 	return ddlQuery(
-		`IF OBJECT_ID(${nstr(quoteIdent(plan.name))}, N'F') IS NOT NULL ${dropText}`
+		`IF OBJECT_ID(${nstr(qualified(namespace, plan.name))}, N'F') IS NOT NULL ${dropText}`
 	);
 }
 
@@ -1435,11 +1518,33 @@ function renderAddEnumMember(
 	const likePattern = `%${quotedMember.replace(/[\\%_[]/g, (c) => `\\${c}`)}%`;
 	const likeRef = params.add(likePattern);
 	const meta = enumsMetaTable(namespace);
-	const text =
+	const update =
 		`UPDATE ${meta} SET [members] = CASE WHEN [members] = '[]' ` +
 		`THEN '[' + ${quotedRef} + ']' ` +
 		`ELSE STUFF([members], LEN([members]), 1, ',' + ${quotedRef} + ']') END ` +
 		`WHERE [name] = ${nameRef} AND [members] NOT LIKE ${likeRef} ESCAPE '\\'`;
+	// Les colonnes de l'enum portent ses valeurs dans leur CHECK : réécrit
+	// avec la nouvelle, dans la même transaction.
+	const usage = plan.usage;
+	const text =
+		usage === undefined
+			? update
+			: [
+					"SET XACT_ABORT ON;",
+					"BEGIN TRAN;",
+					`${update};`,
+					...usage.columns.map((c) =>
+						enumCheckRewrite(
+							namespace,
+							c.table,
+							c.column,
+							usage.members.includes(plan.member)
+								? usage.members
+								: [...usage.members, plan.member]
+						)
+					),
+					"COMMIT;"
+				].join("\n");
 	return {
 		engine: "mssql",
 		kind: "sql",
@@ -1447,6 +1552,21 @@ function renderAddEnumMember(
 		params: params.all(),
 		paramSpans: params.allSpans()
 	};
+}
+
+/** CHECK `ck_<t>_<c>_enum` d'une colonne d'enum, reposé avec `members`. */
+function enumCheckRewrite(
+	namespace: string,
+	table: string,
+	column: string,
+	members: readonly string[]
+): string {
+	const target = `${quoteIdent(namespace)}.${quoteIdent(table)}`;
+	const check = quoteIdent(`ck_${table}_${column}_enum`);
+	return (
+		`ALTER TABLE ${target} DROP CONSTRAINT IF EXISTS ${check}; ` +
+		`ALTER TABLE ${target} WITH CHECK ADD CONSTRAINT ${check} CHECK (${quoteIdent(column)} IN (${members.map(nstr).join(", ")}));`
+	);
 }
 
 /**
