@@ -14,13 +14,15 @@ export const projectStatusOp = defineOp({
 		const project = loadLocalConnections()?.connections.find(
 			(c) => c.name === ctx.connectionName
 		)?.project;
-		if (project === undefined) return { linked: false };
+		const connection = ctx.connectionName;
+		if (project === undefined) return { connection, linked: false };
 		let schema = ctx.schema.get();
 		if (schema === undefined) {
 			schema = await (await ctx.connection()).introspect();
 			ctx.schema.set(schema);
 		}
 		const status = {
+			connection,
 			linked: true,
 			orm: project.orm,
 			apply: project.apply,

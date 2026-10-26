@@ -62,6 +62,12 @@ export type {
 	TunnelSchemaCheck,
 	TunnelSchemaDifference
 } from "./ops";
+export {
+	ORM_HISTORY_TABLES,
+	ORM_LABELS,
+	ORM_NAMES,
+	type OrmName
+} from "./orm";
 export { signFrame, verifyFrame } from "./signature";
 export {
 	CHACHA_NONCE_LEN,

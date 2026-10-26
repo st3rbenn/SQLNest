@@ -93,7 +93,7 @@ describe("projectStatus (ADR-037 D2)", () => {
 		const t = target(fakeConnection());
 		expect(await dispatchOp({ op: "projectStatus" }, t)).toEqual({
 			ok: true,
-			data: { linked: false }
+			data: { connection: "apollon", linked: false }
 		});
 		expect(t.open).not.toHaveBeenCalled();
 	});
@@ -130,6 +130,7 @@ describe("projectStatus (ADR-037 D2)", () => {
 		expect(res).toEqual({
 			ok: true,
 			data: {
+				connection: "apollon",
 				linked: true,
 				orm: "prisma",
 				apply: false,
@@ -170,6 +171,7 @@ describe("projectStatus (ADR-037 D2)", () => {
 		expect(await dispatchOp({ op: "projectStatus" }, t)).toEqual({
 			ok: true,
 			data: {
+				connection: "apollon",
 				linked: true,
 				orm: "prisma",
 				apply: true,

@@ -113,7 +113,8 @@ export const ProjectStatusResponse = z.object({
 	apply: z.boolean().optional(),
 	projectFound: z.boolean().optional(),
 	historyTable: z.object({ name: z.string(), present: z.boolean() }).optional(),
-	migrations: z.boolean().optional()
+	migrations: z.boolean().optional(),
+	connection: z.string().optional()
 });
 z.globalRegistry.add(ProjectStatusResponse, {
 	id: "DbConnectionsProjectStatusResponse"

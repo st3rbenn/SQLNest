@@ -28,7 +28,6 @@
  *     avant d'ouvrir le WS, non couvert par ce module).
  */
 
-import { randomBytes } from "node:crypto";
 import { pack, unpack } from "msgpackr";
 
 /** Longueur d'une session nonce en bytes (16 = 128 bits). */
@@ -50,9 +49,12 @@ export interface HandshakePayload {
 	readonly session_nonce: Uint8Array;
 }
 
-/** Génère une nonce de session aléatoire (CSPRNG Node). */
+/**
+ * Génère une nonce de session aléatoire. WebCrypto (Node ≥ 19, navigateur) :
+ * le front importe aussi ce paquet, où `node:crypto` n'existe pas.
+ */
 export function generateSessionNonce(): Uint8Array {
-	return new Uint8Array(randomBytes(SESSION_NONCE_LEN));
+	return globalThis.crypto.getRandomValues(new Uint8Array(SESSION_NONCE_LEN));
 }
 
 /**

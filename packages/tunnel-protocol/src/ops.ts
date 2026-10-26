@@ -5,6 +5,8 @@
  * côté CLI.
  */
 
+import type { OrmName } from "./orm";
+
 /** Ping applicatif : latence de la base locale et sa version. */
 export interface TunnelPingData {
 	readonly latencyMs: number;
@@ -31,8 +33,10 @@ export interface TunnelRunSnqlData {
  * sait. Jamais le chemin du projet.
  */
 export interface TunnelProjectStatusData {
+	/** Nom de la connexion côté CLI : celui des commandes (`link-project`…), qui peut différer de son nom dans l'app. */
+	readonly connection?: string;
 	readonly linked: boolean;
-	readonly orm?: "prisma" | "doctrine" | "sequelize" | "seaorm";
+	readonly orm?: OrmName;
 	/** `false` : migration et modèle écrits, base non touchée (ADR-035 point 3). */
 	readonly apply?: boolean;
 	/** Le dossier du projet existe et l'ORM y est toujours détecté. */
@@ -94,7 +98,7 @@ export interface TunnelSchemaCheck {
  * relatifs au projet, jamais le contenu des fichiers.
  */
 export interface TunnelSchemaChangeData {
-	readonly orm: "prisma" | "doctrine" | "sequelize" | "seaorm";
+	readonly orm: OrmName;
 	/**
 	 * Migration écrite : nom de son dossier, ou de son fichier. Absente sans
 	 * historique de migrations (Prisma sous MongoDB) : SQLNest a appliqué le DDL.

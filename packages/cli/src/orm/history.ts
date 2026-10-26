@@ -5,16 +5,12 @@
 
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { ORM_HISTORY_TABLES } from "@sqlnest/tunnel-protocol";
 import { type DbEngine, ENGINE_LABELS } from "../services/connection-strings";
 import type { OrmDetection } from "./detect";
 import { ORM_LABELS, ORM_NAMES, type OrmName } from "./types";
 
-export const HISTORY_TABLES: Readonly<Record<OrmName, string>> = {
-	prisma: "_prisma_migrations",
-	doctrine: "doctrine_migration_versions",
-	sequelize: "SequelizeMeta",
-	seaorm: "seaql_migrations"
-};
+export const HISTORY_TABLES = ORM_HISTORY_TABLES;
 
 /** Moteurs où un ORM ne tient pas d'historique de migrations : Prisma sous MongoDB (`db push`). */
 const WITHOUT_HISTORY: Readonly<Partial<Record<OrmName, readonly string[]>>> = {
