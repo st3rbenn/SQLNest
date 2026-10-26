@@ -312,6 +312,60 @@ describe("runCli — connect: sélection DSN locale", () => {
 		expect(connectFn.mock.calls[0]?.[0].cliConnectionName).toBe("delphi");
 	});
 
+	test("connect <name> : la connexion nommée, sans menu ; contredite par --connection → 2", async () => {
+		addLocalConnection({ name: "apollon", url: "postgres://x/apollon" });
+		addLocalConnection({ name: "delphi", url: "postgres://x/delphi" });
+		const io = captureIO();
+		const connectFn = vi.fn().mockResolvedValue({
+			tunnelId: "id",
+			connectionId: "c",
+			sessionToken: "tn_x",
+			expiresAt: new Date(),
+			connectionName: "delphi"
+		});
+		await runCli(["connect", "delphi"], {
+			stdout: io.stdout,
+			stderr: io.stderr,
+			// biome-ignore lint/suspicious/noExplicitAny: mock
+			connectFn: connectFn as any,
+			// biome-ignore lint/suspicious/noExplicitAny: mock stub
+			serveTunnelFn: (async () => 0) as any
+		});
+		expect(connectFn.mock.calls[0]?.[0].cliConnectionName).toBe("delphi");
+		const code = await runCli(
+			["connect", "delphi", "--connection", "apollon"],
+			{
+				stdout: io.stdout,
+				stderr: io.stderr
+			}
+		);
+		expect(code).toBe(2);
+		expect(io.err.at(-1)).toBe(
+			"sqlnest connect: usage invalide — « delphi » et --connection apollon se contredisent"
+		);
+	});
+
+	test("add-connection <chaîne> : la chaîne en argument, comme --url", async () => {
+		const io = captureIO();
+		const code = await runCli(
+			[
+				"add-connection",
+				"postgres://lab:lab@localhost:5440/e2x_legacy",
+				"--name",
+				"legacy",
+				"--no-test"
+			],
+			{ stdout: io.stdout, stderr: io.stderr }
+		);
+		expect(code).toBe(0);
+		const { loadLocalConnections } = await import(
+			"../services/local-connections"
+		);
+		expect(loadLocalConnections()?.connections).toEqual([
+			{ name: "legacy", url: "postgres://lab:lab@localhost:5440/e2x_legacy" }
+		]);
+	});
+
 	test("--connection <inconnu> → 2 + message d'erreur listant les DSN connues", async () => {
 		addLocalConnection({ name: "apollon", url: "postgres://x/apollon" });
 		addLocalConnection({ name: "delphi", url: "postgres://x/delphi" });

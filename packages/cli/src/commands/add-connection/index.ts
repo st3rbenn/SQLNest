@@ -8,7 +8,7 @@
  * saisie guidée (`manual.ts`). Une base lue dans un `.env` est enregistrée
  * en référence à ce `.env` (ADR-038 S4).
  *
- * **`--url <chaîne>` — scriptable** : URL, JDBC, ADO.NET ou libpq.
+ * **`<chaîne>` (ou `--url <chaîne>`) — scriptable** : URL, JDBC, ADO.NET ou libpq.
  * ⚠ Le password sera visible dans `ps aux` et pourra atterrir dans
  *   l'historique shell (~/.zsh_history) : à utiliser quand la DSN vient
  *   déjà d'un secret manager ou d'un shell script, PAS quand elle est
@@ -22,7 +22,11 @@
  * skip la question. Pas de merge : la nouvelle entrée remplace intégrale.
  */
 
-import { defineCommand, parseCommandArgs } from "../../app/command";
+import {
+	defineCommand,
+	parseCommandLine,
+	positionalOrOption
+} from "../../app/command";
 import type { CliContext } from "../../app/context";
 import type { OrmDetection } from "../../orm/detect";
 import { ORM_LABELS } from "../../orm/types";
@@ -116,7 +120,7 @@ export async function addConnection(
 	} else if (opts.interactive === false) {
 		throw new AddConnectionError(
 			"invalid-input",
-			"Sans terminal, passe la chaîne de connexion : sqlnest add-connection --url <chaîne>"
+			"Sans terminal, passe la chaîne de connexion : sqlnest add-connection <chaîne>"
 		);
 	} else if (opts.database !== undefined) {
 		target = await targetOfDatabase(
@@ -311,7 +315,7 @@ export const addConnectionCommand = defineCommand({
 			"Bases trouvées (projet courant, Docker), chaîne collée ou saisie"
 		],
 		[
-			"sqlnest add-connection --url <chaîne>",
+			"sqlnest add-connection <chaîne>",
 			"URL, JDBC, ADO.NET ou libpq (⚠ visible dans ps aux / historique shell)"
 		],
 		[
@@ -325,19 +329,33 @@ export const addConnectionCommand = defineCommand({
 		]
 	],
 	async run(args, ctx) {
-		const values = parseCommandArgs(ctx, "add-connection", args, {
-			name: { type: "string" },
-			force: { type: "boolean" },
-			url: { type: "string" },
-			"no-test": { type: "boolean" }
-		});
-		if (values === undefined) return 2;
+		const parsed = parseCommandLine(
+			ctx,
+			"add-connection",
+			args,
+			{
+				name: { type: "string" },
+				force: { type: "boolean" },
+				url: { type: "string" },
+				"no-test": { type: "boolean" }
+			},
+			1
+		);
+		if (parsed === undefined) return 2;
+		const { values } = parsed;
+		const url = positionalOrOption(
+			ctx,
+			"add-connection",
+			parsed.positionals[0],
+			{ flag: "--url", value: values.url }
+		);
+		if (url === undefined) return 2;
 		const prompter = ctx.services.prompter();
 		try {
 			await ctx.services.addConnection({
 				...(values.name ? { name: values.name } : {}),
 				...(values.force ? { force: true } : {}),
-				...(values.url ? { url: values.url } : {}),
+				...(url.value ? { url: url.value } : {}),
 				...(values["no-test"] ? {} : { test: ctx.services.probeConnection }),
 				...discoveryTools(ctx),
 				interactive: process.stdin.isTTY === true,

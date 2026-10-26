@@ -8,14 +8,14 @@ const EXPECTED_HELP = `sqlnest — CLI SQLNest (tunnel local vers tes bases).
 
 Usage :
   sqlnest connect                          Sert une connexion : celle du projet relié, sinon menu
-  sqlnest connect --connection <name>      Sert cette connexion, sans menu
+  sqlnest connect <name>                   Sert cette connexion, sans menu
   sqlnest connect --no-browser             Idem, sans ouvrir le navigateur
   sqlnest connect --token <sn> --name <n>  Mode CI (Bearer sn_...)
   sqlnest logout --all                     Retire tous les tunnels locaux
   sqlnest logout --tunnel <id>             Retire un tunnel local
   sqlnest ping --tunnel <name>             Teste une connexion locale (diagnostic)
   sqlnest add-connection                   Bases trouvées (projet courant, Docker), chaîne collée ou saisie
-  sqlnest add-connection --url <chaîne>    URL, JDBC, ADO.NET ou libpq (⚠ visible dans ps aux / historique shell)
+  sqlnest add-connection <chaîne>          URL, JDBC, ADO.NET ou libpq (⚠ visible dans ps aux / historique shell)
   sqlnest add-connection … --name <n>      Nom de la connexion (proposé d'après la base sinon)
   sqlnest add-connection … --force         Écrase sans demander confirmation
   sqlnest add-connection … --no-test       Enregistre sans tester la connexion

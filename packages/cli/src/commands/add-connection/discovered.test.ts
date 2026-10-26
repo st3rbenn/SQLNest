@@ -386,7 +386,7 @@ describe("add-connection sans argument", () => {
 				stdout: (l) => out.push(l)
 			})
 		).rejects.toThrow(
-			"Sans terminal, passe la chaîne de connexion : sqlnest add-connection --url <chaîne>"
+			"Sans terminal, passe la chaîne de connexion : sqlnest add-connection <chaîne>"
 		);
 		expect(discover).not.toHaveBeenCalled();
 	});

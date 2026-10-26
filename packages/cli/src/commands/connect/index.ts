@@ -5,7 +5,11 @@
 
 import { homedir } from "node:os";
 import { API_URL, FRONTEND_URL } from "../../app/build-info";
-import { defineCommand, parseCommandArgs } from "../../app/command";
+import {
+	defineCommand,
+	parseCommandLine,
+	positionalOrOption
+} from "../../app/command";
 import type { CliContext } from "../../app/context";
 import { ApiClientError } from "../../services/api-client";
 import { loadConfig } from "../../services/config";
@@ -38,7 +42,7 @@ export const connectCommand = defineCommand({
 			"sqlnest connect",
 			"Sert une connexion : celle du projet relié, sinon menu"
 		],
-		["sqlnest connect --connection <name>", "Sert cette connexion, sans menu"],
+		["sqlnest connect <name>", "Sert cette connexion, sans menu"],
 		["sqlnest connect --no-browser", "Idem, sans ouvrir le navigateur"],
 		["sqlnest connect --token <sn> --name <n>", "Mode CI (Bearer sn_...)"]
 	],
@@ -46,7 +50,7 @@ export const connectCommand = defineCommand({
 });
 
 async function runConnect(args: string[], ctx: CliContext): Promise<number> {
-	const values = parseCommandArgs(
+	const parsed = parseCommandLine(
 		ctx,
 		"connect",
 		args,
@@ -56,9 +60,16 @@ async function runConnect(args: string[], ctx: CliContext): Promise<number> {
 			connection: { type: "string" },
 			"no-browser": { type: "boolean" }
 		},
+		1,
 		{ seeHelp: true }
 	);
-	if (values === undefined) return 2;
+	if (parsed === undefined) return 2;
+	const { values } = parsed;
+	const explicit = positionalOrOption(ctx, "connect", parsed.positionals[0], {
+		flag: "--connection",
+		value: values.connection
+	});
+	if (explicit === undefined) return 2;
 
 	const baseUrl = API_URL;
 	const frontendUrl = FRONTEND_URL;
@@ -80,9 +91,7 @@ async function runConnect(args: string[], ctx: CliContext): Promise<number> {
 	let cliConnectionName: string | null;
 	try {
 		cliConnectionName = await chooseConnection({
-			...(values.connection !== undefined
-				? { explicit: values.connection }
-				: {}),
+			...(explicit.value !== undefined ? { explicit: explicit.value } : {}),
 			cwd: process.cwd(),
 			home: homedir(),
 			interactive,

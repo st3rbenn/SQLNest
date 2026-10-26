@@ -314,7 +314,7 @@ describe("chooseConnection — menu", () => {
 			connections: [{ name: "a", url: "postgres://u@localhost/a" }]
 		});
 		await expect(chooseConnection(options({ explicit: "zz" }))).rejects.toThrow(
-			/aucune connexion « zz ».*Connues : a/
+			/Aucune connexion « zz ».*Connues : a/
 		);
 	});
 });

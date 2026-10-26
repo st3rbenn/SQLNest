@@ -1,7 +1,7 @@
 /**
  * Connexion que `sqlnest connect` sert (ADR-038 S6).
  *
- *   1. `--connection <nom>` explicite (validé contre le fichier).
+ *   1. `<nom>` (ou `--connection <nom>`) explicite (validé contre le fichier).
  *   2. Dans un projet relié : sa connexion, sans menu.
  *   3. Projet non relié dont la base est détectée (terminal) : relier la
  *      connexion qui la vise, ou la créer puis relier.
@@ -109,15 +109,15 @@ function explicitConnection(
 ): string {
 	if (entries.length === 0) {
 		throw new Error(
-			`--connection ${name} : aucune connexion locale.\n` +
-				`Ajoute-en une : sqlnest add-connection --name ${name}`
+			`Aucune connexion locale « ${name} ».\n` +
+				`Ajoute-la : sqlnest add-connection --name ${name}`
 		);
 	}
 	if (!entries.some((c) => c.name === name)) {
 		const names = entries.map((c) => c.name).join(", ");
 		throw new Error(
-			`--connection ${name} : aucune connexion « ${name} » ` +
-				`dans local-connections.toml. Connues : ${names}`
+			`Aucune connexion « ${name} » dans local-connections.toml. ` +
+				`Connues : ${names}`
 		);
 	}
 	return name;

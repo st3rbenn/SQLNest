@@ -51,7 +51,8 @@ export function parseCommandLine<const T extends ParseArgsOptionsConfig>(
 	command: string,
 	args: string[],
 	options: T,
-	max: number
+	max: number,
+	{ seeHelp = false }: { readonly seeHelp?: boolean } = {}
 ) {
 	try {
 		const parsed = parseArgs({
@@ -67,6 +68,30 @@ export function parseCommandLine<const T extends ParseArgsOptionsConfig>(
 		ctx.stderr(
 			`sqlnest ${command}: usage invalide — ${(err as Error).message}`
 		);
+		if (seeHelp) ctx.stderr("Voir `sqlnest --help`.");
 		return undefined;
 	}
+}
+
+/**
+ * Valeur donnée en argument ou par son option (`connect <nom>` ou
+ * `--connection <nom>`) ; deux valeurs différentes : usage invalide.
+ */
+export function positionalOrOption(
+	ctx: CliContext,
+	command: string,
+	positional: string | undefined,
+	option: { readonly flag: string; readonly value: string | undefined }
+): { readonly value: string | undefined } | undefined {
+	if (
+		positional !== undefined &&
+		option.value !== undefined &&
+		positional !== option.value
+	) {
+		ctx.stderr(
+			`sqlnest ${command}: usage invalide — « ${positional} » et ${option.flag} ${option.value} se contredisent`
+		);
+		return undefined;
+	}
+	return { value: positional ?? option.value };
 }
