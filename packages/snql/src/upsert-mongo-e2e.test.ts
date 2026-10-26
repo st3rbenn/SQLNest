@@ -5,7 +5,7 @@
  *  - codegen : `add {…} on conflict (k) ignore` → op=upsert, ops[i] avec
  *    filter+setOnInsert (pas de $set)
  *  - codegen : `add {…} on conflict (k) edit set c = new.c` → op=upsert avec
- *    $set (subst upsertNew) + $setOnInsert (les autres cols)
+ *    $set (subst upsertNew) + $setOnInsert (la row proposée entière)
  *  - refus : action.where (v2), sourcePlan (v4), expr composite dans $set
  *  - capability : MONGODB_CAPABILITIES.supports('upsert') = true
  *
@@ -130,15 +130,19 @@ describe("codegen Mongo — on conflict ignore", () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe("codegen Mongo — on conflict edit set", () => {
-	it("edit set literal → $set inline, $setOnInsert = le reste", () => {
+	it("edit set literal → $set inline, $setOnInsert = la row proposée", () => {
 		const q = mongoUpsert(
 			`add {_id: 1, email: "a@e.com", is_active: false} into users on conflict (_id) edit set is_active = true`
 		);
 		const op = q.operations[0]!;
 		expect(op.filter).toEqual({ _id: 1 });
 		expect(op.set).toEqual({ is_active: true });
-		// _id + email restent en $setOnInsert ; is_active a été poussé en $set.
-		expect(op.setOnInsert).toEqual({ _id: 1, email: "a@e.com" });
+		// Une insertion écrit la row proposée : is_active vaut false, pas l'edit set.
+		expect(op.setOnInsert).toEqual({
+			_id: 1,
+			email: "a@e.com",
+			is_active: false
+		});
 	});
 
 	it("edit set new.<col> → substitué par la valeur de la row", () => {
@@ -147,7 +151,11 @@ describe("codegen Mongo — on conflict edit set", () => {
 		);
 		const op = q.operations[0]!;
 		expect(op.set).toEqual({ email: "new@e.com" });
-		expect(op.setOnInsert).toEqual({ _id: 1, is_active: true });
+		expect(op.setOnInsert).toEqual({
+			_id: 1,
+			email: "new@e.com",
+			is_active: true
+		});
 	});
 });
 

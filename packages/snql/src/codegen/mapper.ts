@@ -112,9 +112,11 @@ export type MongoWriteQuery = {
 			/**
 			 * Sprint v3 Mongo : upsert = `add {…} into t on conflict (k) [ignore |
 			 * edit set …]`. Une entrée par row du batch — chacune porte son propre
-			 * filter (les valeurs des key cols) + $set (si action=edit) +
-			 * $setOnInsert (les autres cols de la row). L'adapter émet bulkWrite
-			 * pour atomicité serveur-side.
+			 * filter (les valeurs des key cols) + $setOnInsert (la row proposée,
+			 * toutes ses cols) + $set (si action=edit, pour la ligne qui existait).
+			 * Mongo applique `$set` aussi à l'insertion d'un upsert : l'adapter
+			 * insère d'abord, puis n'applique `$set` qu'aux lignes déjà là
+			 * (ADR-029 D16).
 			 */
 			readonly op: "upsert";
 			readonly operations: readonly {

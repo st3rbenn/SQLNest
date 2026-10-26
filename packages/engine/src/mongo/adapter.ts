@@ -543,7 +543,10 @@ export function pipelineWithUuidForms(stages: readonly Document[]): Document[] {
 		return Array.isArray(lookup?.pipeline)
 			? {
 					...stage,
-					$lookup: { ...lookup, pipeline: pipelineWithUuidForms(lookup.pipeline) }
+					$lookup: {
+						...lookup,
+						pipeline: pipelineWithUuidForms(lookup.pipeline)
+					}
 				}
 			: stage;
 	});
@@ -700,19 +703,71 @@ function writeColumns(query: MongoWrite): {
 	}
 }
 
-/** Un `updateOne` + upsert par ligne d'un `add … on conflict` (sprint v3 Mongo). */
-function upsertBulkOps(
-	operations: Extract<MongoWrite, { op: "upsert" }>["operations"]
-) {
-	return operations.map((op) => {
+/** Champ témoin d'un upsert : l'insertion le reçoit du filtre, à `null`. */
+const UPSERT_MARK = "__snql_upsert";
+
+/**
+ * Upsert d'un `add … on conflict` (sprint v3 Mongo), un `updateOne` par
+ * ligne. Avec `$set` + `$setOnInsert`, Mongo appliquerait aussi l'edit set
+ * au document inséré (ADR-029 D16) : l'edit passe par un update en forme
+ * pipeline qui choisit sa branche sur `UPSERT_MARK` — `null` dans le
+ * document que l'insertion tire du filtre, absent d'un document existant —
+ * puis le retire. Comme sous Postgres, `rowCount` compte les lignes
+ * insérées ou modifiées.
+ */
+async function runUpsert(
+	coll: Collection,
+	operations: Extract<MongoWrite, { op: "upsert" }>["operations"],
+	session?: ClientSession
+): Promise<{ rowCount: number; upsertedIds: unknown[] }> {
+	const ops = operations.map((op) => {
 		const filter = hydrateBson(op.filter, true) as Document;
-		const update: Document = {};
-		if (op.set !== undefined) {
-			update.$set = hydrateBson(op.set, false) as Document;
+		// Valeurs stockées, pas un filtre : un `_id` texte reste du texte.
+		const row = hydrateBson(op.setOnInsert, false) as Document;
+		if (op.set === undefined) {
+			return {
+				updateOne: { filter, update: { $setOnInsert: row }, upsert: true }
+			};
 		}
-		update.$setOnInsert = hydrateBson(op.setOnInsert, true) as Document;
-		return { updateOne: { filter, update, upsert: true } };
+		const edit = hydrateBson(op.set, false) as Document;
+		const inserting = { $eq: [{ $type: `$${UPSERT_MARK}` }, "null"] };
+		return {
+			updateOne: {
+				filter: { ...filter, [UPSERT_MARK]: null },
+				update: [
+					{
+						$replaceWith: {
+							$cond: [
+								inserting,
+								{ $mergeObjects: ["$$ROOT", { $literal: row }] },
+								{ $mergeObjects: ["$$ROOT", { $literal: edit }] }
+							]
+						}
+					},
+					{ $unset: UPSERT_MARK }
+				],
+				upsert: true
+			}
+		};
 	});
+	const res = await coll.bulkWrite(
+		ops,
+		session !== undefined ? { session } : {}
+	);
+	const edits = operations.some((op) => op.set !== undefined);
+	return {
+		rowCount: res.upsertedCount + (edits ? res.matchedCount : 0),
+		upsertedIds: Object.values(res.upsertedIds)
+	};
+}
+
+/** `doc` où la colonne aliasée (`id`, ADR-036 E/1f) passe à `_id`. */
+function withAliasKey<T extends object>(doc: T, column: string | undefined): T {
+	if (column === undefined) return doc;
+	const { [column]: key, ...rest } = doc as Record<string, unknown>;
+	return (
+		key !== undefined && rest._id === undefined ? { ...rest, _id: key } : doc
+	) as T;
 }
 
 /** Colonnes à photographier autour d'un write : clés référencées et FK `refs`. */
@@ -1164,19 +1219,37 @@ class MongoConnection implements Connection {
 						updating
 					)
 				};
-			case "upsert":
-				// Le filtre reste une égalité : à l'insertion, Mongo en copie les
-				// champs dans le document.
+			case "upsert": {
+				// La branche insertion écrit le document d'un `add` : clé aliasée,
+				// défauts, types déclarés. Le filtre reste une égalité : à
+				// l'insertion, Mongo en copie les champs dans le document.
+				const alias = (await loadPkAliases(this.#requireDb())).get(
+					query.collection
+				)?.column;
+				const inserts = await this.#prepareInsert(
+					query.collection,
+					query.operations.map((op) => op.setOnInsert),
+					session
+				);
 				return {
 					...query,
-					operations: query.operations.map((op) => ({
-						filter: toDeclaredTypes(op.filter, types, inserting),
+					operations: query.operations.map((op, i) => ({
+						filter: toDeclaredTypes(
+							withAliasKey(op.filter, alias),
+							types,
+							inserting
+						),
 						...(op.set !== undefined
 							? { set: toDeclaredTypes(op.set, types, updating) }
 							: {}),
-						setOnInsert: toDeclaredTypes(op.setOnInsert, types, inserting)
+						setOnInsert: toDeclaredTypes(
+							inserts[i] ?? op.setOnInsert,
+							types,
+							inserting
+						)
 					}))
 				};
+			}
 		}
 	}
 
@@ -1185,7 +1258,9 @@ class MongoConnection implements Connection {
 		try {
 			const info = (
 				await this.#requireDb().listCollections({ name: collection }).toArray()
-			)[0] as { readonly options?: { readonly validator?: Document } } | undefined;
+			)[0] as
+				| { readonly options?: { readonly validator?: Document } }
+				| undefined;
 			return declaredTypes(info?.options?.validator);
 		} catch {
 			return new Map();
@@ -1261,18 +1336,10 @@ class MongoConnection implements Connection {
 				return { columns: [], rows: [], rowCount: 0 };
 			}
 			if (query.op === "upsert") {
-				// Sprint v3 Mongo : bulkWrite d'updateOne+upsert (atomicité côté
-				// serveur par bulk, pas par transaction). `rowCount` = docs matched
-				// (edit) + docs upserted (insert), analogue au RETURNING PG mais
-				// sans les docs (l'user avait un upsert, pas un fetch).
-				const result = await collection.bulkWrite(
-					upsertBulkOps(query.operations)
-				);
-				return {
-					columns: [],
-					rows: [],
-					rowCount: result.matchedCount + result.upsertedCount
-				};
+				// Hors transaction : chaque document est écrit atomiquement, pas le
+				// lot. Sans les docs (l'user avait un upsert, pas un fetch).
+				const { rowCount } = await runUpsert(collection, query.operations);
+				return { columns: [], rows: [], rowCount };
 			}
 			const filter = hydrateBson(query.filter, true) as Document;
 			const result = await collection.deleteMany(filter);
@@ -1535,24 +1602,18 @@ class MongoConnection implements Connection {
 					snapshotColumns(plan, plan.outgoing),
 					session
 				);
-				const res = await coll.bulkWrite(upsertBulkOps(query.operations), {
-					session
-				});
+				const res = await runUpsert(coll, query.operations, session);
 				await this.#checkRewrite(
 					query.collection,
 					"insert",
 					plan,
 					plan.outgoing,
 					before,
-					Object.values(res.upsertedIds),
+					res.upsertedIds,
 					session,
 					journal
 				);
-				return {
-					columns: [],
-					rows: [],
-					rowCount: res.matchedCount + res.upsertedCount
-				};
+				return { columns: [], rows: [], rowCount: res.rowCount };
 			}
 		}
 	}
@@ -3247,20 +3308,7 @@ class MongoConnection implements Connection {
 	): Promise<T[]> {
 		const alias = (await loadPkAliases(this.#requireDb())).get(collection);
 		// Sans schéma, le lower n'a pas réécrit l'alias : la valeur passe à `_id`.
-		const keyed =
-			alias === undefined
-				? documents
-				: documents.map((doc) => {
-						const { [alias.column]: key, ...rest } = doc as Record<
-							string,
-							unknown
-						>;
-						return (
-							key !== undefined && rest._id === undefined
-								? { ...rest, _id: key }
-								: doc
-						) as T;
-					});
+		const keyed = documents.map((doc) => withAliasKey(doc, alias?.column));
 		const prepared = await this.#withDefaults(collection, keyed, session);
 		if (
 			alias !== undefined &&
@@ -3687,15 +3735,12 @@ class MongoConnection implements Connection {
 				};
 			}
 			if (query.op === "upsert") {
-				const result = await collection.bulkWrite(
-					upsertBulkOps(query.operations),
-					{ session }
+				const { rowCount } = await runUpsert(
+					collection,
+					query.operations,
+					session
 				);
-				return {
-					columns: [],
-					rows: [],
-					rowCount: result.matchedCount + result.upsertedCount
-				};
+				return { columns: [], rows: [], rowCount };
 			}
 			const filter = hydrateBson(query.filter, true) as Document;
 			const result = await collection.deleteMany(filter, { session });

@@ -407,9 +407,10 @@ function evalLiteralValue(
  * Sprint v3 Mongo : upsert = insert + onConflict. Chaque row du batch génère
  * une entrée bulkWrite avec :
  *  - `filter` : {key_col_i: row_value_i} pour les cols du conflict target
- *  - `setOnInsert` : les fields du doc à créer si aucun match (tous les cols
- *    sauf ceux dans `set`)
- *  - `set` (edit only) : les assignments — mais uniquement literals ou
+ *  - `setOnInsert` : la row proposée, toutes ses cols — le doc à créer si
+ *    aucun match (ADR-029 D16)
+ *  - `set` (edit only) : les assignments, pour la ligne qui existait déjà
+ *    — mais uniquement literals ou
  *    upsertNew (référence à la row d'insert) v1. Toute expression composite
  *    (arith, call…) est refusée : la forme classique Mongo `$set` n'accepte
  *    pas d'expression, et la forme pipeline perd `$setOnInsert`. Ticket
@@ -491,15 +492,15 @@ function renderUpsertOperations(
 			}
 			filter[k] = bsonMapping.get(k);
 		}
+		// Tous les cols de la row → $setOnInsert, y compris ceux de l'edit set :
+		// une insertion écrit la row proposée, comme Postgres.
+		const setOnInsert: Record<string, unknown> =
+			Object.fromEntries(bsonMapping);
 		if (onConflict.action.kind === "ignore") {
-			// Tous les cols de la row → $setOnInsert. Sur match : aucun $set,
-			// donc no-op (comportement DO NOTHING PG).
-			const setOnInsert: Record<string, unknown> = {};
-			for (const [col, val] of bsonMapping) setOnInsert[col] = val;
+			// Sur match : aucun $set, donc no-op (comportement DO NOTHING PG).
 			ops.push({ filter, setOnInsert });
 			continue;
 		}
-		const setCols = new Set<string>();
 		const set: Record<string, unknown> = {};
 		for (const a of onConflict.action.assignments) {
 			const substituted = substUpsertNewToLiteral(a.value, literalMapping);
@@ -519,11 +520,6 @@ function renderUpsertOperations(
 					"codegen_mongo_upsert_edit_composite"
 				);
 			}
-			setCols.add(a.column);
-		}
-		const setOnInsert: Record<string, unknown> = {};
-		for (const [col, val] of bsonMapping) {
-			if (!setCols.has(col)) setOnInsert[col] = val;
 		}
 		ops.push({ filter, set, setOnInsert });
 	}
