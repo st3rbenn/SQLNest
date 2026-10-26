@@ -29,6 +29,17 @@ import {
 } from "./capability-probe";
 import { describeMongoConfig } from "./config";
 import {
+	BOOL_FALSE,
+	BOOL_TRUE,
+	convertValue,
+	type DeclaredTypes,
+	declaredPipeline,
+	declaredTypes,
+	declaredUpdate,
+	toDeclaredType,
+	toDeclaredTypes
+} from "./declared-types";
+import {
 	applyPkAlias,
 	inferCollection,
 	introspectMongo,
@@ -213,11 +224,6 @@ const MONGO_CONVERT: Partial<Record<SnqlType, string>> = {
 	enum: "string"
 };
 
-/** Lecture d'un texte en booléen, mots acceptés par Postgres (`'f'::boolean`).
- *  `$convert` rendrait `true` pour tout texte non vide, `"false"` compris. */
-const BOOL_TRUE = ["true", "t", "yes", "y", "on", "1"];
-const BOOL_FALSE = ["false", "f", "no", "n", "off", "0"];
-
 /** Valeur convertie, ou `UNCONVERTIBLE`. `null` reste `null`. */
 function convertExpr(field: string, type: SnqlType, to: string): Document {
 	const input = `$${field}`;
@@ -252,7 +258,11 @@ async function convertFieldType(
 	col: Collection,
 	collection: string,
 	field: string,
-	action: { readonly type: SnqlType; readonly enumMembers?: readonly string[] }
+	action: {
+		readonly type: SnqlType;
+		readonly bsonType: string | null;
+		readonly enumMembers?: readonly string[];
+	}
 ): Promise<void> {
 	const present = { [field]: { $exists: true, $ne: null } };
 	const refuse = (count: number, sample: unknown): never => {
@@ -286,26 +296,7 @@ async function convertFieldType(
 	}
 
 	// uuid / json / array : conversion côté adapter, un document à la fois.
-	const parse = (value: unknown): { ok: boolean; value?: unknown } => {
-		if (action.type === "uuid") {
-			if (value instanceof UUID) return { ok: true, value };
-			if (typeof value === "string" && UUID.isValid(value)) {
-				return { ok: true, value: new UUID(value) };
-			}
-			return { ok: false };
-		}
-		const wantArray = action.type === "array";
-		const isTarget = (v: unknown): boolean =>
-			wantArray ? Array.isArray(v) : v !== null && typeof v === "object";
-		if (isTarget(value)) return { ok: true, value };
-		if (typeof value !== "string") return { ok: false };
-		try {
-			const parsed: unknown = JSON.parse(value);
-			return isTarget(parsed) ? { ok: true, value: parsed } : { ok: false };
-		} catch {
-			return { ok: false };
-		}
-	};
+	const parse = (value: unknown) => convertValue(value, action.bsonType ?? "");
 	let count = 0;
 	let sample: unknown;
 	for await (const doc of col.find(present, { projection: { [field]: 1 } })) {
@@ -461,13 +452,49 @@ function renameKeyAt(
 const UUID_TEXT =
 	/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
+/** Un uuid écrit en texte : sa forme binaire (sous-type 4), puis le texte. */
+function uuidForms(value: unknown): unknown[] | undefined {
+	return typeof value === "string" && UUID_TEXT.test(value)
+		? [new UUID(value), value]
+		: undefined;
+}
+
 /** Une clé `_id` écrite en texte peut être stockée en ObjectId ou en UUID
  *  (alias `id: uuid`, ADR-036 E/1f) : les deux formes. */
 function idBothForms(value: unknown): unknown[] | undefined {
-	if (typeof value !== "string") return undefined;
-	if (OBJECT_ID_HEX.test(value)) return [new ObjectId(value), value];
-	if (UUID_TEXT.test(value)) return [new UUID(value), value];
-	return undefined;
+	if (typeof value === "string" && OBJECT_ID_HEX.test(value)) {
+		return [new ObjectId(value), value];
+	}
+	return uuidForms(value);
+}
+
+/**
+ * Condition de filtre où une valeur matche toutes ses formes stockées
+ * (`forms`) : égalité ou `$eq` → `$in`, `$ne` → `$nin`, listes `$in` / `$nin`
+ * étendues. Le reste passe par `other`.
+ */
+function expandForms(
+	child: unknown,
+	forms: (value: unknown) => unknown[] | undefined,
+	other: (value: unknown) => unknown
+): unknown {
+	const direct = forms(child);
+	if (direct !== undefined) return { $in: direct };
+	if (child === null || typeof child !== "object" || Array.isArray(child)) {
+		return other(child);
+	}
+	const entries = Object.entries(child as Record<string, unknown>);
+	const [entry] = entries;
+	if (entries.length === 1 && entry !== undefined) {
+		const [op, v] = entry;
+		const vForms = forms(v);
+		if (op === "$eq" && vForms !== undefined) return { $in: vForms };
+		if (op === "$ne" && vForms !== undefined) return { $nin: vForms };
+		if ((op === "$in" || op === "$nin") && Array.isArray(v)) {
+			return { [op]: v.flatMap((x) => forms(x) ?? [other(x)]) };
+		}
+	}
+	return other(child);
 }
 
 /**
@@ -479,26 +506,47 @@ function idBothForms(value: unknown): unknown[] | undefined {
  * la coercion ObjectId simple ; le reste retombe sur l'hydratation normale.
  */
 function expandIdFilter(child: unknown): unknown {
-	const forms = idBothForms(child);
-	if (forms !== undefined) return { $in: forms };
-	if (child === null || typeof child !== "object" || Array.isArray(child)) {
-		return hydrateBson(child, true, true);
-	}
-	const entries = Object.entries(child as Record<string, unknown>);
-	if (entries.length === 1) {
-		const [op, v] = entries[0]!;
-		const vForms = idBothForms(v);
-		if (op === "$eq" && vForms !== undefined) return { $in: vForms };
-		if (op === "$ne" && vForms !== undefined) return { $nin: vForms };
-		if ((op === "$in" || op === "$nin") && Array.isArray(v)) {
-			const expanded = v.flatMap(
-				(x) => idBothForms(x) ?? [hydrateBson(x, true, true)]
-			);
-			return { [op]: expanded };
+	return expandForms(child, idBothForms, (v) => hydrateBson(v, true, true));
+}
+
+/**
+ * Filtre où un uuid écrit en texte matche aussi sa forme binaire : une
+ * colonne uuid est stockée en binData (ADR-029 D15). Même expansion que
+ * `_id`, qui garde la sienne ({@link expandIdFilter}). Ne descend que dans
+ * les conditions de champ et `$and` / `$or` / `$nor` : sous `$expr`, les
+ * clés ne sont pas des champs.
+ */
+export function withUuidForms(query: Document): Document {
+	const out: Document = {};
+	for (const [key, value] of Object.entries(query)) {
+		if (key === "$and" || key === "$or" || key === "$nor") {
+			out[key] = Array.isArray(value)
+				? value.map((q) => withUuidForms(q as Document))
+				: value;
+		} else {
+			out[key] =
+				key.startsWith("$") || key === "_id"
+					? value
+					: expandForms(value, uuidForms, (v) => v);
 		}
 	}
-	// ranges + autres opérateurs : coercion ObjectId simple (comportement historique).
-	return hydrateBson(child, true, true);
+	return out;
+}
+
+/** {@link withUuidForms} sur les `$match` d'un pipeline, sous-pipelines de `$lookup` compris. */
+export function pipelineWithUuidForms(stages: readonly Document[]): Document[] {
+	return stages.map((stage) => {
+		if (stage.$match !== undefined) {
+			return { ...stage, $match: withUuidForms(stage.$match as Document) };
+		}
+		const lookup = stage.$lookup as Document | undefined;
+		return Array.isArray(lookup?.pipeline)
+			? {
+					...stage,
+					$lookup: { ...lookup, pipeline: pipelineWithUuidForms(lookup.pipeline) }
+				}
+			: stage;
+	});
 }
 
 /**
@@ -1005,7 +1053,10 @@ class MongoConnection implements Connection {
 		try {
 			// `filter: true` → une chaîne 24-hex comparée à `_id` dans un `$match`
 			// redevient un ObjectId (cf. hydrateBson), pour que `where _id = "…"` matche.
-			const pipeline = hydrateBson([...query.pipeline], true) as Document[];
+			const pipeline = hydrateBson(
+				pipelineWithUuidForms(query.pipeline),
+				true
+			) as Document[];
 			const docs = await db
 				.collection(query.collection)
 				.aggregate(pipeline)
@@ -1048,16 +1099,7 @@ class MongoConnection implements Connection {
 	 */
 	async #executeWrite(queryIn: MongoWrite): Promise<ResultSet> {
 		// Défauts posés avant le contrôle FK : une colonne de FK peut en avoir un.
-		const query =
-			queryIn.op === "insert"
-				? {
-						...queryIn,
-						documents: await this.#prepareInsert(
-							queryIn.collection,
-							queryIn.documents
-						)
-					}
-				: queryIn;
+		const query = await this.#prepareWrite(queryIn);
 		const plan = await this.#fkPlan(query);
 		if (plan === undefined) return this.#executeWritePlain(query);
 		const session = this.#requireClient().startSession();
@@ -1071,6 +1113,82 @@ class MongoConnection implements Connection {
 			throw fkTransactionError(query.collection, cause);
 		} finally {
 			await session.endSession();
+		}
+	}
+
+	/**
+	 * Write prêt à exécuter (ADR-029 D15) : défauts posés, valeurs converties
+	 * au type que le validateur déclare pour leur colonne, uuid d'un filtre
+	 * sous ses deux formes. Un insert-select convertit ses documents une fois
+	 * lus ({@link #prepareCopied}).
+	 */
+	async #prepareWrite(
+		query: MongoWrite,
+		session?: ClientSession
+	): Promise<MongoWrite> {
+		if (query.op === "delete") {
+			return { ...query, filter: withUuidForms(query.filter) };
+		}
+		if (query.op === "insert-select-agg-merge") {
+			return { ...query, pipeline: pipelineWithUuidForms(query.pipeline) };
+		}
+		const types = await this.#declaredTypes(query.collection);
+		const inserting = `insert dans '${query.collection}'`;
+		const updating = `update de '${query.collection}'`;
+		switch (query.op) {
+			case "insert": {
+				const documents = await this.#prepareInsert(
+					query.collection,
+					query.documents,
+					session
+				);
+				return {
+					...query,
+					documents: documents.map((doc) =>
+						toDeclaredTypes(doc, types, inserting)
+					)
+				};
+			}
+			case "update":
+				return {
+					...query,
+					filter: withUuidForms(query.filter),
+					update: declaredUpdate(query.update, types, updating)
+				};
+			case "update-agg-merge":
+				return {
+					...query,
+					pipeline: declaredPipeline(
+						pipelineWithUuidForms(query.pipeline),
+						types,
+						updating
+					)
+				};
+			case "upsert":
+				// Le filtre reste une égalité : à l'insertion, Mongo en copie les
+				// champs dans le document.
+				return {
+					...query,
+					operations: query.operations.map((op) => ({
+						filter: toDeclaredTypes(op.filter, types, inserting),
+						...(op.set !== undefined
+							? { set: toDeclaredTypes(op.set, types, updating) }
+							: {}),
+						setOnInsert: toDeclaredTypes(op.setOnInsert, types, inserting)
+					}))
+				};
+		}
+	}
+
+	/** Types déclarés par le validateur de `collection` ; aucun sans validateur. */
+	async #declaredTypes(collection: string): Promise<DeclaredTypes> {
+		try {
+			const info = (
+				await this.#requireDb().listCollections({ name: collection }).toArray()
+			)[0] as { readonly options?: { readonly validator?: Document } } | undefined;
+			return declaredTypes(info?.options?.validator);
+		} catch {
+			return new Map();
 		}
 	}
 
@@ -1129,6 +1247,11 @@ class MongoConnection implements Connection {
 				// session OK, dans session refus au codegen
 				// (#executeWriteInSession). Le $merge whenMatched='fail' gère
 				// les duplicate keys ; non-atomique sur batch mid-failure.
+				// Une table SNQL déclare ses types : ses documents passent par
+				// l'adapter, comme ceux d'un `add`.
+				if ((await this.#declaredTypes(query.collection)).size > 0) {
+					return await this.#insertSelectInBatches(query);
+				}
 				const sourceColl = this.#requireDb().collection(query.sourceCollection);
 				const pipeline = hydrateBson(
 					[...query.pipeline],
@@ -1155,10 +1278,60 @@ class MongoConnection implements Connection {
 			const result = await collection.deleteMany(filter);
 			return { columns: [], rows: [], rowCount: result.deletedCount };
 		} catch (cause) {
+			if (cause instanceof EngineExecutionError) throw cause;
 			throw new EngineExecutionError(writeErrorMessage(query.op, cause), {
 				cause
 			});
 		}
+	}
+
+	/**
+	 * Insert-select hors transaction vers une table qui déclare ses types :
+	 * documents lus par lots de 1 000 et préparés comme ceux d'un `add`.
+	 * Non atomique, comme le `$merge` qu'il remplace : un échec dit combien
+	 * de documents sont déjà insérés.
+	 */
+	async #insertSelectInBatches(
+		query: Extract<MongoWrite, { op: "insert-select-agg-merge" }>
+	): Promise<ResultSet> {
+		const db = this.#requireDb();
+		const stages = hydrateBson(
+			query.pipeline.filter((s) => !("$merge" in s)),
+			false
+		) as Document[];
+		let inserted = 0;
+		let batch: Document[] = [];
+		const flush = async (): Promise<void> => {
+			if (batch.length === 0) return;
+			const docs = await this.#prepareCopied(query.collection, batch);
+			batch = [];
+			inserted += (await db.collection(query.collection).insertMany(docs))
+				.insertedCount;
+		};
+		try {
+			for await (const doc of db
+				.collection(query.sourceCollection)
+				.aggregate(stages)) {
+				batch.push(doc);
+				if (batch.length >= 1000) await flush();
+			}
+			await flush();
+		} catch (cause) {
+			const partial =
+				inserted +
+				((cause as { result?: { insertedCount?: number } }).result
+					?.insertedCount ?? 0);
+			if (partial === 0) throw cause;
+			const detail =
+				cause instanceof EngineExecutionError
+					? cause.message
+					: describeMongoExecutionError(cause);
+			throw new EngineExecutionError(
+				`Écriture MongoDB échouée après ${partial} document(s) inséré(s) (insert non atomique) — ${detail}`,
+				{ cause }
+			);
+		}
+		return { columns: [], rows: [], rowCount: inserted };
 	}
 
 	/**
@@ -1267,20 +1440,15 @@ class MongoConnection implements Connection {
 			case "delete":
 				return this.#deleteCascading(query, session, journal);
 			case "insert": {
-				const documents = await this.#prepareInsert(
-					query.collection,
-					query.documents,
-					session
-				);
 				await this.#assertRefsResolve(
 					query.collection,
 					"insert",
 					plan.outgoing,
-					documents.map((d) => hydrateBson(d, false) as Document),
+					query.documents.map((d) => hydrateBson(d, false) as Document),
 					undefined,
 					session
 				);
-				return this.#mainWrite({ ...query, documents }, session, journal);
+				return this.#mainWrite(query, session, journal);
 			}
 			case "insert-select-agg-merge": {
 				const documents = await this.#insertSelectDocs(query, session);
@@ -1570,9 +1738,7 @@ class MongoConnection implements Connection {
 
 	/**
 	 * Documents d'un insert-select matérialisés dans la session (`$merge`
-	 * interdit en transaction) : le pipeline source sans son `$merge`. Ils
-	 * sortent de la base déjà en BSON et sont copiés tels quels — une
-	 * hydratation en mode filtre réécrirait un `_id` chaîne 24-hex en `$in`.
+	 * interdit en transaction) : le pipeline source sans son `$merge`.
 	 */
 	async #insertSelectDocs(
 		query: Extract<MongoWrite, { op: "insert-select-agg-merge" }>,
@@ -1582,10 +1748,29 @@ class MongoConnection implements Connection {
 			query.pipeline.filter((s) => !("$merge" in s)),
 			false
 		) as Document[];
-		return this.#requireDb()
+		const docs = await this.#requireDb()
 			.collection(query.sourceCollection)
 			.aggregate(stages, { session })
 			.toArray();
+		return this.#prepareCopied(query.collection, docs, session);
+	}
+
+	/**
+	 * Documents copiés par un insert-select, préparés comme ceux d'un `add` :
+	 * défauts, clé aliasée, types déclarés. Ils sortent de la base déjà en
+	 * BSON, sans hydratation — en mode filtre, elle réécrirait un `_id`
+	 * chaîne 24-hex en `$in`.
+	 */
+	async #prepareCopied(
+		collection: string,
+		docs: readonly Document[],
+		session?: ClientSession
+	): Promise<Document[]> {
+		const types = await this.#declaredTypes(collection);
+		const where = `insert dans '${collection}'`;
+		return (await this.#prepareInsert(collection, docs, session)).map((doc) =>
+			toDeclaredTypes(doc, types, where)
+		);
 	}
 
 	/**
@@ -1654,9 +1839,23 @@ class MongoConnection implements Connection {
 				groups.set(key, group);
 			}
 			if (groups.size === 0) continue;
+			// La nouvelle clé prend le type de la colonne enfant (int → bigint…).
+			const childType = (await this.#declaredTypes(ref.fromCollection)).get(
+				ref.fromColumn
+			);
 			const childMoves: KeyMove[] = [];
 			for (const { move, ids } of groups.values()) {
-				const to = ref.onUpdate === "set-null" ? null : move.to;
+				const to =
+					ref.onUpdate === "set-null"
+						? null
+						: childType === undefined
+							? move.to
+							: toDeclaredType(
+									move.to,
+									childType,
+									ref.fromName,
+									`update de '${ref.fromCollection}'`
+								);
 				await setField(
 					childColl,
 					{ _id: { $in: ids } },
@@ -3230,6 +3429,23 @@ class MongoConnection implements Connection {
 				}
 			}
 
+			// Le remplissage écrit au type de la colonne (ADR-029 D15), contrôlé
+			// avant que le validateur change.
+			const { bsonType } = query.column;
+			const typed = (value: unknown): unknown =>
+				bsonType === null
+					? value
+					: toDeclaredType(
+							value,
+							bsonType,
+							fieldName,
+							`add column dans '${query.collection}'`
+						);
+			const backfillValue =
+				query.backfill && query.column.defaultFn === undefined
+					? typed(query.column.defaultValue)
+					: undefined;
+
 			// collMod avec validator mergé : ajoute la nouvelle property + étend
 			// `required` si NOT NULL. Préserve les autres contraintes existantes.
 			const newProperty: Record<string, unknown> = {};
@@ -3276,7 +3492,7 @@ class MongoConnection implements Connection {
 					for await (const doc of col.find(missing, { projection: { _id: 1 } })) {
 						await col.updateOne(
 							{ _id: (doc as Document)._id },
-							{ $set: { [fieldName]: new UUID() } }
+							{ $set: { [fieldName]: typed(new UUID()) } }
 						);
 					}
 				} else {
@@ -3285,7 +3501,7 @@ class MongoConnection implements Connection {
 						missing,
 						query.column.defaultFn === "now"
 							? [{ $set: { [fieldName]: "$$NOW" } }]
-							: { $set: { [fieldName]: hydrateBson(query.column.defaultValue, false) } },
+							: { $set: { [fieldName]: hydrateBson(backfillValue, false) } },
 						capMessage
 					);
 				}
@@ -3349,7 +3565,7 @@ class MongoConnection implements Connection {
 			for (const step of query.steps) {
 				if (step.kind === "query") {
 					const pipeline = hydrateBson(
-						[...step.query.pipeline],
+						pipelineWithUuidForms(step.query.pipeline),
 						true
 					) as Document[];
 					const docs = await db
@@ -3366,11 +3582,12 @@ class MongoConnection implements Connection {
 						rowCount: rows.length
 					};
 				} else if (step.kind === "write") {
-					const plan = await this.#fkPlan(step.write);
+					const write = await this.#prepareWrite(step.write, session);
+					const plan = await this.#fkPlan(write);
 					lastResult =
 						plan === undefined
-							? await this.#executeWriteInSession(step.write, session)
-							: await this.#writeEnforcingFK(step.write, plan, session);
+							? await this.#executeWriteInSession(write, session)
+							: await this.#writeEnforcingFK(write, plan, session);
 				} else {
 					// Savepoint via compensation logique in-session.
 					lastResult = await this.#executeSavepoint(step, session);
@@ -3421,12 +3638,7 @@ class MongoConnection implements Connection {
 		const collection = this.#requireDb().collection(query.collection);
 		try {
 			if (query.op === "insert") {
-				const withDefaults = await this.#prepareInsert(
-					query.collection,
-					query.documents,
-					session
-				);
-				const documents = withDefaults.map(
+				const documents = query.documents.map(
 					(doc) => hydrateBson(doc, false) as Document
 				);
 				const result = await collection.insertMany(documents, { session });
@@ -3489,6 +3701,7 @@ class MongoConnection implements Connection {
 			const result = await collection.deleteMany(filter, { session });
 			return { columns: [], rows: [], rowCount: result.deletedCount };
 		} catch (cause) {
+			if (cause instanceof EngineExecutionError) throw cause;
 			throw new EngineExecutionError(writeErrorMessage(query.op, cause), {
 				cause
 			});
@@ -3528,7 +3741,7 @@ class MongoConnection implements Connection {
 			for (const bodyStep of step.body) {
 				if (bodyStep.kind === "query") {
 					const pipeline = hydrateBson(
-						[...bodyStep.query.pipeline],
+						pipelineWithUuidForms(bodyStep.query.pipeline),
 						true
 					) as Document[];
 					const docs = await db
@@ -3545,7 +3758,7 @@ class MongoConnection implements Connection {
 						rowCount: rows.length
 					};
 				} else if (bodyStep.kind === "write") {
-					const write = bodyStep.write;
+					const write = await this.#prepareWrite(bodyStep.write, session);
 					const plan =
 						write.op === "insert" ||
 						write.op === "update" ||
@@ -3609,12 +3822,7 @@ class MongoConnection implements Connection {
 	): Promise<{ result: ResultSet; compensate: () => Promise<void> }> {
 		const collection = this.#requireDb().collection(query.collection);
 		if (query.op === "insert") {
-			const withDefaults = await this.#prepareInsert(
-				query.collection,
-				query.documents,
-				session
-			);
-			const documents = withDefaults.map(
+			const documents = query.documents.map(
 				(doc) => hydrateBson(doc, false) as Document
 			);
 			const insertResult = await collection.insertMany(documents, {

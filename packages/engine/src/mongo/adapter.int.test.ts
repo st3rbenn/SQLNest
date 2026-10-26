@@ -566,8 +566,8 @@ describe.skipIf(!hasMongo)(
 					{ code: "b", n: null }
 				]);
 				await expect(
-					runQuery(conn, 'add {code: "c", n: "7"} into e1c_m')
-				).rejects.toThrow();
+					runQuery(conn, 'add {code: "c", n: "sept"} into e1c_m')
+				).rejects.toThrow(`'n' (int) n'accepte pas "sept"`);
 
 				// Nullabilité : refus tant qu'un document est nul, puis appliquée.
 				await expect(
