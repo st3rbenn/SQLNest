@@ -112,7 +112,8 @@ export const ProjectStatusResponse = z.object({
 	orm: z.enum(["prisma", "doctrine", "sequelize", "seaorm"]).optional(),
 	apply: z.boolean().optional(),
 	projectFound: z.boolean().optional(),
-	historyTable: z.object({ name: z.string(), present: z.boolean() }).optional()
+	historyTable: z.object({ name: z.string(), present: z.boolean() }).optional(),
+	migrations: z.boolean().optional()
 });
 z.globalRegistry.add(ProjectStatusResponse, {
 	id: "DbConnectionsProjectStatusResponse"

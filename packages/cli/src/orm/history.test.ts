@@ -3,7 +3,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { OrmDetection } from "./detect";
-import { checkHistory, describeHistory, migrationsDir } from "./history";
+import {
+	checkHistory,
+	describeHistory,
+	describeNoHistory,
+	keepsHistory,
+	migrationsDir
+} from "./history";
 
 describe("checkHistory", () => {
 	it("table de l'ORM présente (casse ignorée)", () => {
@@ -33,6 +39,17 @@ describe("checkHistory", () => {
 		expect(check).toEqual({ table: "seaql_migrations", present: false });
 		expect(describeHistory("seaorm", check)).toBe(
 			"Aucune table seaql_migrations : la base n'a encore reçu aucune migration SeaORM"
+		);
+	});
+});
+
+describe("keepsHistory (ADR-037 D3 bis)", () => {
+	it("Prisma sous MongoDB : pas d'historique (db push) ; ailleurs, un historique", () => {
+		expect(keepsHistory("prisma", "mongodb")).toBe(false);
+		expect(keepsHistory("prisma", "postgres")).toBe(true);
+		expect(keepsHistory("doctrine", "mongodb")).toBe(true);
+		expect(describeNoHistory("prisma", "mongodb")).toBe(
+			"Prisma ne tient pas d'historique de migrations sous MongoDB (db push) : SQLNest applique les changements lui-même"
 		);
 	});
 });

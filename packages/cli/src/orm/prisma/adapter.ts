@@ -36,6 +36,7 @@ import {
 	SchemaChangeError
 } from "../adapter";
 import { detectOrms } from "../detect";
+import { keepsHistory } from "../history";
 import { patchPrismaSchema } from "./patch";
 import {
 	datasourceEnvKeys,
@@ -62,8 +63,6 @@ const PROVIDERS: Readonly<Record<string, string>> = {
 	mssql: "sqlserver",
 	mongodb: "mongodb"
 };
-/** Moteurs où Prisma ne tient pas d'historique de migrations (`db push`). */
-const WITHOUT_HISTORY = new Set(["mongodb"]);
 /** Fournisseur écrit par Prisma dans `migration_lock.toml` (son nom interne). */
 const LOCK_PROVIDERS: Readonly<Record<string, string>> = {
 	postgres: "postgresql",
@@ -94,7 +93,7 @@ const resolved = new WeakMap<SchemaChange, PrismaProject>();
 export const prismaAdapter: OrmAdapter = {
 	orm: "prisma",
 	ddlOptions: () => ({ ormProfile: "prisma" }),
-	migrations: (engine) => !WITHOUT_HISTORY.has(engine),
+	migrations: (engine) => keepsHistory("prisma", engine),
 
 	async preflight(change) {
 		const project = prismaProject(change);
@@ -299,7 +298,7 @@ function prismaProject(change: SchemaChange): PrismaProject {
 		schema,
 		provider: expected,
 		lockProvider: LOCK_PROVIDERS[engine] ?? expected,
-		history: !WITHOUT_HISTORY.has(engine),
+		history: keepsHistory("prisma", engine),
 		env: {
 			...change.env,
 			...Object.fromEntries(keys.map((key) => [key, url])),

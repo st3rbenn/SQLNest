@@ -1,5 +1,5 @@
 import { detectOrms } from "../../orm/detect";
-import { checkHistory } from "../../orm/history";
+import { checkHistory, keepsHistory } from "../../orm/history";
 import { loadLocalConnections } from "../../services/local-connections";
 import { defineOp } from "./op";
 
@@ -20,15 +20,22 @@ export const projectStatusOp = defineOp({
 			schema = await (await ctx.connection()).introspect();
 			ctx.schema.set(schema);
 		}
+		const status = {
+			linked: true,
+			orm: project.orm,
+			apply: project.apply,
+			projectFound: detectOrms(project.path).some((d) => d.orm === project.orm)
+		};
+		// Prisma sous MongoDB : pas d'historique, donc pas de table attendue.
+		if (!keepsHistory(project.orm, schema.engine)) {
+			return { ...status, migrations: false };
+		}
 		const history = checkHistory(
 			project.orm,
 			schema.collections.map((c) => c.name)
 		);
 		return {
-			linked: true,
-			orm: project.orm,
-			apply: project.apply,
-			projectFound: detectOrms(project.path).some((d) => d.orm === project.orm),
+			...status,
 			historyTable: { name: history.table, present: history.present }
 		};
 	}

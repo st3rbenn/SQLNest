@@ -5,6 +5,7 @@
 
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { type DbEngine, ENGINE_LABELS } from "../services/connection-strings";
 import type { OrmDetection } from "./detect";
 import { ORM_LABELS, ORM_NAMES, type OrmName } from "./types";
 
@@ -14,6 +15,22 @@ export const HISTORY_TABLES: Readonly<Record<OrmName, string>> = {
 	sequelize: "SequelizeMeta",
 	seaorm: "seaql_migrations"
 };
+
+/** Moteurs où un ORM ne tient pas d'historique de migrations : Prisma sous MongoDB (`db push`). */
+const WITHOUT_HISTORY: Readonly<Partial<Record<OrmName, readonly string[]>>> = {
+	prisma: ["mongodb"]
+};
+
+/** L'ORM tient un historique de migrations sous ce moteur (ADR-037 D3 bis). */
+export function keepsHistory(orm: OrmName, engine: string): boolean {
+	return !(WITHOUT_HISTORY[orm]?.includes(engine) ?? false);
+}
+
+/** Pourquoi aucune table d'historique n'est attendue. */
+export function describeNoHistory(orm: OrmName, engine: string): string {
+	const label = ENGINE_LABELS[engine as DbEngine] ?? engine;
+	return `${ORM_LABELS[orm]} ne tient pas d'historique de migrations sous ${label} (db push) : SQLNest applique les changements lui-même`;
+}
 
 export interface HistoryCheck {
 	/** Table de l'ORM du projet. */

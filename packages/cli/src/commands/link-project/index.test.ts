@@ -142,6 +142,29 @@ describe("link-project dans un projet", () => {
 		expect(out.at(-1)).toMatch(/^✓ « lab » relié à .*prisma \(Prisma\)$/);
 	});
 
+	test("Prisma sous MongoDB : pas de table d'historique attendue, ni de dossier de migrations", async () => {
+		const orm = prismaProject("prisma");
+		const MONGO_URL = "mongodb://localhost:27017/shop?directConnection=true";
+		saveLocalConnections({
+			version: 1,
+			connections: [{ name: "shop", url: MONGO_URL }]
+		});
+		await linkProject(
+			options({
+				discover: discovery({ databases: [database(MONGO_URL, orm)] }),
+				probe: probe(["owner", "pet"])
+			})
+		);
+		expect(out).toContain(
+			"✓ Prisma ne tient pas d'historique de migrations sous MongoDB (db push) : SQLNest applique les changements lui-même"
+		);
+		expect(
+			out.some(
+				(l) => l.includes("migrations :") || l.includes("_prisma_migrations")
+			)
+		).toBe(false);
+	});
+
 	test("aucune connexion ne vise la base : créée avec accord, puis reliée", async () => {
 		const orm = prismaProject("prisma");
 		const createConnection = vi.fn(async () => {

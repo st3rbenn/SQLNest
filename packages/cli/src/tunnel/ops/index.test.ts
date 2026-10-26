@@ -142,6 +142,43 @@ describe("projectStatus (ADR-037 D2)", () => {
 		expect(t.schema.get()?.collections).toHaveLength(2);
 	});
 
+	it("Prisma sous MongoDB : pas d'historique, pas de table attendue", async () => {
+		const project = join(dir, "mongo-app");
+		mkdirSync(join(project, "prisma"), { recursive: true });
+		writeFileSync(
+			join(project, "prisma", "schema.prisma"),
+			'datasource db {\n  provider = "mongodb"\n  url = env("DATABASE_URL")\n}'
+		);
+		saveLocalConnections({
+			version: 2,
+			connections: [
+				{
+					name: "apollon",
+					url: "mongodb://h/shop",
+					project: { path: project, orm: "prisma", apply: true }
+				}
+			]
+		});
+		const t = target(
+			fakeConnection({
+				introspect: vi.fn(async () => ({
+					...SCHEMA,
+					engine: "mongodb"
+				})) as unknown as Connection["introspect"]
+			})
+		);
+		expect(await dispatchOp({ op: "projectStatus" }, t)).toEqual({
+			ok: true,
+			data: {
+				linked: true,
+				orm: "prisma",
+				apply: true,
+				projectFound: true,
+				migrations: false
+			}
+		});
+	});
+
 	it("dossier du projet disparu : projectFound false", async () => {
 		saveLocalConnections({
 			version: 2,

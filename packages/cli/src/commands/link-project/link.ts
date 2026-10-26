@@ -9,12 +9,16 @@ import type { OrmDetection } from "../../orm/detect";
 import {
 	checkHistory,
 	describeHistory,
+	describeNoHistory,
+	keepsHistory,
 	migrationsDir
 } from "../../orm/history";
 import { ORM_LABELS } from "../../orm/types";
+import { parseConnectionString } from "../../services/connection-strings";
 import type { ConnectionProbe } from "../../services/engine";
 import {
 	entryUrl,
+	type LocalConnectionEntry,
 	type LocalConnectionProject,
 	loadLocalConnections,
 	setConnectionProject
@@ -90,21 +94,27 @@ export async function linkConnection(
 			}
 		}
 	}
-	if (tables !== undefined) {
-		const history = checkHistory(detection.orm, tables);
-		const verdict = describeHistory(detection.orm, history);
-		if (history.other !== undefined) {
+	const engine = engineOf(entry);
+	const history = engine === undefined || keepsHistory(detection.orm, engine);
+	if (!history) {
+		opts.stdout(`✓ ${describeNoHistory(detection.orm, engine as string)}`);
+	} else if (tables !== undefined) {
+		const check = checkHistory(detection.orm, tables);
+		const verdict = describeHistory(detection.orm, check);
+		if (check.other !== undefined) {
 			throw new LinkProjectError("mismatch", verdict);
 		}
-		opts.stdout(history.present ? `✓ ${verdict}` : verdict);
+		opts.stdout(check.present ? `✓ ${verdict}` : verdict);
 	}
 
-	const migrations = migrationsDir(detection);
-	opts.stdout(
-		migrations !== undefined
-			? `  migrations : ${tildify(migrations)}`
-			: "  pas encore de dossier de migrations"
-	);
+	if (history) {
+		const migrations = migrationsDir(detection);
+		opts.stdout(
+			migrations !== undefined
+				? `  migrations : ${tildify(migrations)}`
+				: "  pas encore de dossier de migrations"
+		);
+	}
 	const project: LocalConnectionProject = {
 		path: detection.dir,
 		orm: detection.orm,
@@ -117,4 +127,13 @@ export async function linkConnection(
 		})`
 	);
 	return project;
+}
+
+/** Moteur de la connexion, lu dans son URL ; inconnu si elle est illisible. */
+function engineOf(entry: LocalConnectionEntry): string | undefined {
+	try {
+		return parseConnectionString(entryUrl(entry))?.engine;
+	} catch {
+		return undefined;
+	}
 }

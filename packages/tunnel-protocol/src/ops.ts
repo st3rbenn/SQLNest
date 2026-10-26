@@ -39,6 +39,12 @@ export interface TunnelProjectStatusData {
 	readonly projectFound?: boolean;
 	/** Table d'historique de l'ORM, présente ou non dans la base. */
 	readonly historyTable?: { readonly name: string; readonly present: boolean };
+	/**
+	 * `false` : l'ORM ne tient pas d'historique de migrations sous ce moteur
+	 * (Prisma sous MongoDB) — pas de table attendue, SQLNest applique les
+	 * changements lui-même (ADR-037 D3 bis).
+	 */
+	readonly migrations?: boolean;
 }
 
 /** Noms que la base ne donne pas (ADR-037 D3), proposés et modifiables dans l'aperçu. */
