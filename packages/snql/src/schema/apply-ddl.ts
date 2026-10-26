@@ -15,13 +15,14 @@ import type {
 	FieldRefPlan
 } from "../ir/plan";
 import { isDdlDefaultFn, isSqlDecimal, isSqlJsonLiteral } from "../ir/plan";
-import type {
-	Collection,
-	CollectionIndex,
-	Field,
-	RefDef,
-	Relation,
-	SchemaModel
+import {
+	type Collection,
+	type CollectionIndex,
+	type Field,
+	getFkPartners,
+	type RefDef,
+	type Relation,
+	type SchemaModel
 } from "./model";
 
 export function applyDdlToSchema(
@@ -249,11 +250,50 @@ function relationMatches(relation: Relation, ref: RefDef): boolean {
 /** FK ajoutées, et leurs relations. */
 function withRefs(schema: SchemaModel, refs: readonly RefDef[]): SchemaModel {
 	if (refs.length === 0) return schema;
-	return {
-		...schema,
-		refs: [...(schema.refs ?? []), ...refs],
-		relations: [...schema.relations, ...refs.map(relationOf)]
-	};
+	return withRefTypes(
+		{
+			...schema,
+			refs: [...(schema.refs ?? []), ...refs],
+			relations: [...schema.relations, ...refs.map(relationOf)]
+		},
+		refs
+	);
+}
+
+/**
+ * SQL Server : la colonne d'une FK prend le type de la colonne référencée,
+ * avec les colonnes liées à elle par FK (codegen MSSQL) — un `int` qui
+ * référence un `bigint` devient `bigint`.
+ */
+function withRefTypes(
+	schema: SchemaModel,
+	refs: readonly RefDef[]
+): SchemaModel {
+	if (schema.engine !== "mssql") return schema;
+	let next = schema;
+	for (const ref of refs) {
+		const type = next.collections
+			.find((c) => c.name === ref.toCollection)
+			?.fields.find((f) => f.name === ref.toColumn)?.type;
+		if (type === undefined) continue;
+		const columns = [
+			{ table: ref.fromCollection, column: ref.fromColumn },
+			...getFkPartners(next, ref.fromCollection, ref.fromColumn)
+		];
+		for (const { table, column } of columns) {
+			next = updateCollection(next, table, (c) =>
+				c.fields.some((f) => f.name === column && f.type !== type)
+					? {
+							...c,
+							fields: c.fields.map((f) =>
+								f.name === column ? { ...f, type } : f
+							)
+						}
+					: c
+			);
+		}
+	}
+	return next;
 }
 
 /** `refs` filtrées, la clé gardée absente si elle l'était. */

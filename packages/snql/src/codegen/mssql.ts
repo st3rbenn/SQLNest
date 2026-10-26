@@ -1280,25 +1280,80 @@ function constraintPrefix(name: string | undefined): string {
 	return name !== undefined ? `CONSTRAINT ${quoteIdent(name)} ` : "";
 }
 
+/**
+ * Morceau d'une instruction DDL : du texte, ou la variable T-SQL d'un type
+ * qui ne se lit qu'à l'exécution.
+ */
+type SqlPart = string | { readonly variable: string };
+
+/** L'instruction telle quelle, ou `EXEC (N'…' + @v + N'…')` quand une variable y porte un type. */
+function sqlFromParts(parts: readonly SqlPart[]): string {
+	const merged: SqlPart[] = [];
+	for (const part of parts) {
+		const last = merged.at(-1);
+		if (typeof part === "string" && typeof last === "string") {
+			merged[merged.length - 1] = last + part;
+		} else {
+			merged.push(part);
+		}
+	}
+	if (merged.every((part) => typeof part === "string")) return merged.join("");
+	return `EXEC (${merged
+		.map((part) => (typeof part === "string" ? nstr(part) : part.variable))
+		.join(" + ")})`;
+}
+
+/** `withValues` : `add column` remplit les lignes existantes (la clause suit le `DEFAULT`). */
 function renderFieldDef(
 	f: import("../ir/plan").CreateTableField,
 	table: string,
-	primaryKey: readonly string[] | undefined,
-	namespace: string
-): string {
-	const inPk = primaryKey?.includes(f.name) ?? false;
-	const parts: string[] = [quoteIdent(f.name), mssqlFieldTypeSql(f, inPk)];
+	type: SqlPart,
+	namespace: string,
+	withValues = false
+): SqlPart[] {
+	const parts: string[] = [];
 	if (!f.nullable) parts.push("NOT NULL");
 	if (f.unique) parts.push(`${constraintPrefix(f.uniqueName)}UNIQUE`);
 	if (f.defaultValue !== undefined) {
 		parts.push(
-			`${constraintPrefix(f.defaultName)}DEFAULT ${mssqlInlineDefault(f.defaultValue)}`
+			`${constraintPrefix(f.defaultName)}DEFAULT ${mssqlInlineDefault(f.defaultValue)}${withValues ? " WITH VALUES" : ""}`
 		);
 	}
 	const check = enumCheckClause(table, f);
 	if (check !== undefined) parts.push(check);
 	if (f.ref !== undefined) parts.push(mssqlRefClause(f.ref, namespace));
-	return parts.join(" ");
+	return [`${quoteIdent(f.name)} `, type, ...parts.map((p) => ` ${p}`)];
+}
+
+/**
+ * Type d'une colonne de FK : exactement celui de la colonne référencée, que
+ * SQL Server exige identique (type 1778, longueur et échelle 1753, collation
+ * 1757). SNQL range un texte en `nvarchar(max)` hors d'une clé, et une base
+ * existante a ses propres types (`nvarchar(255)`, `varchar(…)`, `bigint`…) :
+ * celui de la colonne référencée est relu au catalogue à l'exécution, dans une
+ * variable déclarée par `lookups`. Sans cette colonne, le type SNQL reste, et
+ * le moteur refuse la FK lui-même.
+ */
+function refTypeVariable(
+	f: import("../ir/plan").CreateTableField & {
+		readonly ref: import("../ir/plan").FieldRefPlan;
+	},
+	declared: string,
+	namespace: string,
+	lookups: string[]
+): SqlPart {
+	const variable = `@type_${f.name}`;
+	lookups.push(
+		`DECLARE ${variable} nvarchar(300) = ISNULL((SELECT ${MSSQL_CURRENT_TYPE} FROM sys.columns c JOIN sys.types ty ON ty.user_type_id = c.user_type_id WHERE c.object_id = OBJECT_ID(${objectLiteral(namespace, f.ref.targetCollection)}) AND c.name = ${nstr(f.ref.targetColumn)}), ${nstr(declared)});`
+	);
+	return { variable };
+}
+
+/** Lot qui déclare les types relus au catalogue, puis exécute l'instruction. */
+function withLookups(lookups: readonly string[], statement: string): string {
+	return lookups.length === 0
+		? statement
+		: ["SET NOCOUNT ON;", ...lookups, `${statement};`].join("\n");
 }
 
 /** Réf objet qualifiée en littéral pour OBJECT_ID/COL_LENGTH — les noms
@@ -1317,23 +1372,63 @@ function ddlQuery(text: string): SqlQuery {
  * Transaction-scoped) → IF OBJECT_ID IS NULL CREATE] — miroir exact de
  * l'advisory lock D3 PG : deux create concurrents sont sérialisés, le
  * second voit la table et no-op proprement.
+ *
+ * Une colonne de FK prend le type de la colonne référencée
+ * (`refTypeVariable`) ; vers la table créée, celui de la colonne visée.
  */
 function renderCreateTable(
 	plan: import("../ir/plan").CreateTablePlan,
 	namespace: string
 ): NativeQuery {
+	const lookups: string[] = [];
+	const types = new Map<string, SqlPart>();
+	const typeOf = (
+		f: import("../ir/plan").CreateTableField,
+		seen: ReadonlySet<string>
+	): SqlPart => {
+		const known = types.get(f.name);
+		if (known !== undefined) return known;
+		const declared = mssqlFieldTypeSql(
+			f,
+			plan.primaryKey?.includes(f.name) ?? false
+		);
+		const ref = f.ref;
+		const target =
+			ref?.targetCollection === plan.target
+				? plan.fields.find(
+						(t) => t.name === ref.targetColumn && !seen.has(t.name)
+					)
+				: undefined;
+		const type =
+			ref === undefined
+				? declared
+				: ref.targetCollection !== plan.target
+					? refTypeVariable({ ...f, ref }, declared, namespace, lookups)
+					: target !== undefined
+						? typeOf(target, new Set([...seen, f.name]))
+						: declared;
+		types.set(f.name, type);
+		return type;
+	};
 	const cols = plan.fields.map((f) =>
-		renderFieldDef(f, plan.target, plan.primaryKey, namespace)
+		renderFieldDef(f, plan.target, typeOf(f, new Set()), namespace)
 	);
 	if (plan.primaryKey !== undefined && plan.primaryKey.length > 0) {
-		cols.push(
+		cols.push([
 			`${constraintPrefix(plan.primaryKeyName)}PRIMARY KEY (${plan.primaryKey.map(quoteIdent).join(", ")})`
-		);
+		]);
 	}
-	const createText = `CREATE TABLE ${qualified(namespace, plan.target)} (${cols.join(", ")})`;
-	if (!plan.ifNotExists) return ddlQuery(createText);
+	const createText = sqlFromParts([
+		`CREATE TABLE ${qualified(namespace, plan.target)} (`,
+		...cols.flatMap((col, i) => (i === 0 ? col : [", ", ...col])),
+		")"
+	]);
+	if (!plan.ifNotExists) return ddlQuery(withLookups(lookups, createText));
 
-	const guarded = `IF OBJECT_ID(${objectLiteral(namespace, plan.target)}, N'U') IS NULL ${createText}`;
+	const guarded = withLookups(
+		lookups,
+		`IF OBJECT_ID(${objectLiteral(namespace, plan.target)}, N'U') IS NULL ${createText}`
+	);
 	const lockParams = newParams();
 	const resourceRef = lockParams.add(`sqlnest_ddl:${plan.target}`);
 	const lockStep: SqlQuery = {
@@ -1358,21 +1453,32 @@ function renderCreateTable(
  * `add column` → `ALTER TABLE … ADD` (T-SQL : ADD, jamais ADD COLUMN).
  * D10 backfill : NOT NULL + DEFAULT backfille nativement ; nullable +
  * DEFAULT exige `WITH VALUES` pour peupler les rows existantes (parité
- * PG qui backfille toujours). `if not exists` → guard COL_LENGTH.
+ * PG qui backfille toujours). `if not exists` → guard COL_LENGTH. Une
+ * colonne de FK prend le type de la colonne référencée (`refTypeVariable`).
  */
 function renderAddColumn(
 	plan: import("../ir/plan").AddColumnPlan,
 	namespace: string
 ): NativeQuery {
 	const f = plan.column;
-	const def = renderFieldDef(f, plan.target, undefined, namespace);
-	const withValues =
-		f.defaultValue !== undefined && f.nullable ? " WITH VALUES" : "";
-	const alterText = `ALTER TABLE ${qualified(namespace, plan.target)} ADD ${def}${withValues}`;
-	if (!plan.ifNotExists) return ddlQuery(alterText);
+	const ref = f.ref;
+	const lookups: string[] = [];
+	const declared = mssqlFieldTypeSql(f, false);
+	const type =
+		ref !== undefined
+			? refTypeVariable({ ...f, ref }, declared, namespace, lookups)
+			: declared;
+	const alterText = sqlFromParts([
+		`ALTER TABLE ${qualified(namespace, plan.target)} ADD `,
+		...renderFieldDef(f, plan.target, type, namespace, f.nullable)
+	]);
+	if (!plan.ifNotExists) return ddlQuery(withLookups(lookups, alterText));
 	const table = nstr(`${quoteIdent(namespace)}.${quoteIdent(plan.target)}`);
 	return ddlQuery(
-		`IF COL_LENGTH(${table}, ${nstr(f.name)}) IS NULL ${alterText}`
+		withLookups(
+			lookups,
+			`IF COL_LENGTH(${table}, ${nstr(f.name)}) IS NULL ${alterText}`
+		)
 	);
 }
 
@@ -1651,6 +1757,29 @@ const MSSQL_ALTER_TARGETS =
 	"DECLARE @targets TABLE (obj int, col int, sql nvarchar(max));";
 
 /**
+ * Ajoute à `@targets` les colonnes liées aux siennes par FK, de proche en
+ * proche : une FK exige le même type des deux côtés, la chaîne entière change
+ * ensemble (colonnes qui référencent, colonne référencée, ses autres FK).
+ * Suit immédiatement l'`INSERT` qui amorce `@targets`.
+ */
+const MSSQL_FK_PARTNERS = `WHILE @@ROWCOUNT > 0
+INSERT @targets (obj, col) SELECT e.obj, e.col FROM (
+	SELECT fkc.parent_object_id, fkc.parent_column_id FROM sys.foreign_key_columns fkc JOIN @targets tg ON tg.obj = fkc.referenced_object_id AND tg.col = fkc.referenced_column_id
+	UNION SELECT fkc.referenced_object_id, fkc.referenced_column_id FROM sys.foreign_key_columns fkc JOIN @targets tg ON tg.obj = fkc.parent_object_id AND tg.col = fkc.parent_column_id
+) AS e (obj, col)
+WHERE NOT EXISTS (SELECT 1 FROM @targets tg WHERE tg.obj = e.obj AND tg.col = e.col);`;
+
+/** `ALTER TABLE … ALTER COLUMN` de chaque colonne de `@targets`, au type `type` (expression sur `c`, `ty`). */
+function mssqlAlterStatements(type: string, nullability: string): string {
+	return `UPDATE tg SET sql = N'ALTER TABLE ' + ${mssqlQualified("tg.obj")} + N' ALTER COLUMN ' + QUOTENAME(c.name) + N' ' + ${type} + ${nullability}
+FROM @targets tg JOIN sys.columns c ON c.object_id = tg.obj AND c.column_id = tg.col JOIN sys.types ty ON ty.user_type_id = c.user_type_id;`;
+}
+
+/** Nullabilité gardée. */
+const MSSQL_CURRENT_NULLABILITY =
+	"CASE WHEN c.is_nullable = 1 THEN N' NULL' ELSE N' NOT NULL' END";
+
+/**
  * `ALTER COLUMN` des colonnes de `@targets` (ADR-036 D9). T-SQL le refuse dès
  * qu'un index, une contrainte (PK, UNIQUE, CHECK, DEFAULT), une FK ou une
  * statistique créée à la main dépend de la colonne (5074) : les dépendants,
@@ -1719,10 +1848,10 @@ WHERE s.user_created = 1 AND EXISTS (SELECT 1 FROM sys.stats_columns sc WHERE sc
 /**
  * `alter column` (ADR-036 E/1c), dépendants retirés puis recréés autour de
  * l'`ALTER COLUMN` (D9). Une FK exige des types identiques des deux côtés :
- * `set type` emmène les colonnes partenaires des FK de la colonne. Le CHECK
- * d'enum `ck_<t>_<c>_enum` suit le type : retiré, puis reposé si la cible
- * est un enum. Une valeur non convertible fait échouer la transaction, rien
- * n'est modifié.
+ * `set type` emmène les colonnes liées par FK (`MSSQL_FK_PARTNERS`), toutes au
+ * même type. Le CHECK d'enum `ck_<t>_<c>_enum` suit le type : retiré, puis
+ * reposé si la cible est un enum. Une valeur non convertible fait échouer la
+ * transaction, rien n'est modifié.
  */
 function renderAlterColumn(
 	plan: import("../ir/plan").AlterColumnPlan,
@@ -1733,19 +1862,20 @@ function renderAlterColumn(
 	const enumCheck = `ck_${plan.target}_${plan.column}_enum`;
 	const { action } = plan;
 	const isTypeChange = action.kind === "set-type";
-	// Type cible : un texte qui reste indexé passe en nvarchar(450).
-	const newType = (obj: string, col: string): string =>
+	// Un texte dont l'une des colonnes reste indexée passe en nvarchar(450),
+	// toutes ensemble : la colonne référencée d'une FK l'est toujours.
+	const newType =
 		action.kind !== "set-type"
 			? ""
 			: action.type === "string" || action.type === "enum"
-				? `CASE WHEN EXISTS (SELECT 1 FROM sys.index_columns ic WHERE ic.object_id = ${obj} AND ic.column_id = ${col}) THEN N'${KEYABLE_STRING_TYPE}' ELSE N'${MSSQL_DDL_TYPE[action.type]}' END`
+				? `CASE WHEN EXISTS (SELECT 1 FROM sys.index_columns ic JOIN @targets k ON k.obj = ic.object_id AND k.col = ic.column_id) THEN N'${KEYABLE_STRING_TYPE}' ELSE N'${MSSQL_DDL_TYPE[action.type]}' END`
 				: `N'${MSSQL_DDL_TYPE[action.type]}'`;
 	const nullability = (kind: string): string =>
 		kind === "set-nullable"
 			? "N' NULL'"
 			: kind === "set-not-null"
 				? "N' NOT NULL'"
-				: "CASE WHEN c.is_nullable = 1 THEN N' NULL' ELSE N' NOT NULL' END";
+				: MSSQL_CURRENT_NULLABILITY;
 	const enumAdd =
 		action.kind === "set-type" &&
 		action.type === "enum" &&
@@ -1762,14 +1892,12 @@ function renderAlterColumn(
 		`DECLARE @col int = COLUMNPROPERTY(@obj, ${nstr(plan.column)}, 'ColumnId');`,
 		`IF @col IS NULL THROW 50000, ${nstr(`colonne '${plan.target}.${plan.column}' inconnue`)}, 1;`,
 		MSSQL_ALTER_TARGETS,
-		`INSERT @targets SELECT c.object_id, c.column_id, N'ALTER TABLE ' + ${mssqlQualified("c.object_id")} + N' ALTER COLUMN ' + QUOTENAME(c.name) + N' ' + ${isTypeChange ? newType("c.object_id", "c.column_id") : MSSQL_CURRENT_TYPE} + ${nullability(action.kind)}
-FROM sys.columns c JOIN sys.types ty ON ty.user_type_id = c.user_type_id
-WHERE (c.object_id = @obj AND c.column_id = @col)${
-			isTypeChange
-				? `
-	OR EXISTS (SELECT 1 FROM sys.foreign_key_columns fkc WHERE (fkc.referenced_object_id = @obj AND fkc.referenced_column_id = @col AND fkc.parent_object_id = c.object_id AND fkc.parent_column_id = c.column_id) OR (fkc.parent_object_id = @obj AND fkc.parent_column_id = @col AND fkc.referenced_object_id = c.object_id AND fkc.referenced_column_id = c.column_id))`
-				: ""
-		};`,
+		"INSERT @targets (obj, col) VALUES (@obj, @col);",
+		...(isTypeChange ? [MSSQL_FK_PARTNERS] : []),
+		mssqlAlterStatements(
+			isTypeChange ? newType : MSSQL_CURRENT_TYPE,
+			nullability(action.kind)
+		),
 		...mssqlAlterTargets(isTypeChange ? enumCheck : undefined),
 		...(enumAdd !== "" ? [`EXEC (${nstr(enumAdd)});`] : []),
 		"COMMIT;"
@@ -1777,19 +1905,70 @@ WHERE (c.object_id = @obj AND c.column_id = @col)${
 	return ddlQuery(lines.join("\n"));
 }
 
-/** `add ref` → contrainte de table. `WITH CHECK` : les lignes existantes
- *  sont vérifiées (orphelins refusés) et la contrainte est approuvée. */
+/**
+ * `add ref` → contrainte de table. `WITH CHECK` : les lignes existantes
+ * sont vérifiées (orphelins refusés) et la contrainte est approuvée.
+ *
+ * SQL Server exige le même type des deux côtés (`refTypeVariable`). Dans la
+ * même transaction, une colonne d'un autre type, longueur, précision, échelle
+ * ou collation passe d'abord à celui de la colonne référencée, avec les
+ * colonnes liées à elle par FK (`MSSQL_FK_PARTNERS`), leurs dépendants retirés
+ * puis recréés (D9 d'ADR-036). Une valeur trop longue pour le nouveau type est
+ * refusée avant, comme pour `add index` (D14 d'ADR-029) ; une valeur non
+ * convertible fait échouer la transaction.
+ */
 function renderAddRef(
 	plan: import("../ir/plan").AddRefPlan,
 	namespace: string
 ): NativeQuery {
 	const { ref } = plan;
-	return ddlQuery(
-		`ALTER TABLE ${qualified(namespace, plan.target)} WITH CHECK ADD CONSTRAINT ${quoteIdent(ref.name)} ` +
+	const table = qualified(namespace, plan.target);
+	const target = qualified(namespace, ref.targetCollection);
+	const lines = [
+		"SET NOCOUNT ON;",
+		"SET XACT_ABORT ON;",
+		"BEGIN TRAN;",
+		`DECLARE @obj int = OBJECT_ID(${nstr(table)});`,
+		`DECLARE @col int = COLUMNPROPERTY(@obj, ${nstr(ref.fromColumn)}, 'ColumnId');`,
+		`DECLARE @refObj int = OBJECT_ID(${nstr(target)});`,
+		`DECLARE @refCol int = COLUMNPROPERTY(@refObj, ${nstr(ref.targetColumn)}, 'ColumnId');`,
+		`DECLARE @type nvarchar(300) = (SELECT ${MSSQL_CURRENT_TYPE} FROM sys.columns c JOIN sys.types ty ON ty.user_type_id = c.user_type_id WHERE c.object_id = @refObj AND c.column_id = @refCol);`,
+		MSSQL_ALTER_TARGETS,
+		`INSERT @targets (obj, col) SELECT c.object_id, c.column_id FROM sys.columns c JOIN sys.columns r ON r.object_id = @refObj AND r.column_id = @refCol
+WHERE c.object_id = @obj AND c.column_id = @col AND (c.system_type_id <> r.system_type_id OR c.max_length <> r.max_length OR c.precision <> r.precision OR c.scale <> r.scale OR ISNULL(c.collation_name, N'') <> ISNULL(r.collation_name, N''));`,
+		MSSQL_FK_PARTNERS,
+		mssqlAlterStatements("@type", MSSQL_CURRENT_NULLABILITY),
+		refLengthPreflight(ref),
+		...mssqlAlterTargets(),
+		`ALTER TABLE ${table} WITH CHECK ADD CONSTRAINT ${quoteIdent(ref.name)} ` +
 			`FOREIGN KEY (${quoteIdent(ref.fromColumn)}) REFERENCES ` +
-			`${qualified(namespace, ref.targetCollection)} (${quoteIdent(ref.targetColumn)}) ` +
-			mssqlRefActions(ref)
-	);
+			`${target} (${quoteIdent(ref.targetColumn)}) ` +
+			`${mssqlRefActions(ref)};`,
+		"COMMIT;"
+	];
+	return ddlQuery(lines.join("\n"));
+}
+
+/**
+ * Refus d'un `add ref` dont une colonne à convertir porte des valeurs trop
+ * longues pour le type de la colonne référencée : la première trouvée, leur
+ * nombre, et pour un texte unicode la commande qui les retrouve. Mesure en
+ * octets du nouveau type, comme pour `add index` (D14 d'ADR-029) : la
+ * conversion rognerait sans erreur les espaces finaux.
+ */
+function refLengthPreflight(ref: import("../ir/plan").FieldRefPlan): string {
+	const target = `${ref.targetCollection}.${ref.targetColumn}`;
+	return `DECLARE @max int, @unicode bit, @wide nvarchar(20), @check nvarchar(max) = N'', @long int = 0, @longTable sysname, @longCol sysname, @findable bit, @msg nvarchar(2048);
+SELECT @max = c.max_length, @unicode = CASE WHEN ty.name IN (N'nvarchar', N'nchar') THEN 1 ELSE 0 END, @wide = CASE WHEN ty.name IN (N'nvarchar', N'nchar') THEN N'nvarchar(max)' WHEN ty.name IN (N'varchar', N'char') THEN N'varchar(max)' WHEN ty.name IN (N'varbinary', N'binary') THEN N'varbinary(max)' END
+FROM sys.columns c JOIN sys.types ty ON ty.user_type_id = c.system_type_id WHERE c.object_id = @refObj AND c.column_id = @refCol AND c.max_length > 0;
+SELECT @check = @check + N'IF @long = 0 SELECT @long = COUNT(*), @t = N' + QUOTENAME(OBJECT_NAME(tg.obj), N'''') + N', @c = N' + QUOTENAME(c.name, N'''') + N', @f = ' + CASE WHEN TYPE_NAME(c.system_type_id) IN (N'nvarchar', N'varchar', N'nchar', N'char') THEN N'1' ELSE N'0' END + N' FROM ' + ${mssqlQualified("tg.obj")} + N' WHERE DATALENGTH(CONVERT(' + @wide + N', ' + QUOTENAME(c.name) + N')) > @max;'
+FROM @targets tg JOIN sys.columns c ON c.object_id = tg.obj AND c.column_id = tg.col WHERE @wide IS NOT NULL;
+IF @check <> N'' EXEC sp_executesql @check, N'@max int, @long int OUTPUT, @t sysname OUTPUT, @c sysname OUTPUT, @f bit OUTPUT', @max, @long OUTPUT, @longTable OUTPUT, @longCol OUTPUT, @findable OUTPUT;
+IF @long > 0
+BEGIN
+	SET @msg = CONCAT(N'''', @longCol, N''' dépasse ', CASE WHEN @unicode = 1 THEN CONCAT(@max / 2, N' caractères') ELSE CONCAT(@max, N' octets') END, N' sur ', @long, CASE WHEN @long > 1 THEN N' lignes' ELSE N' ligne' END, N' de ''', @longTable, ${nstr(`', la longueur de ${target} — à raccourcir avant la foreign key`)}, CASE WHEN @unicode = 1 AND @findable = 1 THEN CONCAT(N' : find ', @longTable, N' where length(', @longCol, N') > ', @max / 2) ELSE N'' END);
+	THROW 50000, @msg, 1;
+END`;
 }
 
 /** `drop ref` → `ALTER TABLE … DROP CONSTRAINT` — natif, miroir PG (D7

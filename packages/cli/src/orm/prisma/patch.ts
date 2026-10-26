@@ -225,6 +225,7 @@ function apply(p: Patcher, plan: DDLPlan): void {
 			break;
 		case "add-ref":
 			addRelation(p, plan.target, plan.ref);
+			alignForeignKeyType(p, plan.target, plan.ref);
 			break;
 		case "drop-ref":
 			dropRelation(p, plan.target, plan.name);
@@ -310,6 +311,22 @@ function createTable(p: Patcher, plan: CreateTablePlan): void {
 			addRelation(p, plan.target, f.ref, f.unique || f.name === soleKey);
 		}
 	}
+	// Une FK vers une colonne de la même table, elle-même FK, attend son type.
+	const aligned = new Set<string>();
+	const align = (f: CreateTableField, seen: ReadonlySet<string>): void => {
+		const ref = f.ref;
+		if (ref === undefined || aligned.has(f.name)) return;
+		const target = plan.fields.find(
+			(t) =>
+				ref.targetCollection === plan.target &&
+				t.name === ref.targetColumn &&
+				!seen.has(t.name)
+		);
+		if (target !== undefined) align(target, new Set([...seen, f.name]));
+		alignForeignKeyType(p, plan.target, ref);
+		aligned.add(f.name);
+	};
+	for (const f of plan.fields) align(f, new Set());
 }
 
 function addColumn(p: Patcher, table: string, column: CreateTableField): void {
@@ -330,6 +347,7 @@ function addColumn(p: Patcher, table: string, column: CreateTableField): void {
 	);
 	if (column.ref !== undefined) {
 		addRelation(p, table, column.ref, column.unique);
+		alignForeignKeyType(p, table, column.ref);
 	}
 }
 
@@ -495,8 +513,9 @@ function setOptional(
 
 /**
  * Type : le champ, et les champs liés à lui par FK, que SNQL change avec lui
- * (Prisma exige des types identiques). Un texte indexé reste en
- * `nvarchar(450)` sous SQL Server. Le défaut suit le nouveau type.
+ * (Prisma exige des types identiques). Sous SQL Server, un texte dont l'un
+ * des champs est indexé passe en `nvarchar(450)`, tous ensemble. Le défaut
+ * suit le nouveau type.
  */
 function setType(
 	p: Patcher,
@@ -513,11 +532,11 @@ function setType(
 		action.enumTypeName !== undefined
 			? enumModelName(p, action.enumTypeName)
 			: undefined;
+	const scalar = prismaScalar(action.type, p.provider, {
+		...(enumName !== undefined ? { enumTypeName: enumName } : {}),
+		key: targets.some((t) => isIndexed(schema, t.model, t.field))
+	});
 	for (const target of targets) {
-		const scalar = prismaScalar(action.type, p.provider, {
-			...(enumName !== undefined ? { enumTypeName: enumName } : {}),
-			key: isIndexed(schema, target.model, target.field)
-		});
 		rewriteField(p, target.model, target.field, (parts) => {
 			let attributes = withoutAttribute(parts.attributes, "@db.");
 			if (scalar.native !== undefined) {
@@ -949,13 +968,16 @@ function foreignKeyName(
 	);
 }
 
-/** Colonnes liées par FK à celle-ci, dans un sens ou dans l'autre. */
+/**
+ * Colonnes liées par FK à celle-ci, dans un sens ou dans l'autre, de proche
+ * en proche : la chaîne entière garde un même type (comme le DDL de SNQL).
+ */
 function foreignKeyPartners(
 	schema: PrismaSchema,
 	model: PrismaBlock,
 	field: PrismaField
 ): { model: PrismaBlock; field: PrismaField }[] {
-	const partners: { model: PrismaBlock; field: PrismaField }[] = [];
+	const found = [{ model, field }];
 	const add = (
 		block: PrismaBlock | undefined,
 		name: string | undefined
@@ -963,21 +985,86 @@ function foreignKeyPartners(
 		if (block === undefined || name === undefined) return;
 		const partner = modelFields(schema, block).find((f) => f.name === name);
 		if (partner === undefined) return;
-		if (partner.line === field.line) return;
-		if (partners.some((x) => x.field.line === partner.line)) return;
-		partners.push({ model: block, field: partner });
+		if (found.some((x) => x.field.line === partner.line)) return;
+		found.push({ model: block, field: partner });
 	};
-	for (const r of owningRelations(schema)) {
-		r.fields.forEach((name, i) => {
-			if (r.model.name === model.name && name === field.name) {
-				add(findBlock(schema, "model", r.field.type), r.references[i]);
-			}
-			if (r.field.type === model.name && r.references[i] === field.name) {
-				add(r.model, name);
-			}
+	const relations = owningRelations(schema);
+	for (let i = 0; i < found.length; i++) {
+		const at = found[i] as { model: PrismaBlock; field: PrismaField };
+		for (const r of relations) {
+			r.fields.forEach((name, k) => {
+				if (r.model.name === at.model.name && name === at.field.name) {
+					add(findBlock(schema, "model", r.field.type), r.references[k]);
+				}
+				if (
+					r.field.type === at.model.name &&
+					r.references[k] === at.field.name
+				) {
+					add(r.model, name);
+				}
+			});
+		}
+	}
+	return found.slice(1);
+}
+
+/**
+ * SQL Server : la colonne d'une FK prend exactement le type de la colonne
+ * qu'elle référence, avec les colonnes liées à elle par FK (DDL de SNQL) ; le
+ * champ reprend le type Prisma et le type natif du champ référencé. Le défaut
+ * suit le nouveau type.
+ */
+function alignForeignKeyType(
+	p: Patcher,
+	table: string,
+	ref: FieldRefPlan
+): void {
+	if (p.provider !== "sqlserver") return;
+	const schema = p.editor.schema;
+	const source = requireModel(schema, table);
+	const from = scalarOf(schema, source, ref.fromColumn);
+	const to = scalarOf(
+		schema,
+		requireModel(schema, ref.targetCollection),
+		ref.targetColumn
+	);
+	if (from === undefined || to === undefined) return;
+	const native = parseAttributes(to.attributes).attributes.find((a) =>
+		a.name.startsWith("@db.")
+	);
+	const nativeOf = (f: PrismaField): string | undefined => {
+		const attribute = parseAttributes(f.attributes).attributes.find((a) =>
+			a.name.startsWith("@db.")
+		);
+		return attribute !== undefined ? renderAttribute(attribute) : undefined;
+	};
+	const wanted = native !== undefined ? renderAttribute(native) : undefined;
+	for (const target of [
+		{ model: source, field: from },
+		...foreignKeyPartners(schema, source, from)
+	]) {
+		if (target.field.type === to.type && nativeOf(target.field) === wanted) {
+			continue;
+		}
+		rewriteField(p, target.model, target.field, (parts) => {
+			const attributes = withoutAttribute(parts.attributes, "@db.");
+			return {
+				...parts,
+				type: to.type,
+				attributes: (native !== undefined
+					? withAttribute(attributes, native)
+					: attributes
+				).map((a) =>
+					// Pas d'enum Prisma sous SQL Server : du texte.
+					a.name === "@default" &&
+					a.args !== undefined &&
+					parts.type !== to.type
+						? { name: a.name, args: convertDefault(a.args, to.type, false) }
+						: a
+				)
+			};
 		});
 	}
-	return partners;
 }
 
 // ─── Enums ───────────────────────────────────────────────────────────────

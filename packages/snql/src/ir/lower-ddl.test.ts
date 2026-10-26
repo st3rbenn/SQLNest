@@ -813,6 +813,50 @@ describe("lower DDL — alter column (ADR-036 E/1c)", () => {
 		).not.toHaveProperty("partners");
 	});
 
+	it("set type : la chaîne de FK entière suit, de proche en proche (colonnes sœurs comprises)", () => {
+		const chained = {
+			...schema,
+			engine: "mssql",
+			collections: [
+				...schema.collections,
+				{
+					name: "invoice",
+					source: "declared" as const,
+					fields: [
+						{
+							name: "agency_id",
+							type: "uuid" as const,
+							nullable: true,
+							source: "declared" as const
+						}
+					]
+				}
+			],
+			refs: [
+				...(schema.refs ?? []),
+				{
+					name: "invoice_agency_id_fkey",
+					fromCollection: "invoice",
+					fromColumn: "agency_id",
+					toCollection: "agency",
+					toColumn: "id",
+					onDelete: "restrict" as const,
+					onUpdate: "restrict" as const,
+					source: "declared" as const
+				}
+			]
+		};
+		// booking.agency_id → agency.id ← invoice.agency_id : la sœur suit aussi.
+		expect(
+			lowerAlter("alter column booking.agency_id set type uuid", chained)
+		).toMatchObject({
+			partners: [
+				{ table: "agency", column: "id" },
+				{ table: "invoice", column: "agency_id" }
+			]
+		});
+	});
+
 	it("set default : littéral ou fonction, typé par la colonne (E/1d)", () => {
 		expect(lowerAlter('alter column agency.zip set default "75000"')).toMatchObject({
 			action: { kind: "set-default", value: "75000" }

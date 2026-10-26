@@ -680,6 +680,76 @@ describe("patchPrismaSchema — SQL Server", () => {
 		expect(agency).toContain("@@index([name])");
 		expect(block(out.text, "model Note")?.[2]).toBe("agency_id BigInt");
 	});
+
+	it("FK : la colonne prend le type du champ référencé ; set type : un seul type natif pour toute la chaîne", () => {
+		const out = run(
+			[
+				"add column code string unique into agency",
+				"create table tag { id: int, agency_code: string nullable ref agency.code, parent_code: string nullable, code: string unique, primary key (id) }",
+				"add ref (parent_code) references tag.code into tag",
+				"add column backup_code string nullable ref agency.code into tag"
+			],
+			start
+		);
+		expect(block(out.text, "model Agency")?.[3]).toBe(
+			"code String @unique @db.NVarChar(450)"
+		);
+		expect(block(out.text, "model Tag")?.slice(1, 6)).toEqual([
+			"id Int @id",
+			"agency_code String? @db.NVarChar(450)",
+			"parent_code String? @db.NVarChar(450)",
+			"code String @unique @db.NVarChar(450)",
+			"backup_code String? @db.NVarChar(450)"
+		]);
+		// Clé non indexée d'un côté, indexée de l'autre : nvarchar(450) partout.
+		const typed = run(
+			[
+				"add column code string unique into agency",
+				"create table tag { id: int, agency_code: string nullable ref agency.code, primary key (id) }",
+				"alter column tag.agency_code set type string"
+			],
+			start
+		);
+		expect(block(typed.text, "model Tag")?.[2]).toBe(
+			"agency_code String? @db.NVarChar(450)"
+		);
+		expect(block(typed.text, "model Agency")?.[3]).toBe(
+			"code String @unique @db.NVarChar(450)"
+		);
+	});
+
+	it("add ref vers un BigInt : la colonne et celles qui la référencent passent en BigInt ; String sans @db gardé tel quel", () => {
+		const withLegacy = {
+			text: MSSQL.replace(
+				"model Note {",
+				'model Legacy {\n  id   BigInt @id\n  code String @unique\n\n  @@map("legacy")\n}\n\nmodel Note {'
+			),
+			db: {
+				...MSSQL_DB,
+				collections: [
+					...MSSQL_DB.collections,
+					{
+						name: "legacy",
+						source: "declared" as const,
+						primaryKey: ["id"],
+						fields: [field("id", "bigint"), field("code", "string")]
+					}
+				]
+			}
+		};
+		const out = run(
+			[
+				"add ref (id) references legacy.id into agency",
+				"create table tag { id: int, legacy_code: string nullable ref legacy.code, primary key (id) }"
+			],
+			withLegacy
+		);
+		expect(block(out.text, "model Agency")?.[1]).toBe("id BigInt @id");
+		// note.agency_id référence agency.id : la chaîne suit.
+		expect(block(out.text, "model Note")?.[2]).toBe("agency_id BigInt");
+		// legacy.code : nvarchar(1000) de Prisma, sans @db ; la FK aussi.
+		expect(block(out.text, "model Tag")?.[2]).toBe("legacy_code String?");
+	});
 });
 
 describe("patchPrismaSchema — FK compensée sous SQL Server", () => {

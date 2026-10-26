@@ -482,7 +482,7 @@ describe("codegen mssql — DDL (M/6)", () => {
 		);
 	});
 
-	it("create table avec ref → FK inline, restrict → NO ACTION", () => {
+	it("create table avec ref → FK inline au type de la colonne référencée, relu au catalogue ; restrict → NO ACTION", () => {
 		const { text } = ddlText({
 			op: "ddl",
 			kind: "create-table",
@@ -507,8 +507,83 @@ describe("codegen mssql — DDL (M/6)", () => {
 			],
 			primaryKey: ["id"]
 		});
+		const lines = text.split("\n");
+		expect(lines[0]).toBe("SET NOCOUNT ON;");
+		expect(lines[1]).toMatch(
+			/^DECLARE @type_user_id nvarchar\(300\) = ISNULL\(\(SELECT CASE$/
+		);
+		// Type complet (longueur, précision, collation) de users.id, sinon le type SNQL.
 		expect(text).toContain(
-			`[user_id] int NOT NULL CONSTRAINT [fk_orders_user_id] REFERENCES [dbo].[users] ([id]) ON DELETE NO ACTION ON UPDATE NO ACTION`
+			"ELSE ty.name END + ISNULL(N' COLLATE ' + c.collation_name, N'') FROM sys.columns c JOIN sys.types ty ON ty.user_type_id = c.user_type_id WHERE c.object_id = OBJECT_ID(N'[dbo].[users]') AND c.name = N'id'), N'int');"
+		);
+		expect(lines.at(-1)).toBe(
+			"EXEC (N'CREATE TABLE [dbo].[orders] ([id] int NOT NULL, [user_id] ' + @type_user_id + N' NOT NULL CONSTRAINT [fk_orders_user_id] REFERENCES [dbo].[users] ([id]) ON DELETE NO ACTION ON UPDATE NO ACTION, PRIMARY KEY ([id]))');"
+		);
+	});
+
+	it("create table : FK vers la table créée → type de la colonne visée, sans lecture du catalogue", () => {
+		const { text } = ddlText({
+			op: "ddl",
+			kind: "create-table",
+			target: "category",
+			ifNotExists: false,
+			fields: [
+				{ name: "code", type: "string", nullable: false, unique: false },
+				{
+					name: "parent_code",
+					type: "string",
+					nullable: true,
+					unique: false,
+					ref: {
+						name: "fk_category_parent_code_category",
+						fromColumn: "parent_code",
+						targetCollection: "category",
+						targetColumn: "code",
+						onDelete: "restrict",
+						onUpdate: "restrict"
+					}
+				}
+			],
+			primaryKey: ["code"]
+		});
+		expect(text).toBe(
+			"CREATE TABLE [dbo].[category] ([code] nvarchar(450) NOT NULL, [parent_code] nvarchar(450) CONSTRAINT [fk_category_parent_code_category] REFERENCES [dbo].[category] ([code]) ON DELETE NO ACTION ON UPDATE NO ACTION, PRIMARY KEY ([code]))"
+		);
+	});
+
+	it("create table if not exists avec ref → le type est relu dans l'étape gardée", () => {
+		const native = mapDdl({
+			op: "ddl",
+			kind: "create-table",
+			target: "c",
+			ifNotExists: true,
+			fields: [
+				{
+					name: "b",
+					type: "string",
+					nullable: true,
+					unique: false,
+					ref: {
+						name: "fk_c_b_p",
+						fromColumn: "b",
+						targetCollection: "p",
+						targetColumn: "code",
+						onDelete: "restrict",
+						onUpdate: "restrict"
+					}
+				}
+			]
+		});
+		if (native.kind !== "transaction") throw new Error(native.kind);
+		const create = native.steps[1];
+		if (create?.kind !== "statement") throw new Error();
+		const lines = create.query.text.split("\n");
+		expect(lines[0]).toBe("SET NOCOUNT ON;");
+		expect(create.query.text).toContain(
+			"WHERE c.object_id = OBJECT_ID(N'[dbo].[p]') AND c.name = N'code'), N'nvarchar(max)');"
+		);
+		expect(lines.at(-1)).toBe(
+			"IF OBJECT_ID(N'[dbo].[c]', N'U') IS NULL EXEC (N'CREATE TABLE [dbo].[c] ([b] ' + @type_b + N' CONSTRAINT [fk_c_b_p] REFERENCES [dbo].[p] ([code]) ON DELETE NO ACTION ON UPDATE NO ACTION)');"
 		);
 	});
 
@@ -552,6 +627,36 @@ describe("codegen mssql — DDL (M/6)", () => {
 		});
 		expect(text).toBe(
 			`ALTER TABLE [dbo].[users] ADD [note] nvarchar(max) DEFAULT 'aucune' WITH VALUES`
+		);
+	});
+
+	it("add column … ref → type relu au catalogue ; WITH VALUES suit le DEFAULT, avant la FK", () => {
+		const { text } = ddlText({
+			op: "ddl",
+			kind: "add-column",
+			target: "c",
+			ifNotExists: true,
+			column: {
+				name: "b",
+				type: "string",
+				nullable: true,
+				unique: false,
+				defaultValue: "zz",
+				ref: {
+					name: "fk_c_b_p",
+					fromColumn: "b",
+					targetCollection: "p",
+					targetColumn: "code",
+					onDelete: "restrict",
+					onUpdate: "restrict"
+				}
+			}
+		});
+		expect(text).toContain(
+			"WHERE c.object_id = OBJECT_ID(N'[dbo].[p]') AND c.name = N'code'), N'nvarchar(max)');"
+		);
+		expect(text.split("\n").at(-1)).toBe(
+			"IF COL_LENGTH(N'[dbo].[c]', N'b') IS NULL EXEC (N'ALTER TABLE [dbo].[c] ADD [b] ' + @type_b + N' DEFAULT ''zz'' WITH VALUES CONSTRAINT [fk_c_b_p] REFERENCES [dbo].[p] ([code]) ON DELETE NO ACTION ON UPDATE NO ACTION');"
 		);
 	});
 
@@ -732,10 +837,47 @@ describe("codegen mssql — DDL (M/6)", () => {
 			column: "tier",
 			action: { kind: "set-type", type: "enum", enumTypeName: "TIER", enumMembers: ["a", "b"] }
 		});
-		expect(text).toContain("CASE WHEN EXISTS (SELECT 1 FROM sys.index_columns ic");
-		// Les colonnes partenaires des FK suivent le nouveau type.
-		expect(text).toContain("fkc.referenced_object_id = @obj AND fkc.referenced_column_id = @col");
+		// Les colonnes liées par FK suivent, de proche en proche, toutes au même
+		// type : nvarchar(450) dès que l'une est indexée.
+		expect(text).toContain(
+			"INSERT @targets (obj, col) VALUES (@obj, @col);\nWHILE @@ROWCOUNT > 0\nINSERT @targets (obj, col) SELECT e.obj, e.col FROM ("
+		);
+		expect(text).toContain(
+			"CASE WHEN EXISTS (SELECT 1 FROM sys.index_columns ic JOIN @targets k ON k.obj = ic.object_id AND k.col = ic.column_id) THEN N'nvarchar(450)' ELSE N'nvarchar(450)' END"
+		);
 		expect(text).toContain("CHECK ([tier] IN (N''a'', N''b''))");
+	});
+
+	it("alter column set type : colonnes liées par FK de proche en proche, texte au même type", () => {
+		const { text } = ddlText({
+			op: "ddl",
+			kind: "alter-column",
+			target: "p",
+			column: "code",
+			action: { kind: "set-type", type: "string" }
+		});
+		// Colonnes qui référencent, colonne référencée, et leurs autres FK.
+		expect(text).toContain(
+			"SELECT fkc.parent_object_id, fkc.parent_column_id FROM sys.foreign_key_columns fkc JOIN @targets tg ON tg.obj = fkc.referenced_object_id AND tg.col = fkc.referenced_column_id"
+		);
+		expect(text).toContain(
+			"UNION SELECT fkc.referenced_object_id, fkc.referenced_column_id FROM sys.foreign_key_columns fkc JOIN @targets tg ON tg.obj = fkc.parent_object_id AND tg.col = fkc.parent_column_id"
+		);
+		expect(text).toContain(
+			"THEN N'nvarchar(450)' ELSE N'nvarchar(max)' END + CASE WHEN c.is_nullable = 1 THEN N' NULL' ELSE N' NOT NULL' END\nFROM @targets tg JOIN sys.columns c"
+		);
+		// Nullabilité : la colonne seule, sans ses partenaires.
+		const nullable = ddlText({
+			op: "ddl",
+			kind: "alter-column",
+			target: "p",
+			column: "code",
+			action: { kind: "set-nullable" }
+		}).text;
+		expect(nullable).not.toContain("WHILE @@ROWCOUNT > 0");
+		expect(nullable).toContain(
+			"ISNULL(N' COLLATE ' + c.collation_name, N'') + N' NULL'"
+		);
 	});
 
 	it("set default → défaut existant retiré, df_<t>_<c> posé ; fonctions natives", () => {
@@ -825,24 +967,50 @@ describe("codegen mssql — DDL (M/6)", () => {
 		expect(lines.at(-1)).toBe("COMMIT;");
 	});
 
-	it("add ref → WITH CHECK ADD CONSTRAINT (orphelins vérifiés)", () => {
+	it("add ref → colonne passée au type de la colonne référencée, puis WITH CHECK ADD CONSTRAINT (orphelins vérifiés)", () => {
+		const { text } = ddlText({
+			op: "ddl",
+			kind: "add-ref",
+			target: "orders",
+			ref: {
+				name: "fk_orders_user_code",
+				fromColumn: "user_code",
+				targetCollection: "users",
+				targetColumn: "code",
+				onDelete: "restrict",
+				onUpdate: "cascade"
+			}
+		});
 		expect(
-			ddlText({
-				op: "ddl",
-				kind: "add-ref",
-				target: "orders",
-				ref: {
-					name: "fk_orders_user_id",
-					fromColumn: "user_id",
-					targetCollection: "users",
-					targetColumn: "id",
-					onDelete: "restrict",
-					onUpdate: "cascade"
-				}
-			}).text
-		).toBe(
-			`ALTER TABLE [dbo].[orders] WITH CHECK ADD CONSTRAINT [fk_orders_user_id] FOREIGN KEY ([user_id]) REFERENCES [dbo].[users] ([id]) ON DELETE NO ACTION ON UPDATE CASCADE`
+			text.startsWith(
+				"SET NOCOUNT ON;\nSET XACT_ABORT ON;\nBEGIN TRAN;\nDECLARE @obj int = OBJECT_ID(N'[dbo].[orders]');\nDECLARE @col int = COLUMNPROPERTY(@obj, N'user_code', 'ColumnId');\nDECLARE @refObj int = OBJECT_ID(N'[dbo].[users]');\nDECLARE @refCol int = COLUMNPROPERTY(@refObj, N'code', 'ColumnId');"
+			)
+		).toBe(true);
+		// Convertie seulement si ce que SQL Server compare diffère.
+		expect(text).toContain(
+			"(c.system_type_id <> r.system_type_id OR c.max_length <> r.max_length OR c.precision <> r.precision OR c.scale <> r.scale OR ISNULL(c.collation_name, N'') <> ISNULL(r.collation_name, N''));\nWHILE @@ROWCOUNT > 0"
 		);
+		expect(text).toContain(
+			"QUOTENAME(c.name) + N' ' + @type + CASE WHEN c.is_nullable = 1 THEN N' NULL' ELSE N' NOT NULL' END"
+		);
+		// Valeurs trop longues pour le nouveau type, en octets, refusées avant.
+		expect(text).toContain(
+			"N' WHERE DATALENGTH(CONVERT(' + @wide + N', ' + QUOTENAME(c.name) + N')) > @max;'"
+		);
+		expect(text).toContain(
+			"N''', la longueur de users.code — à raccourcir avant la foreign key', CASE WHEN @unicode = 1 AND @findable = 1 THEN CONCAT(N' : find ', @longTable, N' where length(', @longCol, N') > ', @max / 2) ELSE N'' END);"
+		);
+		const steps = [
+			"THROW 50000, @msg, 1;",
+			"EXEC (@dropFk); EXEC (@dropIdx); EXEC (@dropChk); EXEC (@dropDf); EXEC (@dropSt);",
+			"EXEC (@alter);",
+			"EXEC (@addSt); EXEC (@addDf); EXEC (@addChk); EXEC (@addIdx); EXEC (@addFk);",
+			"ALTER TABLE [dbo].[orders] WITH CHECK ADD CONSTRAINT [fk_orders_user_code] FOREIGN KEY ([user_code]) REFERENCES [dbo].[users] ([code]) ON DELETE NO ACTION ON UPDATE CASCADE;",
+			"COMMIT;"
+		].map((step) => text.indexOf(step));
+		expect(
+			steps.every((at, i) => at >= 0 && (i === 0 || at > (steps[i - 1] ?? 0)))
+		).toBe(true);
 	});
 
 	it("create enum → bootstrap _snql_enums + INSERT paramétré", () => {
@@ -1058,8 +1226,8 @@ describe("codegen mssql — schéma de la connexion (E/2c)", () => {
 					}
 				]
 			})
-		).toBe(
-			"CREATE TABLE [sales].[orders] ([user_id] int NOT NULL CONSTRAINT [fk_orders_user_id] REFERENCES [sales].[users] ([id]) ON DELETE NO ACTION ON UPDATE NO ACTION)"
+		).toContain(
+			"WHERE c.object_id = OBJECT_ID(N'[sales].[users]') AND c.name = N'id'), N'int');\nEXEC (N'CREATE TABLE [sales].[orders] ([user_id] ' + @type_user_id + N' NOT NULL CONSTRAINT [fk_orders_user_id] REFERENCES [sales].[users] ([id]) ON DELETE NO ACTION ON UPDATE NO ACTION)');"
 		);
 		expect(
 			text({ op: "ddl", kind: "drop-table", target: "orders", ifExists: false })

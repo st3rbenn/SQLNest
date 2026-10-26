@@ -205,3 +205,37 @@ export function getIncomingRefs(
 ): readonly RefDef[] {
 	return schema.refs?.filter((r) => r.toCollection === collection) ?? [];
 }
+
+/**
+ * Colonnes liées par FK à `collection.column`, de proche en proche : une FK
+ * exige le même type des deux côtés (SQL Server, Prisma), la chaîne entière
+ * change ensemble — colonnes qui la référencent, colonne qu'elle référence,
+ * et les autres FK de celles-ci.
+ */
+export function getFkPartners(
+	schema: SchemaModel,
+	collection: string,
+	column: string
+): { readonly table: string; readonly column: string }[] {
+	const found = [{ table: collection, column }];
+	for (let i = 0; i < found.length; i++) {
+		const at = found[i] as { table: string; column: string };
+		for (const ref of schema.refs ?? []) {
+			const linked =
+				ref.fromCollection === at.table && ref.fromColumn === at.column
+					? { table: ref.toCollection, column: ref.toColumn }
+					: ref.toCollection === at.table && ref.toColumn === at.column
+						? { table: ref.fromCollection, column: ref.fromColumn }
+						: undefined;
+			if (
+				linked !== undefined &&
+				!found.some(
+					(f) => f.table === linked.table && f.column === linked.column
+				)
+			) {
+				found.push(linked);
+			}
+		}
+	}
+	return found.slice(1);
+}

@@ -239,4 +239,49 @@ describe("applyDdlToSchema", () => {
 		expect(next.refs).toEqual([]);
 		expect(next.relations).toEqual([]);
 	});
+
+	it("SQL Server : la colonne d'une FK prend le type de la colonne référencée, avec ses colonnes liées", () => {
+		const mssql: SchemaModel = {
+			...BASE,
+			engine: "mssql",
+			collections: BASE.collections.map((c) => ({
+				...c,
+				fields: c.fields.map((f) =>
+					f.name === "id" ? { ...f, type: "bigint" as const } : f
+				)
+			}))
+		};
+		const created = apply(
+			mssql,
+			"create table orders { id: int, user_id: int nullable ref users.id, primary key (id) }"
+		);
+		expect(table(created, "orders")?.fields[1]?.type).toBe("bigint");
+		// Une colonne qui référence celle qui change suit aussi.
+		let next = apply(
+			mssql,
+			"create table orders { id: int, user_id: int nullable, primary key (id) }"
+		);
+		next = apply(
+			next,
+			"create table lines { id: int, order_user_id: int nullable, primary key (id) }"
+		);
+		next = apply(next, "add unique index (user_id) into orders");
+		next = apply(
+			next,
+			"add ref (order_user_id) references orders.user_id into lines"
+		);
+		next = apply(next, "add ref (user_id) references users.id into orders");
+		expect(table(next, "orders")?.fields[1]?.type).toBe("bigint");
+		expect(table(next, "lines")?.fields[1]?.type).toBe("bigint");
+		// Postgres accepte des types différents des deux côtés : le type déclaré reste.
+		expect(
+			table(
+				apply(
+					BASE,
+					"create table orders { id: int, user_id: bigint nullable ref users.id, primary key (id) }"
+				),
+				"orders"
+			)?.fields[1]?.type
+		).toBe("bigint");
+	});
 });

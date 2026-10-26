@@ -25,12 +25,13 @@ import type {
 } from "../parser/ast";
 import type { Span } from "../lexer/token";
 import { DDL_DEFAULT_FUNCTIONS } from "../parser/parser";
-import type {
-	OnDeleteRule,
-	OnUpdateRule,
-	RefDef,
-	SchemaModel,
-	SnqlType
+import {
+	getFkPartners,
+	type OnDeleteRule,
+	type OnUpdateRule,
+	type RefDef,
+	type SchemaModel,
+	type SnqlType
 } from "../schema/model";
 import type {
 	AddColumnPlan,
@@ -1132,7 +1133,10 @@ function lowerAlterColumn(
 		schema,
 		stmt.action.typeSpan
 	);
-	const partners: { table: string; column: string }[] = [];
+	const partners =
+		schema !== undefined && FK_TYPED_ENGINES.has(schema.engine)
+			? getFkPartners(schema, stmt.target, stmt.column)
+			: [];
 	for (const ref of schema?.refs ?? []) {
 		const outgoing = ref.fromCollection === stmt.target && ref.fromColumn === stmt.column;
 		const incoming = ref.toCollection === stmt.target && ref.toColumn === stmt.column;
@@ -1140,13 +1144,6 @@ function lowerAlterColumn(
 		const other = outgoing
 			? { table: ref.toCollection, column: ref.toColumn }
 			: { table: ref.fromCollection, column: ref.fromColumn };
-		const same = other.table === stmt.target && other.column === stmt.column;
-		const listed = partners.some(
-			(p) => p.table === other.table && p.column === other.column
-		);
-		if (!same && !listed && FK_TYPED_ENGINES.has(schema?.engine ?? "")) {
-			partners.push(other);
-		}
 		const otherType = schema?.collections
 			.find((c) => c.name === other.table)
 			?.fields.find((f) => f.name === other.column)?.type;
