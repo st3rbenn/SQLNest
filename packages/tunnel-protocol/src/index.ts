@@ -56,7 +56,11 @@ export type {
 	TunnelPingData,
 	TunnelProjectStatusData,
 	TunnelResultColumn,
-	TunnelRunSnqlData
+	TunnelRunSnqlData,
+	TunnelSchemaChangeData,
+	TunnelSchemaChangeNames,
+	TunnelSchemaCheck,
+	TunnelSchemaDifference
 } from "./ops";
 export { signFrame, verifyFrame } from "./signature";
 export {

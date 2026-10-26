@@ -55,6 +55,7 @@ const LEADING_SEPARATORS_RE = /^[\s;]+/;
 const IPV6_HOST_RE = /^(\[[^\]]+\])(?::(\d+))?$/;
 const PORT_TEXT_RE = /^\d{1,5}$/;
 const EDGE_DASHES_RE = /^-+|-+$/g;
+const LEADING_SLASH_RE = /^\//;
 
 export function parseConnectionString(
 	raw: string
@@ -150,6 +151,33 @@ export function buildConnection(
 		database: parts.database !== "" ? parts.database : undefined,
 		user: parts.user !== "" ? parts.user : undefined
 	};
+}
+
+/** Parties d'une connexion, relues dans son URL normalisée (secret compris). */
+export function connectionParts(c: ParsedConnection): ConnectionParts {
+	const url = new URL(c.url);
+	const params: Record<string, string> = {};
+	for (const [key, value] of url.searchParams) params[key] = value;
+	const database = decodeURIComponent(
+		url.pathname.replace(LEADING_SLASH_RE, "")
+	);
+	return {
+		host: url.hostname,
+		port: url.port !== "" ? Number(url.port) : undefined,
+		database: database !== "" ? database : undefined,
+		user: url.username !== "" ? decodeURIComponent(url.username) : undefined,
+		password:
+			url.password !== "" ? decodeURIComponent(url.password) : undefined,
+		params
+	};
+}
+
+/** La même connexion, sur une autre base du même serveur. */
+export function withDatabase(
+	c: ParsedConnection,
+	database: string
+): ParsedConnection {
+	return buildConnection(c.engine, { ...connectionParts(c), database });
 }
 
 /**

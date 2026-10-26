@@ -6,6 +6,7 @@ import type {
 	TunnelOpResult
 } from "@sqlnest/tunnel-protocol";
 import { openConnectionForTunnel } from "../../services/engine";
+import { applySchemaChangeOp } from "./apply-schema-change";
 import { introspectOp } from "./introspect";
 import type { OpDefinition, SchemaCache } from "./op";
 import { pingOp } from "./ping";
@@ -17,7 +18,8 @@ const OPS: { readonly [K in TunnelOpName]: OpDefinition<K> } = {
 	ping: pingOp,
 	introspect: introspectOp,
 	runSnql: runSnqlOp,
-	projectStatus: projectStatusOp
+	projectStatus: projectStatusOp,
+	applySchemaChange: applySchemaChangeOp
 };
 
 /** Cache de schéma d'une connexion, pour la durée du process CLI. */

@@ -4,6 +4,7 @@
  *   GET  /api/teams/:slug/db-connections/:id/schema
  *   POST /api/teams/:slug/db-connections/:id/query
  *   GET  /api/teams/:slug/db-connections/:id/project-status
+ *   POST /api/teams/:slug/db-connections/:id/schema-change
  *
  * Miroir de `routes/api/db-connections/proxy.ts` — même logique, mais
  * l'autorisation passe par `team_id` (via `requireTeamAccess` +
@@ -19,7 +20,9 @@ import {
 	ProjectStatusResponse,
 	ProxyErrorResponse,
 	ProxyQueryBody,
-	ProxyQueryResponse
+	ProxyQueryResponse,
+	SchemaChangeBody,
+	SchemaChangeResponse
 } from "../../../domains/db-connections/proxy-schema";
 import {
 	assertTeamAccess,
@@ -39,6 +42,9 @@ z.globalRegistry.add(SlugAndConnectionParams, {
 	id: "TeamProxySlugAndConnectionIdParams"
 });
 type SlugAndConnectionParamsT = z.infer<typeof SlugAndConnectionParams>;
+
+/** Outil de l'ORM, base shadow et contrôles : plusieurs commandes à la suite. */
+const SCHEMA_CHANGE_TIMEOUT_MS = 180_000;
 
 class ConnectionNotInTeamError extends Error {
 	constructor() {
@@ -81,7 +87,7 @@ function mapErrorToReply(
 	}
 	if (err instanceof TunnelTimeoutError) {
 		return reply.code(504).send({
-			message: "Le CLI n'a pas répondu dans les temps (30s). Réessaie."
+			message: `Le CLI n'a pas répondu dans les temps (${Math.round(err.ms / 1000)}s). Réessaie.`
 		});
 	}
 	if (err instanceof TunnelCliError) {
@@ -215,6 +221,58 @@ export default function teamsDbConnectionsProxyRoute(fastify: FastifyInstance) {
 					op: "projectStatus"
 				});
 			} catch (err) {
+				return mapErrorToReply(err, reply, request);
+			}
+		}
+	);
+
+	// ─── POST /:slug/db-connections/:id/schema-change ────────────────
+	// Changement de schéma dans le projet relié côté CLI (ADR-037 D3) :
+	// migration écrite, modèle patché et validé, base mise à jour, contrôles.
+	// Un échec (validation, application) remonte en 422 avec le message de
+	// l'outil ; les fichiers du projet sont alors remis en l'état.
+	instance.post(
+		"/:slug/db-connections/:id/schema-change",
+		{
+			preHandler: [requireTeamAccess],
+			schema: {
+				params: SlugAndConnectionParams,
+				body: SchemaChangeBody,
+				response: {
+					200: SchemaChangeResponse,
+					404: ProxyErrorResponse,
+					422: ProxyErrorResponse,
+					500: ProxyErrorResponse,
+					502: ProxyErrorResponse,
+					503: ProxyErrorResponse,
+					504: ProxyErrorResponse
+				}
+			}
+		},
+		async (request, reply) => {
+			assertTeamAccess(request);
+			try {
+				const params = request.params as SlugAndConnectionParamsT;
+				const { tunnelId } = await resolveActiveTunnelInTeam(
+					fastify,
+					request.user.id,
+					request.team.id,
+					params.id
+				);
+				const { source, names } = request.body;
+				return await fastify.backendProxy.sendReq(
+					tunnelId,
+					{
+						op: "applySchemaChange",
+						src: source,
+						...(names !== undefined ? { names } : {})
+					},
+					{ timeoutMs: SCHEMA_CHANGE_TIMEOUT_MS }
+				);
+			} catch (err) {
+				if (err instanceof TunnelCliError && err.pgError === undefined) {
+					return reply.code(422).send({ message: err.cliMessage });
+				}
 				return mapErrorToReply(err, reply, request);
 			}
 		}

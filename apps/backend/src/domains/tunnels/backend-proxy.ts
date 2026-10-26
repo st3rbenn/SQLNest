@@ -67,9 +67,11 @@ export class NoTunnelError extends Error {
 	}
 }
 export class TunnelTimeoutError extends Error {
+	readonly ms: number;
 	constructor(correlationId: string, ms: number) {
 		super(`tunnel req ${correlationId} timeout after ${ms}ms`);
 		this.name = "TunnelTimeoutError";
+		this.ms = ms;
 	}
 }
 /**

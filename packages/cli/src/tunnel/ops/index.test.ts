@@ -163,3 +163,58 @@ describe("projectStatus (ADR-037 D2)", () => {
 		});
 	});
 });
+
+describe("applySchemaChange (ADR-037 D3)", () => {
+	let dir: string;
+	beforeEach(() => {
+		dir = mkdtempSync(join(tmpdir(), "sqlnest-schema-change-"));
+		process.env.SQLNEST_CONFIG_DIR = join(dir, "config");
+	});
+	afterEach(() => {
+		delete process.env.SQLNEST_CONFIG_DIR;
+		rmSync(dir, { recursive: true, force: true });
+	});
+
+	it("connexion sans projet : la commande qui le relie, base non ouverte", async () => {
+		saveLocalConnections({
+			version: 1,
+			connections: [{ name: "apollon", url: "postgres://u@h/db" }]
+		});
+		const t = target(fakeConnection());
+		await expect(
+			dispatchOp({ op: "applySchemaChange", src: "drop table t" }, t)
+		).rejects.toThrow(
+			"Aucun projet relié à « apollon » : sqlnest link-project apollon <dossier>"
+		);
+		expect(t.open).not.toHaveBeenCalled();
+	});
+
+	it("projet qui n'est plus un projet Prisma : rien n'est écrit, cache de schéma vidé", async () => {
+		const project = join(dir, "app");
+		mkdirSync(project);
+		saveLocalConnections({
+			version: 2,
+			connections: [
+				{
+					name: "apollon",
+					url: "postgres://u@h/db",
+					project: { path: project, orm: "prisma", apply: true }
+				}
+			]
+		});
+		const conn = fakeConnection();
+		const t = target(conn);
+		t.schema.set(SCHEMA);
+		await expect(
+			dispatchOp(
+				{
+					op: "applySchemaChange",
+					src: "create table e2e_t { id: int, primary key (id) }"
+				},
+				t
+			)
+		).rejects.toThrow("Le projet relié n'est plus un projet Prisma");
+		expect(t.schema.get()).toBeUndefined();
+		expect(conn.close).toHaveBeenCalledOnce();
+	});
+});

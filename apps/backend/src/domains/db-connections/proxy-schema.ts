@@ -117,3 +117,60 @@ export const ProjectStatusResponse = z.object({
 z.globalRegistry.add(ProjectStatusResponse, {
 	id: "DbConnectionsProjectStatusResponse"
 });
+
+/** Noms que la base ne donne pas, proposés et modifiables dans l'aperçu (ADR-037 D3). */
+export const SchemaChangeNames = z.object({
+	model: z.string().optional(),
+	relations: z
+		.record(
+			z.string(),
+			z.object({
+				field: z.string().optional(),
+				back: z.string().optional(),
+				name: z.string().optional()
+			})
+		)
+		.optional()
+});
+
+/** Corps de POST /api/teams/:slug/db-connections/:id/schema-change : un DDL SNQL. */
+export const SchemaChangeBody = z.object({
+	source: z.string().min(1).max(10_000),
+	names: SchemaChangeNames.optional()
+});
+z.globalRegistry.add(SchemaChangeBody, { id: "DbConnectionsSchemaChangeBody" });
+
+/**
+ * Réponse de POST …/schema-change (ADR-037 D7) : migration écrite, appliquée
+ * ou non, verdict de chaque contrôle. Chemins relatifs au projet, jamais le
+ * contenu de ses fichiers.
+ */
+export const SchemaChangeResponse = z.object({
+	orm: z.enum(["prisma", "doctrine", "sequelize", "seaorm"]),
+	migration: z.string(),
+	files: z.array(z.string()),
+	applied: z.boolean(),
+	checks: z.array(
+		z.object({
+			name: z.enum(["model-database", "history-model", "structure"]),
+			ok: z.boolean().optional(),
+			skipped: z.string().optional(),
+			diff: z.string().optional(),
+			differences: z
+				.array(
+					z.object({
+						target: z.string(),
+						subject: z.string(),
+						name: z.string().optional(),
+						expected: z.string(),
+						actual: z.string()
+					})
+				)
+				.optional()
+		})
+	),
+	names: SchemaChangeNames.optional()
+});
+z.globalRegistry.add(SchemaChangeResponse, {
+	id: "DbConnectionsSchemaChangeResponse"
+});

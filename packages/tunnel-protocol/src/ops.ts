@@ -41,6 +41,65 @@ export interface TunnelProjectStatusData {
 	readonly historyTable?: { readonly name: string; readonly present: boolean };
 }
 
+/** Noms que la base ne donne pas (ADR-037 D3), proposés et modifiables dans l'aperçu. */
+export interface TunnelSchemaChangeNames {
+	/** Modèle d'une nouvelle table. */
+	readonly model?: string;
+	/** Par FK, `table.colonne` : champ de relation, champ retour, nom de relation. */
+	readonly relations?: Readonly<
+		Record<
+			string,
+			{
+				readonly field?: string;
+				readonly back?: string;
+				readonly name?: string;
+			}
+		>
+	>;
+}
+
+/** Écart de structure (ADR-037 D5) : attendu d'après le DDL, constaté en base. */
+export interface TunnelSchemaDifference {
+	readonly target: string;
+	readonly subject: string;
+	readonly name?: string;
+	readonly expected: string;
+	readonly actual: string;
+}
+
+/**
+ * Contrôle après le changement (ADR-037 D3, D5) : `model-database` (modèle ↔
+ * base), `history-model` (historique des migrations ↔ modèle, sur une base
+ * shadow), `structure` (schéma attendu ↔ introspection).
+ */
+export interface TunnelSchemaCheck {
+	readonly name: "model-database" | "history-model" | "structure";
+	/** `true` conforme, `false` écart ; absent quand le contrôle n'a pas tourné. */
+	readonly ok?: boolean;
+	/** Pourquoi le contrôle n'a pas tourné. */
+	readonly skipped?: string;
+	/** Écart : le SQL que l'ORM jouerait pour le combler. */
+	readonly diff?: string;
+	readonly differences?: readonly TunnelSchemaDifference[];
+}
+
+/**
+ * Changement de schéma écrit dans le projet relié (ADR-037 D7) : chemins
+ * relatifs au projet, jamais le contenu des fichiers.
+ */
+export interface TunnelSchemaChangeData {
+	readonly orm: "prisma" | "doctrine" | "sequelize" | "seaorm";
+	/** Migration écrite : nom de son dossier, ou de son fichier. */
+	readonly migration: string;
+	/** Fichiers écrits ou modifiés, relatifs au projet. */
+	readonly files: readonly string[];
+	/** `false` : base non touchée (projet relié avec `apply = false`). */
+	readonly applied: boolean;
+	readonly checks: readonly TunnelSchemaCheck[];
+	/** Noms retenus, fournis ou déduits. */
+	readonly names?: TunnelSchemaChangeNames;
+}
+
 /**
  * Table des ops : nom → requête (champs en plus de `op`) et données de la
  * réponse. `introspect` rend le `SchemaModel` de `@sqlnest/snql`, que ce
@@ -56,6 +115,13 @@ export interface TunnelOpTable {
 	readonly projectStatus: {
 		readonly req: object;
 		readonly data: TunnelProjectStatusData;
+	};
+	readonly applySchemaChange: {
+		readonly req: {
+			readonly src: string;
+			readonly names?: TunnelSchemaChangeNames;
+		};
+		readonly data: TunnelSchemaChangeData;
 	};
 }
 

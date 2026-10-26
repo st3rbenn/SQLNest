@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
 	connectionIdentity,
+	connectionParts,
 	describeConnection,
 	parseConnectionString,
-	suggestConnectionName
+	suggestConnectionName,
+	withDatabase
 } from "./connection-strings";
 
 describe("parseConnectionString — URL", () => {
@@ -184,5 +186,31 @@ describe("affichage, identité, nom proposé", () => {
 		).toBe("apollon_prisma-3");
 		const noDb = parseConnectionString("mongodb://cluster.example.com");
 		expect(noDb && suggestConnectionName(noDb, [])).toBe("cluster-example-com");
+	});
+});
+
+describe("parties d'une connexion, autre base du serveur", () => {
+	const c = parseConnectionString(
+		"postgres://lab:s3cr%40t@localhost:5440/apollon_prisma?schema=public"
+	);
+	if (c === undefined) throw new Error("parse");
+
+	it("connectionParts : secret et base décodés, paramètres gardés", () => {
+		expect(connectionParts(c)).toEqual({
+			host: "localhost",
+			port: 5440,
+			database: "apollon_prisma",
+			user: "lab",
+			password: "s3cr@t",
+			params: { schema: "public" }
+		});
+	});
+
+	it("withDatabase : même serveur, même compte, autre base", () => {
+		expect(withDatabase(c, "sqlnest_shadow_x")).toMatchObject({
+			engine: "postgres",
+			url: "postgres://lab:s3cr%40t@localhost:5440/sqlnest_shadow_x?schema=public",
+			database: "sqlnest_shadow_x"
+		});
 	});
 });
