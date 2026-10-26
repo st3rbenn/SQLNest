@@ -751,4 +751,125 @@ describe("useCanvasSync", () => {
 		);
 		expect(putCalls.length).toBe(0);
 	});
+
+	// ─── Un PUT par sauvegarde ────────────────────────────────────────
+	function routeByMethod(put: () => Promise<Response>): void {
+		fetchMock.mockImplementation((_url: string, init?: RequestInit) =>
+			(init?.method ?? "GET") === "GET"
+				? Promise.resolve(mockResponse(404, {}))
+				: put()
+		);
+	}
+	function putBodies(): Array<{
+		readonly payload: { readonly positions: Record<string, unknown> };
+	}> {
+		return fetchMock.mock.calls
+			.filter((c) => (c[1] as RequestInit | undefined)?.method === "PUT")
+			.map((c) => JSON.parse((c[1] as RequestInit).body as string));
+	}
+	async function mountHydrated() {
+		const initialOpts = makeOpts();
+		const hook = renderHook(
+			(props: UseCanvasSyncOptions) => useCanvasSync(props),
+			{ wrapper: makeWrapper(), initialProps: initialOpts }
+		);
+		await waitFor(() => {
+			expect(fetchMock).toHaveBeenCalledTimes(1);
+		});
+		await new Promise((r) => setTimeout(r, 0));
+		return { ...hook, initialOpts };
+	}
+
+	it("un change → un seul PUT, pas de doublon après le passage en saving", async () => {
+		// Régression : setSyncStatus("saving") re-déclenchait l'effet push
+		// avant la mise à jour de la baseline → même payload ré-armé, 2ᵉ PUT
+		// identique 2 s plus tard. La réponse reste en vol sur un act()
+		// distinct, sinon React fusionne saving/idle en un seul render.
+		const resolvers: Array<(r: Response) => void> = [];
+		routeByMethod(
+			() =>
+				new Promise<Response>((resolve) => {
+					resolvers.push(resolve);
+				})
+		);
+		const { rerender, initialOpts } = await mountHydrated();
+
+		vi.useFakeTimers();
+		rerender({ ...initialOpts, positions: { users: { x: 1, y: 1 } } });
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(CANVAS_SYNC_DEBOUNCE_MS);
+		});
+		expect(putBodies()).toHaveLength(1);
+
+		await act(async () => {
+			resolvers[0]?.(
+				mockResponse(200, { updatedAt: "2026-01-01T00:00:40.000Z" })
+			);
+		});
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(CANVAS_SYNC_DEBOUNCE_MS * 3);
+		});
+		expect(putBodies()).toHaveLength(1);
+	});
+
+	it("change puis retour à l'état synchronisé avant l'échéance → aucun PUT", async () => {
+		// Drag puis Cmd+Z en moins de 2 s : le timer armé pour l'état
+		// intermédiaire doit être annulé, sinon il écrit côté serveur une
+		// position que l'UI n'affiche plus (et le flush pagehide l'enverrait).
+		routeByMethod(() =>
+			Promise.resolve(
+				mockResponse(200, { updatedAt: "2026-01-01T00:00:41.000Z" })
+			)
+		);
+		const { rerender, initialOpts } = await mountHydrated();
+
+		vi.useFakeTimers();
+		rerender({ ...initialOpts, positions: { users: { x: 9, y: 9 } } });
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(CANVAS_SYNC_DEBOUNCE_MS / 2);
+		});
+		rerender(initialOpts);
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(CANVAS_SYNC_DEBOUNCE_MS * 3);
+		});
+		expect(putBodies()).toHaveLength(0);
+	});
+
+	it("change pendant un PUT en vol → un PUT de plus avec l'état final, sans doublon", async () => {
+		const resolvers: Array<(r: Response) => void> = [];
+		routeByMethod(
+			() =>
+				new Promise<Response>((resolve) => {
+					resolvers.push(resolve);
+				})
+		);
+		const { rerender, initialOpts } = await mountHydrated();
+
+		vi.useFakeTimers();
+		rerender({ ...initialOpts, positions: { users: { x: 1, y: 1 } } });
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(CANVAS_SYNC_DEBOUNCE_MS);
+		});
+		expect(putBodies()).toHaveLength(1);
+
+		// PUT #1 toujours en vol : nouveau geste.
+		rerender({ ...initialOpts, positions: { users: { x: 2, y: 2 } } });
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(CANVAS_SYNC_DEBOUNCE_MS);
+		});
+		expect(putBodies()).toHaveLength(2);
+
+		// Réponses dans l'ordre, chacune dans son propre commit.
+		for (const resolve of resolvers.slice()) {
+			await act(async () => {
+				resolve(mockResponse(200, { updatedAt: "2026-01-01T00:00:42.000Z" }));
+			});
+		}
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(CANVAS_SYNC_DEBOUNCE_MS * 3);
+		});
+		const bodies = putBodies();
+		expect(bodies).toHaveLength(2);
+		expect(bodies[1]?.payload.positions).toEqual({ users: { x: 2, y: 2 } });
+	});
 });

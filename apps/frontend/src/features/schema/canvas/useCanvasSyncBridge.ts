@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useCurrentTeamSlug } from "../../teams/useCurrentTeam";
 import type { LayoutResult } from "../layout";
 import type { TableNodeType } from "../TableNode";
@@ -22,6 +22,11 @@ export interface UseCanvasSyncBridgeOptions {
 	readonly setHiddenIds: React.Dispatch<
 		React.SetStateAction<ReadonlySet<string>>
 	>;
+	/** Appelé à chaque passage de `canvasReady` à `true`, dans un effet
+	 * post-commit : les sources lues à ce moment sont l'état hydraté (ou
+	 * l'état local conservé sur 404 / erreur / divergence). Sert à poser la
+	 * baseline de l'historique undo — cf. `useCanvasHistory.resetBaseline`. */
+	readonly onHydrated?: () => void;
 }
 
 export interface UseCanvasSyncBridgeReturn {
@@ -71,7 +76,8 @@ export function useCanvasSyncBridge(
 		framesApi,
 		edgeAnchors,
 		hiddenIds,
-		setHiddenIds
+		setHiddenIds,
+		onHydrated
 	} = opts;
 
 	const canvasSyncReplaceAll = useMemo(
@@ -135,6 +141,15 @@ export function useCanvasSyncBridge(
 		edgeAnchors: edgeAnchors.overrides,
 		replaceAll: canvasSyncReplaceAll
 	});
+
+	// Les setters de `replaceAll` et `setHydrated` partent du même effet →
+	// un seul commit : quand cet effet voit `canvasReady`, les sources
+	// hydratées sont déjà commitées.
+	const onHydratedRef = useRef(onHydrated);
+	onHydratedRef.current = onHydrated;
+	useEffect(() => {
+		if (canvasReady) onHydratedRef.current?.();
+	}, [canvasReady]);
 
 	return { canvasReady };
 }

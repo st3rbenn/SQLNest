@@ -18,6 +18,8 @@ export interface UseHistoryStackReturn {
 	readonly redo: () => void;
 	readonly canUndo: boolean;
 	readonly canRedo: boolean;
+	/** Vide past et future sans rien restaurer. */
+	readonly clear: () => void;
 }
 
 const DEFAULT_MAX = 50;
@@ -128,10 +130,18 @@ export function useHistoryStack<S>(
 		bump();
 	}, [bump]);
 
+	const clear = useCallback(() => {
+		const { past, future } = stackRef.current;
+		if (past.length === 0 && future.length === 0) return;
+		stackRef.current = { past: [], future: [] };
+		bump();
+	}, [bump]);
+
 	return {
 		push,
 		undo,
 		redo,
+		clear,
 		canUndo: stackRef.current.past.length > 0,
 		canRedo: stackRef.current.future.length > 0
 	};

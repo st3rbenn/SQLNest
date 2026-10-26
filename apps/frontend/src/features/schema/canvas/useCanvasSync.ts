@@ -193,6 +193,11 @@ export function useCanvasSync(opts: UseCanvasSyncOptions): UseCanvasSyncReturn {
 	// immédiatement. La connectionId est captée au moment de l'armement — évite
 	// d'envoyer un vieux payload avec une nouvelle connectionId.
 	const pendingPushRef = useRef<PendingPush | null>(null);
+	// `inFlightPushRef` : PUT parti mais pas encore confirmé. Le push effect
+	// re-tourne au passage en "saving" alors que `lastSyncedSerializedRef`
+	// n'est mis à jour qu'à la réponse — sans cette ref il ré-armait le même
+	// payload et un 2ᵉ PUT identique partait 2 s plus tard.
+	const inFlightPushRef = useRef<PendingPush | null>(null);
 	// `fetchStartSerializedRef` : snapshot du `currentSerialized` au moment
 	// où le fetch d'hydratation démarre. Utilisé au settle pour détecter si
 	// l'user a modifié le state pendant que la requête était en vol. `null`
@@ -398,6 +403,7 @@ export function useCanvasSync(opts: UseCanvasSyncOptions): UseCanvasSyncReturn {
 				queryClient,
 				hashKey(canvasStateQueryKey(teamSlug, pending.connectionId))
 			);
+			inFlightPushRef.current = pending;
 			setSyncStatus("saving");
 			try {
 				const payload = JSON.parse(pending.serialized) as Record<
@@ -417,6 +423,7 @@ export function useCanvasSync(opts: UseCanvasSyncOptions): UseCanvasSyncReturn {
 				// change arrive entre-temps, le comparateur du push effect verra
 				// bien la divergence et reschedulera.
 				lastSyncedSerializedRef.current = pending.serialized;
+				if (inFlightPushRef.current === pending) inFlightPushRef.current = null;
 				// Rafraîchit le cache TanStack — sans ça, un re-mount (nav
 				// gallery → canvas) réhydrate depuis un cache stale et écrase
 				// les positions user via replaceAll. staleTime: Infinity +
@@ -432,6 +439,7 @@ export function useCanvasSync(opts: UseCanvasSyncOptions): UseCanvasSyncReturn {
 				// On ne verrouille PAS le hook après une erreur : au prochain
 				// changement (nouveau geste user), le debounce reprogrammera un
 				// push. `error` reste affiché jusqu'au prochain succès.
+				if (inFlightPushRef.current === pending) inFlightPushRef.current = null;
 				setSyncStatus("error");
 			} finally {
 				endPush();
@@ -451,7 +459,25 @@ export function useCanvasSync(opts: UseCanvasSyncOptions): UseCanvasSyncReturn {
 		if (!hydrated) return;
 		if (syncStatus === "offline") return;
 		if (lastSyncedSerializedRef.current === null) return;
-		if (currentSerialized === lastSyncedSerializedRef.current) return;
+
+		// Ce que le serveur détiendra : le PUT en vol s'il vise ce canvas,
+		// sinon la dernière baseline confirmée.
+		const inFlight = inFlightPushRef.current;
+		const serverTarget =
+			inFlight !== null && inFlight.connectionId === connectionIdRef.current
+				? inFlight.serialized
+				: lastSyncedSerializedRef.current;
+		if (currentSerialized === serverTarget) {
+			// Un timer encore armé porte un état que l'UI n'affiche plus
+			// (drag puis undo en < 2 s) : l'envoyer — ou le flusher au
+			// pagehide — écrirait côté serveur un layout abandonné.
+			if (debounceTimeoutRef.current !== null) {
+				window.clearTimeout(debounceTimeoutRef.current);
+				debounceTimeoutRef.current = null;
+			}
+			pendingPushRef.current = null;
+			return;
+		}
 
 		if (debounceTimeoutRef.current !== null) {
 			window.clearTimeout(debounceTimeoutRef.current);

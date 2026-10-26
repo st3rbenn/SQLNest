@@ -37,7 +37,19 @@ export interface UseCanvasHistoryOptions {
 	readonly onRestore?: (snapshot: CanvasSnapshot) => void;
 }
 
-export interface UseCanvasHistoryReturn extends UseHistoryStackReturn {}
+export interface UseCanvasHistoryReturn
+	extends Omit<UseHistoryStackReturn, "clear"> {
+	/**
+	 * Prend l'état courant comme nouvelle baseline et vide past/future.
+	 *
+	 * À appeler une fois l'hydratation serveur appliquée ET commitée : le
+	 * `prevRef` initial est capturé au 1er render, avant que
+	 * `useCanvasSync` ait injecté le payload serveur. Sans reset, le 1er
+	 * push (drag, resize…) empile cet état vide dans `past` → le 1er undo
+	 * restaure « rien de sauvegardé », que le sync persiste aussitôt.
+	 */
+	readonly resetBaseline: () => void;
+}
 
 /**
  * Composition d'`useHistoryStack` avec les 3 hooks de persistance canvas
@@ -141,8 +153,19 @@ export function useCanvasHistory(
 		pendingSyncRef.current = true;
 	}, [stack.push]);
 
+	// Lit `optsRef` en direct (pas via le gate `pendingSyncRef`) : appelé
+	// depuis un effet post-commit, opts reflète déjà l'état hydraté — et
+	// une hydratation no-op (payload identique) ne re-déclencherait pas
+	// l'effet de sync.
+	const resetBaseline = useCallback(() => {
+		prevRef.current = captureNow();
+		pendingSyncRef.current = false;
+		stack.clear();
+	}, [captureNow, stack.clear]);
+
 	return {
 		push,
+		resetBaseline,
 		undo: stack.undo,
 		redo: stack.redo,
 		canUndo: stack.canUndo,

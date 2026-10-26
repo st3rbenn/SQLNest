@@ -120,6 +120,10 @@ function makeNode(schema: SchemaModel) {
 			// Dimensions explicites → fitView cadre sans attendre la mesure DOM.
 			width: NODE_WIDTH,
 			height: nodeHeight(collection),
+			// Le Backspace natif du moteur retirerait la table du state sans
+			// persistance ni retour possible : il passe par `hideSelected`
+			// (raccourci plus bas), comme le « Masquer » du chip.
+			deletable: false,
 			data: { collection, dimmed: false, focused: false, matched: false }
 		};
 	};
@@ -376,7 +380,8 @@ function CanvasInner({
 		framesApi,
 		edgeAnchors,
 		hiddenIds,
-		setHiddenIds
+		setHiddenIds,
+		onHydrated: history.resetBaseline
 	});
 
 	// Sync serveur du snapshot de preview — compute + PUT le rendu
@@ -807,6 +812,11 @@ function CanvasInner({
 	// INPUT/TEXTAREA/SELECT + contentEditable (préserve l'undo/rename
 	// inline), et gère les modifier keys sans qu'on ait besoin de check
 	// `metaKey/ctrlKey/altKey` à la main.
+	const hideSelection = () => {
+		if (selectedTables.length === 0) return;
+		hideSelected();
+		clearSelection();
+	};
 	useHotkeys([
 		[
 			"Escape",
@@ -837,7 +847,9 @@ function CanvasInner({
 			},
 			{ preventDefault: true }
 		],
-		["C", createConsoleAtCenter, { preventDefault: true }]
+		["C", createConsoleAtCenter, { preventDefault: true }],
+		["Backspace", hideSelection, { preventDefault: true }],
+		["Delete", hideSelection, { preventDefault: true }]
 	]);
 
 	// Mode « frame » toolbar — capture lasso + crée un frame. Voir

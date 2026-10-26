@@ -195,4 +195,90 @@ describe("useCanvasHistory", () => {
 			users: { x: 0, y: 0 }
 		});
 	});
+
+	it("resetBaseline après hydratation : le 1er undo revient à l'état hydraté, pas à l'état vide du mount", () => {
+		// Régression : `prevRef` était capturé au 1er render, avant que
+		// useCanvasSync injecte le payload serveur. Le 1er push empilait cet
+		// état vide → Cmd+Z après un drag effaçait tout le layout sauvegardé.
+		const { result } = renderHook(() => useHarness());
+
+		const hydrated = {
+			positions: {
+				users: { x: 100, y: 200 },
+				orders: { x: 400, y: 50 }
+			} as PositionsMap,
+			sizes: { users: { width: 320, height: 240 } } as SizesMap,
+			frames: [
+				{
+					key: "f1",
+					label: "Core",
+					hue: 210,
+					collections: ["users", "orders"],
+					rect: { x: 80, y: 30, width: 700, height: 420 }
+				}
+			] as readonly Frame[],
+			hiddenIds: new Set(["audit_log"])
+		};
+
+		// Hydratation : replaceAll serveur sur les 4 sources (un commit),
+		// puis l'effet post-commit du bridge appelle resetBaseline.
+		act(() => {
+			result.current.mutate.setPositions(hydrated.positions);
+			result.current.mutate.setSizes(hydrated.sizes);
+			result.current.mutate.setFrames(hydrated.frames);
+			result.current.mutate.setHiddenIds(hydrated.hiddenIds);
+		});
+		act(() => {
+			result.current.history.resetBaseline();
+		});
+		expect(result.current.history.canUndo).toBe(false);
+
+		// Drag d'une table.
+		act(() => {
+			result.current.mutate.setPositions({
+				...hydrated.positions,
+				users: { x: 150, y: 260 }
+			});
+			result.current.history.push();
+		});
+
+		act(() => {
+			result.current.history.undo();
+		});
+		expect(result.current.snapshot.positions).toEqual(hydrated.positions);
+		expect(result.current.snapshot.sizes).toEqual(hydrated.sizes);
+		expect(result.current.snapshot.frames).toEqual(hydrated.frames);
+		expect(result.current.snapshot.hiddenIds).toEqual(hydrated.hiddenIds);
+		expect(result.current.history.canUndo).toBe(false);
+	});
+
+	it("resetBaseline jette les entrées poussées avant l'hydratation", () => {
+		const { result } = renderHook(() => useHarness());
+
+		act(() => {
+			result.current.mutate.setPositions({ local: { x: 1, y: 1 } });
+			result.current.history.push();
+		});
+		expect(result.current.history.canUndo).toBe(true);
+
+		act(() => {
+			result.current.mutate.setPositions({ users: { x: 100, y: 200 } });
+		});
+		act(() => {
+			result.current.history.resetBaseline();
+		});
+		expect(result.current.history.canUndo).toBe(false);
+		expect(result.current.history.canRedo).toBe(false);
+
+		act(() => {
+			result.current.mutate.setPositions({ users: { x: 0, y: 0 } });
+			result.current.history.push();
+		});
+		act(() => {
+			result.current.history.undo();
+		});
+		expect(result.current.snapshot.positions).toEqual({
+			users: { x: 100, y: 200 }
+		});
+	});
 });

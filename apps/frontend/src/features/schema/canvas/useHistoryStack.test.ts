@@ -225,4 +225,28 @@ describe("useHistoryStack", () => {
 		// et repoussé {0}. On vérifie que redo est toujours dispo :
 		expect(hook.result.current.canRedo).toBe(true);
 	});
+
+	it("clear vide past et future sans restaurer", () => {
+		const { hook, restore, setCount } = setup({ count: 0 });
+		act(() => {
+			hook.result.current.push();
+		});
+		setCount(1);
+		act(() => {
+			hook.result.current.push();
+		});
+		act(() => {
+			hook.result.current.undo();
+		});
+		expect(hook.result.current.canUndo).toBe(true);
+		expect(hook.result.current.canRedo).toBe(true);
+		restore.mockClear();
+
+		act(() => {
+			hook.result.current.clear();
+		});
+		expect(hook.result.current.canUndo).toBe(false);
+		expect(hook.result.current.canRedo).toBe(false);
+		expect(restore).not.toHaveBeenCalled();
+	});
 });
