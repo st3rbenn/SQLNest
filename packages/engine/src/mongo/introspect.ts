@@ -1,12 +1,14 @@
-import type {
-	Collection,
-	CollectionIndex,
-	EnumTypeDef,
-	Field,
-	RefDef,
-	Relation,
-	SchemaModel,
-	SnqlType
+import {
+	type Collection,
+	type CollectionIndex,
+	type EnumTypeDef,
+	type Field,
+	MONGO_TEXT_PATTERN,
+	type RefDef,
+	type Relation,
+	type SchemaModel,
+	type SnqlType,
+	type StoredAs
 } from "@sqlnest/snql";
 import type { Db, Document } from "mongodb";
 import { EngineIntrospectionError } from "../errors";
@@ -27,8 +29,17 @@ const BSON_TYPE_TO_SNQL: Readonly<Record<string, SnqlType>> = {
 	date: "date",
 	object: "json",
 	array: "array",
-	binData: "uuid"
+	binData: "uuid",
+	objectId: "string"
 };
+
+/** Type SNQL d'un texte au motif que SNQL pose sur un `uuid` / `decimal` rangé en texte. */
+const TEXT_PATTERN_TYPES: ReadonlyMap<string, SnqlType> = new Map(
+	Object.entries(MONGO_TEXT_PATTERN).map(([type, pattern]) => [
+		pattern as string,
+		type as SnqlType
+	])
+);
 
 /** Un document échantillonné, réduit à ses paires clé/valeur. */
 export type SampledDoc = Record<string, unknown>;
@@ -86,6 +97,8 @@ interface FieldStat {
 	present: number;
 	nullable: boolean;
 	readonly types: Map<SnqlType, number>;
+	/** Valeurs ObjectId parmi les valeurs non nulles. */
+	objectIds: number;
 }
 
 function mostCommonType(types: Map<SnqlType, number>): SnqlType {
@@ -117,7 +130,8 @@ export function inferCollection(
 			const stat = stats.get(key) ?? {
 				present: 0,
 				nullable: false,
-				types: new Map<SnqlType, number>()
+				types: new Map<SnqlType, number>(),
+				objectIds: 0
 			};
 			stat.present += 1;
 			const value = doc[key];
@@ -126,18 +140,28 @@ export function inferCollection(
 			} else {
 				const type = snqlTypeOf(value);
 				stat.types.set(type, (stat.types.get(type) ?? 0) + 1);
+				if ((value as { _bsontype?: string })._bsontype === "ObjectId") {
+					stat.objectIds += 1;
+				}
 			}
 			stats.set(key, stat);
 		}
 	}
 
-	const fields: Field[] = [...stats.entries()].map(([fieldName, stat]) => ({
-		name: fieldName,
-		type: mostCommonType(stat.types),
-		nullable: stat.nullable || stat.present < sampleSize,
-		source: "inferred" as const,
-		confidence: sampleSize > 0 ? stat.present / sampleSize : 0
-	}));
+	const fields: Field[] = [...stats.entries()].map(([fieldName, stat]) => {
+		const values = [...stat.types.values()].reduce((a, b) => a + b, 0);
+		return {
+			name: fieldName,
+			type: mostCommonType(stat.types),
+			nullable: stat.nullable || stat.present < sampleSize,
+			source: "inferred" as const,
+			confidence: sampleSize > 0 ? stat.present / sampleSize : 0,
+			// Une clé ObjectId (celle de Prisma) : une FK qui la vise en prend la forme.
+			...(stat.objectIds > 0 && stat.objectIds === values
+				? { storedAs: "objectId" as const }
+				: {})
+		};
+	});
 
 	const hasId = fields.some((field) => field.name === "_id");
 	return hasId
@@ -166,6 +190,8 @@ export const SNQL_PK = "_snql_pk";
 export interface PkAlias {
 	readonly column: string;
 	readonly type: SnqlType;
+	/** Représentation de `_id` quand elle diffère du type (profil prisma : texte). */
+	readonly storedAs?: StoredAs;
 }
 
 /**
@@ -182,7 +208,11 @@ export async function loadPkAliases(db: Db): Promise<Map<string, PkAlias>> {
 				typeof d.type === "string" && d.type in SNQL_TYPES
 					? (d.type as SnqlType)
 					: "unknown";
-			aliases.set(d._id, { column: d.column, type });
+			const storedAs =
+				d.storedAs === "string" || d.storedAs === "objectId"
+					? { storedAs: d.storedAs as StoredAs }
+					: {};
+			aliases.set(d._id, { column: d.column, type, ...storedAs });
 		}
 	} catch {
 		// silence — pas d'alias lisible
@@ -220,7 +250,8 @@ export function applyPkAlias(
 		type: alias.type,
 		nullable: false,
 		source: "declared",
-		nativeName: "_id"
+		nativeName: "_id",
+		...(alias.storedAs !== undefined ? { storedAs: alias.storedAs } : {})
 	};
 	return {
 		...collection,
@@ -459,10 +490,22 @@ export function mergeValidatorFields(
 		const single = Array.isArray(bsonType)
 			? bsonType.find((t) => t !== "null")
 			: bsonType;
+		const pattern = (propRaw as { pattern?: unknown }).pattern;
+		const textType =
+			single === "string" && typeof pattern === "string"
+				? TEXT_PATTERN_TYPES.get(pattern)
+				: undefined;
 		const type =
-			typeof single === "string"
+			textType ??
+			(typeof single === "string"
 				? (BSON_TYPE_TO_SNQL[single] ?? "unknown")
-				: "unknown";
+				: "unknown");
+		const storedAs: StoredAs | undefined =
+			textType !== undefined
+				? "string"
+				: single === "objectId"
+					? "objectId"
+					: undefined;
 		const members = (propRaw as { enum?: unknown }).enum;
 		const enumValues = Array.isArray(members)
 			? members.filter((m): m is string => typeof m === "string")
@@ -472,7 +515,8 @@ export function mergeValidatorFields(
 			type,
 			nullable: !required.has(propName),
 			source: "declared",
-			...(enumValues !== undefined ? { enumValues } : {})
+			...(enumValues !== undefined ? { enumValues } : {}),
+			...(storedAs !== undefined ? { storedAs } : {})
 		};
 		if (known.has(propName)) fromValidator.set(propName, field);
 		else declared.push(field);
@@ -482,11 +526,14 @@ export function mergeValidatorFields(
 	const fields = inferred.fields.map((f) => {
 		const d = fromValidator.get(f.name);
 		if (d === undefined) return f;
+		const { storedAs: sampled, ...rest } = f;
+		const storedAs = d.type === "unknown" ? sampled : d.storedAs;
 		return {
-			...f,
+			...rest,
 			type: d.type === "unknown" ? f.type : d.type,
 			nullable: d.nullable,
-			...(d.enumValues !== undefined ? { enumValues: d.enumValues } : {})
+			...(d.enumValues !== undefined ? { enumValues: d.enumValues } : {}),
+			...(storedAs !== undefined ? { storedAs } : {})
 		};
 	});
 	return { ...inferred, fields: [...fields, ...declared] };

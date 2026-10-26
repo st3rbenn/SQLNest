@@ -35,6 +35,33 @@ function table(schema: SchemaModel, name: string) {
 }
 
 describe("applyDdlToSchema", () => {
+	it("Mongo sous le profil prisma : uuid et decimal attendus rangés en texte, set type compris", () => {
+		const mongo: SchemaModel = { ...BASE, engine: "mongodb", enums: [] };
+		const prisma = { ormProfile: "prisma" };
+		const created = apply(
+			mongo,
+			"create table item { id: int, price: decimal, code: uuid nullable, note: string nullable, primary key (id) }",
+			prisma
+		);
+		expect(
+			table(created, "item")?.fields.map((f) => [f.name, f.storedAs])
+		).toEqual([
+			["id", undefined],
+			["price", "string"],
+			["code", "string"],
+			["note", undefined]
+		]);
+		const typed = apply(
+			created,
+			"alter column item.note set type decimal",
+			prisma
+		);
+		const back = apply(typed, "alter column item.note set type string", prisma);
+		expect(
+			table(back, "item")?.fields.find((f) => f.name === "note")?.storedAs
+		).toBeUndefined();
+	});
+
 	it("create table : colonnes, défaut, clé, unicité au nom choisi par le moteur, FK et relation", () => {
 		const next = apply(
 			BASE,

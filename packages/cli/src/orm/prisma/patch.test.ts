@@ -752,6 +752,75 @@ describe("patchPrismaSchema — SQL Server", () => {
 	});
 });
 
+describe("patchPrismaSchema — MongoDB (ADR-036 D6, ADR-037 D3 bis)", () => {
+	const MONGO = `datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+model Owner {
+  id   String @id @default(auto()) @map("_id") @db.ObjectId
+  name String
+
+  @@map("owner")
+}
+`;
+	const MONGO_DB: SchemaModel = {
+		engine: "mongodb",
+		collections: [
+			{
+				name: "owner",
+				source: "inferred",
+				primaryKey: ["_id"],
+				fields: [
+					field("_id", "string", { source: "inferred", storedAs: "objectId" }),
+					field("name", "string", { source: "inferred" })
+				]
+			}
+		],
+		relations: []
+	};
+	const start = { text: MONGO, db: MONGO_DB };
+
+	it("create table : clé `_id` en uuid texte, decimal en String, FK vers une clé ObjectId en @db.ObjectId", () => {
+		const out = run(
+			[
+				"create table pet { id: uuid default uuid(), owner_id: string ref owner._id, price: decimal, born: date nullable, primary key (id) }",
+				"add column fee decimal default 1.5 into pet",
+				"add index (price) into pet"
+			],
+			start
+		);
+		expect(block(out.text, "model Pet")).toEqual([
+			"model Pet {",
+			'id String @id @default(uuid()) @map("_id")',
+			"owner_id String @db.ObjectId",
+			"price String",
+			"born DateTime?",
+			'fee String @default("1.5")',
+			"",
+			"Owner Owner @relation(fields: [owner_id], references: [id])",
+			"",
+			"@@index([price])",
+			'@@map("pet")',
+			"}"
+		]);
+		expect(block(out.text, "model Owner")).toContain("Pet Pet[]");
+	});
+
+	it("create table sans clé : Prisma attend l'ObjectId que Mongo pose", () => {
+		const out = run(["create table tag { label: string }"], start);
+		expect(block(out.text, "model Tag")).toEqual([
+			"model Tag {",
+			'id String @id @default(auto()) @map("_id") @db.ObjectId',
+			"label String",
+			"",
+			'@@map("tag")',
+			"}"
+		]);
+	});
+});
+
 describe("patchPrismaSchema — FK compensée sous SQL Server", () => {
 	it("2ᵉ chemin de cascade : la relation décrit la base (NoAction), le commentaire dit l'action", () => {
 		const out = run(

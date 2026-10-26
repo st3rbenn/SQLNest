@@ -1,12 +1,20 @@
-import { Decimal128, Double, Long, UUID } from "mongodb";
+import { MONGO_TEXT_PATTERN } from "@sqlnest/snql";
+import { Binary, Decimal128, Double, Long, ObjectId, UUID } from "mongodb";
 import { describe, expect, it } from "vitest";
-import { pipelineWithStoredForms, withStoredForms } from "./adapter";
+import {
+	lookupCollections,
+	pipelineWithStoredForms,
+	withStoredForms,
+	withTextDecimalFilter,
+	withTextDecimalStages
+} from "./adapter";
 import {
 	convertValue,
 	declaredPipeline,
 	declaredTypeExpr,
 	declaredTypes,
 	declaredUpdate,
+	textDecimals,
 	toDeclaredType,
 	toDeclaredTypes
 } from "./declared-types";
@@ -277,5 +285,175 @@ describe("withStoredForms — un littéral matche ses formes stockées", () => {
 		expect(withStoredForms({ d: { $eq: dec(raw) } })).toEqual({
 			d: { $in: [Number(raw)] }
 		});
+	});
+});
+
+describe("uuid et decimal rangés en texte (profil prisma, ADR-036 D6)", () => {
+	const HEX = "65f1c2b9e1b2a4c3d8e9f0a1";
+
+	it("declaredTypes : reconnus au motif que SNQL pose ; un autre motif reste du texte", () => {
+		const types = declaredTypes({
+			$jsonSchema: {
+				properties: {
+					id: { bsonType: "string", pattern: MONGO_TEXT_PATTERN.uuid },
+					price: {
+						bsonType: ["string", "null"],
+						pattern: MONGO_TEXT_PATTERN.decimal
+					},
+					code: { bsonType: "string", pattern: "^[A-Z]+$" },
+					owner_id: { bsonType: "objectId" }
+				}
+			}
+		});
+		expect([...types]).toEqual([
+			["id", "uuid-text"],
+			["price", "decimal-text"],
+			["code", "string"],
+			["owner_id", "objectId"]
+		]);
+		expect(textDecimals(types)).toEqual(["price"]);
+	});
+
+	it("decimal en texte : notation décimale, échelle gardée, refus nommés", () => {
+		expect(to(dec("12.50"), "decimal-text")).toBe("12.50");
+		expect(to(dec("1e3"), "decimal-text")).toBe("1000");
+		expect(to(dec("1.5e-7"), "decimal-text")).toBe("0.00000015");
+		expect(to(0.1, "decimal-text")).toBe("0.1");
+		expect(to(1e21, "decimal-text")).toBe("1000000000000000000000");
+		expect(to(9007199254740993n, "decimal-text")).toBe("9007199254740993");
+		expect(to(Decimal128.fromString("25.00"), "decimal-text")).toBe("25.00");
+		expect(to(" 007.5 ", "decimal-text")).toBe("7.5");
+		expect(to(".5", "decimal-text")).toBe("0.5");
+		expect(to("-0.0", "decimal-text")).toBe("0.0");
+		expect(refusal("abc", "decimal-text")).toBe(
+			"insert dans 't' : 'c' (decimal) n'accepte pas \"abc\""
+		);
+		expect(
+			refusal(dec("1.2345678901234567890123456789012345"), "decimal-text")
+		).toBe(
+			"insert dans 't' : 'c' (decimal) n'accepte pas 1.2345678901234567890123456789012345 — plus de 34 chiffres significatifs"
+		);
+	});
+
+	it("uuid en texte : forme canonique en minuscules, depuis le texte ou le binaire", () => {
+		expect(to(U1.toUpperCase(), "uuid-text")).toBe(U1);
+		expect(to(`{${U1}}`, "uuid-text")).toBe(U1);
+		expect(to(new UUID(U1), "uuid-text")).toBe(U1);
+		expect(
+			to(new Binary(new UUID(U1).buffer, Binary.SUBTYPE_UUID), "uuid-text")
+		).toBe(U1);
+		expect(refusal("nope", "uuid-text")).toBe(
+			"insert dans 't' : 'c' (uuid) n'accepte pas \"nope\""
+		);
+	});
+
+	it("valeur calculée côté serveur : un nombre ramené au texte", () => {
+		expect(declaredTypeExpr("$p", "decimal-text")).toEqual({
+			$let: {
+				vars: { v: "$p" },
+				in: { $cond: [{ $isNumber: "$$v" }, { $toString: "$$v" }, "$$v"] }
+			}
+		});
+	});
+
+	it("formes stockées : un uuid en majuscules matche aussi ses minuscules, un texte 24-hex son ObjectId", () => {
+		expect(withStoredForms({ u: U1.toUpperCase(), o: HEX })).toEqual({
+			u: { $in: [new UUID(U1), U1.toUpperCase(), U1] },
+			o: { $in: [new ObjectId(HEX), HEX] }
+		});
+	});
+
+	it("filtre d'écriture : comparé sur la valeur en Decimal128 ; null, $exists et autres colonnes gardés", () => {
+		const out = withTextDecimalFilter(
+			{
+				price: { $gt: dec("10"), $lte: 100, $exists: true },
+				fee: dec("1.5"),
+				tax: null,
+				label: "a",
+				$or: [{ fee: { $in: [dec("2"), 3] } }, { fee: { $nin: [dec("4")] } }]
+			},
+			new Set(["price", "fee", "tax"])
+		);
+		const as = (f: string) => ({
+			$convert: { input: `$${f}`, to: "decimal", onError: null, onNull: null }
+		});
+		expect(out).toEqual({
+			price: { $exists: true },
+			tax: null,
+			label: "a",
+			$or: [
+				{
+					$expr: {
+						$in: [
+							as("fee"),
+							[Decimal128.fromString("2"), Decimal128.fromString("3")]
+						]
+					}
+				},
+				{
+					$expr: { $not: [{ $in: [as("fee"), [Decimal128.fromString("4")]] }] }
+				}
+			],
+			$expr: {
+				$and: [
+					{ $gt: [as("price"), Decimal128.fromString("10")] },
+					{ $lte: [as("price"), Decimal128.fromString("100")] },
+					{ $eq: [as("fee"), Decimal128.fromString("1.5")] }
+				]
+			}
+		});
+		expect(withTextDecimalFilter({ price: 1 }, new Set())).toEqual({
+			price: 1
+		});
+	});
+
+	it("lecture : le décimal en texte passe en Decimal128 en tête, et dans le sous-pipeline d'un $lookup", () => {
+		const asDecimal = (f: string) => ({
+			$cond: [
+				{ $eq: [{ $type: `$${f}` }, "string"] },
+				{ $convert: { input: `$${f}`, to: "decimal", onError: `$${f}` } },
+				`$${f}`
+			]
+		});
+		const stages = [
+			{ $match: { price: { $gt: 1 } } },
+			{
+				$lookup: { from: "fee", localField: "f", foreignField: "_id", as: "j" }
+			},
+			{
+				$lookup: {
+					from: "plain",
+					localField: "p",
+					foreignField: "_id",
+					as: "k"
+				}
+			}
+		];
+		expect([...lookupCollections(stages)]).toEqual(["fee", "plain"]);
+		expect(
+			withTextDecimalStages(stages, ["price"], (c) =>
+				c === "fee" ? ["amount"] : []
+			)
+		).toEqual([
+			{ $addFields: { price: asDecimal("price") } },
+			{ $match: { price: { $gt: 1 } } },
+			{
+				$lookup: {
+					from: "fee",
+					localField: "f",
+					foreignField: "_id",
+					as: "j",
+					pipeline: [{ $addFields: { amount: asDecimal("amount") } }]
+				}
+			},
+			{
+				$lookup: {
+					from: "plain",
+					localField: "p",
+					foreignField: "_id",
+					as: "k"
+				}
+			}
+		]);
 	});
 });

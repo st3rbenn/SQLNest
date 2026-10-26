@@ -34,10 +34,14 @@ import {
 	convertValue,
 	type DeclaredTypes,
 	declaredPipeline,
+	declaredTypeOf,
 	declaredTypes,
 	declaredUpdate,
+	DECIMAL_TEXT_TYPE,
+	textDecimals,
 	toDeclaredType,
-	toDeclaredTypes
+	toDeclaredTypes,
+	UUID_TEXT_TYPE
 } from "./declared-types";
 import {
 	applyPkAlias,
@@ -46,6 +50,7 @@ import {
 	loadPkAliases,
 	mergeValidatorFields,
 	mongoDefaultText,
+	type PkAlias,
 	SNQL_PK,
 	type SampledDoc
 } from "./introspect";
@@ -261,6 +266,7 @@ async function convertFieldType(
 	action: {
 		readonly type: SnqlType;
 		readonly bsonType: string | null;
+		readonly pattern?: string;
 		readonly enumMembers?: readonly string[];
 	}
 ): Promise<void> {
@@ -273,7 +279,9 @@ async function convertFieldType(
 	const capMessage = (max: number): string =>
 		`alter column ${field} sur '${collection}' : la conversion dépasse le cap ${max} docs — relance la commande, elle reprend où elle s'est arrêtée`;
 
-	const to = MONGO_CONVERT[action.type];
+	// Un uuid ou un decimal rangé en texte passe par l'adapter (forme canonique).
+	const to =
+		action.pattern === undefined ? MONGO_CONVERT[action.type] : undefined;
 	if (to !== undefined) {
 		const converted = convertExpr(field, action.type, to);
 		const invalid: Document[] = [{ $eq: [converted, UNCONVERTIBLE] }];
@@ -296,7 +304,8 @@ async function convertFieldType(
 	}
 
 	// uuid / json / array : conversion côté adapter, un document à la fois.
-	const parse = (value: unknown) => convertValue(value, action.bsonType ?? "");
+	const declared = declaredTypeOf(action.bsonType, action.pattern) ?? "";
+	const parse = (value: unknown) => convertValue(value, declared);
 	let count = 0;
 	let sample: unknown;
 	for await (const doc of col.find(present, { projection: { [field]: 1 } })) {
@@ -452,10 +461,22 @@ function renameKeyAt(
 const UUID_TEXT =
 	/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
-/** Un uuid écrit en texte : sa forme binaire (sous-type 4), puis le texte. */
+/**
+ * Un uuid écrit en texte : sa forme binaire (sous-type 4), puis le texte, et
+ * ses minuscules — la forme d'un uuid rangé en texte (ADR-036 D6).
+ */
 function uuidForms(value: unknown): unknown[] | undefined {
-	return typeof value === "string" && UUID_TEXT.test(value)
+	if (typeof value !== "string" || !UUID_TEXT.test(value)) return undefined;
+	const lower = value.toLowerCase();
+	return lower === value
 		? [new UUID(value), value]
+		: [new UUID(value), value, lower];
+}
+
+/** Un texte 24-hex : aussi un ObjectId, la forme d'une FK vers une clé ObjectId. */
+function objectIdForms(value: unknown): unknown[] | undefined {
+	return typeof value === "string" && OBJECT_ID_HEX.test(value)
+		? [new ObjectId(value), value]
 		: undefined;
 }
 
@@ -524,7 +545,7 @@ function decimalForms(value: unknown): unknown[] | undefined {
 }
 
 function storedForms(value: unknown): unknown[] | undefined {
-	return uuidForms(value) ?? decimalForms(value);
+	return uuidForms(value) ?? objectIdForms(value) ?? decimalForms(value);
 }
 
 /** `value` dont chaque littéral décimal prend sa forme Decimal128 ou double. */
@@ -616,6 +637,156 @@ export function pipelineWithStoredForms(
 				}
 			: stage;
 	});
+}
+
+/** Un `decimal` rangé en texte, en Decimal128 ; un texte illisible reste tel quel. */
+function textAsDecimal(field: string): Document {
+	const path = `$${field}`;
+	return {
+		$cond: [
+			{ $eq: [{ $type: path }, "string"] },
+			{ $convert: { input: path, to: "decimal", onError: path } },
+			path
+		]
+	};
+}
+
+/** Collections visées par les `$lookup` d'un pipeline, sous-pipelines compris. */
+export function lookupCollections(
+	stages: readonly Document[],
+	out: Set<string> = new Set()
+): Set<string> {
+	for (const stage of stages) {
+		const lookup = stage.$lookup as Document | undefined;
+		if (lookup === undefined) continue;
+		if (typeof lookup.from === "string") out.add(lookup.from);
+		if (Array.isArray(lookup.pipeline)) lookupCollections(lookup.pipeline, out);
+	}
+	return out;
+}
+
+/**
+ * Pipeline où chaque `decimal` rangé en texte (ADR-036 D6) se lit comme un
+ * nombre : comparé, trié, sommé et calculé sur sa valeur, rendu comme un
+ * decimal. Le champ passe en Decimal128 en tête du pipeline, et en tête du
+ * sous-pipeline d'un `$lookup` vers une collection qui en a.
+ */
+export function withTextDecimalStages(
+	stages: readonly Document[],
+	fields: readonly string[],
+	fieldsOf: (collection: string) => readonly string[]
+): Document[] {
+	const out = stages.map((stage) => {
+		const lookup = stage.$lookup as Document | undefined;
+		if (lookup === undefined || typeof lookup.from !== "string") return stage;
+		const inner = Array.isArray(lookup.pipeline)
+			? (lookup.pipeline as Document[])
+			: [];
+		const next = withTextDecimalStages(inner, fieldsOf(lookup.from), fieldsOf);
+		return next.length === 0
+			? stage
+			: { ...stage, $lookup: { ...lookup, pipeline: next } };
+	});
+	if (fields.length === 0) return out;
+	return [
+		{
+			$addFields: Object.fromEntries(fields.map((f) => [f, textAsDecimal(f)]))
+		},
+		...out
+	];
+}
+
+/** Étape qui ramène au texte les `decimal` rangés en texte, avant d'écrire. */
+function decimalsBackToText(fields: readonly string[]): Document {
+	return {
+		$set: Object.fromEntries(
+			fields.map((f) => [
+				f,
+				{ $cond: [{ $isNumber: `$${f}` }, { $toString: `$${f}` }, `$${f}`] }
+			])
+		)
+	};
+}
+
+/** `stage` inséré avant le `$merge` final d'un pipeline d'écriture. */
+function beforeMerge(stages: readonly Document[], stage: Document): Document[] {
+	const last = stages.at(-1);
+	return last?.$merge !== undefined
+		? [...stages.slice(0, -1), stage, last]
+		: [...stages, stage];
+}
+
+const DECIMAL_COMPARE = new Set(["$eq", "$ne", "$gt", "$gte", "$lt", "$lte"]);
+
+/** Borne d'un filtre en Decimal128, pour la comparer exactement à un décimal. */
+function decimalBound(value: unknown): unknown {
+	const text = isSqlDecimal(value)
+		? value.raw
+		: typeof value === "number" && Number.isFinite(value)
+			? String(value)
+			: typeof value === "bigint"
+				? value.toString()
+				: typeof value === "string"
+					? value.trim()
+					: undefined;
+	if (text === undefined) return value;
+	try {
+		return Decimal128.fromString(text);
+	} catch {
+		return value;
+	}
+}
+
+/**
+ * Filtre d'écriture où une condition sur un `decimal` rangé en texte compare
+ * sa valeur, en Decimal128 sous `$expr` (ADR-036 D6). `null`, `$exists` et
+ * les autres opérateurs restent des conditions de champ.
+ */
+export function withTextDecimalFilter(
+	filter: Document,
+	fields: ReadonlySet<string>
+): Document {
+	if (fields.size === 0) return filter;
+	const out: Document = {};
+	const exprs: Document[] = [];
+	for (const [key, value] of Object.entries(filter)) {
+		if (key === "$and" || key === "$or" || key === "$nor") {
+			out[key] = Array.isArray(value)
+				? value.map((q) => withTextDecimalFilter(q as Document, fields))
+				: value;
+			continue;
+		}
+		if (!fields.has(key) || value === null) {
+			out[key] = value;
+			continue;
+		}
+		const field = {
+			$convert: { input: `$${key}`, to: "decimal", onError: null, onNull: null }
+		};
+		const operators = isOperators(value);
+		const kept: Document = {};
+		for (const [op, v] of operators
+			? Object.entries(value)
+			: [["$eq", value]]) {
+			if (DECIMAL_COMPARE.has(op as string) && v !== null) {
+				exprs.push({ [op as string]: [field, decimalBound(v)] });
+			} else if (
+				(op === "$in" || op === "$nin") &&
+				Array.isArray(v) &&
+				!v.includes(null)
+			) {
+				const member = { $in: [field, v.map(decimalBound)] };
+				exprs.push(op === "$in" ? member : { $not: [member] });
+			} else {
+				kept[op as string] = v;
+			}
+		}
+		if (Object.keys(kept).length > 0) out[key] = operators ? kept : value;
+	}
+	if (exprs.length === 0) return out;
+	const all =
+		out.$expr !== undefined ? [out.$expr as Document, ...exprs] : exprs;
+	return { ...out, $expr: all.length === 1 ? all[0] : { $and: all } };
 }
 
 /**
@@ -834,6 +1005,35 @@ function withAliasKey<T extends object>(doc: T, column: string | undefined): T {
 	return (
 		key !== undefined && rest._id === undefined ? { ...rest, _id: key } : doc
 	) as T;
+}
+
+/**
+ * `_id` des documents à la représentation de la clé aliasée : un `uuid` rangé
+ * en texte (profil prisma, ADR-036 D6) l'est en minuscules, défaut compris.
+ */
+function keyAsStored<T extends object>(
+	documents: readonly T[],
+	alias: PkAlias | undefined,
+	where: string
+): T[] {
+	const declared =
+		alias?.storedAs === "string"
+			? alias.type === "uuid"
+				? UUID_TEXT_TYPE
+				: alias.type === "decimal"
+					? DECIMAL_TEXT_TYPE
+					: undefined
+			: alias?.storedAs;
+	if (alias === undefined || declared === undefined) return [...documents];
+	return documents.map((doc) => {
+		const key = (doc as Record<string, unknown>)._id;
+		return key === undefined
+			? doc
+			: ({
+					...doc,
+					_id: toDeclaredType(key, declared, alias.column, where)
+				} as T);
+	});
 }
 
 /** Colonnes à photographier autour d'un write : clés référencées et FK `refs`. */
@@ -1172,12 +1372,10 @@ class MongoConnection implements Connection {
 		}
 		const db = this.#requireDb();
 		try {
-			// `filter: true` → une chaîne 24-hex comparée à `_id` dans un `$match`
-			// redevient un ObjectId (cf. hydrateBson), pour que `where _id = "…"` matche.
-			const pipeline = hydrateBson(
-				pipelineWithStoredForms(query.pipeline),
-				true
-			) as Document[];
+			const pipeline = await this.#readPipeline(
+				query.collection,
+				query.pipeline
+			);
 			const docs = await db
 				.collection(query.collection)
 				.aggregate(pipeline)
@@ -1248,10 +1446,31 @@ class MongoConnection implements Connection {
 		session?: ClientSession
 	): Promise<MongoWrite> {
 		if (query.op === "delete") {
-			return { ...query, filter: withStoredForms(query.filter) };
+			const decimals = textDecimals(
+				await this.#declaredTypes(query.collection)
+			);
+			return {
+				...query,
+				filter: withStoredForms(
+					withTextDecimalFilter(query.filter, new Set(decimals))
+				)
+			};
 		}
 		if (query.op === "insert-select-agg-merge") {
-			return { ...query, pipeline: pipelineWithStoredForms(query.pipeline) };
+			const decimals = await this.#textDecimalsOf([
+				query.sourceCollection,
+				...lookupCollections(query.pipeline)
+			]);
+			return {
+				...query,
+				pipeline: pipelineWithStoredForms(
+					withTextDecimalStages(
+						query.pipeline,
+						decimals.get(query.sourceCollection) ?? [],
+						(c) => decimals.get(c) ?? []
+					)
+				)
+			};
 		}
 		const types = await this.#declaredTypes(query.collection);
 		const inserting = `insert dans '${query.collection}'`;
@@ -1270,21 +1489,48 @@ class MongoConnection implements Connection {
 					)
 				};
 			}
-			case "update":
+			case "update": {
+				// Un calcul en forme pipeline lit le décimal en nombre, puis le range en texte.
+				const decimals = textDecimals(types);
+				const update = declaredUpdate(query.update, types, updating);
 				return {
 					...query,
-					filter: withStoredForms(query.filter),
-					update: declaredUpdate(query.update, types, updating)
+					filter: withStoredForms(
+						withTextDecimalFilter(query.filter, new Set(decimals))
+					),
+					update:
+						Array.isArray(update) && decimals.length > 0
+							? [
+									...withTextDecimalStages([], decimals, () => []),
+									...update,
+									decimalsBackToText(decimals)
+								]
+							: update
 				};
-			case "update-agg-merge":
-				return {
-					...query,
-					pipeline: declaredPipeline(
+			}
+			case "update-agg-merge": {
+				const decimals = await this.#textDecimalsOf([
+					query.collection,
+					...lookupCollections(query.pipeline)
+				]);
+				const own = decimals.get(query.collection) ?? [];
+				const stages = withTextDecimalStages(
+					declaredPipeline(
 						pipelineWithStoredForms(query.pipeline),
 						types,
 						updating
-					)
+					),
+					own,
+					(c) => decimals.get(c) ?? []
+				);
+				return {
+					...query,
+					pipeline:
+						own.length > 0
+							? beforeMerge(stages, decimalsBackToText(own))
+							: stages
 				};
+			}
 			case "upsert": {
 				// La branche insertion écrit le document d'un `add` : clé aliasée,
 				// défauts, types déclarés. Le filtre reste une égalité : à
@@ -1317,6 +1563,53 @@ class MongoConnection implements Connection {
 				};
 			}
 		}
+	}
+
+	/**
+	 * Pipeline de lecture prêt à exécuter : `decimal` rangés en texte lus comme
+	 * des nombres (ADR-036 D6), littéraux sous leurs formes stockées, chaîne
+	 * 24-hex comparée à `_id` redevenue un ObjectId (cf. hydrateBson).
+	 */
+	async #readPipeline(
+		collection: string,
+		stages: readonly Document[]
+	): Promise<Document[]> {
+		const decimals = await this.#textDecimalsOf([
+			collection,
+			...lookupCollections(stages)
+		]);
+		return hydrateBson(
+			pipelineWithStoredForms(
+				withTextDecimalStages(
+					stages,
+					decimals.get(collection) ?? [],
+					(c) => decimals.get(c) ?? []
+				)
+			),
+			true
+		) as Document[];
+	}
+
+	/** `decimal` rangés en texte de chaque collection, en une lecture des validateurs. */
+	async #textDecimalsOf(
+		names: readonly string[]
+	): Promise<Map<string, string[]>> {
+		const out = new Map<string, string[]>();
+		try {
+			const infos = (await this.#requireDb()
+				.listCollections({ name: { $in: [...new Set(names)] } })
+				.toArray()) as {
+				readonly name: string;
+				readonly options?: { readonly validator?: Document };
+			}[];
+			for (const info of infos) {
+				const fields = textDecimals(declaredTypes(info.options?.validator));
+				if (fields.length > 0) out.set(info.name, fields);
+			}
+		} catch {
+			// Validateurs illisibles : la lecture se fait sur les valeurs stockées.
+		}
+		return out;
 	}
 
 	/** Types déclarés par le validateur de `collection` ; aucun sans validateur. */
@@ -2991,7 +3284,12 @@ class MongoConnection implements Connection {
 				// Le validateur garde l'ancien type tant que la conversion tourne :
 				// il le lâche d'abord, le nouveau est posé à la fin.
 				if (validator !== undefined && properties[field] !== undefined) {
-					const { bsonType: _type, enum: _enum, ...untyped } = property;
+					const {
+						bsonType: _type,
+						enum: _enum,
+						pattern: _pattern,
+						...untyped
+					} = property;
 					await db.command({
 						collMod: query.collection,
 						validator: {
@@ -3013,6 +3311,10 @@ class MongoConnection implements Connection {
 				action.kind === "set-nullable" ? true : action.kind === "set-not-null" ? false : nullable;
 			delete property.bsonType;
 			delete property.enum;
+			if (action.kind === "set-type") {
+				delete property.pattern;
+				if (action.pattern !== undefined) property.pattern = action.pattern;
+			}
 			if (bsonType !== null && bsonType !== undefined) {
 				property.bsonType = stayNullable ? [bsonType, "null"] : bsonType;
 			} else if (!stayNullable) {
@@ -3332,6 +3634,9 @@ class MongoConnection implements Connection {
 						column: query.primaryKeyAlias,
 						...(query.primaryKeyType !== undefined
 							? { type: query.primaryKeyType }
+							: {}),
+						...(query.primaryKeyStoredAs !== undefined
+							? { storedAs: query.primaryKeyStoredAs }
 							: {})
 					},
 					{ upsert: true }
@@ -3375,7 +3680,11 @@ class MongoConnection implements Connection {
 		const alias = (await loadPkAliases(this.#requireDb())).get(collection);
 		// Sans schéma, le lower n'a pas réécrit l'alias : la valeur passe à `_id`.
 		const keyed = documents.map((doc) => withAliasKey(doc, alias?.column));
-		const prepared = await this.#withDefaults(collection, keyed, session);
+		const prepared = keyAsStored(
+			await this.#withDefaults(collection, keyed, session),
+			alias,
+			`insert dans '${collection}'`
+		);
 		if (
 			alias !== undefined &&
 			prepared.some((doc) => (doc as Record<string, unknown>)._id === undefined)
@@ -3545,13 +3854,16 @@ class MongoConnection implements Connection {
 
 			// Le remplissage écrit au type de la colonne (ADR-029 D15), contrôlé
 			// avant que le validateur change.
-			const { bsonType } = query.column;
+			const declared = declaredTypeOf(
+				query.column.bsonType,
+				query.column.pattern
+			);
 			const typed = (value: unknown): unknown =>
-				bsonType === null
+				declared === undefined
 					? value
 					: toDeclaredType(
 							value,
-							bsonType,
+							declared,
 							fieldName,
 							`add column dans '${query.collection}'`
 						);
@@ -3570,6 +3882,9 @@ class MongoConnection implements Connection {
 				newProperty["bsonType"] = query.column.required
 					? query.column.bsonType
 					: [query.column.bsonType, "null"];
+			}
+			if (query.column.pattern !== undefined) {
+				newProperty.pattern = query.column.pattern;
 			}
 			if (query.column.enum !== undefined) {
 				newProperty.enum = query.column.required
@@ -3678,10 +3993,10 @@ class MongoConnection implements Connection {
 			session.startTransaction(txOptions);
 			for (const step of query.steps) {
 				if (step.kind === "query") {
-					const pipeline = hydrateBson(
-						pipelineWithStoredForms(step.query.pipeline),
-						true
-					) as Document[];
+					const pipeline = await this.#readPipeline(
+						step.query.collection,
+						step.query.pipeline
+					);
 					const docs = await db
 						.collection(step.query.collection)
 						.aggregate(pipeline, { session })
@@ -3851,10 +4166,10 @@ class MongoConnection implements Connection {
 		try {
 			for (const bodyStep of step.body) {
 				if (bodyStep.kind === "query") {
-					const pipeline = hydrateBson(
-						pipelineWithStoredForms(bodyStep.query.pipeline),
-						true
-					) as Document[];
+					const pipeline = await this.#readPipeline(
+						bodyStep.query.collection,
+						bodyStep.query.pipeline
+					);
 					const docs = await db
 						.collection(bodyStep.query.collection)
 						.aggregate(pipeline, { session })

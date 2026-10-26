@@ -1,29 +1,63 @@
-import { isSqlDecimal } from "@sqlnest/snql";
+import { isSqlDecimal, MONGO_TEXT_PATTERN } from "@sqlnest/snql";
 import type { Document } from "mongodb";
-import { Decimal128, Double, Int32, Long, ObjectId, UUID } from "mongodb";
+import {
+	Binary,
+	Decimal128,
+	Double,
+	Int32,
+	Long,
+	ObjectId,
+	UUID
+} from "mongodb";
 import { EngineExecutionError } from "../errors";
 
 /**
  * Type BSON déclaré de chaque champ, lu du validateur `$jsonSchema` : c'est
  * lui qui refuse un document mal typé (ADR-029 D15). `null` est retiré d'une
- * union `[t, "null"]` ; un champ à plusieurs types n'est pas converti.
+ * union `[t, "null"]` ; un champ à plusieurs types n'est pas converti. Un
+ * `uuid` ou un `decimal` rangé en texte (profil prisma, ADR-036 D6) est
+ * `uuid-text` ou `decimal-text`.
  */
 export type DeclaredTypes = ReadonlyMap<string, string>;
+
+/** Uuid et décimal rangés en texte, reconnus au motif que SNQL leur pose. */
+export const UUID_TEXT_TYPE = "uuid-text";
+export const DECIMAL_TEXT_TYPE = "decimal-text";
+
+/** Type déclaré d'une property du validateur ; `undefined` sans type unique. */
+export function declaredTypeOf(
+	bsonType: unknown,
+	pattern?: unknown
+): string | undefined {
+	const types = (Array.isArray(bsonType) ? bsonType : [bsonType]).filter(
+		(t) => t !== "null"
+	);
+	const [type] = types;
+	if (types.length !== 1 || typeof type !== "string") return undefined;
+	if (type === "string" && typeof pattern === "string") {
+		if (pattern === MONGO_TEXT_PATTERN.uuid) return UUID_TEXT_TYPE;
+		if (pattern === MONGO_TEXT_PATTERN.decimal) return DECIMAL_TEXT_TYPE;
+	}
+	return type;
+}
 
 export function declaredTypes(validator: Document | undefined): DeclaredTypes {
 	const jsonSchema = validator?.$jsonSchema as Document | undefined;
 	const properties = jsonSchema?.properties as Document | undefined;
 	const out = new Map<string, string>();
 	for (const [field, property] of Object.entries(properties ?? {})) {
-		const bsonType = (property as { bsonType?: unknown } | null)?.bsonType;
-		const types = (Array.isArray(bsonType) ? bsonType : [bsonType]).filter(
-			(t) => t !== "null"
-		);
-		if (types.length === 1 && typeof types[0] === "string") {
-			out.set(field, types[0]);
-		}
+		const p = property as { bsonType?: unknown; pattern?: unknown } | null;
+		const type = declaredTypeOf(p?.bsonType, p?.pattern);
+		if (type !== undefined) out.set(field, type);
 	}
 	return out;
+}
+
+/** Champs d'un `decimal` rangé en texte. */
+export function textDecimals(types: DeclaredTypes): string[] {
+	return [...types]
+		.filter(([, type]) => type === DECIMAL_TEXT_TYPE)
+		.map(([field]) => field);
 }
 
 /** Lecture d'un texte en booléen, mots acceptés par Postgres (`'f'::boolean`).
@@ -42,7 +76,10 @@ const SNQL_NAMES: Readonly<Record<string, string>> = {
 	date: "date",
 	binData: "uuid",
 	object: "json",
-	array: "array"
+	array: "array",
+	objectId: "ObjectId",
+	[UUID_TEXT_TYPE]: "uuid",
+	[DECIMAL_TEXT_TYPE]: "decimal"
 };
 
 /** Valeur qu'un type refuse, avec la précision du message. */
@@ -60,6 +97,7 @@ const INT64 = { min: -(2n ** 63n), max: 2n ** 63n - 1n };
 const DECIMAL_TEXT = /^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i;
 const DECIMAL_PARTS = /^([+-]?)(\d*)(?:\.(\d*))?(?:e([+-]?\d+))?$/i;
 const LEADING_ZEROS = /^0+/;
+const NON_ZERO = /[1-9]/;
 
 /** Texte d'un nombre JS ; un entier ≥ 1e21 écrit en chiffres, pas `1e+21`. */
 function numberText(value: number): string {
@@ -152,6 +190,45 @@ function toText(value: unknown): unknown {
 	if (value instanceof UUID || value instanceof ObjectId)
 		return value.toHexString();
 	return decimalText(value) ?? INVALID;
+}
+
+/** Texte décimal sans exposant (`1.5e3` → `1500`), échelle gardée. */
+function plainDecimal(text: string): string {
+	const [, sign, whole = "", fraction = "", exponent = "0"] =
+		DECIMAL_PARTS.exec(text) ?? [];
+	let digits = `${whole}${fraction}`;
+	let point = whole.length + Number(exponent);
+	if (point <= 0) {
+		digits = `${"0".repeat(1 - point)}${digits}`;
+		point = 1;
+	}
+	if (point > digits.length) digits = digits.padEnd(point, "0");
+	const integer = digits.slice(0, point).replace(LEADING_ZEROS, "") || "0";
+	const rest = digits.slice(point);
+	const negative = sign === "-" && NON_ZERO.test(digits);
+	return `${negative ? "-" : ""}${integer}${rest !== "" ? `.${rest}` : ""}`;
+}
+
+/** Un `decimal` rangé en texte : notation décimale, au plus 34 chiffres significatifs (Decimal128). */
+function toDecimalText(value: unknown): unknown {
+	const text = decimalText(value);
+	if (text === undefined) return INVALID;
+	const plain = plainDecimal(text);
+	try {
+		Decimal128.fromString(plain);
+	} catch {
+		return new Refused("plus de 34 chiffres significatifs");
+	}
+	return plain;
+}
+
+/** Un `uuid` rangé en texte : forme canonique en minuscules, comme `uuid()`. */
+function toUuidText(value: unknown): unknown {
+	if (value instanceof Binary && value.sub_type === Binary.SUBTYPE_UUID) {
+		return value.toUUID().toHexString();
+	}
+	const uuid = toUuid(value);
+	return uuid instanceof UUID ? uuid.toHexString() : uuid;
 }
 
 function toBool(value: unknown): unknown {
@@ -259,7 +336,9 @@ const CONVERTERS: Readonly<Record<string, (value: unknown) => unknown>> = {
 			? v
 			: typeof v === "string" && OBJECT_ID_HEX.test(v)
 				? new ObjectId(v)
-				: INVALID
+				: INVALID,
+	[UUID_TEXT_TYPE]: toUuidText,
+	[DECIMAL_TEXT_TYPE]: toDecimalText
 };
 
 function shown(value: unknown): string {
@@ -365,7 +444,9 @@ export function declaredTypeExpr(input: unknown, bsonType: string): unknown {
 				{ $toString: v },
 				v
 			]
-		}
+		},
+		// Un Decimal128 garde son échelle (`25.00`), un double son texte court.
+		[DECIMAL_TEXT_TYPE]: { $cond: [{ $isNumber: v }, { $toString: v }, v] }
 	};
 	const expr = converted[bsonType];
 	return expr === undefined

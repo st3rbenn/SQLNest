@@ -147,7 +147,7 @@ z.globalRegistry.add(SchemaChangeBody, { id: "DbConnectionsSchemaChangeBody" });
  */
 export const SchemaChangeResponse = z.object({
 	orm: z.enum(["prisma", "doctrine", "sequelize", "seaorm"]),
-	migration: z.string(),
+	migration: z.string().optional(),
 	files: z.array(z.string()),
 	applied: z.boolean(),
 	checks: z.array(

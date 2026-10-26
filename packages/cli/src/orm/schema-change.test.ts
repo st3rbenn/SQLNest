@@ -59,6 +59,7 @@ function adapter(overrides: Partial<OrmAdapter> = {}): OrmAdapter {
 	return {
 		orm: "prisma",
 		ddlOptions: () => ({ ormProfile: "prisma" }),
+		migrations: () => true,
 		preflight: step("preflight"),
 		writeMigration: async () => {
 			calls.push("writeMigration");
@@ -94,6 +95,26 @@ function connection(...schemas: SchemaModel[]): Connection {
 	for (const s of schemas) introspect.mockResolvedValueOnce(s);
 	const execute = vi.fn(async () => ({ columns: [], rows: [], rowCount: 0 }));
 	return { engine: "postgres", introspect, execute } as unknown as Connection;
+}
+
+/** Base MongoDB : Prisma n'y tient pas d'historique de migrations. */
+const MONGO: SchemaModel = { ...BEFORE, engine: "mongodb" };
+
+function mongoConnection(
+	execute: () => Promise<unknown> = async () => ({
+		columns: [],
+		rows: [],
+		rowCount: 0
+	}),
+	...schemas: SchemaModel[]
+): Connection {
+	const introspect = vi.fn(async () => MONGO);
+	for (const s of schemas) introspect.mockResolvedValueOnce(s);
+	return {
+		engine: "mongodb",
+		introspect,
+		execute: vi.fn(execute)
+	} as unknown as Connection;
 }
 
 const PROJECT: LocalConnectionProject = {
@@ -324,6 +345,52 @@ describe("applySchemaChange (ADR-037 D3, D4, D5)", () => {
 			run(adapter(), conn, { src: "remove from agency where id = 1" })
 		).rejects.toThrow("Un changement de schéma attend une instruction DDL");
 		expect(conn.introspect).not.toHaveBeenCalled();
+	});
+
+	it("sans historique (Prisma sous MongoDB) : pas de migration, SQLNest applique le DDL après la validation", async () => {
+		const after = applyDdlToSchema(
+			MONGO,
+			lowerDDL(parse(tokenize(SRC)) as Parameters<typeof lowerDDL>[0], MONGO, {
+				ormProfile: "prisma"
+			})
+		);
+		const conn = mongoConnection(undefined, MONGO, after);
+		const result = await run(adapter({ migrations: () => false }), conn);
+		expect(calls).toEqual([
+			"preflight",
+			"patchModel",
+			"validate",
+			"check applied=true"
+		]);
+		expect(conn.execute).toHaveBeenCalledWith(
+			expect.objectContaining({ kind: "mongo-ddl", operation: "add-column" })
+		);
+		expect(changes[0]?.sql).toBeUndefined();
+		expect(result).toEqual({
+			orm: "prisma",
+			files: ["prisma/schema.prisma"],
+			applied: true,
+			checks: [
+				{ name: "model-database", ok: true },
+				{ name: "history-model", ok: true },
+				{ name: "structure", ok: true }
+			]
+		});
+	});
+
+	it("sans historique, échec à l'application : modèle remis, base vérifiée, erreur d'origine", async () => {
+		const conn = mongoConnection(async () => {
+			throw new Error("Document failed validation");
+		});
+		await expect(
+			run(adapter({ migrations: () => false }), conn)
+		).rejects.toThrow(/^Document failed validation$/);
+		expect(calls).toEqual([
+			"preflight",
+			"patchModel",
+			"validate",
+			"undo model"
+		]);
 	});
 
 	it("ORM dont SQLNest n'écrit pas encore les migrations", async () => {

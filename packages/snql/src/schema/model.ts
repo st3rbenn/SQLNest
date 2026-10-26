@@ -30,6 +30,9 @@ export type RelationOrigin = "foreign-key" | "naming-heuristic" | "ai" | "user";
 
 export type RelationKind = "one-to-many" | "many-to-one" | "one-to-one";
 
+/** Représentation stockée d'une colonne qui diffère de son type (`Field.storedAs`). */
+export type StoredAs = "string" | "objectId";
+
 export interface Field {
 	readonly name: string;
 	readonly type: SnqlType;
@@ -64,6 +67,13 @@ export interface Field {
 	 * réécrit le nom SNQL, la sortie rend le nom SNQL.
 	 */
 	readonly nativeName?: string;
+	/**
+	 * Représentation stockée quand elle diffère de `type` (Mongo) : `string`
+	 * pour un `uuid` ou un `decimal` rangé en texte sous le profil `prisma`
+	 * (ADR-036 D6), `objectId` pour une clé ObjectId et la FK qui la vise.
+	 * Absent = la représentation du type.
+	 */
+	readonly storedAs?: StoredAs;
 	/**
 	 * Nom de l'enum type si la colonne est typée par un enum nommé
 	 * (ADR-030). Permet la résolution `type: role_type` dans le parser,

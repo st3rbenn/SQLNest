@@ -2,9 +2,10 @@
  * Boucle d'un changement de schéma dans le projet relié (ADR-037 D3, D4, D5,
  * D7) : DDL compilé avec le profil de l'ORM sur une introspection fraîche,
  * migration écrite, modèle patché et validé avant la base, migration
- * appliquée, puis contrôles. Un échec avant la base, ou de l'application,
- * remet les fichiers et la base en l'état ; un écart après application est
- * rapporté.
+ * appliquée, puis contrôles. Sans historique de migrations (Prisma sous
+ * MongoDB, D3 bis), pas de fichier : SQLNest applique le DDL lui-même. Un
+ * échec avant la base, ou de l'application, remet les fichiers et la base en
+ * l'état ; un écart après application est rapporté.
  */
 
 import { type Connection, dropFailedIndex } from "@sqlnest/engine";
@@ -82,20 +83,24 @@ export async function applySchemaChange(
 			`Pas de DDL ${connection.engine} pour ce changement`
 		);
 	}
+	const history = adapter.migrations(connection.engine);
 	const change: SchemaChange = {
 		...input,
 		plan,
-		sql: migrationSql(native, input.src),
+		native,
+		...(history ? { sql: migrationSql(native, input.src) } : {}),
 		before
 	};
 	await adapter.preflight(change);
 
 	const written: Written[] = [];
-	let migration: WrittenMigration;
+	let migration: WrittenMigration | undefined;
 	let names: TunnelSchemaChangeNames | undefined;
 	try {
-		migration = await adapter.writeMigration(change);
-		written.push(migration);
+		if (history) {
+			migration = await adapter.writeMigration(change);
+			written.push(migration);
+		}
 		const model = await adapter.patchModel(change);
 		written.push(model);
 		names = model.names;
@@ -109,7 +114,7 @@ export async function applySchemaChange(
 		checks: readonly TunnelSchemaCheck[]
 	): TunnelSchemaChangeData => ({
 		orm: project.orm,
-		migration: migration.name,
+		...(migration !== undefined ? { migration: migration.name } : {}),
 		files: written.flatMap((w) => w.files),
 		applied,
 		checks,
@@ -123,11 +128,12 @@ export async function applySchemaChange(
 		]);
 	}
 	try {
-		await adapter.apply(change, migration);
+		if (migration !== undefined) await adapter.apply(change, migration);
+		else await connection.execute(native);
 	} catch (err) {
 		const notes: string[] = [];
 		try {
-			await adapter.rollback(change, migration);
+			if (migration !== undefined) await adapter.rollback(change, migration);
 		} catch (rollbackErr) {
 			notes.push(
 				`Retour arrière de l'historique incomplet : ${messageOf(rollbackErr)}`
@@ -152,7 +158,7 @@ export async function applySchemaChange(
 async function nativeChecks(
 	adapter: OrmAdapter,
 	change: SchemaChange,
-	migration: WrittenMigration,
+	migration: WrittenMigration | undefined,
 	applied: boolean
 ): Promise<TunnelSchemaCheck[]> {
 	try {

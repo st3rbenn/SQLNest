@@ -122,7 +122,7 @@ export class PrismaPatchError extends Error {
 interface Patcher {
 	readonly editor: SchemaEditor;
 	readonly provider: PrismaProvider;
-	readonly engine: "postgres" | "mssql";
+	readonly engine: "postgres" | "mssql" | "mongodb";
 	readonly conventions: FileConventions;
 	readonly indent: string;
 	readonly db: SchemaModel;
@@ -131,10 +131,11 @@ interface Patcher {
 	model?: string;
 }
 
-/** Fournisseur Prisma de chaque moteur dont Prisma écrit les migrations. */
+/** Fournisseur Prisma de chaque moteur. */
 const PROVIDERS: Readonly<Record<string, PrismaProvider>> = {
 	postgres: "postgresql",
-	mssql: "sqlserver"
+	mssql: "sqlserver",
+	mongodb: "mongodb"
 };
 const LEADING_SPACE_RE = /^\s*/;
 const WHITESPACE_RE = /\s/;
@@ -267,8 +268,16 @@ function createTable(p: Patcher, plan: CreateTablePlan): void {
 	}
 	const nameOf = (column: string): string => names.get(column) ?? column;
 	const soleKey = primaryKey.length === 1 ? primaryKey[0] : undefined;
+	// MongoDB sans clé déclarée : Mongo pose un ObjectId, que Prisma attend en `@id`.
+	const objectIdKey =
+		p.provider === "mongodb" && primaryKey.length === 0
+			? [
+					`${p.indent}${unique("id", new Set(names.values()))} String @id @default(auto()) @map("_id") @db.ObjectId`
+				]
+			: [];
 	const lines = [
 		`model ${model} {`,
+		...objectIdKey,
 		...plan.fields.map((f) =>
 			scalarField(p, {
 				table: plan.target,
@@ -298,7 +307,11 @@ function createTable(p: Patcher, plan: CreateTablePlan): void {
 	}
 	if (model !== plan.target) attributes.push(`@@map(${quote(plan.target)})`);
 	// Sans clé ni unicité, Prisma Client ne peut pas servir la table.
-	if (primaryKey.length === 0 && !plan.fields.some((f) => f.unique)) {
+	if (
+		objectIdKey.length === 0 &&
+		primaryKey.length === 0 &&
+		!plan.fields.some((f) => f.unique)
+	) {
 		attributes.push("@@ignore");
 	}
 	if (attributes.length > 0) {
@@ -534,7 +547,8 @@ function setType(
 			: undefined;
 	const scalar = prismaScalar(action.type, p.provider, {
 		...(enumName !== undefined ? { enumTypeName: enumName } : {}),
-		key: targets.some((t) => isIndexed(schema, t.model, t.field))
+		key: targets.some((t) => isIndexed(schema, t.model, t.field)),
+		...(action.storedAs !== undefined ? { storedAs: action.storedAs } : {})
 	});
 	for (const target of targets) {
 		rewriteField(p, target.model, target.field, (parts) => {
@@ -1223,18 +1237,23 @@ function scalarField(p: Patcher, spec: ScalarSpec): string {
 		...(f.enumTypeName !== undefined
 			? { enumTypeName: enumModelName(p, f.enumTypeName) }
 			: {}),
-		key: spec.key
+		key: spec.key,
+		...(f.storedAs !== undefined ? { storedAs: f.storedAs } : {})
 	});
+	// MongoDB : la clé est `_id`, sans nom de contrainte (alias `id`, ADR-036 E/1f).
+	const mongoKey = p.provider === "mongodb" && spec.primaryKey !== undefined;
 	const attributes: PrismaAttribute[] = [];
 	if (spec.primaryKey !== undefined) {
 		attributes.push(
 			attributeWith(
 				"@id",
 				[],
-				mapArgument(
-					spec.primaryKey.name,
-					conventional(p, spec.table, [], "pkey")
-				)
+				mongoKey
+					? []
+					: mapArgument(
+							spec.primaryKey.name,
+							conventional(p, spec.table, [], "pkey")
+						)
 			)
 		);
 	} else if (f.unique) {
@@ -1257,7 +1276,8 @@ function scalarField(p: Patcher, spec: ScalarSpec): string {
 		);
 		if (attribute !== undefined) attributes.push(attribute);
 	}
-	if (spec.name !== f.name)
+	if (mongoKey) attributes.push({ name: "@map", args: quote("_id") });
+	else if (spec.name !== f.name)
 		attributes.push({ name: "@map", args: quote(f.name) });
 	if (scalar.native !== undefined)
 		attributes.push(nativeAttribute(scalar.native));

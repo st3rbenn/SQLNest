@@ -663,6 +663,8 @@ export interface CreateTableField {
 	// FK info — présent uniquement si le field a un modifier `ref` (ADR-031).
 	// Résolu + validé au lower depuis `schema.collections`.
 	readonly ref?: FieldRefPlan;
+	/** Représentation Mongo quand elle diffère du type (voir `Field.storedAs`). */
+	readonly storedAs?: import("../schema/model").StoredAs;
 	readonly span?: Span;
 }
 
@@ -922,6 +924,8 @@ export type AlterColumnPlanAction =
 			readonly type: import("../schema/model").SnqlType;
 			readonly enumTypeName?: string;
 			readonly enumMembers?: readonly string[];
+			/** Représentation Mongo du nouveau type (voir `Field.storedAs`). */
+			readonly storedAs?: import("../schema/model").StoredAs;
 	  };
 
 /**

@@ -15,7 +15,8 @@ import type {
 	Field,
 	RefDef,
 	SchemaModel,
-	SnqlType
+	SnqlType,
+	StoredAs
 } from "./model";
 
 export interface SchemaDiff {
@@ -182,6 +183,7 @@ function sameField(w: Field, g: Field, engine: string): boolean {
 		(ENGINE_REPRESENTATIONS[engine]?.[w.type]?.includes(g.type) ?? false);
 	return (
 		typeMatches &&
+		w.storedAs === g.storedAs &&
 		w.nullable === g.nullable &&
 		(w.hasDefault === true) === (g.hasDefault === true) &&
 		(w.enumValues === undefined ||
@@ -284,9 +286,16 @@ function compareRefs(
 	return diffs;
 }
 
+const STORED_AS_LABEL: Readonly<Record<StoredAs, string>> = {
+	string: "texte",
+	objectId: "ObjectId"
+};
+
 function describeField(f: Field): string {
 	return [
-		f.type,
+		f.storedAs !== undefined
+			? `${f.type} rangé en ${STORED_AS_LABEL[f.storedAs]}`
+			: f.type,
 		f.nullable ? "nullable" : "non nul",
 		...(f.hasDefault === true ? ["avec défaut"] : []),
 		...(f.enumValues !== undefined ? [`[${f.enumValues.join(", ")}]`] : [])

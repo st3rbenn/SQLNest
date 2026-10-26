@@ -203,7 +203,8 @@ function fieldOf(f: CreateTableField): Field {
 			? { hasDefault: true, defaultExpr: defaultText(f.defaultValue) }
 			: {}),
 		...(f.enumMembers !== undefined ? { enumValues: [...f.enumMembers] } : {}),
-		...(f.enumTypeName !== undefined ? { enumTypeName: f.enumTypeName } : {})
+		...(f.enumTypeName !== undefined ? { enumTypeName: f.enumTypeName } : {}),
+		...(f.storedAs !== undefined ? { storedAs: f.storedAs } : {})
 	};
 }
 
@@ -446,7 +447,12 @@ function alterField(field: Field, action: AlterColumnPlanAction): Field {
 			return rest;
 		}
 		case "set-type": {
-			const { enumValues: _values, enumTypeName: _typeName, ...rest } = field;
+			const {
+				enumValues: _values,
+				enumTypeName: _typeName,
+				storedAs: _storedAs,
+				...rest
+			} = field;
 			return {
 				...rest,
 				type: action.type,
@@ -455,7 +461,8 @@ function alterField(field: Field, action: AlterColumnPlanAction): Field {
 					: {}),
 				...(action.enumTypeName !== undefined
 					? { enumTypeName: action.enumTypeName }
-					: {})
+					: {}),
+				...(action.storedAs !== undefined ? { storedAs: action.storedAs } : {})
 			};
 		}
 	}

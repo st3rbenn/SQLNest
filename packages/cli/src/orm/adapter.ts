@@ -4,7 +4,12 @@
  */
 
 import type { Connection } from "@sqlnest/engine";
-import type { DDLPlan, DdlLowerOptions, SchemaModel } from "@sqlnest/snql";
+import type {
+	DDLPlan,
+	DdlLowerOptions,
+	NativeQuery,
+	SchemaModel
+} from "@sqlnest/snql";
 import type {
 	TunnelSchemaChangeNames,
 	TunnelSchemaCheck
@@ -17,8 +22,10 @@ export interface SchemaChange {
 	readonly project: LocalConnectionProject;
 	readonly src: string;
 	readonly plan: DDLPlan;
-	/** SQL de la migration, SNQL d'origine en commentaire. */
-	readonly sql: string;
+	/** DDL natif du changement, appliqué par SQLNest quand l'ORM ne tient pas d'historique. */
+	readonly native: NativeQuery;
+	/** SQL de la migration, SNQL d'origine en commentaire ; absent sans historique de migrations. */
+	readonly sql?: string;
 	/** Schéma de la base avant le changement. */
 	readonly before: SchemaModel;
 	readonly names?: TunnelSchemaChangeNames;
@@ -48,6 +55,12 @@ export interface OrmAdapter {
 	readonly orm: OrmName;
 	/** Profil de DDL de l'ORM (ADR-036 D6), selon le moteur de la base. */
 	ddlOptions(engine: string): DdlLowerOptions;
+	/**
+	 * `false` : l'ORM ne tient pas d'historique de migrations sous ce moteur
+	 * (Prisma sous MongoDB, `db push`) — pas de fichier de migration, SQLNest
+	 * applique le DDL lui-même (ADR-037 D3 bis).
+	 */
+	migrations(engine: string): boolean;
 	/** Avant toute écriture : l'outil de l'ORM est là, la base est à jour de ses migrations. */
 	preflight(change: SchemaChange): Promise<void>;
 	writeMigration(change: SchemaChange): Promise<WrittenMigration>;
@@ -57,10 +70,10 @@ export interface OrmAdapter {
 	apply(change: SchemaChange, migration: WrittenMigration): Promise<void>;
 	/** Après l'échec d'`apply` : l'historique de l'ORM marque la migration annulée. */
 	rollback(change: SchemaChange, migration: WrittenMigration): Promise<void>;
-	/** Contrôles natifs de l'ORM ; `applied` : la migration est en base. */
+	/** Contrôles natifs de l'ORM ; `applied` : le changement est en base. */
 	check(
 		change: SchemaChange,
-		migration: WrittenMigration,
+		migration: WrittenMigration | undefined,
 		applied: boolean
 	): Promise<TunnelSchemaCheck[]>;
 }

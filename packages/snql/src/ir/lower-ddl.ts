@@ -26,12 +26,14 @@ import type {
 import type { Span } from "../lexer/token";
 import { DDL_DEFAULT_FUNCTIONS } from "../parser/parser";
 import {
+	type Field,
 	getFkPartners,
 	type OnDeleteRule,
 	type OnUpdateRule,
 	type RefDef,
 	type SchemaModel,
-	type SnqlType
+	type SnqlType,
+	type StoredAs
 } from "../schema/model";
 import type {
 	AddColumnPlan,
@@ -88,6 +90,8 @@ interface DdlNaming {
 	readonly prisma: boolean;
 	readonly maxLength: number;
 	readonly onUpdate: OnUpdateRule;
+	/** `uuid` et `decimal` rangés en texte (profil `prisma` sous Mongo). */
+	readonly textStorage: boolean;
 }
 
 function ddlNaming(options: DdlLowerOptions, schema?: SchemaModel): DdlNaming {
@@ -97,8 +101,40 @@ function ddlNaming(options: DdlLowerOptions, schema?: SchemaModel): DdlNaming {
 		// Prisma tronque à la limite du moteur : 63 en Postgres, 128 en SQL Server.
 		maxLength: schema?.engine === "mssql" ? 128 : 63,
 		// `@relation` met `onUpdate: Cascade` quand rien n'est écrit.
-		onUpdate: prisma ? "cascade" : "restrict"
+		onUpdate: prisma ? "cascade" : "restrict",
+		// Prisma n'a sous MongoDB ni `Decimal` ni type UUID natif (ADR-036 D6).
+		textStorage: prisma && schema?.engine === "mongodb"
 	};
+}
+
+/** Types que le profil `prisma` range en texte sous Mongo (ADR-036 D6). */
+const TEXT_STORED: ReadonlySet<SnqlType> = new Set(["uuid", "decimal"]);
+
+/**
+ * Représentation Mongo d'une colonne (`Field.storedAs`) : celle de la clé
+ * qu'elle vise pour une FK, sinon le texte du profil pour un `uuid` ou un
+ * `decimal`.
+ */
+function columnStorage(
+	naming: DdlNaming,
+	type: SnqlType,
+	target: Field | undefined
+): StoredAs | undefined {
+	if (target !== undefined) return target.storedAs;
+	return naming.textStorage && TEXT_STORED.has(type) ? "string" : undefined;
+}
+
+/** Colonne visée par une FK, d'après le schéma ; absente pour une table créée. */
+function refTargetField(
+	schema: SchemaModel | undefined,
+	ref:
+		| { readonly targetCollection: string; readonly targetColumn: string }
+		| undefined
+): Field | undefined {
+	if (ref === undefined) return undefined;
+	return schema?.collections
+		.find((c) => c.name === ref.targetCollection)
+		?.fields.find((f) => f.name === ref.targetColumn);
 }
 
 function prismaName(
@@ -652,6 +688,11 @@ function lowerAddColumn(
 					naming
 				)
 			: undefined;
+	const storedAs = columnStorage(
+		naming,
+		resolved.type,
+		refTargetField(schema, ref)
+	);
 	const base: CreateTableField = {
 		name: stmt.column.name,
 		type: resolved.type,
@@ -662,6 +703,7 @@ function lowerAddColumn(
 			hasDefault: stmt.column.defaultExpr !== undefined
 		}),
 		...(ref !== undefined ? { ref } : {}),
+		...(storedAs !== undefined ? { storedAs } : {}),
 		...(resolved.enumTypeName !== undefined
 			? { enumTypeName: resolved.enumTypeName }
 			: {}),
@@ -742,6 +784,14 @@ function lowerCreateTable(
 					onUpdate: ref.onUpdate
 				});
 			}
+			// Une FK vers la table créée suit la règle de son type, comme sa cible.
+			const storedAs = columnStorage(
+				naming,
+				type,
+				ref?.targetCollection === stmt.target
+					? undefined
+					: refTargetField(schema, ref)
+			);
 			const base: CreateTableField = {
 				name: f.name,
 				type,
@@ -751,6 +801,7 @@ function lowerCreateTable(
 					unique,
 					hasDefault: f.defaultExpr !== undefined
 				}),
+				...(storedAs !== undefined ? { storedAs } : {}),
 				...(resolved.enumTypeName !== undefined
 					? { enumTypeName: resolved.enumTypeName }
 					: {}),
@@ -1155,6 +1206,19 @@ function lowerAlterColumn(
 			);
 		}
 	}
+	const outgoing = schema?.refs?.find(
+		(r) => r.fromCollection === stmt.target && r.fromColumn === stmt.column
+	);
+	const storedAs = columnStorage(
+		naming,
+		resolved.type,
+		outgoing !== undefined
+			? refTargetField(schema, {
+					targetCollection: outgoing.toCollection,
+					targetColumn: outgoing.toColumn
+				})
+			: undefined
+	);
 	return {
 		op: "ddl",
 		kind: "alter-column",
@@ -1168,7 +1232,8 @@ function lowerAlterColumn(
 				: {}),
 			...(resolved.enumMembers !== undefined
 				? { enumMembers: resolved.enumMembers }
-				: {})
+				: {}),
+			...(storedAs !== undefined ? { storedAs } : {})
 		},
 		...(current !== undefined ? { current } : {}),
 		...(partners.length > 0 ? { partners } : {}),

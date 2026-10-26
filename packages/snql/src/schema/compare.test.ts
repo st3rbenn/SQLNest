@@ -30,6 +30,28 @@ describe("compareSchemas", () => {
 		expect(compareSchemas(s, s)).toEqual([]);
 	});
 
+	it("représentation stockée différente (Mongo, profil prisma) : signalée", () => {
+		const mongo = { engine: "mongodb" } as const;
+		const expected = schema(
+			{ fields: [field("price", { type: "decimal", storedAs: "string" })] },
+			mongo
+		);
+		const actual = schema(
+			{ fields: [field("price", { type: "decimal" })] },
+			mongo
+		);
+		expect(compareSchemas(expected, actual)).toEqual([
+			{
+				target: "t",
+				subject: "column",
+				name: "price",
+				expected: "decimal rangé en texte, non nul",
+				actual: "decimal, non nul"
+			}
+		]);
+		expect(compareSchemas(expected, expected)).toEqual([]);
+	});
+
 	it("colonne absente, type, nullabilité, défaut, valeurs d'enum : chacun signalé", () => {
 		const expected = schema({
 			fields: [

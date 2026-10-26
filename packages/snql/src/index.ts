@@ -86,7 +86,7 @@ export function planFor(
 }
 
 export { mapKvDDL } from "./codegen/kv-ddl";
-export { mongoMapper } from "./codegen/mongodb";
+export { MONGO_TEXT_PATTERN, mongoMapper } from "./codegen/mongodb";
 export { MSSQL_EMULATED_REF_PROPERTY, mssqlMapper } from "./codegen/mssql";
 export { postgresMapper } from "./codegen/postgres";
 export { DISTINCT_ON_RN_COLUMN } from "./codegen/sql-core";
@@ -295,6 +295,7 @@ export type {
 	SchemaModel,
 	SchemaSource,
 	SnqlType,
+	StoredAs,
 	TriggerEvent
 } from "./schema/model";
 export { applyDdlToSchema } from "./schema/apply-ddl";

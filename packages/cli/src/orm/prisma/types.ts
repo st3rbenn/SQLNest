@@ -1,18 +1,19 @@
 /**
  * Types, défauts et actions SNQL écrits en Prisma, pour que le modèle décrive
  * exactement le DDL que SNQL génère (zéro écart à `prisma migrate diff`).
- * Tables vérifiées sur le vrai Prisma : PostgreSQL et SQL Server.
+ * Tables vérifiées sur le vrai Prisma : PostgreSQL, SQL Server et MongoDB.
  */
 
 import type {
 	DdlDefault,
 	OnDeleteRule,
 	OnUpdateRule,
-	SnqlType
+	SnqlType,
+	StoredAs
 } from "@sqlnest/snql";
 import type { PrismaArgument } from "./attributes";
 
-export type PrismaProvider = "postgresql" | "sqlserver";
+export type PrismaProvider = "postgresql" | "sqlserver" | "mongodb";
 
 export interface PrismaScalar {
 	/** Type Prisma : `String`, `Int`, le nom d'un enum. */
@@ -53,6 +54,25 @@ const SQLSERVER: Readonly<Record<SnqlType, PrismaScalar>> = {
 	unknown: { type: "String", native: "@db.NVarChar(Max)" }
 };
 
+/**
+ * MongoDB : ni `Decimal` ni type UUID natif chez Prisma ; le profil les range
+ * en texte (ADR-036 D6). Les autres types BSON sont ceux que Prisma lit.
+ */
+const MONGODB: Readonly<Record<SnqlType, PrismaScalar>> = {
+	string: { type: "String" },
+	int: { type: "Int" },
+	bigint: { type: "BigInt" },
+	float: { type: "Float" },
+	decimal: { type: "String" },
+	bool: { type: "Boolean" },
+	date: { type: "DateTime" },
+	json: { type: "Json" },
+	array: { type: "Json" },
+	uuid: { type: "String" },
+	enum: { type: "String" },
+	unknown: { type: "String" }
+};
+
 /** Texte indexable sous SQL Server : SNQL range une clé en `nvarchar(450)`. */
 export const SQLSERVER_KEY_STRING = "@db.NVarChar(450)";
 
@@ -63,12 +83,21 @@ export const SQLSERVER_KEY_STRING = "@db.NVarChar(450)";
 export function prismaScalar(
 	type: SnqlType,
 	provider: PrismaProvider,
-	options: { readonly enumTypeName?: string; readonly key?: boolean } = {}
+	options: {
+		readonly enumTypeName?: string;
+		readonly key?: boolean;
+		readonly storedAs?: StoredAs;
+	} = {}
 ): PrismaScalar {
-	if (provider === "postgresql") {
-		return type === "enum" && options.enumTypeName !== undefined
-			? { type: options.enumTypeName }
-			: POSTGRES[type];
+	if (provider === "postgresql" || provider === "mongodb") {
+		if (type === "enum" && options.enumTypeName !== undefined) {
+			return { type: options.enumTypeName };
+		}
+		if (provider === "postgresql") return POSTGRES[type];
+		// Une FK vers une clé ObjectId (celle de Prisma) en prend le type natif.
+		return options.storedAs === "objectId"
+			? { type: "String", native: "@db.ObjectId" }
+			: MONGODB[type];
 	}
 	const scalar = SQLSERVER[type];
 	return type === "string" && options.key === true
@@ -85,6 +114,8 @@ export function prismaDefaultValue(
 	if (value === null) return undefined;
 	if (typeof value === "object" && "kind" in value) {
 		if (value.kind === "fn") {
+			// MongoDB : la valeur vient de Prisma Client, comme de `_snql_defaults`.
+			if (provider === "mongodb") return `${value.fn}()`;
 			if (value.fn === "now") {
 				return provider === "postgresql"
 					? "now()"
@@ -94,18 +125,24 @@ export function prismaDefaultValue(
 				? 'dbgenerated("gen_random_uuid()")'
 				: 'dbgenerated("newid()")';
 		}
-		if (value.kind === "decimal") return value.raw;
+		// Un décimal rangé en texte sous MongoDB : un défaut texte.
+		if (value.kind === "decimal") {
+			return provider === "mongodb" ? JSON.stringify(value.raw) : value.raw;
+		}
 		if (value.kind === "json") return JSON.stringify(value.raw);
 	}
 	if (typeof value === "string") {
-		return isEnum && provider === "postgresql" ? value : JSON.stringify(value);
+		return isEnum && provider !== "sqlserver" ? value : JSON.stringify(value);
 	}
 	return String(value);
 }
 
 /** Moteur SNQL d'un fournisseur : la limite de longueur des noms en dépend. */
-export function engineOf(provider: PrismaProvider): "postgres" | "mssql" {
-	return provider === "postgresql" ? "postgres" : "mssql";
+export function engineOf(
+	provider: PrismaProvider
+): "postgres" | "mssql" | "mongodb" {
+	if (provider === "postgresql") return "postgres";
+	return provider === "sqlserver" ? "mssql" : "mongodb";
 }
 
 const ACTIONS: Readonly<Record<OnDeleteRule, string>> = {

@@ -4,7 +4,9 @@
  * `prisma format` et `validate`, `migrate deploy`, et `migrate resolve
  * --rolled-back` après un échec. Contrôles : modèle ↔ base, et historique ↔
  * modèle sur une base shadow créée pour l'occasion sur le serveur de la
- * connexion.
+ * connexion. Sous MongoDB, Prisma ne tient pas d'historique (`db push`) :
+ * modèle patché et validé, DDL appliqué par SQLNest, contrôle modèle ↔ base
+ * (D3 bis).
  */
 
 import { randomBytes } from "node:crypto";
@@ -54,11 +56,14 @@ import {
 } from "./tool";
 
 const TIMEOUT_MS = 120_000;
-/** Fournisseur Prisma des moteurs dont Prisma tient l'historique de migrations. */
+/** Fournisseur Prisma de chaque moteur. */
 const PROVIDERS: Readonly<Record<string, string>> = {
 	postgres: "postgresql",
-	mssql: "sqlserver"
+	mssql: "sqlserver",
+	mongodb: "mongodb"
 };
+/** Moteurs où Prisma ne tient pas d'historique de migrations (`db push`). */
+const WITHOUT_HISTORY = new Set(["mongodb"]);
 /** Fournisseur écrit par Prisma dans `migration_lock.toml` (son nom interne). */
 const LOCK_PROVIDERS: Readonly<Record<string, string>> = {
 	postgres: "postgresql",
@@ -78,6 +83,8 @@ interface PrismaProject {
 	readonly provider: string;
 	/** Fournisseur du verrou de migrations. */
 	readonly lockProvider: string;
+	/** Prisma tient l'historique des migrations de ce moteur (pas sous MongoDB). */
+	readonly history: boolean;
 	/** Environnement de l'outil : les variables du `datasource` visent la base de la connexion. */
 	readonly env: NodeJS.ProcessEnv;
 }
@@ -87,10 +94,11 @@ const resolved = new WeakMap<SchemaChange, PrismaProject>();
 export const prismaAdapter: OrmAdapter = {
 	orm: "prisma",
 	ddlOptions: () => ({ ormProfile: "prisma" }),
+	migrations: (engine) => !WITHOUT_HISTORY.has(engine),
 
 	async preflight(change) {
 		const project = prismaProject(change);
-		if (!change.project.apply) return;
+		if (!change.project.apply || !project.history) return;
 		const status = await prisma(project, ["migrate", "status"]);
 		if (status.code !== 0) {
 			throw new SchemaChangeError(toolMessage(status, project.dir));
@@ -112,7 +120,7 @@ export const prismaAdapter: OrmAdapter = {
 		const folder = join(dir, name);
 		mkdirSync(folder);
 		const file = join(folder, "migration.sql");
-		writeFileSync(file, change.sql);
+		writeFileSync(file, change.sql ?? "");
 		return {
 			name,
 			files: [
@@ -204,6 +212,7 @@ export const prismaAdapter: OrmAdapter = {
 
 	async check(change, _migration, applied) {
 		const project = prismaProject(change);
+		// Sous MongoDB, `migrate diff` compare collections et index, sans `--script`.
 		const modelDatabase: TunnelSchemaCheck = applied
 			? diffCheck(
 					"model-database",
@@ -212,13 +221,22 @@ export const prismaAdapter: OrmAdapter = {
 						project.schema.arg,
 						"--to-schema-datamodel",
 						project.schema.arg,
-						"--script",
+						...(project.history ? ["--script"] : []),
 						"--exit-code"
 					]),
 					project
 				)
 			: { name: "model-database", skipped: "base non touchée (apply = false)" };
-		return [modelDatabase, await historyCheck(change, project)];
+		return [
+			modelDatabase,
+			project.history
+				? await historyCheck(change, project)
+				: {
+						name: "history-model",
+						skipped:
+							"pas d'historique de migrations Prisma sous MongoDB (db push)"
+					}
+		];
 	}
 };
 
@@ -245,9 +263,7 @@ function prismaProject(change: SchemaChange): PrismaProject {
 	const label = ENGINE_LABELS[engine as DbEngine] ?? engine;
 	const expected = PROVIDERS[engine];
 	if (expected === undefined) {
-		throw new SchemaChangeError(
-			`Prisma ne tient pas d'historique de migrations sous ${label} (prisma db push)`
-		);
+		throw new SchemaChangeError(`Prisma ne connaît pas le moteur ${label}`);
 	}
 	const datasource = readFileSync(schema.datasourceFile, "utf8");
 	const provider = datasourceProvider(datasource);
@@ -283,6 +299,7 @@ function prismaProject(change: SchemaChange): PrismaProject {
 		schema,
 		provider: expected,
 		lockProvider: LOCK_PROVIDERS[engine] ?? expected,
+		history: !WITHOUT_HISTORY.has(engine),
 		env: {
 			...change.env,
 			...Object.fromEntries(keys.map((key) => [key, url])),

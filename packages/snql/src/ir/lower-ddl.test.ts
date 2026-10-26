@@ -1525,6 +1525,88 @@ describe("lower DDL — alias Mongo id ↔ _id (ADR-036 E/1f)", () => {
 	});
 });
 
+describe("lower DDL — profil prisma sous Mongo : uuid et decimal en texte (ADR-036 D6)", () => {
+	const field = (
+		name: string,
+		type: import("../schema/model").SnqlType,
+		extra: Partial<import("../schema/model").Field> = {}
+	): import("../schema/model").Field => ({
+		name,
+		type,
+		nullable: false,
+		source: "declared",
+		...extra
+	});
+	const schema: import("../schema/model").SchemaModel = {
+		engine: "mongodb",
+		collections: [
+			{
+				name: "owner",
+				source: "inferred",
+				primaryKey: ["_id"],
+				fields: [field("_id", "string", { storedAs: "objectId" })]
+			},
+			{
+				name: "item",
+				source: "declared",
+				primaryKey: ["id"],
+				fields: [
+					field("id", "uuid", { nativeName: "_id", storedAs: "string" }),
+					field("price", "decimal", { storedAs: "string" }),
+					field("legacy", "uuid")
+				]
+			}
+		],
+		relations: []
+	};
+	const prisma = { ormProfile: "prisma" } as const;
+	const lowerOn = (
+		source: string,
+		on: import("../schema/model").SchemaModel = schema,
+		options: { readonly ormProfile?: "prisma" } = prisma
+	) => lowerDDL(parse(tokenize(source)) as DDLStatement, on, options);
+	const storage = (plan: DDLPlan) =>
+		plan.kind === "create-table"
+			? Object.fromEntries(plan.fields.map((f) => [f.name, f.storedAs]))
+			: undefined;
+
+	it("create table : uuid et decimal en texte, une FK suit la clé qu'elle vise", () => {
+		expect(
+			storage(
+				lowerOn(
+					"create table pet { id: uuid, price: decimal, owner_id: string ref owner._id, item_id: uuid ref item.id, legacy_id: uuid nullable ref item.legacy, parent_id: uuid nullable ref self.id, label: string, primary key (id) }"
+				)
+			)
+		).toEqual({
+			id: "string",
+			price: "string",
+			owner_id: "objectId",
+			item_id: "string",
+			legacy_id: undefined,
+			parent_id: "string",
+			label: undefined
+		});
+	});
+
+	it("add column et set type sous le profil ; sans profil ou hors Mongo : la représentation du type", () => {
+		expect(lowerOn("add column fee decimal into item")).toMatchObject({
+			column: { name: "fee", storedAs: "string" }
+		});
+		expect(lowerOn("alter column item.legacy set type uuid")).toMatchObject({
+			action: { kind: "set-type", type: "uuid", storedAs: "string" }
+		});
+		const plain = lowerOn("add column fee decimal into item", schema, {});
+		expect(
+			plain.kind === "add-column" && plain.column.storedAs
+		).toBeUndefined();
+		const pg = lowerOn("add column fee decimal into item", {
+			...schema,
+			engine: "postgres"
+		});
+		expect(pg.kind === "add-column" && pg.column.storedAs).toBeUndefined();
+	});
+});
+
 describe("lower DDL — colonnes d'un enum (E/2c)", () => {
 	const schema = {
 		engine: "mssql",

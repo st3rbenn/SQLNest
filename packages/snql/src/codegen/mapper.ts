@@ -282,6 +282,8 @@ export interface MongoDDLCreateCollectionQuery {
 	 */
 	readonly primaryKeyAlias?: string;
 	readonly primaryKeyType?: string;
+	/** Représentation de la clé aliasée quand elle diffère de son type (profil prisma : texte). */
+	readonly primaryKeyStoredAs?: import("../schema/model").StoredAs;
 	/** FK déclarées sur les colonnes (ADR-031 FK/1a) — stockées `_snql_refs`. */
 	readonly refs?: readonly MongoRefSpec[];
 	/** Défauts des colonnes (ADR-036 E/1d), appliqués à l'insertion. */
@@ -317,6 +319,8 @@ export interface MongoDDLAddColumnQuery {
 		readonly name: string;
 		/** null = SnqlType `unknown` — pas de contrainte bsonType côté validator. */
 		readonly bsonType: string | null;
+		/** Motif d'un type rangé en texte (`uuid`, `decimal` sous le profil prisma). */
+		readonly pattern?: string;
 		/** `required` du validator étendu (contrat cross-engine : NOT NULL). */
 		readonly required: boolean;
 		readonly defaultValue?: unknown;
@@ -532,6 +536,8 @@ export interface MongoDDLAlterColumnQuery {
 				readonly kind: "set-type";
 				readonly type: import("../schema/model").SnqlType;
 				readonly bsonType: string | null;
+				/** Motif d'un type rangé en texte (`uuid`, `decimal` sous le profil prisma). */
+				readonly pattern?: string;
 				readonly enumMembers?: readonly string[];
 		  };
 }

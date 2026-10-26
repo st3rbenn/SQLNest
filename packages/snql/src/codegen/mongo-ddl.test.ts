@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { lowerDDL } from "../ir/lower-ddl";
+import { tokenize } from "../lexer/lexer";
+import { parse } from "../parser/parser";
 import type {
 	AddColumnPlan,
 	AddEnumMemberPlan,
@@ -22,7 +25,7 @@ import type {
 	MongoDDLDropEnumQuery,
 	MongoDDLDropIndexQuery
 } from "./mapper";
-import { mongoMapper } from "./mongodb";
+import { MONGO_TEXT_PATTERN, mongoMapper } from "./mongodb";
 
 function mapCreate(plan: CreateTablePlan): MongoDDLCreateCollectionQuery {
 	if (mongoMapper.mapDDL === undefined) {
@@ -985,6 +988,73 @@ describe("codegen Mongo — alias id ↔ _id (ADR-036 E/1f)", () => {
 		if (q.kind !== "mongo") throw new Error("attendu mongo");
 		expect(q.pipeline.find((stage) => "$project" in stage)).toEqual({
 			$project: { _id: 0, id: "$_id._id", n: expect.anything() }
+		});
+	});
+});
+
+describe("mongoMapper.mapDDL — profil prisma : uuid et decimal en texte (ADR-036 D6)", () => {
+	const schema: import("../schema/model").SchemaModel = {
+		engine: "mongodb",
+		collections: [
+			{
+				name: "item",
+				source: "declared",
+				fields: [
+					{ name: "_id", type: "string", nullable: false, source: "inferred" },
+					{ name: "qty", type: "string", nullable: true, source: "declared" }
+				]
+			}
+		],
+		relations: []
+	};
+	const map = (src: string) => {
+		const plan = lowerDDL(
+			parse(tokenize(src)) as import("../parser/ast").DDLStatement,
+			schema,
+			{ ormProfile: "prisma" }
+		);
+		const q = mongoMapper.mapDDL?.(plan);
+		if (q === undefined) throw new Error("mapDDL manquant");
+		return q as unknown as Record<string, unknown>;
+	};
+
+	it("create table : validateur string + motif, clé aliasée rangée en texte", () => {
+		const q = map(
+			"create table pet { id: uuid default uuid(), price: decimal nullable, primary key (id) }"
+		);
+		expect(q.validator).toEqual({
+			$jsonSchema: {
+				bsonType: "object",
+				properties: {
+					price: {
+						bsonType: ["string", "null"],
+						pattern: MONGO_TEXT_PATTERN.decimal
+					}
+				}
+			}
+		});
+		expect(q).toMatchObject({
+			primaryKeyAlias: "id",
+			primaryKeyType: "uuid",
+			primaryKeyStoredAs: "string"
+		});
+	});
+
+	it("add column et set type : type BSON et motif transmis à l'adapter", () => {
+		expect(map("add column fee decimal default 1.5 into item")).toMatchObject({
+			column: {
+				name: "fee",
+				bsonType: "string",
+				pattern: MONGO_TEXT_PATTERN.decimal
+			}
+		});
+		expect(map("alter column item.qty set type uuid")).toMatchObject({
+			action: {
+				kind: "set-type",
+				type: "uuid",
+				bsonType: "string",
+				pattern: MONGO_TEXT_PATTERN.uuid
+			}
 		});
 	});
 });

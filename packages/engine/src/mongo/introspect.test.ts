@@ -1,3 +1,5 @@
+import { MONGO_TEXT_PATTERN } from "@sqlnest/snql";
+import { ObjectId } from "mongodb";
 import { describe, expect, it } from "vitest";
 import {
 	applyPkAlias,
@@ -152,6 +154,80 @@ describe("mergeValidatorFields (ADR-031 — colonnes déclarées du validator)",
 		});
 		expect(merged.fields[0]).toMatchObject({ name: "weird", type: "unknown" });
 	});
+
+	it("uuid / decimal en texte relus au motif, ObjectId déclaré : type SNQL et représentation", () => {
+		const merged = mergeValidatorFields(
+			{
+				name: "item",
+				fields: [
+					{
+						name: "price",
+						type: "string",
+						nullable: false,
+						source: "inferred",
+						confidence: 1
+					}
+				],
+				source: "inferred"
+			},
+			{
+				$jsonSchema: {
+					properties: {
+						price: { bsonType: "string", pattern: MONGO_TEXT_PATTERN.decimal },
+						code: {
+							bsonType: ["string", "null"],
+							pattern: MONGO_TEXT_PATTERN.uuid
+						},
+						owner_id: { bsonType: "objectId" },
+						name: { bsonType: "string", pattern: "^[a-z]+$" }
+					},
+					required: ["price", "owner_id", "name"]
+				}
+			}
+		);
+		expect(merged.fields).toEqual([
+			{
+				name: "price",
+				type: "decimal",
+				nullable: false,
+				source: "inferred",
+				confidence: 1,
+				storedAs: "string"
+			},
+			{
+				name: "code",
+				type: "uuid",
+				nullable: true,
+				source: "declared",
+				storedAs: "string"
+			},
+			{
+				name: "owner_id",
+				type: "string",
+				nullable: false,
+				source: "declared",
+				storedAs: "objectId"
+			},
+			{ name: "name", type: "string", nullable: false, source: "declared" }
+		]);
+	});
+});
+
+describe("clé ObjectId échantillonnée (FK de Prisma, ADR-036 D6)", () => {
+	it("que des ObjectId : rangé en ObjectId ; mélangé à du texte : rien", () => {
+		const id = new ObjectId();
+		const owner = inferCollection("owner", [
+			{ _id: id },
+			{ _id: new ObjectId() }
+		]);
+		expect(owner.fields[0]).toMatchObject({
+			name: "_id",
+			type: "string",
+			storedAs: "objectId"
+		});
+		const mixed = inferCollection("mixed", [{ _id: id }, { _id: "abc" }]);
+		expect(mixed.fields[0]?.storedAs).toBeUndefined();
+	});
 });
 
 describe("applyPkAlias (ADR-036 E/1f)", () => {
@@ -169,6 +245,20 @@ describe("applyPkAlias (ADR-036 E/1f)", () => {
 			nativeName: "_id"
 		});
 		expect(collection.fields.map((f) => f.name)).toEqual(["id", "label"]);
+	});
+
+	it("clé rangée en texte (profil prisma) : la représentation suit l'alias", () => {
+		const collection = applyPkAlias(inferCollection("item", [{ _id: "a" }]), {
+			column: "id",
+			type: "uuid",
+			storedAs: "string"
+		});
+		expect(collection.fields[0]).toMatchObject({
+			name: "id",
+			type: "uuid",
+			nativeName: "_id",
+			storedAs: "string"
+		});
 	});
 
 	it("sans alias, la collection ne change pas ; les relations visent l'alias", () => {

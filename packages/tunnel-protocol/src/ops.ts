@@ -89,8 +89,11 @@ export interface TunnelSchemaCheck {
  */
 export interface TunnelSchemaChangeData {
 	readonly orm: "prisma" | "doctrine" | "sequelize" | "seaorm";
-	/** Migration écrite : nom de son dossier, ou de son fichier. */
-	readonly migration: string;
+	/**
+	 * Migration écrite : nom de son dossier, ou de son fichier. Absente sans
+	 * historique de migrations (Prisma sous MongoDB) : SQLNest a appliqué le DDL.
+	 */
+	readonly migration?: string;
 	/** Fichiers écrits ou modifiés, relatifs au projet. */
 	readonly files: readonly string[];
 	/** `false` : base non touchée (projet relié avec `apply = false`). */

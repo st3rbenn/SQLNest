@@ -29,7 +29,7 @@ import type {
 	TransactionPlanItem
 } from "../ir/plan";
 import { isDdlDefaultFn, isSqlDecimal, isSqlJsonLiteral, linearize } from "../ir/plan";
-import type { SnqlType } from "../schema/model";
+import type { SnqlType, StoredAs } from "../schema/model";
 import type {
 	Mapper,
 	MongoDDLAddColumnQuery,
@@ -274,7 +274,7 @@ export const mongoMapper: Mapper = {
 						? {
 								kind: "set-type",
 								type: action.type,
-								bsonType: MONGO_BSON_TYPE[action.type],
+								...mongoColumnType(action.type, action.storedAs),
 								...(action.enumMembers !== undefined
 									? { enumMembers: action.enumMembers }
 									: {})
@@ -2940,6 +2940,31 @@ const MONGO_BSON_TYPE: Readonly<Record<SnqlType, string | null>> = {
 };
 
 /**
+ * Motif du validateur d'un type rangé en texte sous le profil `prisma`
+ * (ADR-036 D6) : l'uuid canonique en minuscules, comme l'écrit `uuid()`, et un
+ * décimal en notation décimale. L'introspection y relit le type SNQL.
+ */
+export const MONGO_TEXT_PATTERN: Readonly<Partial<Record<SnqlType, string>>> = {
+	uuid: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+	decimal: "^-?[0-9]+(\\.[0-9]+)?([eE][-+]?[0-9]+)?$"
+};
+
+/** Type BSON du validateur, et motif d'un type rangé en texte, selon `storedAs`. */
+function mongoColumnType(
+	type: SnqlType,
+	storedAs: StoredAs | undefined
+): { readonly bsonType: string | null; readonly pattern?: string } {
+	if (storedAs === "objectId") return { bsonType: "objectId" };
+	if (storedAs === "string") {
+		const pattern = MONGO_TEXT_PATTERN[type];
+		return pattern !== undefined
+			? { bsonType: "string", pattern }
+			: { bsonType: "string" };
+	}
+	return { bsonType: MONGO_BSON_TYPE[type] };
+}
+
+/**
  * Rend une property $jsonSchema pour un field du plan. Type builtin →
  * `{bsonType}`, enum (ADR-030 Enum/2) → `{bsonType: "string", enum: [...]}`
  * — Mongo enforce nativement le enum dans le validator.
@@ -2953,11 +2978,12 @@ const MONGO_BSON_TYPE: Readonly<Record<SnqlType, string | null>> = {
 function buildMongoFieldProperty(
 	f: CreateTableField
 ): Record<string, unknown> {
-	const bson = MONGO_BSON_TYPE[f.type];
+	const { bsonType: bson, pattern } = mongoColumnType(f.type, f.storedAs);
 	const property: Record<string, unknown> = {};
 	if (bson !== null) {
 		property.bsonType = f.nullable ? [bson, "null"] : bson;
 	}
+	if (pattern !== undefined) property.pattern = pattern;
 	if (f.type === "enum" && f.enumMembers !== undefined) {
 		property.enum = f.nullable ? [...f.enumMembers, null] : f.enumMembers;
 	}
@@ -3051,9 +3077,9 @@ function renderMongoCreateTable(
 		const column = f.name === primaryKeyAlias ? "_id" : f.name;
 		defaults.push({ column, ...mongoDefaultSpec(f.defaultValue) });
 	}
-	const primaryKeyType = plan.fields.find(
-		(f) => f.name === primaryKeyAlias
-	)?.type;
+	const keyField = plan.fields.find((f) => f.name === primaryKeyAlias);
+	const primaryKeyType = keyField?.type;
+	const primaryKeyStoredAs = keyField?.storedAs;
 
 	const ddl: MongoDDLCreateCollectionQuery = {
 		engine: "mongodb",
@@ -3065,6 +3091,7 @@ function renderMongoCreateTable(
 		...(indexes.length > 0 ? { indexes } : {}),
 		...(primaryKeyAlias !== undefined ? { primaryKeyAlias } : {}),
 		...(primaryKeyType !== undefined ? { primaryKeyType } : {}),
+		...(primaryKeyStoredAs !== undefined ? { primaryKeyStoredAs } : {}),
 		...(refs.length > 0 ? { refs } : {}),
 		...(defaults.length > 0 ? { defaults } : {})
 	};
@@ -3270,7 +3297,7 @@ function renderMongoDropEnum(plan: DropEnumPlan): MongoDDLDropEnumQuery {
 
 function renderMongoAddColumn(plan: AddColumnPlan): MongoDDLAddColumnQuery {
 	const f = plan.column;
-	const bson = MONGO_BSON_TYPE[f.type];
+	const { bsonType: bson, pattern } = mongoColumnType(f.type, f.storedAs);
 	const required = !f.nullable;
 	const backfill = f.defaultValue !== undefined;
 	// D2 preflight = NOT NULL sans default. Si NOT NULL + default, le backfill
@@ -3283,6 +3310,7 @@ function renderMongoAddColumn(plan: AddColumnPlan): MongoDDLAddColumnQuery {
 	const columnSpec: MongoDDLAddColumnQuery["column"] = {
 		name: f.name,
 		bsonType: bson,
+		...(pattern !== undefined ? { pattern } : {}),
 		required,
 		...(defaultSpec !== undefined && defaultSpec.fn === undefined
 			? { defaultValue: defaultSpec.value }
