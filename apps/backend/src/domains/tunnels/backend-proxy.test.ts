@@ -211,6 +211,41 @@ describe("createBackendProxy — happy path", () => {
 		expect(await p2).toEqual({ second: true });
 		proxy.dispose();
 	});
+
+	test("un entier 64 bits du CLI arrive en texte : la réponse reste du JSON", async () => {
+		const { registry, emitCliFrame } = makeMockRegistry(true);
+		const backendKp = deriveBackendKeypair(AUTH_SECRET);
+		const fakeCli = makeFakeCli();
+		const now = () => 1_700_000_000_000;
+		const proxy = createBackendProxy({
+			registry,
+			backendKeypair: backendKp,
+			now,
+			newCorrelationId: () => "corr-big"
+		});
+
+		const p = proxy.sendReq(TUNNEL_ID, { op: "runSnql", src: "find t" });
+		// Long Mongo au-delà de 2^53 : l'engine le rend en bigint, à la
+		// racine comme dans un document joint.
+		emitCliFrame(
+			fakeCli.resFrame(
+				"corr-big",
+				{
+					rows: [{ b: 9007199254740993n, n: 5, j: { b: -9007199254740993n } }],
+					rowCount: 1
+				},
+				now(),
+				new Uint8Array(16)
+			)
+		);
+		const result = await p;
+		expect(result).toEqual({
+			rows: [{ b: "9007199254740993", n: 5, j: { b: "-9007199254740993" } }],
+			rowCount: 1
+		});
+		expect(() => JSON.stringify(result)).not.toThrow();
+		proxy.dispose();
+	});
 });
 
 describe("createBackendProxy — erreurs", () => {

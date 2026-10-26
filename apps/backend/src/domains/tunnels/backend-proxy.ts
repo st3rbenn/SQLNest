@@ -44,7 +44,7 @@ import {
 	signFrame,
 	type TunnelOp
 } from "@sqlnest/tunnel-protocol";
-import { pack, unpack } from "msgpackr";
+import { pack, Unpackr, unpack } from "msgpackr";
 import type { BackendKeypair } from "../backend-identity/keypair";
 import type { TunnelRegistry } from "./session/registry";
 
@@ -106,6 +106,17 @@ export interface BackendProxy {
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+
+/**
+ * Réponses du CLI, renvoyées en JSON par les routes HTTP. Un entier 64 bits
+ * (Long Mongo au-delà de 2^53, rendu en `bigint` par l'engine) arrive en
+ * texte : JSON n'a pas de bigint, et Postgres comme MSSQL rendent déjà leurs
+ * entiers 64 bits en texte.
+ */
+const responseUnpackr = new Unpackr({
+	useRecords: false,
+	int64AsType: "string"
+});
 
 export interface CreateBackendProxyOptions {
 	readonly registry: TunnelRegistry;
@@ -203,7 +214,7 @@ export function createBackendProxy(
 		state.pending.delete(frame.header.correlation_id);
 		let payload: unknown;
 		try {
-			payload = unpack(frame.payload);
+			payload = responseUnpackr.unpack(frame.payload);
 		} catch (err) {
 			pending.reject(err);
 			return;
