@@ -111,7 +111,7 @@ export function CanvasContextMenu({
 			showNotification({
 				title: "Copié",
 				message: tableName,
-				color: "blue",
+				color: "brand",
 				autoClose: 1500
 			});
 		} catch {

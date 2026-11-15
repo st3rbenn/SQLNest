@@ -117,7 +117,7 @@ export type GalleryView = "canvas" | "recents";
 
 const VIEW_TITLES: Record<GalleryView, string> = {
 	canvas: "Canvas",
-	recents: "Recents"
+	recents: "Récents"
 };
 
 const SORT_STORAGE_KEY = "sqlnest.gallery.sort";

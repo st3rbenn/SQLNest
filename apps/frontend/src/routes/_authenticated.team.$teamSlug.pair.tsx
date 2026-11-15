@@ -11,14 +11,14 @@ import { createFileRoute } from "@tanstack/react-router";
 import { PairPage } from "../features/tunnel/PairPage";
 
 interface PairSearch {
-	code?: string | null;
+	code?: string;
 }
 
 function validateSearch(raw: Record<string, unknown>): PairSearch {
 	if (typeof raw.code === "string" && raw.code.length > 0) {
 		return { code: raw.code };
 	}
-	return { code: null };
+	return {};
 }
 
 export const Route = createFileRoute("/_authenticated/team/$teamSlug/pair")({

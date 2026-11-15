@@ -109,7 +109,7 @@ const stagePayloadStyle: CSSProperties = {
 function badgeStyle(badge: StageBadge): CSSProperties {
 	const map: Record<StageBadge, string> = {
 		native: "var(--sqlnest-success)",
-		lift: "var(--sqlnest-info, #4a9eff)",
+		lift: "var(--sqlnest-info)",
 		materialize: "var(--sqlnest-warning)",
 		write: "var(--sqlnest-danger)",
 		compensate: "var(--sqlnest-text-tertiary)"

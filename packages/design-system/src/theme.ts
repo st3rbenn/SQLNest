@@ -13,12 +13,30 @@ const slate: MantineColorsTuple = [
 	"#f0f0f0",
 	"#d9d9d9",
 	"#b3b3b3", // 3 — text-secondary
-	"#8a8a8a",
-	"#7a7a7a", // 5 — text-tertiary
+	"#a6a6a6",
+	"#999999", // 5 — text-tertiary
 	"#5a5a5a",
 	"#444444", // 7 — border
 	"#363636", // 8 — surface-hover
 	"#2c2c2c", // 9 — surface
+];
+
+/**
+ * En mode sombre, Mantine tire ses défauts de `dark`, pas de `slate` : fond de
+ * page, texte, champs, boutons par défaut, bordures. Chaque indice reprend la
+ * valeur du token qui joue ce rôle (voir `tokens.css`).
+ */
+const dark: MantineColorsTuple = [
+	"#ffffff", // 0 — texte : text-primary
+	"#b3b3b3", // 1 — text-secondary
+	"#999999", // 2 — texte atténué : text-tertiary
+	"#999999", // 3 — placeholder : text-tertiary
+	"#444444", // 4 — bordure par défaut : border
+	"#363636", // 5 — survol : surface-hover
+	"#2c2c2c", // 6 — champs, boutons par défaut : surface
+	"#1e1e1e", // 7 — fond de page : canvas-bg
+	"#1a1a1a",
+	"#141414",
 ];
 
 /**
@@ -105,6 +123,7 @@ export const theme = createTheme({
 	primaryColor: "brand",
 	primaryShade: { light: 5, dark: 5 },
 	colors: {
+		dark,
 		brand,
 		slate,
 		amber,

@@ -30,7 +30,7 @@
 	/* Texte */
 	--sqlnest-text-primary: #ffffff;
 	--sqlnest-text-secondary: #b3b3b3;
-	--sqlnest-text-tertiary: #7a7a7a;
+	--sqlnest-text-tertiary: #999999;
 	/* Gris clair mais < blanc pur — headings de nav, noms de compte/team
 	 * dans la sidebar. Cohérent : les 3 « labels de structure » utilisent
 	 * la même intensité. `#e6e6e6` sur `--sqlnest-surface` (#2c2c2c) =
@@ -67,6 +67,10 @@
 	/* Succès — connexion live, notif positive. */
 	--sqlnest-success: #10b981;
 	--sqlnest-success-soft: rgba(16, 185, 129, 0.15);
+
+	/* Information neutre — badges de plan, liens de la page de parité. Plus
+	 * doux que l'accent, qui reste réservé aux actions. */
+	--sqlnest-info: #4a9eff;
 
 	/* Grille de points du canvas. */
 	--sqlnest-canvas-dot: rgba(255, 255, 255, 0.08);

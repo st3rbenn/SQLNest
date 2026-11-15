@@ -6,20 +6,13 @@ import {
 } from "@sqlnest/design-system";
 import {
 	IconArrowsShuffle,
-	IconDeviceFloppy,
-	IconDownload,
 	IconLink,
-	IconMessage,
-	IconMoon,
 	IconPointer,
-	IconSparkles,
 	IconSquareDashed,
 	IconTerminal2
 } from "@tabler/icons-react";
-import { useState } from "react";
 
 export type CanvasTool = "select" | "frame";
-type LocalTool = CanvasTool | "comment";
 
 const notImplemented = (label: string) =>
 	showNotification({
@@ -60,15 +53,6 @@ export function CanvasToolbar({
 	onToggleInference,
 	inferenceActive = false
 }: Props) {
-	// Le tool « comment » reste local — pas d'implémentation côté canvas
-	// donc pas la peine de le remonter. Basculer sur select/frame quitte
-	// l'affichage `comment` de la toolbar (cohérent visuellement).
-	const [localComment, setLocalComment] = useState(false);
-	const displayTool: LocalTool = localComment ? "comment" : activeTool;
-	const selectCanvasTool = (t: CanvasTool) => {
-		setLocalComment(false);
-		onSelectTool(t);
-	};
 	return (
 		<FloatingPanel
 			position="bottom-center"
@@ -81,15 +65,15 @@ export function CanvasToolbar({
 			<Toolbar orientation="horizontal" aria-label="Canvas actions">
 				<ToolbarButton
 					label="Sélection (V)"
-					active={displayTool === "select"}
-					onClick={() => selectCanvasTool("select")}
+					active={activeTool === "select"}
+					onClick={() => onSelectTool("select")}
 				>
 					<IconPointer {...ICON} />
 				</ToolbarButton>
 				<ToolbarButton
 					label="Créer un frame (F)"
-					active={displayTool === "frame"}
-					onClick={() => selectCanvasTool("frame")}
+					active={activeTool === "frame"}
+					onClick={() => onSelectTool("frame")}
 				>
 					<IconSquareDashed {...ICON} />
 				</ToolbarButton>
@@ -101,16 +85,6 @@ export function CanvasToolbar({
 					}}
 				>
 					<IconTerminal2 {...ICON} />
-				</ToolbarButton>
-				<ToolbarButton
-					label="Annoter (bientôt)"
-					active={displayTool === "comment"}
-					onClick={() => {
-						setLocalComment(true);
-						notImplemented("Annotations");
-					}}
-				>
-					<IconMessage {...ICON} />
 				</ToolbarButton>
 				<Toolbar.Divider orientation="horizontal" />
 				<ToolbarButton
@@ -131,29 +105,6 @@ export function CanvasToolbar({
 						<IconLink {...ICON} />
 					</ToolbarButton>
 				) : null}
-				<ToolbarButton
-					label="IA (bientôt)"
-					statusDot="warning"
-					onClick={() => notImplemented("IA")}
-				>
-					<IconSparkles {...ICON} />
-				</ToolbarButton>
-				<Toolbar.Divider orientation="horizontal" />
-				<ToolbarButton
-					label="Exporter"
-					onClick={() => notImplemented("Export")}
-				>
-					<IconDownload {...ICON} />
-				</ToolbarButton>
-				<ToolbarButton
-					label="Enregistrer"
-					onClick={() => notImplemented("Enregistrer")}
-				>
-					<IconDeviceFloppy {...ICON} />
-				</ToolbarButton>
-				<ToolbarButton label="Thème" onClick={() => notImplemented("Thème")}>
-					<IconMoon {...ICON} />
-				</ToolbarButton>
 			</Toolbar>
 		</FloatingPanel>
 	);

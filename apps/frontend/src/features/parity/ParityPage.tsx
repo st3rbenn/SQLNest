@@ -24,7 +24,7 @@ const pageStyle: CSSProperties = {
 	margin: "0 auto",
 	padding: "24px 32px",
 	color: "var(--sqlnest-text-primary)",
-	background: "var(--sqlnest-background)",
+	background: "var(--sqlnest-canvas-bg)",
 	minHeight: "100vh"
 };
 
@@ -82,7 +82,7 @@ const constructStyle: CSSProperties = {
 	fontFamily:
 		"ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
 	fontSize: 12,
-	color: "var(--sqlnest-info, #4a9eff)",
+	color: "var(--sqlnest-info)",
 	fontWeight: 500
 };
 

@@ -200,7 +200,7 @@ export function ErrorBlock({ error, onFocusSpan }: ErrorBlockProps): React.React
 			showNotification({
 				title: "Copié",
 				message: "Message d'erreur dans le presse-papiers",
-				color: "blue",
+				color: "brand",
 				autoClose: 1500
 			});
 		} catch {
@@ -296,8 +296,7 @@ export function ErrorBlock({ error, onFocusSpan }: ErrorBlockProps): React.React
 			) : null}
 
 			{displayed.details.map((detail, i) => (
-				// biome-ignore lint/suspicious/noArrayIndexKey: les segments detail
-				// viennent d'un source déterministe — l'ordre est stable pour un message donné.
+				// biome-ignore lint/suspicious/noArrayIndexKey: segments issus d'une source déterministe, ordre stable pour un message donné
 				<div key={i} style={detailStyle}>
 					{detail}
 				</div>
@@ -493,6 +492,7 @@ const PREFIX_RE = /^(?:Erreur côté CLI|Erreur côté serveur)\s*:\s*/i;
 const SEGMENT_SPLIT = ` ${String.fromCharCode(0x2014)} `;
 const SQLSTATE_RE = /^SQLSTATE\s+([0-9A-Z]{5})$/;
 const HINT_RE = /^hint\s*:\s*(.+)$/i;
+const CODE_NAME_RE = /^[A-Z][A-Za-z0-9]{2,40}$/;
 
 /**
  * Parseur tolérant (fallback pour messages non structurés) : sur toute forme
@@ -531,7 +531,7 @@ export function parseErrorMessage(raw: string): ParsedError {
 		// des morceaux de message qui ressembleraient à ça.
 		if (
 			codeName === undefined &&
-			/^[A-Z][A-Za-z0-9]{2,40}$/.test(s) &&
+			CODE_NAME_RE.test(s) &&
 			!s.includes(" ")
 		) {
 			codeName = s;

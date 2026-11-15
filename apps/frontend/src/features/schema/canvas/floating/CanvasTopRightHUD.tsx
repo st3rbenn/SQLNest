@@ -118,7 +118,7 @@ function UserAvatarMenu(): React.ReactNode {
 				alt={displayName}
 				radius="xl"
 				size={24}
-				color="blue"
+				color="brand"
 			>
 				{initial}
 			</Avatar>

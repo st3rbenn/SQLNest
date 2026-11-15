@@ -115,7 +115,7 @@ export function useCanvasActions(
 			showNotification({
 				title: "Table masquée",
 				message: `${name} — restaure via « Tout réafficher ».`,
-				color: "blue",
+				color: "brand",
 				autoClose: 2000
 			});
 			history.push();

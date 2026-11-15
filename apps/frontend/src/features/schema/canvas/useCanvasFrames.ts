@@ -111,7 +111,7 @@ export function useCanvasFrames(
 				showNotification({
 					title: `Frame « ${frame.label} » supprimé`,
 					message: `${frame.collections.length} table${frame.collections.length > 1 ? "s" : ""} conservée${frame.collections.length > 1 ? "s" : ""}.`,
-					color: "blue",
+					color: "brand",
 					autoClose: 2500
 				});
 			}

@@ -46,14 +46,14 @@ export function GallerySidebar({
 			<div style={{ padding: "2px 12px 8px" }}>
 				{teamSlug ? (
 					<NavItem
-						label="Recents"
+						label="Récents"
 						icon={<ClockIcon />}
 						active={activeItem === "recents"}
 						to="/team/$teamSlug/recents"
 						params={{ teamSlug }}
 					/>
 				) : (
-					<NavItem label="Recents" icon={<ClockIcon />} active={false} />
+					<NavItem label="Récents" icon={<ClockIcon />} active={false} />
 				)}
 			</div>
 
@@ -90,7 +90,7 @@ export function GallerySidebar({
 				    Objectif : signaler la roadmap sans faire d'ombre à ce
 				    qui existe déjà. */}
 				<NavItem
-					label="Saved Queries"
+					label="Requêtes sauvées"
 					icon={<BookmarkIcon />}
 					active={false}
 					soon
@@ -165,7 +165,7 @@ function NavItem({
 						borderRadius: 3
 					}}
 				>
-					Soon
+					Bientôt
 				</span>
 			) : null}
 		</>
@@ -201,7 +201,7 @@ function ClockIcon(): React.ReactNode {
 			strokeLinejoin="round"
 			aria-hidden="true"
 		>
-			<title>Recents</title>
+			<title>Récents</title>
 			<circle cx={12} cy={12} r={9} />
 			<path d="M12 7v5l3 2" />
 		</svg>
@@ -242,7 +242,7 @@ function BookmarkIcon(): React.ReactNode {
 			strokeLinejoin="round"
 			aria-hidden="true"
 		>
-			<title>Saved Queries</title>
+			<title>Requêtes sauvées</title>
 			<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
 		</svg>
 	);

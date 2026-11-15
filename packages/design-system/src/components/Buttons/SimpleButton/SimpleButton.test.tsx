@@ -54,7 +54,7 @@ describe("SimpleButton", () => {
 			const button = screen.getByRole("button", { name: /exécuter/i });
 			expect(button).toHaveAttribute("data-loading", "true");
 			expect(button.style.cursor).toBe("default");
-			expect(button.style.background).toContain("blue-3");
+			expect(button.style.background).toContain("brand-3");
 		});
 	});
 });

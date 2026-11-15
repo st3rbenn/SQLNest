@@ -4,6 +4,10 @@ import { Link, useLocation } from "@tanstack/react-router";
 import type { CSSProperties } from "react";
 import { useCurrentUser } from "./sessionQuery";
 
+/** Pages d'équipe qui portent leur propre en-tête : le menu flottant s'y efface. */
+const TEAM_PAGE_PATH = /^\/team\/[0-9a-f]{6}(\/(recents|canvas|drafts|pair))?\/?$/;
+const TEAM_CANVAS_PATH = /^\/team\/[0-9a-f]{6}\/canvas\/[a-f0-9-]+(\/query)?\/?$/;
+
 /**
  * Allowlist des hosts d'images OAuth. `user.image` vient de Google / GitHub
  * (via Better Auth OAuth), donc contrôlé — mais un jour un provider pourrait
@@ -52,20 +56,8 @@ export function UserMenu() {
 	// Reste visible sur les pages sans surface dédiée. Cache sur : gallery,
 	// canvas view, console fullscreen (surfaces avec propre header).
 	if (location.pathname === "/") return null;
-	if (
-		/^\/team\/[0-9a-f]{6}(\/(recents|canvas|drafts|pair))?\/?$/.test(
-			location.pathname
-		)
-	) {
-		return null;
-	}
-	if (
-		/^\/team\/[0-9a-f]{6}\/canvas\/[a-f0-9-]+(\/query)?\/?$/.test(
-			location.pathname
-		)
-	) {
-		return null;
-	}
+	if (TEAM_PAGE_PATH.test(location.pathname)) return null;
+	if (TEAM_CANVAS_PATH.test(location.pathname)) return null;
 
 	const user = session.user;
 	const displayName = user.name?.trim() || user.email;
@@ -107,7 +99,7 @@ export function UserMenu() {
 							alt={displayName}
 							radius="xl"
 							size={28}
-							color="blue"
+							color="brand"
 						>
 							{initial}
 						</Avatar>

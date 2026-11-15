@@ -24,7 +24,7 @@ export type ButtonProps = {
 // Inline `style` (spécificité 1000) supplante les classes `:disabled` de
 // Mantine — nécessaire pour garder le bleu clair au lieu du gris désactivé.
 const loadingStyle = {
-	background: "var(--mantine-color-blue-3)",
+	background: "var(--mantine-color-brand-3)",
 	color: "var(--mantine-color-white)",
 	cursor: "default",
 	opacity: 1,
@@ -52,7 +52,7 @@ export const SimpleButton = forwardRef<HTMLButtonElement, ButtonProps>(
 				ref={ref}
 				variant={variant === "primary" ? "filled" : "outline"}
 				size={size}
-				color={variant === "danger" ? "red" : "blue"}
+				color={variant === "danger" ? "red" : "brand"}
 				disabled={isDisabled}
 				data-loading={isLoading || undefined}
 				style={{

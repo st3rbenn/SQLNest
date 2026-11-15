@@ -26,7 +26,8 @@ const PARTITIONED = /^([a-z][a-z0-9]*)_p\d+/;
 function prefixOf(name: string): string {
 	const partitioned = PARTITIONED.exec(name);
 	if (partitioned?.[1] !== undefined) return partitioned[1];
-	const first = name.split("_")[0];
+	// `_prisma_migrations` : le premier segment est vide, on prend le suivant.
+	const first = name.split("_").find((segment) => segment !== "");
 	return first ?? name;
 }
 
