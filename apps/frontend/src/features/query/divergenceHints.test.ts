@@ -92,4 +92,19 @@ describe("collectDivergenceHints — patterns divergents PG↔Mongo", () => {
 		);
 		expect(hints.some((h) => h.code === "concat_null_parity")).toBe(true);
 	});
+
+	it("let rec : la base et l'étape du binding récursif sont parcourues", () => {
+		const hints = hintsFor(
+			`let rec org_chart =
+	find employee where concat(first_name, last_name) = "x" pick employee_id, first_name
+	union all
+	find employee as e with one org_chart as o on e.reports_to = o.employee_id
+		pick e.employee_id, concat(e.first_name, "!") as first_name
+;
+find org_chart pick employee_id, first_name limit 100`
+		);
+		expect(
+			hints.filter((h) => h.code === "concat_null_parity")
+		).toHaveLength(2);
+	});
 });

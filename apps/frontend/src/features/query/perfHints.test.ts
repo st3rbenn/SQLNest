@@ -78,4 +78,17 @@ describe("collectPerfHints — patterns non-indexables Mongo", () => {
 		const hints = hintsFor(`find users where id = 1 pick id, name`);
 		expect(hints).toHaveLength(0);
 	});
+
+	it("let rec : parcouru sans lever, aucun hint sur un binding sans pattern perf", () => {
+		const hints = hintsFor(
+			`let rec org_chart =
+	find employee where concat(first_name, last_name) = "x" pick employee_id, first_name
+	union all
+	find employee as e with one org_chart as o on e.reports_to = o.employee_id
+		pick e.employee_id, concat(e.first_name, "!") as first_name
+;
+find org_chart pick employee_id, first_name limit 100`
+		);
+		expect(hints).toHaveLength(0);
+	});
 });
