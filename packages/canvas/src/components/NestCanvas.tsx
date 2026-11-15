@@ -8,6 +8,7 @@ import {
 	useEffect,
 	useState
 } from "react";
+import type { Connection } from "../connection";
 import { canvasClass } from "../constants";
 import { StoreContext, useNestStore, useStoreApi } from "../context";
 import { type KeyCode, useKeyPress } from "../keys";
@@ -75,6 +76,8 @@ export type NestCanvasProps<
 	onNodeDrag?: (event: MouseEvent, node: TNode, nodes: TNode[]) => void;
 	onNodeDragStop?: (event: MouseEvent, node: TNode, nodes: TNode[]) => void;
 	onNodesDelete?: (nodes: TNode[]) => void;
+	/** Ligne de connexion relâchée sur un handle valide. */
+	onConnect?: (connection: Connection) => void;
 	onSelectionStart?: (event: ReactPointerEvent) => void;
 	onSelectionEnd?: (event: ReactPointerEvent) => void;
 	/**
@@ -111,7 +114,8 @@ function StoreUpdater({
 	onNodeDragStart,
 	onNodeDrag,
 	onNodeDragStop,
-	onNodesDelete
+	onNodesDelete,
+	onConnect
 }: {
 	id: string | undefined;
 	canReparent: ((node: Node, parent: Node | null) => boolean) | undefined;
@@ -125,6 +129,7 @@ function StoreUpdater({
 	onNodeDrag: NodeDragHandler | undefined;
 	onNodeDragStop: NodeDragHandler | undefined;
 	onNodesDelete: ((nodes: Node[]) => void) | undefined;
+	onConnect: ((connection: Connection) => void) | undefined;
 }) {
 	const store = useStoreApi();
 	useEffect(() => {
@@ -146,9 +151,17 @@ function StoreUpdater({
 			onNodeDragStart: onNodeDragStart ?? null,
 			onNodeDrag: onNodeDrag ?? null,
 			onNodeDragStop: onNodeDragStop ?? null,
-			onNodesDelete: onNodesDelete ?? null
+			onNodesDelete: onNodesDelete ?? null,
+			onConnect: onConnect ?? null
 		});
-	}, [store, onNodeDragStart, onNodeDrag, onNodeDragStop, onNodesDelete]);
+	}, [
+		store,
+		onNodeDragStart,
+		onNodeDrag,
+		onNodeDragStop,
+		onNodesDelete,
+		onConnect
+	]);
 	useEffect(() => {
 		if (nodes !== undefined) store.setNodes(nodes);
 	}, [store, nodes]);
@@ -336,6 +349,7 @@ export function NestCanvas<
 		onNodeDrag,
 		onNodeDragStop,
 		onNodesDelete,
+		onConnect,
 		canReparent,
 		className,
 		style,
@@ -382,6 +396,7 @@ export function NestCanvas<
 					onNodeDrag={onNodeDrag as NodeDragHandler | undefined}
 					onNodeDragStop={onNodeDragStop as NodeDragHandler | undefined}
 					onNodesDelete={onNodesDelete as ((nodes: Node[]) => void) | undefined}
+					onConnect={onConnect}
 				/>
 				<GraphView
 					{...(props as unknown as NestCanvasProps)}

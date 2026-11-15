@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Handle } from "../src/components/Handle";
 import { NestCanvas } from "../src/components/NestCanvas";
 import { NodeResizer } from "../src/components/NodeResizer";
+import type { Connection } from "../src/connection";
 import { useStoreApi } from "../src/context";
 import { applyNodeChanges } from "../src/hooks";
 import {
@@ -274,7 +275,13 @@ const RIGHT = "right";
 const LEFT = "left";
 const nodeTypes = { box: Box };
 
-function Harness({ log }: { log: NodeChange[][] }) {
+function Harness({
+	log,
+	onConnect
+}: {
+	log: NodeChange[][];
+	onConnect?: (connection: Connection) => void;
+}) {
 	const [nodes, setNodes] = useState<BoxNode[]>([
 		{
 			id: "a",
@@ -305,6 +312,7 @@ function Harness({ log }: { log: NodeChange[][] }) {
 			}}
 			panOnDrag={[1]}
 			selectionOnDrag
+			{...(onConnect !== undefined ? { onConnect } : {})}
 		>
 			<Probe />
 		</NestCanvas>
@@ -408,9 +416,8 @@ describe("nodes au doigt (sémantique d3-drag)", () => {
 		]);
 	});
 
-	it("connexion au doigt : un doigt levé parmi deux ne la termine pas", () => {
-		const { container } = render(<Harness log={[]} />);
-		sizeContainer();
+	/** Handles mesurés à la main : jsdom ne calcule aucune géométrie. */
+	const measureHandles = () => {
 		act(() => {
 			const lookup = canvasStore().getState().nodeLookup;
 			for (const id of ["a", "b"]) {
@@ -439,6 +446,12 @@ describe("nodes au doigt (sémantique d3-drag)", () => {
 			}
 			canvasStore().setState({});
 		});
+	};
+
+	it("connexion au doigt : un doigt levé parmi deux ne la termine pas", () => {
+		const { container } = render(<Harness log={[]} />);
+		sizeContainer();
+		measureHandles();
 		const from = container.querySelector(
 			'[data-id="a"] .nest-handle.source'
 		) as HTMLElement;
@@ -448,6 +461,31 @@ describe("nodes au doigt (sémantique d3-drag)", () => {
 		touchEvent(document.body, "touchend", [[2, 10, 10]], [[1, 500, 200]]);
 		expect(canvasStore().getState().connection.inProgress).toBe(true);
 		touchEvent(document.body, "touchend", [], [[2, 10, 10]]);
+		expect(canvasStore().getState().connection.inProgress).toBe(false);
+	});
+
+	it("connexion relâchée sur un handle valide : onConnect ; dans le vide : rien", () => {
+		const connections: Connection[] = [];
+		const { container } = render(
+			<Harness log={[]} onConnect={(c) => connections.push(c)} />
+		);
+		sizeContainer();
+		measureHandles();
+		const from = container.querySelector(
+			'[data-id="a"] .nest-handle.source'
+		) as HTMLElement;
+		touchEvent(from, "touchstart", [[1, 340, 110]], [[1, 340, 110]]);
+		touchEvent(document.body, "touchmove", [[1, 420, 300]], [[1, 420, 300]]);
+		touchEvent(document.body, "touchend", [], [[1, 420, 300]]);
+		expect(connections).toEqual([]);
+
+		touchEvent(from, "touchstart", [[1, 340, 110]], [[1, 340, 110]]);
+		touchEvent(document.body, "touchmove", [[1, 498, 112]], [[1, 498, 112]]);
+		expect(canvasStore().getState().connection.isValid).toBe(true);
+		touchEvent(document.body, "touchend", [], [[1, 498, 112]]);
+		expect(connections).toEqual([
+			{ source: "a", sourceHandle: "right", target: "b", targetHandle: "left" }
+		]);
 		expect(canvasStore().getState().connection.inProgress).toBe(false);
 	});
 });

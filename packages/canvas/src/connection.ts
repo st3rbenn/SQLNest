@@ -171,8 +171,8 @@ export function checkHandle(
 
 /**
  * Drag depuis un handle : la ligne de connexion suit le pointeur et
- * s'accroche au handle valide le plus proche. Au relâchement la connexion
- * est abandonnée (aucun `onConnect` dans l'app).
+ * s'accroche au handle valide le plus proche. Relâchée sur un handle valide,
+ * la connexion part à `onConnect` ; ailleurs, elle est abandonnée.
  */
 export function startConnection(
 	down: MouseEvent | TouchEvent,
@@ -197,6 +197,7 @@ export function startConnection(
 	const fromHandle: HandleBound = { ...fromInternal, nodeId, type };
 	let position = eventPos(down);
 	let started = false;
+	let pending: Connection | null = null;
 	let autoPanStarted = false;
 	let autoPanId = 0;
 	let previous: ConnectionState = {
@@ -245,6 +246,7 @@ export function startConnection(
 		}
 		const result = checkHandle(e, store, closest, { nodeId, handleId, type });
 		const isValid = result.isValid ? true : closest ? false : null;
+		pending = result.isValid ? result.connection : null;
 		const node = lookup.get(nodeId);
 		const next: ConnectionState = {
 			...previous,
@@ -276,6 +278,10 @@ export function startConnection(
 	const onUp = (e: MouseEvent | TouchEvent) => {
 		// Un doigt levé alors qu'un autre reste posé ne termine pas la connexion.
 		if ("touches" in e && e.touches.length > 0) return;
+		// Annulée entre-temps (`fromHandle` remis à zéro) : rien ne part.
+		if (pending !== null && store.getState().connection.fromHandle !== null) {
+			store.getState().onConnect?.(pending);
+		}
 		store.cancelConnection();
 		cancelAnimationFrame(autoPanId);
 		document.removeEventListener("mousemove", onMove);
@@ -310,7 +316,7 @@ export function clickConnect(
 		});
 		return;
 	}
-	checkHandle(
+	const result = checkHandle(
 		event,
 		store,
 		{ nodeId, id: handleId, type },
@@ -320,5 +326,8 @@ export function clickConnect(
 			type: start.type
 		}
 	);
+	if (result.isValid && result.connection !== null) {
+		store.getState().onConnect?.(result.connection);
+	}
 	store.setState({ connectionClickStartHandle: null });
 }

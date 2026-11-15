@@ -10,6 +10,7 @@ export {
 	type ResizeControlProps
 } from "./components/NodeResizer";
 export { Panel, type PanelProps } from "./components/Panel";
+export type { Connection } from "./connection";
 export { canvasClass } from "./constants";
 export { useNestStore, useNodeId, useStoreApi } from "./context";
 export {

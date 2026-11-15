@@ -4,6 +4,7 @@ import {
 	internalNodesBounds,
 	viewportForBounds
 } from "./geometry";
+import type { Connection } from "./connection";
 import { measureHandleBounds, renderedZoom } from "./handles";
 import type { PanZoom } from "./panZoom";
 import {
@@ -122,6 +123,8 @@ export type CanvasState = {
 	ariaLiveMessage: string;
 	connection: ConnectionState;
 	connectionClickStartHandle: ClickStartHandle | null;
+	/** Connexion terminée sur un handle valide. */
+	onConnect: ((connection: Connection) => void) | null;
 	/** Re-parentage pendant un drag : un node peut-il rejoindre `parent` (`null` : racine) ? */
 	canReparent: ((node: Node, parent: Node | null) => boolean) | null;
 	/** Conteneur visé par le drag en cours. */
@@ -283,6 +286,7 @@ export function createCanvasStore(init: {
 		ariaLiveMessage: "",
 		connection: initialConnection,
 		connectionClickStartHandle: null,
+		onConnect: null,
 		canReparent: null,
 		dropTargetId: null
 	};
