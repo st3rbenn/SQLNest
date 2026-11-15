@@ -24,14 +24,14 @@ const containerStyle: CSSProperties = {
 	overflow: "auto",
 	background: "var(--sqlnest-canvas-bg)",
 	border: "1px solid var(--sqlnest-border-subtle)",
-	borderRadius: 8
+	borderRadius: "var(--sqlnest-radius-8)"
 };
 
 const tableStyle: CSSProperties = {
 	width: "100%",
 	borderCollapse: "separate",
 	borderSpacing: 0,
-	fontSize: 12,
+	fontSize: "var(--sqlnest-font-size-12)",
 	fontFamily: "var(--mantine-font-family-monospace)",
 	color: "var(--sqlnest-text-primary)"
 };
@@ -46,7 +46,7 @@ const theadStyle: CSSProperties = {
 const thStyle: CSSProperties = {
 	textAlign: "left",
 	padding: "6px 10px",
-	fontSize: 10.5,
+	fontSize: "var(--sqlnest-font-size-11)",
 	fontWeight: 600,
 	letterSpacing: 0.5,
 	textTransform: "uppercase",
@@ -74,7 +74,7 @@ const emptyStyle: CSSProperties = {
 	padding: "32px",
 	textAlign: "center",
 	color: "var(--sqlnest-text-tertiary)",
-	fontSize: 12,
+	fontSize: "var(--sqlnest-font-size-12)",
 	fontFamily: "'Inter', ui-sans-serif, system-ui, sans-serif"
 };
 

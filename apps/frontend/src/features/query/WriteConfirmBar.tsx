@@ -109,26 +109,26 @@ const rowStyle: CSSProperties = {
 };
 
 const labelStyle: CSSProperties = {
-	fontSize: 13,
+	fontSize: "var(--sqlnest-font-size-13)",
 	fontWeight: 500,
 	color: "var(--sqlnest-warning)",
 	whiteSpace: "nowrap"
 };
 
 const counterStyle: CSSProperties = {
-	fontSize: 12,
+	fontSize: "var(--sqlnest-font-size-12)",
 	color: "var(--sqlnest-text-tertiary)",
 	fontVariantNumeric: "tabular-nums"
 };
 
 const targetHintStyle: CSSProperties = {
-	fontSize: 12,
+	fontSize: "var(--sqlnest-font-size-12)",
 	color: "var(--sqlnest-text-secondary)",
 	fontFamily: "var(--mantine-font-family-monospace)"
 };
 
 const previewCountStyle: CSSProperties = {
-	fontSize: 12,
+	fontSize: "var(--sqlnest-font-size-12)",
 	fontWeight: 600,
 	color: "var(--sqlnest-text-primary)",
 	fontVariantNumeric: "tabular-nums",
@@ -136,14 +136,14 @@ const previewCountStyle: CSSProperties = {
 };
 
 const previewMutedStyle: CSSProperties = {
-	fontSize: 12,
+	fontSize: "var(--sqlnest-font-size-12)",
 	color: "var(--sqlnest-text-tertiary)",
 	whiteSpace: "nowrap",
 	fontStyle: "italic"
 };
 
 const previewDisclaimerStyle: CSSProperties = {
-	fontSize: 11,
+	fontSize: "var(--sqlnest-font-size-11)",
 	color: "var(--sqlnest-warning)",
 	whiteSpace: "normal",
 	marginTop: 2
@@ -162,7 +162,7 @@ const buttonsStyle: CSSProperties = {
 };
 
 const countdownStyle: CSSProperties = {
-	fontSize: 11,
+	fontSize: "var(--sqlnest-font-size-11)",
 	color: "var(--sqlnest-text-tertiary)",
 	fontVariantNumeric: "tabular-nums",
 	whiteSpace: "nowrap"
@@ -174,7 +174,7 @@ const countdownWarningStyle: CSSProperties = {
 };
 
 const listStyle: CSSProperties = {
-	fontSize: 11,
+	fontSize: "var(--sqlnest-font-size-11)",
 	color: "var(--sqlnest-text-tertiary)",
 	fontFamily: "var(--mantine-font-family-monospace)",
 	lineHeight: 1.6
@@ -269,7 +269,7 @@ export function WriteConfirmBar({
 	// (Mantine ne réappelle pas focus si la prop ne change pas). Un useEffect
 	// explicite est plus robuste — force le focus quand le finding change.
 	const firstOffset = findings[0]?.span.start.offset;
-	// eslint-disable-next-line react-hooks/exhaustive-deps
+	// biome-ignore lint/correctness/useExhaustiveDependencies: firstOffset est le déclencheur, le focus repart quand le finding change
 	useEffect(() => {
 		inputRef.current?.focus();
 	}, [firstOffset]);
@@ -277,6 +277,7 @@ export function WriteConfirmBar({
 	// Countdown local — 250ms tick pour rendu smooth, appelle onCancel
 	// automatiquement quand la deadline est atteinte. Re-init si le finding
 	// change (nouveau pending). Cleanup obligatoire sinon leak.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: firstOffset relance le compte à rebours pour un nouveau finding
 	useEffect(() => {
 		setRemainingMs(timeoutMs);
 		const deadline = performance.now() + timeoutMs;

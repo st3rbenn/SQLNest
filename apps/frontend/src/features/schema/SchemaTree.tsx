@@ -100,7 +100,7 @@ const headerRow: CSSProperties = {
 	background: "transparent",
 	cursor: "pointer",
 	userSelect: "none",
-	fontSize: 11.5,
+	fontSize: "var(--sqlnest-font-size-12)",
 	color: "var(--sqlnest-text-primary)",
 	fontWeight: 600,
 	border: "none",
@@ -198,7 +198,7 @@ export function SchemaTree({
 										display: "inline-block",
 										width: 12,
 										height: 12,
-										borderRadius: 4,
+										borderRadius: "var(--sqlnest-radius-4)",
 										background: groupColor,
 										flexShrink: 0
 									}}
@@ -218,7 +218,7 @@ export function SchemaTree({
 								style={{
 									color: "var(--sqlnest-text-tertiary)",
 									fontWeight: 500,
-									fontSize: 12
+									fontSize: "var(--sqlnest-font-size-12)"
 								}}
 							>
 								{g.tables.length}

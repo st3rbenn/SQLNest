@@ -46,6 +46,7 @@ export function useEnumsNode(
 		(geom) => ({
 			id: ENUMS_NODE_ID,
 			type: "system-enums",
+			ariaLabel: "Enums de la base",
 			position: geom.position,
 			width: geom.width,
 			height: geom.height,

@@ -14,8 +14,8 @@ const TOOLTIP_BASE: CSSProperties = {
 	background: "var(--sqlnest-surface)",
 	color: "var(--sqlnest-text-primary)",
 	padding: "10px 14px",
-	borderRadius: 8,
-	fontSize: 13,
+	borderRadius: "var(--sqlnest-radius-8)",
+	fontSize: "var(--sqlnest-font-size-13)",
 	lineHeight: 1.5,
 	fontFamily: "ui-sans-serif, system-ui, -apple-system, sans-serif",
 	border: "1px solid var(--sqlnest-border)",
@@ -43,12 +43,12 @@ const TOOLTIP_TABLE: CSSProperties = {
 	color: "var(--sqlnest-text-primary)",
 	background: "rgba(255, 255, 255, 0.08)",
 	padding: "1px 6px",
-	borderRadius: 4
+	borderRadius: "var(--sqlnest-radius-4)"
 };
 
 const TOOLTIP_FOOTER: CSSProperties = {
 	marginTop: 4,
-	fontSize: 11,
+	fontSize: "var(--sqlnest-font-size-11)",
 	color: "var(--sqlnest-text-secondary)"
 };
 
@@ -56,8 +56,8 @@ const TOOLTIP_SQL: CSSProperties = {
 	marginTop: 8,
 	padding: "6px 8px",
 	background: "rgba(255, 255, 255, 0.05)",
-	borderRadius: 4,
-	fontSize: 10.5,
+	borderRadius: "var(--sqlnest-radius-4)",
+	fontSize: "var(--sqlnest-font-size-11)",
 	color: "var(--sqlnest-text-secondary)",
 	fontFamily: "var(--mantine-font-family-monospace)"
 };

@@ -23,11 +23,11 @@ export function HiddenChip({ count, onUnhideAll }: HiddenChipProps) {
 				transform: "translateX(-50%)",
 				zIndex: 5,
 				padding: "6px 12px",
-				borderRadius: 999,
+				borderRadius: "var(--sqlnest-radius-full)",
 				background: "var(--sqlnest-surface)",
 				border: "1px solid var(--sqlnest-border)",
 				boxShadow: "var(--mantine-shadow-md)",
-				fontSize: 12,
+				fontSize: "var(--sqlnest-font-size-12)",
 				fontWeight: 600,
 				color: "var(--sqlnest-text-secondary)"
 			}}

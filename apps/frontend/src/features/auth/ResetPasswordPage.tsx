@@ -8,14 +8,14 @@ import { DismissibleAlert } from "./DismissibleAlert";
 import { useNoReferrerMeta } from "./useNoReferrerMeta";
 
 const titleStyle: CSSProperties = {
-	fontSize: 20,
+	fontSize: "var(--sqlnest-font-size-20)",
 	fontWeight: 600,
 	color: "var(--sqlnest-text-primary)",
 	margin: "0 0 6px"
 };
 
 const subtitleStyle: CSSProperties = {
-	fontSize: 13,
+	fontSize: "var(--sqlnest-font-size-13)",
 	color: "var(--sqlnest-text-secondary)",
 	margin: "0 0 20px"
 };
@@ -28,7 +28,7 @@ const formStyle: CSSProperties = {
 
 const footerStyle: CSSProperties = {
 	marginTop: 20,
-	fontSize: 13,
+	fontSize: "var(--sqlnest-font-size-13)",
 	color: "var(--sqlnest-text-secondary)",
 	textAlign: "center"
 };

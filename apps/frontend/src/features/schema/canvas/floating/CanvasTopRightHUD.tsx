@@ -26,7 +26,7 @@ const containerStyle: CSSProperties = {
 	padding: 7,
 	background: "var(--sqlnest-elevated)",
 	border: "1px solid var(--sqlnest-border-subtle)",
-	borderRadius: 10,
+	borderRadius: "var(--sqlnest-radius-10)",
 	boxShadow: "var(--sqlnest-shadow-floating)"
 };
 
@@ -35,9 +35,9 @@ const zoomTriggerStyle: CSSProperties = {
 	alignItems: "center",
 	gap: 4,
 	padding: "5px 8px",
-	borderRadius: 6,
+	borderRadius: "var(--sqlnest-radius-6)",
 	color: "var(--sqlnest-text-primary)",
-	fontSize: 12,
+	fontSize: "var(--sqlnest-font-size-12)",
 	fontWeight: 500,
 	fontVariantNumeric: "tabular-nums",
 	// Largeur min pour éviter que le trigger « saute » entre 80% / 100%.
@@ -52,10 +52,10 @@ const menuStyles = {
 		padding: 3
 	},
 	item: {
-		fontSize: 12,
+		fontSize: "var(--sqlnest-font-size-12)",
 		color: "var(--sqlnest-text-primary)",
 		padding: "5px 8px",
-		borderRadius: 5,
+		borderRadius: "var(--sqlnest-radius-6)",
 		minHeight: 0
 	}
 } as const;
@@ -137,7 +137,7 @@ function ZoomControl(): React.ReactNode {
 			position="bottom-end"
 			withArrow={false}
 			offset={8}
-			radius={8}
+			radius="var(--sqlnest-radius-8)"
 			transitionProps={{ duration: 0 }}
 			styles={menuStyles}
 			classNames={menuClassNames}

@@ -31,7 +31,7 @@ describe("ColorDot", () => {
 		const dot = getDot(container);
 		expect(dot.style.width).toBe("12px");
 		expect(dot.style.height).toBe("12px");
-		expect(dot.style.borderRadius).toBe("4px");
+		expect(dot.style.borderRadius).toBe("var(--sqlnest-radius-4)");
 	});
 
 	it("forwards aria-label", () => {

@@ -32,7 +32,7 @@ export function TableDetailsFields({
 							justifyContent: "space-between",
 							gap: 8,
 							padding: "3px 12px",
-							fontSize: 11.5,
+							fontSize: "var(--sqlnest-font-size-12)",
 							color: "var(--sqlnest-text-secondary)"
 						}}
 					>
@@ -60,7 +60,7 @@ export function TableDetailsFields({
 							style={{
 								color: "var(--sqlnest-text-tertiary)",
 								fontFamily: "var(--mantine-font-family-monospace)",
-								fontSize: 10.5,
+								fontSize: "var(--sqlnest-font-size-11)",
 								whiteSpace: "nowrap"
 							}}
 						>

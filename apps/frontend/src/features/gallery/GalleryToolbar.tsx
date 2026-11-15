@@ -59,11 +59,11 @@ const triggerStyle: CSSProperties = {
 	alignItems: "center",
 	gap: 5,
 	padding: "3px 6px 3px 9px",
-	background: "var(--sqlnest-surface)",
+	background: "var(--header-cta-bg, var(--sqlnest-surface))",
 	color: "var(--sqlnest-text-primary)",
-	border: "1px solid var(--sqlnest-border)",
-	borderRadius: 5,
-	fontSize: 11,
+	border: "1px solid var(--header-cta-border, var(--sqlnest-border))",
+	borderRadius: "var(--sqlnest-radius-6)",
+	fontSize: "var(--sqlnest-font-size-11)",
 	fontWeight: 500,
 	cursor: "pointer",
 	boxSizing: "border-box",
@@ -98,7 +98,7 @@ export function GalleryToolbar({
 				position="bottom-end"
 				withArrow={false}
 				offset={6}
-				radius={8}
+				radius="var(--sqlnest-radius-8)"
 				styles={{
 					dropdown: {
 						background: "var(--sqlnest-surface)",
@@ -106,10 +106,10 @@ export function GalleryToolbar({
 						padding: 3
 					},
 					item: {
-						fontSize: 11,
+						fontSize: "var(--sqlnest-font-size-11)",
 						color: "var(--sqlnest-text-primary)",
 						padding: "4px 7px",
-						borderRadius: 4,
+						borderRadius: "var(--sqlnest-radius-4)",
 						minHeight: 0
 					}
 				}}

@@ -72,7 +72,7 @@ export function StatusPill({
 				background: palette.bg,
 				color: palette.color,
 				border: `1px solid ${palette.border}`,
-				fontSize: 12,
+				fontSize: "var(--sqlnest-font-size-12)",
 				fontWeight: 500,
 				...(style as Record<string, unknown> | undefined),
 			}}

@@ -119,6 +119,7 @@ function makeNode(schema: SchemaModel) {
 		return {
 			id: name,
 			type: "table",
+			ariaLabel: `Table ${name}, ${collection.fields.length} champs`,
 			position: { x: 0, y: 0 },
 			// Dimensions explicites → fitView cadre sans attendre la mesure DOM.
 			width: NODE_WIDTH,
@@ -539,6 +540,7 @@ function CanvasInner({
 				return {
 					id: g.id,
 					type: "console" as const,
+					ariaLabel: "Console SNQL",
 					position: g.position,
 					width: g.width,
 					height: g.height,
@@ -1262,9 +1264,9 @@ function CanvasInner({
 								background: "var(--sqlnest-surface)",
 								color: "var(--sqlnest-accent)",
 								fontWeight: 600,
-								fontSize: 12,
+								fontSize: "var(--sqlnest-font-size-12)",
 								padding: "6px 12px",
-								borderRadius: 8,
+								borderRadius: "var(--sqlnest-radius-8)",
 								cursor: "pointer",
 								boxShadow: "0 2px 8px rgba(0,0,0,0.32)"
 							}}

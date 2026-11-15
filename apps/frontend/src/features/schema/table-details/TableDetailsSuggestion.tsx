@@ -30,7 +30,7 @@ export function TableDetailsSuggestion({ table }: TableDetailsSuggestionProps) {
 						display: "block",
 						width: "100%",
 						padding: 10,
-						borderRadius: 8,
+						borderRadius: "var(--sqlnest-radius-8)",
 						background: "var(--sqlnest-accent-soft)",
 						border: "1px solid var(--sqlnest-accent)",
 						textAlign: "left",
@@ -51,7 +51,7 @@ export function TableDetailsSuggestion({ table }: TableDetailsSuggestionProps) {
 						ff="var(--mantine-font-family-monospace)"
 						style={{
 							lineHeight: 1.5,
-							fontSize: 10.5,
+							fontSize: "var(--sqlnest-font-size-11)",
 							color: "var(--sqlnest-text-secondary)"
 						}}
 					>

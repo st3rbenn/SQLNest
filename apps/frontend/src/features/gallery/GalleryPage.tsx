@@ -77,7 +77,7 @@ const listHeaderStyle: CSSProperties = {
 	gridTemplateColumns: "1fr 120px 160px 90px",
 	gap: 16,
 	padding: "0 14px",
-	fontSize: 10,
+	fontSize: "var(--sqlnest-font-size-10)",
 	fontWeight: 600,
 	letterSpacing: 0.6,
 	textTransform: "uppercase",
@@ -95,14 +95,12 @@ const CARD_HOVER_CSS = `
 .sqlnest-db-card {
 	transition: border-color 160ms ease;
 }
-.sqlnest-db-card:hover {
-	border-color: var(--sqlnest-accent-muted) !important;
-}
+.sqlnest-db-card:hover,
 .sqlnest-db-card--pending {
-	border-color: var(--sqlnest-accent-muted) !important;
+	--db-card-border: var(--sqlnest-accent-muted);
 }
 .sqlnest-db-row:hover {
-	border-color: var(--sqlnest-accent-muted) !important;
+	--db-row-border: var(--sqlnest-accent-muted);
 }
 @keyframes sqlnest-skeleton-shimmer {
 	0% { background-position: 200% 0; }
@@ -348,7 +346,7 @@ function EmptyHero({
 					style={{
 						width: 56,
 						height: 56,
-						borderRadius: 14,
+						borderRadius: "var(--sqlnest-radius-14)",
 						background: "var(--sqlnest-surface)",
 						border: "1px solid var(--sqlnest-border-subtle)",
 						display: "inline-flex",
@@ -374,7 +372,7 @@ function EmptyHero({
 				</div>
 				<h1
 					style={{
-						fontSize: 22,
+						fontSize: "var(--sqlnest-font-size-20)",
 						fontWeight: 700,
 						margin: "0 0 10px",
 						color: "var(--sqlnest-text-primary)"
@@ -384,7 +382,7 @@ function EmptyHero({
 				</h1>
 				<p
 					style={{
-						fontSize: 14,
+						fontSize: "var(--sqlnest-font-size-14)",
 						color: "var(--sqlnest-text-secondary)",
 						lineHeight: 1.55,
 						margin: "0 0 22px"
@@ -396,8 +394,8 @@ function EmptyHero({
 						style={{
 							background: "var(--sqlnest-surface)",
 							padding: "2px 6px",
-							borderRadius: 4,
-							fontSize: 12.5,
+							borderRadius: "var(--sqlnest-radius-4)",
+							fontSize: "var(--sqlnest-font-size-13)",
 							fontFamily: "var(--mantine-font-family-monospace)"
 						}}
 					>
@@ -412,11 +410,11 @@ function EmptyHero({
 						alignItems: "center",
 						gap: 8,
 						padding: "10px 18px",
-						borderRadius: 9,
+						borderRadius: "var(--sqlnest-radius-10)",
 						background: "var(--sqlnest-accent)",
 						color: "#fff",
 						fontWeight: 600,
-						fontSize: 13,
+						fontSize: "var(--sqlnest-font-size-13)",
 						textDecoration: "none"
 					}}
 				>

@@ -40,10 +40,10 @@ export function KindBadge({ kind, label, style, ...rest }: KindBadgeProps) {
 			style={{
 				display: "inline-block",
 				padding: "1px 5px",
-				borderRadius: 4,
+				borderRadius: "var(--sqlnest-radius-4)",
 				background: bg,
 				color,
-				fontSize: kind === "pk" ? 9 : 10,
+				fontSize: "var(--sqlnest-font-size-10)",
 				fontWeight: 700,
 				letterSpacing: "0.3px",
 				fontFamily: "var(--mantine-font-family)",

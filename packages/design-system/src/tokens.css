@@ -72,36 +72,59 @@
 	 * doux que l'accent, qui reste réservé aux actions. */
 	--sqlnest-info: #4a9eff;
 
+	/* Tailles de police, en px. Toute taille du produit en vient : pas de
+	 * demi-pixel, pas de valeur intermédiaire. */
+	--sqlnest-font-size-10: 10px;
+	--sqlnest-font-size-11: 11px;
+	--sqlnest-font-size-12: 12px;
+	--sqlnest-font-size-13: 13px;
+	--sqlnest-font-size-14: 14px;
+	--sqlnest-font-size-16: 16px;
+	--sqlnest-font-size-20: 20px;
+	--sqlnest-font-size-24: 24px;
+
+	/* Rayons, en px. `full` arrondit une pastille quelle que soit sa hauteur ;
+	 * un cercle parfait s'écrit `50%`. */
+	--sqlnest-radius-2: 2px;
+	--sqlnest-radius-4: 4px;
+	--sqlnest-radius-6: 6px;
+	--sqlnest-radius-8: 8px;
+	--sqlnest-radius-10: 10px;
+	--sqlnest-radius-12: 12px;
+	--sqlnest-radius-14: 14px;
+	--sqlnest-radius-full: 999px;
+
 	/* Grille de points du canvas. */
 	--sqlnest-canvas-dot: rgba(255, 255, 255, 0.08);
 }
 
 /*
- * ─── Interactive primitives ─────────────────────────────────────────
- * Classes partagées entre GalleryPage sidebar, TeamSelector,
- * UserBadge (et futurs menus). Évite de re-implémenter le hover à la
- * main dans chaque composant.
- */
-/*
- * `!important` sur les hover — les composants React posent souvent un
- * `style={{ background: "transparent" }}` inline (spécificité infinie
- * qui bat les pseudo-classes CSS standard sans !important). On assume
- * ici qu'aucun consumer ne veut override le hover — donc !important
- * safe.
+ * ─── Primitives interactives ────────────────────────────────────────
+ * Partagées par la sidebar de la galerie, TeamSelector, UserBadge, les menus
+ * et les boutons d'en-tête.
+ *
+ * Un `background` ou un `color` posé en style inline gagne toujours sur une
+ * classe. Le survol règle donc des variables, et le style inline de l'élément
+ * les lit avec sa valeur de repos en repli :
+ *   background: "var(--menu-item-bg, transparent)"
+ * Un élément sans style inline sur ces propriétés reçoit la valeur de la
+ * classe directement.
  */
 .sqlnest-sidebar-item {
 	transition: background-color 120ms ease, color 120ms ease;
 }
 .sqlnest-sidebar-item:hover {
-	background: var(--sqlnest-surface-hover) !important;
-	color: var(--sqlnest-text-primary) !important;
+	--sidebar-item-bg: var(--sqlnest-surface-hover);
+	--sidebar-item-color: var(--sqlnest-text-primary);
+	background: var(--sidebar-item-bg);
+	color: var(--sidebar-item-color);
 }
-.sqlnest-sidebar-item--active {
-	background: var(--sqlnest-accent-soft) !important;
-	color: var(--sqlnest-text-primary) !important;
-}
+.sqlnest-sidebar-item--active,
 .sqlnest-sidebar-item--active:hover {
-	background: var(--sqlnest-accent-soft) !important;
+	--sidebar-item-bg: var(--sqlnest-accent-soft);
+	--sidebar-item-color: var(--sqlnest-text-primary);
+	background: var(--sidebar-item-bg);
+	color: var(--sidebar-item-color);
 }
 
 /* Item d'un menu (dropdown popover). Base + variant active + disabled. */
@@ -109,40 +132,54 @@
 	transition: background-color 120ms ease, color 120ms ease;
 }
 .sqlnest-menu-item:hover:not(:disabled) {
-	background: var(--sqlnest-surface-hover) !important;
-	color: var(--sqlnest-text-primary) !important;
+	--menu-item-bg: var(--sqlnest-surface-hover);
+	--menu-item-color: var(--sqlnest-text-primary);
+	background: var(--menu-item-bg);
+	color: var(--menu-item-color);
 }
-.sqlnest-menu-item--active {
-	background: var(--sqlnest-accent-soft) !important;
-	color: var(--sqlnest-text-primary) !important;
-}
-.sqlnest-menu-item--active:hover {
-	background: var(--sqlnest-accent-soft) !important;
+.sqlnest-menu-item--active,
+.sqlnest-menu-item--active:hover:not(:disabled) {
+	--menu-item-bg: var(--sqlnest-accent-soft);
+	--menu-item-color: var(--sqlnest-text-primary);
+	background: var(--menu-item-bg);
+	color: var(--menu-item-color);
 }
 .sqlnest-menu-item:disabled {
 	cursor: not-allowed;
 	opacity: 0.55;
 }
 
-/* CTA compact dans un header de page (ex. « Nouveau canvas » dans le
- * PageHead de la gallery). Aspect « outlined » : bg surface + border
- * neutre au repos, border accent + bg surface-hover au hover. Moins
- * fort qu'un vrai Button primary du DS mais plus visible qu'un simple
- * link. */
+/* Bouton compact d'un en-tête de page (ex. « Nouveau canvas »). Contour
+ * neutre au repos ; au survol, fond plus clair et contour accent atténué. */
 .sqlnest-header-cta {
 	transition: background-color 120ms ease, border-color 120ms ease;
 }
 .sqlnest-header-cta:hover {
-	background: var(--sqlnest-surface-hover) !important;
-	border-color: var(--sqlnest-accent-muted) !important;
+	--header-cta-bg: var(--sqlnest-surface-hover);
+	--header-cta-border: var(--sqlnest-accent-muted);
+	background: var(--header-cta-bg);
+	border-color: var(--header-cta-border);
 }
 
-/* Override du left color bar `::before` de Mantine notification.
- * Le `styles` prop ne supporte pas les pseudo-elements — obligation
- * de passer par une classe CSS globale, appliquée via classNames.root
- * dans `notify.tsx`. */
+/* La barre de couleur à gauche d'une notification Mantine est un `::before` :
+ * le prop `styles` ne l'atteint pas, d'où cette classe, posée par
+ * `classNames.root` dans `notify.tsx`. */
 .sqlnest-notification::before {
-	display: none !important;
+	display: none;
+}
+
+/* « Réduire les animations » du système : transitions et animations CSS
+ * deviennent instantanées. `!important` voulu ici, pour couvrir aussi les
+ * transitions posées en style inline. */
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+		scroll-behavior: auto !important;
+	}
 }
 
 /* macOS trackpad : un pan 2-doigts horizontal sur le canvas (`panOnScroll`)

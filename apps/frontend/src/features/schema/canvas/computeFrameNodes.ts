@@ -58,6 +58,7 @@ export function computeFrameNodes(
 			{
 				id: frameNodeId(frame.key),
 				type: "frame" as const,
+				ariaLabel: `Frame ${frame.label}`,
 				// Imbriqué : position dans le repère du frame parent, qu'il
 				// agrandit quand on le pousse contre ses bords.
 				position: parent

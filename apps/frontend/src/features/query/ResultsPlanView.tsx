@@ -55,7 +55,7 @@ const containerStyle: CSSProperties = {
 	display: "flex",
 	flexDirection: "column",
 	gap: 8,
-	fontSize: 12,
+	fontSize: "var(--sqlnest-font-size-12)",
 	fontFamily:
 		"ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace"
 };
@@ -64,9 +64,9 @@ const headerStyle: CSSProperties = {
 	padding: "8px 10px",
 	background: "var(--sqlnest-surface-hover)",
 	border: "1px solid var(--sqlnest-border-subtle)",
-	borderRadius: 4,
+	borderRadius: "var(--sqlnest-radius-4)",
 	color: "var(--sqlnest-text-secondary)",
-	fontSize: 11
+	fontSize: "var(--sqlnest-font-size-11)"
 };
 
 const emptyStyle: CSSProperties = {
@@ -83,13 +83,13 @@ const stageRowStyle: CSSProperties = {
 	padding: "6px 10px",
 	background: "var(--sqlnest-surface)",
 	border: "1px solid var(--sqlnest-border-subtle)",
-	borderRadius: 4
+	borderRadius: "var(--sqlnest-radius-4)"
 };
 
 const stageIndexStyle: CSSProperties = {
 	minWidth: 20,
 	color: "var(--sqlnest-text-tertiary)",
-	fontSize: 11
+	fontSize: "var(--sqlnest-font-size-11)"
 };
 
 const stageOperatorStyle: CSSProperties = {
@@ -103,7 +103,7 @@ const stagePayloadStyle: CSSProperties = {
 	color: "var(--sqlnest-text-secondary)",
 	whiteSpace: "pre-wrap",
 	wordBreak: "break-word",
-	fontSize: 11
+	fontSize: "var(--sqlnest-font-size-11)"
 };
 
 function badgeStyle(badge: StageBadge): CSSProperties {
@@ -117,8 +117,8 @@ function badgeStyle(badge: StageBadge): CSSProperties {
 	return {
 		display: "inline-block",
 		padding: "1px 6px",
-		borderRadius: 3,
-		fontSize: 10,
+		borderRadius: "var(--sqlnest-radius-4)",
+		fontSize: "var(--sqlnest-font-size-10)",
 		fontWeight: 600,
 		textTransform: "uppercase" as const,
 		background: `color-mix(in srgb, ${map[badge]} 20%, transparent)`,
@@ -164,7 +164,7 @@ export function ResultsPlanView({
 						marginTop: 6,
 						color: "var(--sqlnest-danger)",
 						fontStyle: "normal",
-						fontSize: 11
+						fontSize: "var(--sqlnest-font-size-11)"
 					}}
 				>
 					{compiled.message}

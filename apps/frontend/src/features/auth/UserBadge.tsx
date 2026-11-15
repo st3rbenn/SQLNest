@@ -24,16 +24,15 @@ const triggerStyle: CSSProperties = {
 	gap: 10,
 	padding: "6px 8px",
 	width: "100%",
-	// Reset user-agent gray sur `<button>`. Le hover CSS (:hover
-	// `!important` dans tokens.css) bat cette valeur inline.
-	background: "transparent",
+	// Reset du gris user-agent sur `<button>` ; le survol règle la variable.
+	background: "var(--sidebar-item-bg, transparent)",
 	border: "none",
-	borderRadius: 6,
+	borderRadius: "var(--sqlnest-radius-6)",
 	cursor: "pointer",
 	textAlign: "left",
-	color: "var(--sqlnest-text-title)",
+	color: "var(--sidebar-item-color, var(--sqlnest-text-title))",
 	fontFamily: "inherit",
-	fontSize: 12,
+	fontSize: "var(--sqlnest-font-size-12)",
 	minWidth: 0
 };
 
@@ -47,13 +46,13 @@ const avatarStyle: CSSProperties = {
 	alignItems: "center",
 	justifyContent: "center",
 	fontWeight: 600,
-	fontSize: 10.5,
+	fontSize: "var(--sqlnest-font-size-11)",
 	color: "var(--sqlnest-text-title)",
 	flexShrink: 0
 };
 
 const nameStyle: CSSProperties = {
-	fontSize: 12,
+	fontSize: "var(--sqlnest-font-size-12)",
 	fontWeight: 600,
 	flex: 1,
 	minWidth: 0,
@@ -69,7 +68,7 @@ const menuStyle: CSSProperties = {
 	right: 0,
 	background: "var(--sqlnest-elevated)",
 	border: "1px solid var(--sqlnest-border-subtle)",
-	borderRadius: 8,
+	borderRadius: "var(--sqlnest-radius-8)",
 	boxShadow: "0 12px 32px rgba(0, 0, 0, 0.45)",
 	zIndex: 100,
 	padding: 4
@@ -80,11 +79,11 @@ const menuItemBase: CSSProperties = {
 	alignItems: "center",
 	gap: 8,
 	padding: "6px 8px",
-	borderRadius: 4,
-	fontSize: 12,
-	color: "var(--sqlnest-text-secondary)",
+	borderRadius: "var(--sqlnest-radius-4)",
+	fontSize: "var(--sqlnest-font-size-12)",
+	color: "var(--menu-item-color, var(--sqlnest-text-secondary))",
 	cursor: "pointer",
-	background: "transparent",
+	background: "var(--menu-item-bg, transparent)",
 	border: "none",
 	width: "100%",
 	textAlign: "left",
@@ -148,7 +147,7 @@ export function UserBadge() {
 					<div
 						style={{
 							padding: "8px 8px 6px",
-							fontSize: 11,
+							fontSize: "var(--sqlnest-font-size-11)",
 							color: "var(--sqlnest-text-tertiary)",
 							whiteSpace: "nowrap",
 							overflow: "hidden",
@@ -176,7 +175,7 @@ export function UserBadge() {
 						<span style={{ flex: 1 }}>Paramètres</span>
 						<span
 							style={{
-								fontSize: 10,
+								fontSize: "var(--sqlnest-font-size-10)",
 								color: "var(--sqlnest-text-tertiary)"
 							}}
 						>

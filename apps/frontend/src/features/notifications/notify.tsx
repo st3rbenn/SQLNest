@@ -33,7 +33,7 @@ const COMPACT_STYLES = {
 		margin: 0
 	},
 	description: {
-		fontSize: 11,
+		fontSize: "var(--sqlnest-font-size-11)",
 		lineHeight: 1.5,
 		color: "var(--sqlnest-text-primary)"
 	},
@@ -51,9 +51,9 @@ const COMPACT_CLASSNAMES = {
 const codeChipStyle = {
 	background: "var(--sqlnest-surface-hover)",
 	padding: "1px 5px",
-	borderRadius: 3,
+	borderRadius: "var(--sqlnest-radius-4)",
 	fontFamily: "var(--mantine-font-family-monospace)",
-	fontSize: 10.5,
+	fontSize: "var(--sqlnest-font-size-11)",
 	color: "var(--sqlnest-text-title)"
 } as const;
 
@@ -76,6 +76,8 @@ function renderSentence(sentence: string): ReactNode[] {
 	);
 }
 
+const SENTENCE_BREAK = /(?<=\.)\s+/;
+
 /**
  * Split le message par phrases (`. ` ou `.\n`) puis rend chaque phrase
  * sur sa propre ligne. Wrap si trop long. Résout le cas messages backend
@@ -84,7 +86,7 @@ function renderSentence(sentence: string): ReactNode[] {
  */
 function renderMessage(message: string): ReactNode {
 	const sentences = message
-		.split(/(?<=\.)\s+/)
+		.split(SENTENCE_BREAK)
 		.map((s) => s.trim())
 		.filter((s) => s.length > 0);
 	return sentences.map((s, i) => (

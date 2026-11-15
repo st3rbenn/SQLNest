@@ -24,12 +24,12 @@ const bannerStyle: CSSProperties = {
 	borderBottom: "1px solid var(--sqlnest-warning)",
 	color: "var(--sqlnest-text-primary)",
 	fontFamily: "'Inter', ui-sans-serif, system-ui, sans-serif",
-	fontSize: 13,
+	fontSize: "var(--sqlnest-font-size-13)",
 	flexShrink: 0
 };
 
 const iconStyle: CSSProperties = {
-	fontSize: 16,
+	fontSize: "var(--sqlnest-font-size-16)",
 	lineHeight: 1
 };
 
@@ -42,8 +42,8 @@ const shortcutStyle: CSSProperties = {
 	fontFamily: "var(--mantine-font-family-monospace)",
 	background: "var(--sqlnest-surface)",
 	padding: "1px 5px",
-	borderRadius: 4,
-	fontSize: 11,
+	borderRadius: "var(--sqlnest-radius-4)",
+	fontSize: "var(--sqlnest-font-size-11)",
 	color: "var(--sqlnest-text-secondary)"
 };
 

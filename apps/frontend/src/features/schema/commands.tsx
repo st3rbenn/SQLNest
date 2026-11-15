@@ -31,7 +31,7 @@ export function buildCanvasCommands(
 						display: "inline-block",
 						width: 8,
 						height: 8,
-						borderRadius: 2,
+						borderRadius: "var(--sqlnest-radius-2)",
 						background: color.border,
 						flexShrink: 0
 					}}

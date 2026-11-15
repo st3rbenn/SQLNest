@@ -13,13 +13,13 @@ const containerStyle: CSSProperties = {
 	overflow: "auto",
 	background: "var(--sqlnest-canvas-bg)",
 	border: "1px solid var(--sqlnest-border-subtle)",
-	borderRadius: 8,
+	borderRadius: "var(--sqlnest-radius-8)",
 	padding: "10px 14px"
 };
 
 const preStyle: CSSProperties = {
 	margin: 0,
-	fontSize: 12,
+	fontSize: "var(--sqlnest-font-size-12)",
 	fontFamily: "var(--mantine-font-family-monospace)",
 	color: "var(--sqlnest-text-primary)",
 	whiteSpace: "pre",
@@ -30,7 +30,7 @@ const emptyStyle: CSSProperties = {
 	padding: "32px",
 	textAlign: "center",
 	color: "var(--sqlnest-text-tertiary)",
-	fontSize: 12
+	fontSize: "var(--sqlnest-font-size-12)"
 };
 
 export function ResultsJsonView({

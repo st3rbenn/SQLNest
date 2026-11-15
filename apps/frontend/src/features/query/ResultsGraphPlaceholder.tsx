@@ -16,7 +16,7 @@ const containerStyle: CSSProperties = {
 	justifyContent: "center",
 	background: "var(--sqlnest-canvas-bg)",
 	border: "1px solid var(--sqlnest-border-subtle)",
-	borderRadius: 8,
+	borderRadius: "var(--sqlnest-radius-8)",
 	padding: 32,
 	gap: 12,
 	color: "var(--sqlnest-text-tertiary)",
@@ -24,14 +24,14 @@ const containerStyle: CSSProperties = {
 };
 
 const titleStyle: CSSProperties = {
-	fontSize: 13,
+	fontSize: "var(--sqlnest-font-size-13)",
 	fontWeight: 600,
 	color: "var(--sqlnest-text-secondary)",
 	margin: 0
 };
 
 const subStyle: CSSProperties = {
-	fontSize: 11.5,
+	fontSize: "var(--sqlnest-font-size-12)",
 	margin: 0,
 	maxWidth: 340,
 	lineHeight: 1.5

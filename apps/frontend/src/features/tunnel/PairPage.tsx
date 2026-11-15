@@ -83,14 +83,14 @@ const formStyle: CSSProperties = {
 const identityBannerStyle: CSSProperties = {
 	background: "var(--sqlnest-surface-hover)",
 	border: "1px solid var(--sqlnest-border)",
-	borderRadius: 8,
+	borderRadius: "var(--sqlnest-radius-8)",
 	padding: "10px 12px",
-	fontSize: 13,
+	fontSize: "var(--sqlnest-font-size-13)",
 	color: "var(--sqlnest-text-secondary)"
 };
 
 const helpStyle: CSSProperties = {
-	fontSize: 12,
+	fontSize: "var(--sqlnest-font-size-12)",
 	color: "var(--sqlnest-text-tertiary)",
 	textAlign: "center",
 	lineHeight: 1.6
@@ -99,8 +99,8 @@ const helpStyle: CSSProperties = {
 const codeChipStyle: CSSProperties = {
 	background: "var(--sqlnest-surface-hover)",
 	padding: "2px 6px",
-	borderRadius: 4,
-	fontSize: 12,
+	borderRadius: "var(--sqlnest-radius-4)",
+	fontSize: "var(--sqlnest-font-size-12)",
 	fontFamily: "var(--mantine-font-family-monospace)",
 	color: "var(--sqlnest-text-secondary)"
 };
@@ -125,7 +125,7 @@ const heroIconReconnectStyle: CSSProperties = {
 // éditable), pour que l'user vérifie visuellement qu'il matche celui
 // affiché dans son terminal AVANT de confirmer.
 const codePreviewLabelStyle: CSSProperties = {
-	fontSize: 11,
+	fontSize: "var(--sqlnest-font-size-11)",
 	fontWeight: 500,
 	color: "var(--sqlnest-text-tertiary)",
 	textTransform: "uppercase",
@@ -134,14 +134,14 @@ const codePreviewLabelStyle: CSSProperties = {
 
 const codePreviewValueStyle: CSSProperties = {
 	fontFamily: "var(--mantine-font-family-monospace)",
-	fontSize: 22,
+	fontSize: "var(--sqlnest-font-size-20)",
 	fontWeight: 600,
 	letterSpacing: "0.15em",
 	color: "var(--sqlnest-text-primary)",
 	padding: "10px 14px",
 	background: "var(--sqlnest-surface-hover)",
 	border: "1px solid var(--sqlnest-border)",
-	borderRadius: 8,
+	borderRadius: "var(--sqlnest-radius-8)",
 	textAlign: "center"
 };
 
@@ -154,7 +154,7 @@ const waitingStyle: CSSProperties = {
 	alignItems: "center",
 	gap: 12,
 	padding: "24px 0",
-	fontSize: 13,
+	fontSize: "var(--sqlnest-font-size-13)",
 	color: "var(--sqlnest-text-secondary)"
 };
 

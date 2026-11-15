@@ -16,15 +16,15 @@ const rowStyle: CSSProperties = {
 	gap: 16,
 	padding: "10px 14px",
 	background: "var(--sqlnest-surface)",
-	border: "1px solid var(--sqlnest-border-subtle)",
-	borderRadius: 8,
+	border: "1px solid var(--db-row-border, var(--sqlnest-border-subtle))",
+	borderRadius: "var(--sqlnest-radius-8)",
 	textDecoration: "none",
 	color: "var(--sqlnest-text-primary)",
 	transition: "border-color 160ms ease"
 };
 
 const nameStyle: CSSProperties = {
-	fontSize: 13,
+	fontSize: "var(--sqlnest-font-size-13)",
 	fontWeight: 600,
 	color: "var(--sqlnest-text-primary)",
 	overflow: "hidden",
@@ -33,7 +33,7 @@ const nameStyle: CSSProperties = {
 };
 
 const metaStyle: CSSProperties = {
-	fontSize: 11.5,
+	fontSize: "var(--sqlnest-font-size-12)",
 	color: "var(--sqlnest-text-secondary)",
 	overflow: "hidden",
 	textOverflow: "ellipsis",
@@ -44,7 +44,7 @@ const statusStyle = (isOnline: boolean): CSSProperties => ({
 	display: "inline-flex",
 	alignItems: "center",
 	gap: 6,
-	fontSize: 11,
+	fontSize: "var(--sqlnest-font-size-11)",
 	fontWeight: 500,
 	color: isOnline
 		? "var(--sqlnest-success, hsl(140, 55%, 55%))"
@@ -94,11 +94,7 @@ export function DbRow({
 
 	const style: CSSProperties = {
 		...rowStyle,
-		borderColor: isPending
-			? "var(--sqlnest-accent-muted)"
-			: rowStyle.border?.toString().includes("border-subtle")
-				? "var(--sqlnest-border-subtle)"
-				: "var(--sqlnest-border-subtle)"
+		...(isPending ? { borderColor: "var(--sqlnest-accent-muted)" } : {})
 	};
 
 	const content = (

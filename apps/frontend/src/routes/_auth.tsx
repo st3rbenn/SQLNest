@@ -68,7 +68,7 @@ const cardStyle: CSSProperties = {
 	maxWidth: 420,
 	background: "var(--sqlnest-surface)",
 	border: "1px solid var(--sqlnest-border)",
-	borderRadius: 12,
+	borderRadius: "var(--sqlnest-radius-12)",
 	// `clamp(min, preferred, max)` : sur un écran mobile étroit le padding
 	// fixe 32px mangeait ~60% de la largeur ; sur desktop on garde 32px pour
 	// respirer.
@@ -77,7 +77,7 @@ const cardStyle: CSSProperties = {
 };
 
 const logoStyle: CSSProperties = {
-	fontSize: 22,
+	fontSize: "var(--sqlnest-font-size-20)",
 	fontWeight: 700,
 	color: "var(--sqlnest-text-primary)",
 	textAlign: "center",

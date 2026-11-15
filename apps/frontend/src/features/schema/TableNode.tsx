@@ -202,7 +202,7 @@ function TableNodeComponent({
 	const shellStyle: CSSProperties = {
 		width: effectiveWidth,
 		height: effectiveHeight,
-		borderRadius: 10,
+		borderRadius: "var(--sqlnest-radius-10)",
 		background: "var(--sqlnest-surface)",
 		border: `2px solid ${matched ? "#ffc933" : highlighted || hoverHighlight ? "#0d99ff" : color.border}`,
 		boxShadow: highlighted
@@ -279,7 +279,7 @@ function TableNodeComponent({
 					handleStyle={{
 						width: 8,
 						height: 8,
-						borderRadius: 2,
+						borderRadius: "var(--sqlnest-radius-2)",
 						background: "var(--sqlnest-surface)",
 						borderColor: color.border,
 						borderWidth: 2
@@ -300,7 +300,7 @@ function TableNodeComponent({
 				<span
 					style={{
 						fontWeight: 700,
-						fontSize: 13,
+						fontSize: "var(--sqlnest-font-size-13)",
 						color: "var(--sqlnest-text-primary)",
 						whiteSpace: "nowrap",
 						overflow: "hidden",
@@ -324,7 +324,7 @@ function TableNodeComponent({
 							gap: 8,
 							height: ROW_H,
 							padding: "0 12px",
-							fontSize: 11.5
+							fontSize: "var(--sqlnest-font-size-12)"
 						}}
 					>
 						<span
@@ -350,7 +350,7 @@ function TableNodeComponent({
 						style={{
 							height: ROW_H,
 							padding: "0 12px",
-							fontSize: 10.5,
+							fontSize: "var(--sqlnest-font-size-11)",
 							color: "var(--sqlnest-text-tertiary)",
 							display: "flex",
 							alignItems: "center"

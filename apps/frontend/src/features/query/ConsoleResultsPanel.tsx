@@ -60,9 +60,9 @@ const partialWritesHeaderStyle: CSSProperties = {
 	padding: "6px 10px",
 	background: "var(--sqlnest-warning-soft)",
 	border: "1px solid var(--sqlnest-warning)",
-	borderRadius: 4,
+	borderRadius: "var(--sqlnest-radius-4)",
 	color: "var(--sqlnest-text-primary)",
-	fontSize: 12,
+	fontSize: "var(--sqlnest-font-size-12)",
 	lineHeight: 1.4
 };
 
@@ -71,7 +71,7 @@ const statusRowStyle: CSSProperties = {
 	alignItems: "center",
 	gap: 10,
 	color: "var(--sqlnest-text-secondary)",
-	fontSize: 12,
+	fontSize: "var(--sqlnest-font-size-12)",
 	minHeight: 24
 };
 
@@ -107,7 +107,7 @@ const viewGroupStyle: CSSProperties = {
 	padding: 2,
 	background: "var(--sqlnest-surface-hover)",
 	border: "1px solid var(--sqlnest-border-subtle)",
-	borderRadius: 6
+	borderRadius: "var(--sqlnest-radius-6)"
 };
 
 const paginationRowStyle: CSSProperties = {
@@ -116,7 +116,7 @@ const paginationRowStyle: CSSProperties = {
 	justifyContent: "space-between",
 	gap: 12,
 	color: "var(--sqlnest-text-secondary)",
-	fontSize: 11,
+	fontSize: "var(--sqlnest-font-size-11)",
 	paddingTop: 4
 };
 
@@ -136,8 +136,8 @@ const selectStyle: CSSProperties = {
 	background: "var(--sqlnest-surface)",
 	color: "var(--sqlnest-text-primary)",
 	border: "1px solid var(--sqlnest-border)",
-	borderRadius: 4,
-	fontSize: 11,
+	borderRadius: "var(--sqlnest-radius-4)",
+	fontSize: "var(--sqlnest-font-size-11)",
 	padding: "2px 6px",
 	cursor: "pointer"
 };

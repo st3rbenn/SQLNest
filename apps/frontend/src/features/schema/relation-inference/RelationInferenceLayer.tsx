@@ -172,7 +172,7 @@ export function RelationInferenceLayer() {
 									px="sm"
 									py={8}
 									style={{
-										borderRadius: 8,
+										borderRadius: "var(--sqlnest-radius-8)",
 										marginBottom: 4
 									}}
 								>

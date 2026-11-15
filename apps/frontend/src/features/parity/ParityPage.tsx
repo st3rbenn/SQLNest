@@ -29,13 +29,13 @@ const pageStyle: CSSProperties = {
 };
 
 const headerStyle: CSSProperties = {
-	fontSize: 24,
+	fontSize: "var(--sqlnest-font-size-24)",
 	fontWeight: 600,
 	marginBottom: 8
 };
 
 const subtitleStyle: CSSProperties = {
-	fontSize: 14,
+	fontSize: "var(--sqlnest-font-size-14)",
 	color: "var(--sqlnest-text-secondary)",
 	marginBottom: 24,
 	lineHeight: 1.5
@@ -44,7 +44,7 @@ const subtitleStyle: CSSProperties = {
 const sectionHeaderStyle: CSSProperties = {
 	marginTop: 24,
 	marginBottom: 12,
-	fontSize: 16,
+	fontSize: "var(--sqlnest-font-size-16)",
 	fontWeight: 600,
 	color: "var(--sqlnest-text-primary)"
 };
@@ -52,10 +52,10 @@ const sectionHeaderStyle: CSSProperties = {
 const tableStyle: CSSProperties = {
 	width: "100%",
 	borderCollapse: "collapse" as const,
-	fontSize: 13,
+	fontSize: "var(--sqlnest-font-size-13)",
 	background: "var(--sqlnest-surface)",
 	border: "1px solid var(--sqlnest-border-subtle)",
-	borderRadius: 4,
+	borderRadius: "var(--sqlnest-radius-4)",
 	overflow: "hidden"
 };
 
@@ -66,7 +66,7 @@ const thStyle: CSSProperties = {
 	borderBottom: "1px solid var(--sqlnest-border-subtle)",
 	fontWeight: 600,
 	color: "var(--sqlnest-text-secondary)",
-	fontSize: 11,
+	fontSize: "var(--sqlnest-font-size-11)",
 	textTransform: "uppercase" as const,
 	letterSpacing: 0.4
 };
@@ -81,7 +81,7 @@ const tdStyle: CSSProperties = {
 const constructStyle: CSSProperties = {
 	fontFamily:
 		"ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-	fontSize: 12,
+	fontSize: "var(--sqlnest-font-size-12)",
 	color: "var(--sqlnest-info)",
 	fontWeight: 500
 };
@@ -95,8 +95,8 @@ function mitigationBadge(m: DivergenceMitigation): CSSProperties {
 	return {
 		display: "inline-block",
 		padding: "2px 8px",
-		borderRadius: 3,
-		fontSize: 11,
+		borderRadius: "var(--sqlnest-radius-4)",
+		fontSize: "var(--sqlnest-font-size-11)",
 		fontWeight: 600,
 		textTransform: "uppercase" as const,
 		background: `color-mix(in srgb, ${colors[m]} 20%, transparent)`,
@@ -170,7 +170,7 @@ export function ParityPage(): React.ReactNode {
 											</div>
 											<div
 												style={{
-													fontSize: 11,
+													fontSize: "var(--sqlnest-font-size-11)",
 													color: "var(--sqlnest-text-tertiary)",
 													marginTop: 2
 												}}

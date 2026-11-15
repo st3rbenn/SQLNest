@@ -129,9 +129,9 @@ function NavItem({
 		alignItems: "center",
 		gap: 10,
 		padding: "6px 8px",
-		color: soon ? "var(--sqlnest-text-tertiary)" : "var(--sqlnest-text-title)",
-		borderRadius: 6,
-		fontSize: 12,
+		color: `var(--sidebar-item-color, ${soon ? "var(--sqlnest-text-tertiary)" : "var(--sqlnest-text-title)"})`,
+		borderRadius: "var(--sqlnest-radius-6)",
+		fontSize: "var(--sqlnest-font-size-12)",
 		fontWeight: 500,
 		cursor: soon ? "not-allowed" : to ? "pointer" : "default",
 		textDecoration: "none",
@@ -155,14 +155,14 @@ function NavItem({
 			{soon ? (
 				<span
 					style={{
-						fontSize: 9,
+						fontSize: "var(--sqlnest-font-size-10)",
 						fontWeight: 600,
 						letterSpacing: 0.4,
 						textTransform: "uppercase",
 						color: "var(--sqlnest-text-tertiary)",
 						border: "1px solid var(--sqlnest-border-subtle)",
 						padding: "1px 5px",
-						borderRadius: 3
+						borderRadius: "var(--sqlnest-radius-4)"
 					}}
 				>
 					Bientôt

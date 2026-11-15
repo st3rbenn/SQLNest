@@ -70,7 +70,7 @@ const outerNodeStyle: CSSProperties = {
 	boxSizing: "border-box",
 	background: "var(--sqlnest-surface)",
 	border: "1px solid var(--sqlnest-border)",
-	borderRadius: 12,
+	borderRadius: "var(--sqlnest-radius-12)",
 	// `--sqlnest-shadow-floating` fallback si le token n'existe pas — la
 	// valeur en dur reste discrète sur le fond `#1E1E1E`.
 	boxShadow: "var(--sqlnest-shadow-floating, 0 8px 24px rgba(0,0,0,0.35))",
@@ -105,7 +105,7 @@ const innerHolderStyle: CSSProperties = {
 	flex: 1,
 	minHeight: 0,
 	minWidth: 0,
-	borderRadius: 8,
+	borderRadius: "var(--sqlnest-radius-8)",
 	overflow: "hidden"
 };
 
@@ -116,7 +116,7 @@ const focusButtonStyle: CSSProperties = {
 	justifyContent: "center",
 	width: 24,
 	height: 24,
-	borderRadius: 4,
+	borderRadius: "var(--sqlnest-radius-4)",
 	background: "transparent",
 	border: "1px solid var(--sqlnest-border-subtle)",
 	color: "var(--sqlnest-text-secondary)",
@@ -125,7 +125,7 @@ const focusButtonStyle: CSSProperties = {
 };
 
 const tooltipStyles = {
-	tooltip: { fontSize: 11, padding: "4px 8px", borderRadius: 6 }
+	tooltip: { fontSize: "var(--sqlnest-font-size-11)", padding: "4px 8px", borderRadius: "var(--sqlnest-radius-6)" }
 } as const;
 
 export function ConsoleNode({
@@ -199,7 +199,7 @@ export function ConsoleNode({
 				handleStyle={{
 					width: 10,
 					height: 10,
-					borderRadius: 3,
+					borderRadius: "var(--sqlnest-radius-4)",
 					background: "var(--sqlnest-surface)",
 					borderColor: "var(--sqlnest-accent)",
 					borderWidth: 2

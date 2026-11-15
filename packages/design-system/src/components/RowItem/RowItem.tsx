@@ -24,13 +24,13 @@ export interface RowItemProps {
 
 interface SizeSpec {
 	readonly paddingY: number;
-	readonly fontSize: number;
+	readonly fontSize: string;
 	readonly labelFontSize?: number;
 }
 
 const SIZES: Record<RowItemSize, SizeSpec> = {
-	md: { paddingY: 6, fontSize: 12.5 },
-	sm: { paddingY: 5, fontSize: 11, labelFontSize: 10.5 },
+	md: { paddingY: 6, fontSize: "var(--sqlnest-font-size-13)" },
+	sm: { paddingY: 5, fontSize: "var(--sqlnest-font-size-11)", labelFontSize: 10.5 },
 };
 
 /**

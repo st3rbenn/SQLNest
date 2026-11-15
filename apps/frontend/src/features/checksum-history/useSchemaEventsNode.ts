@@ -43,6 +43,7 @@ export function useSchemaEventsNode(
 		(geom) => ({
 			id: SYSTEM_TABLE_ID,
 			type: "system-schema-events",
+			ariaLabel: "Événements du schéma",
 			position: geom.position,
 			width: geom.width,
 			height: geom.height,

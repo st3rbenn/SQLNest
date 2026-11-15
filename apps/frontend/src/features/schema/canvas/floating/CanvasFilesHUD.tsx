@@ -34,7 +34,7 @@ const floatingContainerStyle: CSSProperties = {
 	padding: 0,
 	background: "var(--sqlnest-elevated)",
 	border: "1px solid var(--sqlnest-border-subtle)",
-	borderRadius: 10,
+	borderRadius: "var(--sqlnest-radius-10)",
 	boxShadow: "var(--sqlnest-shadow-floating)"
 };
 
@@ -49,7 +49,7 @@ const baseBtnStyle: CSSProperties = {
 	display: "inline-flex",
 	alignItems: "center",
 	color: "var(--sqlnest-text-primary)",
-	fontSize: 14,
+	fontSize: "var(--sqlnest-font-size-14)",
 	fontWeight: 500
 };
 
@@ -60,10 +60,10 @@ const menuStyles = {
 		padding: 3
 	},
 	item: {
-		fontSize: 12,
+		fontSize: "var(--sqlnest-font-size-12)",
 		color: "var(--sqlnest-text-primary)",
 		padding: "5px 8px",
-		borderRadius: 5,
+		borderRadius: "var(--sqlnest-radius-6)",
 		minHeight: 0
 	}
 } as const;
@@ -86,21 +86,21 @@ export function CanvasFilesHUD({
 	if (variant === "floating") {
 		return (
 			<div style={floatingContainerStyle}>
-				<FilesMenu radius="10px 0 0 10px" padding="11px 14px" />
+				<FilesMenu radius="var(--sqlnest-radius-10) 0 0 var(--sqlnest-radius-10)" padding="11px 14px" />
 				<OpenPanelButton dbName={dbName} onClick={onToggleDrawer} />
 			</div>
 		);
 	}
 	return (
 		<div style={embeddedContainerStyle}>
-			<FilesMenu radius={6} padding="6px 8px" />
+			<FilesMenu radius="var(--sqlnest-radius-6)" padding="6px 8px" />
 			<UnstyledButton
 				className="sqlnest-menu-item"
 				aria-label={`Renommer ${dbName} (bientôt)`}
 				style={{
 					...baseBtnStyle,
 					padding: "6px 10px",
-					borderRadius: 6,
+					borderRadius: "var(--sqlnest-radius-6)",
 					maxWidth: 220,
 					overflow: "hidden",
 					textOverflow: "ellipsis",
@@ -116,7 +116,7 @@ export function CanvasFilesHUD({
 				style={{
 					...baseBtnStyle,
 					padding: "6px 8px",
-					borderRadius: 6,
+					borderRadius: "var(--sqlnest-radius-6)",
 					marginLeft: "auto",
 					color: "var(--sqlnest-text-primary)"
 				}}
@@ -147,7 +147,7 @@ function OpenPanelButton({
 				...baseBtnStyle,
 				gap: 12,
 				padding: "11px 14px",
-				borderRadius: "0 10px 10px 0",
+				borderRadius: "0 var(--sqlnest-radius-10) var(--sqlnest-radius-10) 0",
 				maxWidth: 260
 			}}
 		>
@@ -179,7 +179,7 @@ function FilesMenu({
 			position="bottom-start"
 			withArrow={false}
 			offset={8}
-			radius={8}
+			radius="var(--sqlnest-radius-8)"
 			transitionProps={{ duration: 0 }}
 			styles={menuStyles}
 			classNames={menuClassNames}

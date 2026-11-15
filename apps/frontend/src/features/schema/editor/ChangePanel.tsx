@@ -798,7 +798,7 @@ function ClosedEditing({ mode }: { readonly mode: EditMode }) {
 						<Code
 							block
 							onClick={copy}
-							style={{ cursor: "pointer", fontSize: 11 }}
+							style={{ cursor: "pointer", fontSize: "var(--sqlnest-font-size-11)" }}
 							title={copied ? "Copié" : "Copier"}
 						>
 							{command}
@@ -885,7 +885,7 @@ function Outcome({ outcome }: { readonly outcome: ChangeOutcome }) {
 								: `non exécuté — ${check.skipped ?? ""}`}
 					</Text>
 					{check.ok === false ? (
-						<Code block style={{ fontSize: 11 }}>
+						<Code block style={{ fontSize: "var(--sqlnest-font-size-11)" }}>
 							{check.diff ??
 								(check.differences ?? [])
 									.map(
@@ -932,7 +932,7 @@ function Block({
 			<Text size="xs" c={tone ?? "dimmed"}>
 				{label}
 			</Text>
-			<Code block style={{ fontSize: 11, whiteSpace: "pre-wrap" }}>
+			<Code block style={{ fontSize: "var(--sqlnest-font-size-11)", whiteSpace: "pre-wrap" }}>
 				{children}
 			</Code>
 		</Stack>

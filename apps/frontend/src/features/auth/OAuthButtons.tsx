@@ -38,7 +38,7 @@ const dividerStyle: CSSProperties = {
 	gap: 12,
 	margin: "20px 0 12px",
 	color: "var(--sqlnest-text-tertiary)",
-	fontSize: 12
+	fontSize: "var(--sqlnest-font-size-12)"
 };
 
 const dividerLineStyle: CSSProperties = {

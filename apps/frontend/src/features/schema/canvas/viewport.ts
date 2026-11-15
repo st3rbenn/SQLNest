@@ -84,6 +84,11 @@ export function animateViewport(
 		apply(to);
 		return { cancel: () => {} };
 	}
+	// « Réduire les animations » du système : on saute à l'arrivée.
+	if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+		apply(to);
+		return { cancel: () => {} };
+	}
 	// Applique la valeur `from` sans transition — sinon la 1ère transform
 	// serait tweenée depuis n'importe quel état résiduel.
 	vp.style.transition = "none";

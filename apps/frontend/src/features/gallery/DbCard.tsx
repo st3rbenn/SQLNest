@@ -24,8 +24,8 @@ const linkStyle: CSSProperties = {
 	textDecoration: "none",
 	color: "inherit",
 	cursor: "pointer",
-	border: "1px solid var(--sqlnest-border)",
-	borderRadius: 12,
+	border: "1px solid var(--db-card-border, var(--sqlnest-border))",
+	borderRadius: "var(--sqlnest-radius-12)",
 	overflow: "hidden",
 	background: "var(--sqlnest-surface)"
 };
@@ -36,7 +36,7 @@ const infoBlockStyle: CSSProperties = {
 };
 
 const nameStyle: CSSProperties = {
-	fontSize: 13,
+	fontSize: "var(--sqlnest-font-size-13)",
 	fontWeight: 600,
 	color: "var(--sqlnest-text-primary)",
 	whiteSpace: "nowrap",
@@ -45,7 +45,7 @@ const nameStyle: CSSProperties = {
 };
 
 const metaStyle: CSSProperties = {
-	fontSize: 11,
+	fontSize: "var(--sqlnest-font-size-11)",
 	color: "var(--sqlnest-text-tertiary)",
 	marginTop: 3,
 	display: "flex",
@@ -56,7 +56,7 @@ const metaStyle: CSSProperties = {
 // Nom d'engine à côté du canvas name — même weight/color que le meta
 // footer, distinct du name (font-weight 600).
 const engineLabelStyle: CSSProperties = {
-	fontSize: 12,
+	fontSize: "var(--sqlnest-font-size-12)",
 	fontWeight: 400,
 	color: "var(--sqlnest-text-secondary)"
 };

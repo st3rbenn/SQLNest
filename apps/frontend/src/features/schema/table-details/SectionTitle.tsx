@@ -24,7 +24,7 @@ export function SectionTitle({
 			style={{
 				textTransform: "uppercase",
 				letterSpacing: 0.5,
-				fontSize: 9.5,
+				fontSize: "var(--sqlnest-font-size-10)",
 				color: "var(--sqlnest-text-tertiary)"
 			}}
 		>

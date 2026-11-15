@@ -66,7 +66,7 @@ const centerMessageStyle: CSSProperties = {
 	display: "flex",
 	alignItems: "center",
 	justifyContent: "center",
-	fontSize: 11,
+	fontSize: "var(--sqlnest-font-size-11)",
 	color: "var(--sqlnest-text-tertiary)",
 	fontFamily: "var(--mantine-font-family-monospace)"
 };
@@ -190,10 +190,10 @@ function OfflineBadge(): React.ReactNode {
 				alignItems: "center",
 				gap: 5,
 				padding: "3px 8px",
-				borderRadius: 999,
+				borderRadius: "var(--sqlnest-radius-full)",
 				background: "hsla(0, 0%, 0%, 0.55)",
 				border: "1px solid var(--sqlnest-border-subtle)",
-				fontSize: 10,
+				fontSize: "var(--sqlnest-font-size-10)",
 				fontWeight: 600,
 				color: "var(--sqlnest-text-secondary)",
 				letterSpacing: "0.2px",

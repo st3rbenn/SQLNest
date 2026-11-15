@@ -56,7 +56,6 @@ export function ResultTable({
 				</thead>
 				<tbody>
 					{rows.map((row, i) => (
-						// biome-ignore lint/suspicious/noArrayIndexKey: rows n'ont pas d'id stable
 						<tr key={i}>
 							{columns.map((name) => (
 								<td key={name} style={tdStyle}>
@@ -81,7 +80,7 @@ function renderCell(value: unknown): string {
 const wrapperStyle: CSSProperties = {
 	overflow: "auto",
 	border: "1px solid var(--sqlnest-border)",
-	borderRadius: 6,
+	borderRadius: "var(--sqlnest-radius-6)",
 	background: "var(--sqlnest-surface)",
 };
 
@@ -89,7 +88,7 @@ const tableStyle: CSSProperties = {
 	borderCollapse: "collapse",
 	width: "100%",
 	fontFamily: "var(--mantine-font-family-monospace)",
-	fontSize: 12,
+	fontSize: "var(--sqlnest-font-size-12)",
 };
 
 const thStyle: CSSProperties = {
@@ -118,8 +117,8 @@ const emptyStyle: CSSProperties = {
 	justifyContent: "center",
 	padding: "24px 16px",
 	color: "var(--sqlnest-text-tertiary)",
-	fontSize: 12,
+	fontSize: "var(--sqlnest-font-size-12)",
 	border: "1px solid var(--sqlnest-border)",
-	borderRadius: 6,
+	borderRadius: "var(--sqlnest-radius-6)",
 	background: "var(--sqlnest-surface)",
 };

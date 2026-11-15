@@ -18,7 +18,7 @@ interface DotSpec {
 const SPECS: Record<ColorDotSize, DotSpec> = {
 	sm: { px: 8, borderRadius: "50%" },
 	md: { px: 10, borderRadius: "50%" },
-	lg: { px: 12, borderRadius: 4 },
+	lg: { px: 12, borderRadius: "var(--sqlnest-radius-4)" },
 };
 
 /**

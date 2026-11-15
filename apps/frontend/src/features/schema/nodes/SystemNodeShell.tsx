@@ -97,7 +97,7 @@ export function SystemNodeShell({
 				height,
 				background: "var(--sqlnest-surface)",
 				border: `2px solid ${SYSTEM_BORDER}`,
-				borderRadius: 10,
+				borderRadius: "var(--sqlnest-radius-10)",
 				overflow: "hidden",
 				fontFamily: "ui-sans-serif, system-ui, sans-serif",
 				boxShadow: "0 1px 3px rgba(0,0,0,0.35)",
@@ -115,7 +115,7 @@ export function SystemNodeShell({
 				handleStyle={{
 					width: 8,
 					height: 8,
-					borderRadius: 2,
+					borderRadius: "var(--sqlnest-radius-2)",
 					background: "var(--sqlnest-surface)",
 					borderColor: SYSTEM_BORDER,
 					borderWidth: 2
@@ -148,7 +148,7 @@ export function SystemNodeShell({
 						alignItems: "center",
 						gap: 6,
 						fontWeight: 700,
-						fontSize: 13,
+						fontSize: "var(--sqlnest-font-size-13)",
 						color: "var(--sqlnest-text-primary)"
 					}}
 				>
@@ -168,7 +168,7 @@ export function SystemNodeShell({
 							display: "flex",
 							alignItems: "center",
 							gap: 3,
-							fontSize: 10,
+							fontSize: "var(--sqlnest-font-size-10)",
 							fontWeight: 600,
 							color: SYSTEM_BORDER,
 							letterSpacing: 0.5,

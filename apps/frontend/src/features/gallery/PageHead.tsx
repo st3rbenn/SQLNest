@@ -24,7 +24,7 @@ const headStyle: CSSProperties = {
 };
 
 const titleStyle: CSSProperties = {
-	fontSize: 13,
+	fontSize: "var(--sqlnest-font-size-13)",
 	fontWeight: 500,
 	color: "var(--sqlnest-text-title)",
 	margin: 0
@@ -55,11 +55,11 @@ const ctaStyle: CSSProperties = {
 	alignItems: "center",
 	gap: 7,
 	padding: "6px 12px",
-	background: "var(--sqlnest-surface)",
+	background: "var(--header-cta-bg, var(--sqlnest-surface))",
 	color: "var(--sqlnest-text-primary)",
-	border: "1px solid var(--sqlnest-border)",
-	borderRadius: 6,
-	fontSize: 12,
+	border: "1px solid var(--header-cta-border, var(--sqlnest-border))",
+	borderRadius: "var(--sqlnest-radius-6)",
+	fontSize: "var(--sqlnest-font-size-12)",
 	fontWeight: 500,
 	textDecoration: "none",
 	boxSizing: "border-box",

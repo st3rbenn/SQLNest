@@ -110,7 +110,7 @@ export function FrameNode({
 				handleStyle={{
 					width: 10,
 					height: 10,
-					borderRadius: 3,
+					borderRadius: "var(--sqlnest-radius-4)",
 					// `--sqlnest-surface` — un blanc pur ferait « oeuf sur canvas
 					// noir » et brûlerait la teinte du frame.
 					background: "var(--sqlnest-surface)",
@@ -135,7 +135,7 @@ export function FrameNode({
 					// dessine les 4 côtés (sinon double bordure avec halo).
 					width,
 					height,
-					borderRadius: 14,
+					borderRadius: "var(--sqlnest-radius-14)",
 					// Pastel translucide sombre-adapté : sur bg #1E1E1E, un tint
 					// L=90 ferait tache. On descend à L=45 (nuance moyenne de
 					// la hue) et on baisse l'alpha à 12 % — teinte discernable
@@ -214,8 +214,8 @@ export function FrameNode({
 								color: "var(--sqlnest-text-primary)",
 								border: "none",
 								padding: "3px 10px",
-								borderRadius: 999,
-								fontSize: 11,
+								borderRadius: "var(--sqlnest-radius-full)",
+								fontSize: "var(--sqlnest-font-size-11)",
 								fontWeight: 700,
 								outline: "none",
 								minWidth: 90,

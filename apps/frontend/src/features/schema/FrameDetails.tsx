@@ -73,7 +73,7 @@ export function FrameDetails({
 							display: "inline-block",
 							width: 12,
 							height: 12,
-							borderRadius: 4,
+							borderRadius: "var(--sqlnest-radius-4)",
 							background: hueColor,
 							flexShrink: 0
 						}}
@@ -100,14 +100,14 @@ export function FrameDetails({
 								style={{
 									flex: 1,
 									minWidth: 0,
-									fontSize: 15,
+									fontSize: "var(--sqlnest-font-size-14)",
 									fontWeight: 700,
 									textTransform: "uppercase",
 									letterSpacing: 0.3,
 									color: "var(--sqlnest-text-primary)",
 									padding: "4px 8px",
 									border: `1.5px solid ${hueColor}`,
-									borderRadius: 6,
+									borderRadius: "var(--sqlnest-radius-6)",
 									outline: "none",
 									fontFamily: "inherit",
 									background: "var(--sqlnest-surface)"
@@ -137,7 +137,7 @@ export function FrameDetails({
 						<>
 							<span
 								style={{
-									fontSize: 15,
+									fontSize: "var(--sqlnest-font-size-14)",
 									fontWeight: 700,
 									textTransform: "uppercase",
 									letterSpacing: 0.3,
@@ -180,7 +180,7 @@ export function FrameDetails({
 					size="xs"
 					c="dimmed"
 					mt={2}
-					style={{ fontSize: 10.5, letterSpacing: 0.1 }}
+					style={{ fontSize: "var(--sqlnest-font-size-11)", letterSpacing: 0.1 }}
 				>
 					{frame.collections.length} table
 					{frame.collections.length > 1 ? "s" : ""}
@@ -198,7 +198,7 @@ export function FrameDetails({
 				style={{
 					textTransform: "uppercase",
 					letterSpacing: 0.5,
-					fontSize: 9.5
+					fontSize: "var(--sqlnest-font-size-10)"
 				}}
 			>
 				Tables

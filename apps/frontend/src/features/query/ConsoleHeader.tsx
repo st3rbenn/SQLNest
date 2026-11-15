@@ -65,10 +65,10 @@ function HistoryBadge({ entry }: { readonly entry: HistoryEntry }): React.ReactN
 					justifyContent: "center",
 					width: 16,
 					height: 16,
-					borderRadius: 3,
+					borderRadius: "var(--sqlnest-radius-4)",
 					background: bg,
 					color: "var(--sqlnest-surface)",
-					fontSize: 10,
+					fontSize: "var(--sqlnest-font-size-10)",
 					fontWeight: 700,
 					textDecoration: rolledBack ? "line-through" : "none",
 					flexShrink: 0
@@ -102,24 +102,24 @@ const backLinkStyle: CSSProperties = {
 	display: "inline-flex",
 	alignItems: "center",
 	gap: 6,
-	fontSize: 12,
+	fontSize: "var(--sqlnest-font-size-12)",
 	color: "var(--sqlnest-text-secondary)",
 	textDecoration: "none",
 	padding: "4px 8px",
-	borderRadius: 4
+	borderRadius: "var(--sqlnest-radius-4)"
 };
 
 const closeButtonStyle: CSSProperties = {
 	display: "inline-flex",
 	alignItems: "center",
 	gap: 6,
-	fontSize: 12,
+	fontSize: "var(--sqlnest-font-size-12)",
 	color: "var(--sqlnest-text-secondary)",
-	background: "transparent",
+	background: "var(--header-cta-bg, transparent)",
 	border: "none",
 	cursor: "pointer",
 	padding: "4px 8px",
-	borderRadius: 4
+	borderRadius: "var(--sqlnest-radius-4)"
 };
 
 const separatorStyle: CSSProperties = {
@@ -134,7 +134,7 @@ const titleGroupStyle: CSSProperties = {
 	alignItems: "center",
 	gap: 6,
 	color: "var(--sqlnest-text-primary)",
-	fontSize: 12.5,
+	fontSize: "var(--sqlnest-font-size-13)",
 	fontWeight: 600,
 	flexShrink: 0
 };
@@ -142,12 +142,12 @@ const titleGroupStyle: CSSProperties = {
 const connChipStyle: CSSProperties = {
 	display: "inline-flex",
 	alignItems: "center",
-	fontSize: 11,
+	fontSize: "var(--sqlnest-font-size-11)",
 	fontWeight: 500,
 	color: "var(--sqlnest-text-secondary)",
 	background: "var(--sqlnest-surface-hover)",
 	border: "1px solid var(--sqlnest-border-subtle)",
-	borderRadius: 4,
+	borderRadius: "var(--sqlnest-radius-4)",
 	padding: "1px 7px",
 	overflow: "hidden",
 	textOverflow: "ellipsis",
@@ -175,7 +175,7 @@ const tabBaseStyle: CSSProperties = {
 	alignItems: "center",
 	gap: 6,
 	padding: "0 8px 0 12px",
-	fontSize: 12,
+	fontSize: "var(--sqlnest-font-size-12)",
 	color: "var(--sqlnest-text-secondary)",
 	background: "transparent",
 	border: "none",
@@ -198,7 +198,7 @@ const tabActiveStyle: CSSProperties = {
 };
 
 const tabCountStyle: CSSProperties = {
-	fontSize: 10,
+	fontSize: "var(--sqlnest-font-size-10)",
 	fontWeight: 500,
 	color: "var(--sqlnest-text-tertiary)",
 	fontVariantNumeric: "tabular-nums"
@@ -210,7 +210,7 @@ const tabCloseStyle: CSSProperties = {
 	justifyContent: "center",
 	width: 15,
 	height: 15,
-	borderRadius: 3,
+	borderRadius: "var(--sqlnest-radius-4)",
 	background: "transparent",
 	border: "none",
 	color: "var(--sqlnest-text-tertiary)",
@@ -221,9 +221,9 @@ const tabCloseStyle: CSSProperties = {
 const renameInputStyle: CSSProperties = {
 	background: "var(--sqlnest-canvas-bg)",
 	border: "1px solid var(--sqlnest-accent)",
-	borderRadius: 4,
+	borderRadius: "var(--sqlnest-radius-4)",
 	color: "var(--sqlnest-text-primary)",
-	fontSize: 12,
+	fontSize: "var(--sqlnest-font-size-12)",
 	padding: "1px 6px",
 	outline: "none",
 	width: 120
@@ -243,10 +243,10 @@ const menuStyles = {
 		padding: 3
 	},
 	item: {
-		fontSize: 11,
+		fontSize: "var(--sqlnest-font-size-11)",
 		color: "var(--sqlnest-text-primary)",
 		padding: "5px 8px",
-		borderRadius: 4,
+		borderRadius: "var(--sqlnest-radius-4)",
 		minHeight: 0
 	}
 } as const;
@@ -255,11 +255,11 @@ const outlineBtnStyle: CSSProperties = {
 	display: "inline-flex",
 	alignItems: "center",
 	gap: 5,
-	fontSize: 11,
+	fontSize: "var(--sqlnest-font-size-11)",
 	color: "var(--sqlnest-text-primary)",
-	background: "var(--sqlnest-surface)",
-	border: "1px solid var(--sqlnest-border)",
-	borderRadius: 5,
+	background: "var(--header-cta-bg, var(--sqlnest-surface))",
+	border: "1px solid var(--header-cta-border, var(--sqlnest-border))",
+	borderRadius: "var(--sqlnest-radius-6)",
 	padding: "4px 8px",
 	cursor: "pointer",
 	minHeight: 26
@@ -430,7 +430,7 @@ export function ConsoleHeader({
 					width={440}
 					position="bottom-end"
 					withArrow={false}
-					radius={8}
+					radius="var(--sqlnest-radius-8)"
 					styles={menuStyles}
 					disabled={history.length === 0}
 				>
@@ -439,7 +439,7 @@ export function ConsoleHeader({
 							label="Historique des requêtes"
 							openDelay={400}
 							styles={{
-								tooltip: { fontSize: 11, padding: "4px 8px", borderRadius: 6 }
+								tooltip: { fontSize: "var(--sqlnest-font-size-11)", padding: "4px 8px", borderRadius: "var(--sqlnest-radius-6)" }
 							}}
 							withArrow
 							arrowSize={4}
@@ -448,7 +448,7 @@ export function ConsoleHeader({
 								variant="subtle"
 								color="gray"
 								size={26}
-								radius={5}
+								radius="var(--sqlnest-radius-6)"
 								disabled={history.length === 0}
 								aria-label="Historique"
 							>
@@ -464,7 +464,7 @@ export function ConsoleHeader({
 								display: "flex",
 								alignItems: "center",
 								gap: 6,
-								fontSize: 11,
+								fontSize: "var(--sqlnest-font-size-11)",
 								color: "var(--sqlnest-text-secondary)",
 								cursor: "pointer"
 							}}
@@ -480,7 +480,7 @@ export function ConsoleHeader({
 									background: writesOnly
 										? "var(--sqlnest-accent)"
 										: "transparent",
-									borderRadius: 2
+									borderRadius: "var(--sqlnest-radius-2)"
 								}}
 							/>
 							Writes only
@@ -489,6 +489,7 @@ export function ConsoleHeader({
 							const q = entry.source;
 							return (
 								<Menu.Item
+									// biome-ignore lint/suspicious/noArrayIndexKey: une même requête peut revenir dans l'historique, l'indice départage
 									key={`${q}-${i}`}
 									onClick={() => onHistorySelect(q)}
 									style={{
@@ -510,7 +511,7 @@ export function ConsoleHeader({
 							);
 						})}
 						{filteredHistory.length === 0 ? (
-							<Menu.Label style={{ fontSize: 11, opacity: 0.6 }}>
+							<Menu.Label style={{ fontSize: "var(--sqlnest-font-size-11)", opacity: 0.6 }}>
 								{writesOnly ? "Aucune écriture dans l'historique" : "Historique vide"}
 							</Menu.Label>
 						) : null}
@@ -525,7 +526,7 @@ export function ConsoleHeader({
 					label={`Formater — ${modKey} ⇧ F`}
 					openDelay={400}
 					styles={{
-						tooltip: { fontSize: 11, padding: "4px 8px", borderRadius: 6 }
+						tooltip: { fontSize: "var(--sqlnest-font-size-11)", padding: "4px 8px", borderRadius: "var(--sqlnest-radius-6)" }
 					}}
 					withArrow
 					arrowSize={4}
@@ -534,7 +535,7 @@ export function ConsoleHeader({
 						variant="subtle"
 						color="gray"
 						size={26}
-						radius={5}
+						radius="var(--sqlnest-radius-6)"
 						disabled={!canFormat}
 						aria-label="Formater la requête"
 						onClick={onFormat}
@@ -548,7 +549,7 @@ export function ConsoleHeader({
 						label={`Détacher — ${modKey} ⇧ K`}
 						openDelay={400}
 						styles={{
-							tooltip: { fontSize: 11, padding: "4px 8px", borderRadius: 6 }
+							tooltip: { fontSize: "var(--sqlnest-font-size-11)", padding: "4px 8px", borderRadius: "var(--sqlnest-radius-6)" }
 						}}
 						withArrow
 						arrowSize={4}
@@ -571,9 +572,9 @@ export function ConsoleHeader({
 					multiline
 					styles={{
 						tooltip: {
-							fontSize: 11,
+							fontSize: "var(--sqlnest-font-size-11)",
 							padding: "4px 8px",
-							borderRadius: 6,
+							borderRadius: "var(--sqlnest-radius-6)",
 							whiteSpace: "pre-line"
 						}
 					}}

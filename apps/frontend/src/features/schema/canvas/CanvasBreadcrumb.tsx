@@ -58,7 +58,7 @@ export function CanvasBreadcrumb({
 				alignItems: "center",
 				gap: 6,
 				padding: "6px 10px",
-				fontSize: 12.5
+				fontSize: "var(--sqlnest-font-size-13)"
 			}}
 			aria-label="Contexte du canvas"
 		>
@@ -90,7 +90,7 @@ export function CanvasBreadcrumb({
 
 const codeStyle: CSSProperties = {
 	fontFamily: "var(--mantine-font-family-monospace)",
-	fontSize: 11.5,
+	fontSize: "var(--sqlnest-font-size-12)",
 	color: "inherit",
 	background: "transparent",
 	padding: 0

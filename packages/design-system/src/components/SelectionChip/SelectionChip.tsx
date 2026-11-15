@@ -86,11 +86,11 @@ export function SelectionChip({
 							color: a.danger
 								? "var(--sqlnest-danger)"
 								: "var(--sqlnest-text-primary)",
-							fontSize: 12,
+							fontSize: "var(--sqlnest-font-size-12)",
 							fontFamily: "inherit",
 							cursor: "pointer",
 							padding: "2px 6px",
-							borderRadius: 5,
+							borderRadius: "var(--sqlnest-radius-6)",
 							display: "inline-flex",
 							alignItems: "center",
 							gap: 6,

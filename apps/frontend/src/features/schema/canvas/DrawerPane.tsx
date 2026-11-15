@@ -172,7 +172,7 @@ export function DrawerPane({
 										alignItems: "center",
 										gap: 4,
 										width: "100%",
-										fontSize: 12.5,
+										fontSize: "var(--sqlnest-font-size-13)",
 										color: "var(--sqlnest-text-secondary)",
 										fontWeight: 500
 									}}
@@ -292,7 +292,7 @@ function AutoOrganizeMenu(): React.ReactNode {
 			position="bottom-end"
 			withArrow={false}
 			offset={6}
-			radius={8}
+			radius="var(--sqlnest-radius-8)"
 			transitionProps={{ duration: 0 }}
 			styles={{
 				dropdown: {
@@ -301,10 +301,10 @@ function AutoOrganizeMenu(): React.ReactNode {
 					padding: 3
 				},
 				item: {
-					fontSize: 12,
+					fontSize: "var(--sqlnest-font-size-12)",
 					color: "var(--sqlnest-text-primary)",
 					padding: "5px 8px",
-					borderRadius: 5,
+					borderRadius: "var(--sqlnest-radius-6)",
 					minHeight: 0
 				}
 			}}
@@ -319,8 +319,8 @@ function AutoOrganizeMenu(): React.ReactNode {
 						alignItems: "center",
 						justifyContent: "center",
 						padding: "4px 6px",
-						borderRadius: 6,
-						color: "var(--sqlnest-text-secondary)"
+						borderRadius: "var(--sqlnest-radius-6)",
+						color: "var(--menu-item-color, var(--sqlnest-text-secondary))"
 					}}
 				>
 					<IconAdjustmentsHorizontal size={14} stroke={2} aria-hidden />

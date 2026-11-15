@@ -49,7 +49,7 @@ export function TableDetailsHeader({
 					<ColorDot color={borderColor} size="md" />
 					<span
 						style={{
-							fontSize: 15,
+							fontSize: "var(--sqlnest-font-size-14)",
 							fontWeight: 700,
 							color: "var(--sqlnest-text-primary)",
 							overflow: "hidden",
@@ -67,7 +67,7 @@ export function TableDetailsHeader({
 					size="xs"
 					c="dimmed"
 					mt={2}
-					style={{ fontSize: 10.5, letterSpacing: 0.1 }}
+					style={{ fontSize: "var(--sqlnest-font-size-11)", letterSpacing: 0.1 }}
 				>
 					{fieldCount} champs · {totalRelations} relations
 					{frameLabel !== null ? (

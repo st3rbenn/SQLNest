@@ -71,7 +71,7 @@ export function UserMenu() {
 				position="bottom-end"
 				withArrow={false}
 				offset={6}
-				radius={8}
+				radius="var(--sqlnest-radius-8)"
 				styles={{
 					dropdown: {
 						background: "var(--sqlnest-surface)",
@@ -79,10 +79,10 @@ export function UserMenu() {
 						padding: 3
 					},
 					item: {
-						fontSize: 12,
+						fontSize: "var(--sqlnest-font-size-12)",
 						color: "var(--sqlnest-text-primary)",
 						padding: "5px 8px",
-						borderRadius: 5,
+						borderRadius: "var(--sqlnest-radius-6)",
 						minHeight: 0
 					}
 				}}

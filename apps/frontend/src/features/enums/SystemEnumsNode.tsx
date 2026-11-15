@@ -147,7 +147,7 @@ function EnumRow({
 						border: "none",
 						padding: "0 2px",
 						color: "var(--sqlnest-text-secondary)",
-						fontSize: 11.5,
+						fontSize: "var(--sqlnest-font-size-12)",
 						cursor: "pointer",
 						textAlign: "left"
 					}}
@@ -175,7 +175,7 @@ function EnumRow({
 				<span
 					style={{
 						flexShrink: 0,
-						fontSize: 10.5,
+						fontSize: "var(--sqlnest-font-size-11)",
 						color: "var(--sqlnest-text-tertiary)"
 					}}
 				>
@@ -199,7 +199,7 @@ function EnumRow({
 							flexShrink: 0,
 							background: "transparent",
 							border: "1px solid var(--sqlnest-border-subtle)",
-							borderRadius: 4,
+							borderRadius: "var(--sqlnest-radius-4)",
 							color: "var(--sqlnest-text-tertiary)",
 							cursor: "pointer"
 						}}
@@ -218,7 +218,7 @@ function EnumRow({
 								alignItems: "center",
 								gap: 8,
 								padding: "1px 12px 1px 26px",
-								fontSize: 10.5,
+								fontSize: "var(--sqlnest-font-size-11)",
 								fontFamily: "ui-monospace, monospace",
 								color: "var(--sqlnest-text-secondary)"
 							}}
@@ -240,7 +240,7 @@ function EnumRow({
 							style={{
 								margin: 0,
 								padding: "1px 12px 1px 26px",
-								fontSize: 10.5,
+								fontSize: "var(--sqlnest-font-size-11)",
 								color: "var(--sqlnest-text-tertiary)"
 							}}
 						>

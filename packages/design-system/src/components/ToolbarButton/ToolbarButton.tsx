@@ -28,9 +28,9 @@ const DOT_COLOR: Record<ToolbarButtonStatus, string> = {
 // pour ne toucher que ce tooltip-là (pas un override global).
 const COMPACT_TOOLTIP_STYLES = {
 	tooltip: {
-		fontSize: 11,
+		fontSize: "var(--sqlnest-font-size-11)",
 		padding: "4px 8px",
-		borderRadius: 6,
+		borderRadius: "var(--sqlnest-radius-6)",
 	},
 } as const;
 
@@ -58,7 +58,7 @@ export function ToolbarButton({
 					aria-pressed={active ? true : undefined}
 					variant={active ? "light" : "subtle"}
 					color={active ? "brand" : "slate"}
-					radius={9}
+					radius="var(--sqlnest-radius-10)"
 					size={36}
 					onClick={onClick}
 					{...rest}

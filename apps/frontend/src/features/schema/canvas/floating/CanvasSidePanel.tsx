@@ -22,7 +22,7 @@ export function CanvasSidePanel({
 }) {
 	return (
 		<Paper
-			radius={12}
+			radius="var(--sqlnest-radius-12)"
 			shadow="lg"
 			withBorder
 			bg="var(--sqlnest-elevated)"

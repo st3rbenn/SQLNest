@@ -108,7 +108,7 @@ export interface SnqlEditorHandle {
 const theme = EditorView.theme(
 	{
 		"&": {
-			fontSize: "14px",
+			fontSize: "var(--sqlnest-font-size-14)",
 			border: "none",
 			backgroundColor: "var(--sqlnest-canvas-bg)",
 			color: "var(--sqlnest-text-primary)",
@@ -142,7 +142,7 @@ const theme = EditorView.theme(
 		".cm-tooltip-autocomplete": {
 			background: "var(--sqlnest-surface)",
 			border: "1px solid var(--sqlnest-border)",
-			borderRadius: "8px",
+			borderRadius: "var(--sqlnest-radius-8)",
 			color: "var(--sqlnest-text-primary)",
 			boxShadow: "0 8px 24px rgba(0,0,0,0.5)"
 		},
@@ -162,7 +162,7 @@ const theme = EditorView.theme(
 		},
 		".cm-lineNumbers .cm-gutterElement": {
 			padding: "0 8px 0 12px",
-			fontSize: "11.5px",
+			fontSize: "var(--sqlnest-font-size-12)",
 			fontVariantNumeric: "tabular-nums",
 			minWidth: "24px",
 			textAlign: "right"
@@ -234,7 +234,7 @@ const theme = EditorView.theme(
 			width: "14px",
 			height: "18px",
 			color: "var(--sqlnest-warning)",
-			fontSize: 11,
+			fontSize: "var(--sqlnest-font-size-11)",
 			cursor: "help",
 			lineHeight: 1
 		},
@@ -246,9 +246,9 @@ const theme = EditorView.theme(
 			background: "var(--sqlnest-surface)",
 			color: "var(--sqlnest-text-primary)",
 			border: "1px solid var(--sqlnest-danger-border)",
-			borderRadius: "6px",
+			borderRadius: "var(--sqlnest-radius-6)",
 			boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
-			fontSize: "12px",
+			fontSize: "var(--sqlnest-font-size-12)",
 			lineHeight: "1.5",
 			fontFamily: "var(--mantine-font-family-monospace)",
 			whiteSpace: "pre-wrap",
@@ -431,6 +431,7 @@ export const SnqlEditor = forwardRef<SnqlEditorHandle, SnqlEditorProps>(
 
 		// Sync `errorSpans` → décorations CM (Phase 3a). Dispatch un StateEffect
 		// que le `errorField` interprète pour remplacer le DecorationSet.
+		// biome-ignore lint/correctness/useExhaustiveDependencies: la clé sérialisée est le déclencheur, la valeur lue vient de la prop
 		useEffect(() => {
 			const editor = view.current;
 			if (editor === null) return;
@@ -443,6 +444,7 @@ export const SnqlEditor = forwardRef<SnqlEditorHandle, SnqlEditorProps>(
 			if (!liveDiagnostic) return "";
 			return `${liveDiagnostic.span[0]}:${liveDiagnostic.span[1]}:${liveDiagnostic.message}`;
 		}, [liveDiagnostic]);
+		// biome-ignore lint/correctness/useExhaustiveDependencies: la clé sérialisée est le déclencheur, la valeur lue vient de la prop
 		useEffect(() => {
 			const editor = view.current;
 			if (editor === null) return;
@@ -456,6 +458,7 @@ export const SnqlEditor = forwardRef<SnqlEditorHandle, SnqlEditorProps>(
 			if (!rawStatementSpan) return "";
 			return `${rawStatementSpan[0]}:${rawStatementSpan[1]}`;
 		}, [rawStatementSpan]);
+		// biome-ignore lint/correctness/useExhaustiveDependencies: la clé sérialisée est le déclencheur, la valeur lue vient de la prop
 		useEffect(() => {
 			const editor = view.current;
 			if (editor === null) return;

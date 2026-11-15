@@ -105,14 +105,14 @@ export function SystemSchemaEventsNode({
 								gap: 8,
 								height: ROW_H,
 								padding: "0 12px",
-								fontSize: 11.5,
+								fontSize: "var(--sqlnest-font-size-12)",
 								color: "var(--sqlnest-text-secondary)"
 							}}
 						>
 							<span>{f.name}</span>
 							<span
 								style={{
-									fontSize: 10.5,
+									fontSize: "var(--sqlnest-font-size-11)",
 									color: "var(--sqlnest-text-tertiary)"
 								}}
 							>
@@ -139,7 +139,7 @@ export function SystemSchemaEventsNode({
 						border: "none",
 						borderTop: "1px solid var(--sqlnest-border-subtle)",
 						color: "var(--sqlnest-text-tertiary)",
-						fontSize: 11,
+						fontSize: "var(--sqlnest-font-size-11)",
 						cursor: "pointer",
 						textAlign: "left",
 						flexShrink: 0
@@ -212,10 +212,10 @@ function EventsPreview({
 						display: "block",
 						margin: "6px auto 2px",
 						padding: "3px 10px",
-						fontSize: 10.5,
+						fontSize: "var(--sqlnest-font-size-11)",
 						background: "transparent",
 						border: "1px solid var(--sqlnest-border-subtle)",
-						borderRadius: 4,
+						borderRadius: "var(--sqlnest-radius-4)",
 						color: "var(--sqlnest-text-tertiary)",
 						cursor: loadingMore ? "wait" : "pointer"
 					}}
@@ -239,7 +239,7 @@ function StatusLine({
 			style={{
 				margin: 0,
 				padding: "8px 12px",
-				fontSize: 11,
+				fontSize: "var(--sqlnest-font-size-11)",
 				color:
 					tone === "danger"
 						? "var(--sqlnest-danger)"
@@ -266,7 +266,7 @@ function EventRow({ row }: { readonly row: ChecksumHistoryEntry }) {
 				alignItems: "center",
 				gap: 8,
 				padding: "3px 12px",
-				fontSize: 10.5,
+				fontSize: "var(--sqlnest-font-size-11)",
 				fontFamily: "ui-monospace, monospace",
 				color: "var(--sqlnest-text-secondary)"
 			}}

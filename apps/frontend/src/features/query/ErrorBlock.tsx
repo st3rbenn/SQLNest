@@ -46,7 +46,7 @@ const containerStyle: CSSProperties = {
 	padding: "12px 14px",
 	background: "var(--sqlnest-danger-soft)",
 	border: "1px solid var(--sqlnest-danger-border)",
-	borderRadius: 6,
+	borderRadius: "var(--sqlnest-radius-6)",
 	minHeight: 0
 };
 
@@ -55,7 +55,7 @@ const headerStyle: CSSProperties = {
 	alignItems: "center",
 	gap: 8,
 	color: "var(--sqlnest-danger)",
-	fontSize: 12,
+	fontSize: "var(--sqlnest-font-size-12)",
 	fontWeight: 600
 };
 
@@ -63,13 +63,13 @@ const badgeStyle: CSSProperties = {
 	display: "inline-flex",
 	alignItems: "center",
 	padding: "1px 6px",
-	fontSize: 10,
+	fontSize: "var(--sqlnest-font-size-10)",
 	fontWeight: 600,
 	fontVariantNumeric: "tabular-nums",
 	color: "var(--sqlnest-danger)",
 	background: "var(--sqlnest-surface)",
 	border: "1px solid var(--sqlnest-danger-border)",
-	borderRadius: 4,
+	borderRadius: "var(--sqlnest-radius-4)",
 	letterSpacing: 0.2
 };
 
@@ -78,18 +78,18 @@ const copyButtonStyle: CSSProperties = {
 	alignItems: "center",
 	gap: 4,
 	padding: "2px 6px",
-	fontSize: 10.5,
+	fontSize: "var(--sqlnest-font-size-11)",
 	fontWeight: 500,
 	color: "var(--sqlnest-text-secondary)",
 	background: "transparent",
 	border: "1px solid var(--sqlnest-border)",
-	borderRadius: 4,
+	borderRadius: "var(--sqlnest-radius-4)",
 	cursor: "pointer"
 };
 
 const messageStyle: CSSProperties = {
 	fontFamily: "var(--mantine-font-family-monospace)",
-	fontSize: 12,
+	fontSize: "var(--sqlnest-font-size-12)",
 	lineHeight: 1.5,
 	color: "var(--sqlnest-text-primary)",
 	whiteSpace: "pre-wrap",
@@ -97,7 +97,7 @@ const messageStyle: CSSProperties = {
 };
 
 const detailStyle: CSSProperties = {
-	fontSize: 11.5,
+	fontSize: "var(--sqlnest-font-size-12)",
 	lineHeight: 1.5,
 	color: "var(--sqlnest-text-secondary)",
 	fontFamily: "var(--mantine-font-family-monospace)",
@@ -109,7 +109,7 @@ const hintRowStyle: CSSProperties = {
 	display: "flex",
 	alignItems: "flex-start",
 	gap: 6,
-	fontSize: 11.5,
+	fontSize: "var(--sqlnest-font-size-12)",
 	lineHeight: 1.5,
 	color: "var(--sqlnest-text-secondary)",
 	paddingTop: 4,
@@ -134,11 +134,11 @@ const chipBaseStyle: CSSProperties = {
 	alignItems: "center",
 	gap: 4,
 	padding: "2px 6px",
-	borderRadius: 4,
+	borderRadius: "var(--sqlnest-radius-4)",
 	background: "var(--sqlnest-surface)",
 	border: "1px solid var(--sqlnest-border)",
 	fontFamily: "var(--mantine-font-family-monospace)",
-	fontSize: 11,
+	fontSize: "var(--sqlnest-font-size-11)",
 	color: "var(--sqlnest-text-secondary)",
 	cursor: "default"
 };
