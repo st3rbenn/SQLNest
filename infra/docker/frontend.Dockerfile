@@ -13,12 +13,14 @@ WORKDIR /app
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/frontend/package.json apps/frontend/
+COPY packages/canvas/package.json packages/canvas/
 COPY packages/design-system/package.json packages/design-system/
 COPY packages/snql/package.json packages/snql/
 COPY packages/tunnel-protocol/package.json packages/tunnel-protocol/
 RUN pnpm install --frozen-lockfile --filter @sqlnest/frontend... --ignore-scripts
 
 COPY apps/frontend ./apps/frontend
+COPY packages/canvas ./packages/canvas
 COPY packages/design-system ./packages/design-system
 COPY packages/snql ./packages/snql
 COPY packages/tunnel-protocol ./packages/tunnel-protocol
