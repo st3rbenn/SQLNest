@@ -22,4 +22,5 @@ dist
 
 # mac files
 .DS_Store
-.envrccoverage
+.envrc
+coverage
