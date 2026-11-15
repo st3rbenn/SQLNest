@@ -4,10 +4,26 @@
  */
 
 /** Geste en cours, ouvert dans le panneau de changement. */
-export type ChangeGesture = {
-	readonly kind: "add-column";
+export type ChangeGesture =
+	| { readonly kind: "add-column"; readonly table: string }
+	| ColumnGesture;
+
+/** Geste sur une colonne existante (menu du champ, double-clic sur son nom). */
+export type ColumnGesture = {
 	readonly table: string;
-};
+	readonly column: string;
+} & (
+	| {
+			readonly kind:
+				| "rename-column"
+				| "set-type"
+				| "set-default"
+				| "drop-default"
+				| "drop-column";
+	  }
+	/** Nullabilité visée, lue sur la colonne à l'ouverture du geste. */
+	| { readonly kind: "set-nullability"; readonly nullable: boolean }
+);
 
 /** Types proposés pour une colonne : les noms canoniques du parseur SNQL. */
 export const COLUMN_TYPES = [
@@ -41,4 +57,45 @@ export function addColumnSnql(d: AddColumnDraft): string {
 		...(defaultExpr !== "" ? [`default ${defaultExpr}`] : []),
 		`into ${d.table}`
 	].join(" ");
+}
+
+export function renameColumnSnql(
+	table: string,
+	column: string,
+	newName: string
+): string {
+	return `rename column ${table}.${column} to ${newName.trim()}`;
+}
+
+export function setTypeSnql(
+	table: string,
+	column: string,
+	type: string
+): string {
+	return `alter column ${table}.${column} set type ${type}`;
+}
+
+export function setNullabilitySnql(
+	table: string,
+	column: string,
+	nullable: boolean
+): string {
+	return `alter column ${table}.${column} ${nullable ? "set nullable" : "set not null"}`;
+}
+
+/** Défaut écrit en SNQL. */
+export function setDefaultSnql(
+	table: string,
+	column: string,
+	defaultExpr: string
+): string {
+	return `alter column ${table}.${column} set default ${defaultExpr.trim()}`;
+}
+
+export function dropDefaultSnql(table: string, column: string): string {
+	return `alter column ${table}.${column} drop default`;
+}
+
+export function dropColumnSnql(table: string, column: string): string {
+	return `drop column ${column} from ${table}`;
 }

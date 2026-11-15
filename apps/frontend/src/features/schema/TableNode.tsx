@@ -274,6 +274,7 @@ function TableNodeComponent({
 				{shown.map((f) => (
 					<div
 						key={f.name}
+						data-field={f.name}
 						style={{
 							display: "flex",
 							alignItems: "center",

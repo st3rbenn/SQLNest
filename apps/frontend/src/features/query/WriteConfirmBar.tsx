@@ -83,7 +83,8 @@ function normalize(s: string): string {
 	return s.trim().replace(/\s+/g, " ").toUpperCase();
 }
 
-function matches(value: string, expected: string): boolean {
+/** Saisie de confirmation conforme à la chaîne attendue (aussi pour l'éditeur de schéma). */
+export function matchesExpected(value: string, expected: string): boolean {
 	return normalize(value) === normalize(expected);
 }
 
@@ -296,7 +297,7 @@ export function WriteConfirmBar({
 	const first = findings[0];
 	if (!first) return null;
 	const expected = expectedFor(first);
-	const canConfirm = matches(value, expected);
+	const canConfirm = matchesExpected(value, expected);
 
 	function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>): void {
 		if (e.key === "Escape") {

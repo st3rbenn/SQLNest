@@ -74,6 +74,8 @@ export interface CanvasContextMenuState {
 	readonly x: number;
 	readonly y: number;
 	readonly tableName: string;
+	/** Champ sous le pointeur : le menu ouvre sur les gestes de la colonne. */
+	readonly field?: string;
 }
 
 export interface CanvasUIContextValue {

@@ -24,6 +24,11 @@ export interface Field {
 	readonly nullable: boolean;
 	readonly source: SchemaSource;
 	readonly confidence?: number;
+	readonly hasDefault?: boolean;
+	/** Le défaut tel que la base l'exprime (`'free'::text`, `now()`…). */
+	readonly defaultExpr?: string;
+	/** Enum nommé qui type la colonne. */
+	readonly enumTypeName?: string;
 }
 
 export interface Collection {

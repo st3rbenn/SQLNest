@@ -2,7 +2,15 @@ import type { SchemaModel as SnqlSchemaModel } from "@sqlnest/snql";
 import { describe, expect, it } from "vitest";
 import type { SchemaModel } from "../schema-model";
 import { previewChange } from "./changePreview";
-import { addColumnSnql } from "./changeSnql";
+import {
+	addColumnSnql,
+	dropColumnSnql,
+	dropDefaultSnql,
+	renameColumnSnql,
+	setDefaultSnql,
+	setNullabilitySnql,
+	setTypeSnql
+} from "./changeSnql";
 import { canApply, editModeOf, managingOrm } from "./editMode";
 
 const collection = (name: string) => ({
@@ -107,8 +115,51 @@ describe("addColumnSnql (ADR-039 D2)", () => {
 	});
 });
 
+describe("gestes de colonne (ADR-039 D2)", () => {
+	it("renommer, type, nullabilité, défaut, suppression, dans la syntaxe du parseur", () => {
+		expect(renameColumnSnql("agency", "label", " name ")).toBe(
+			"rename column agency.label to name"
+		);
+		expect(setTypeSnql("agency", "label", "int")).toBe(
+			"alter column agency.label set type int"
+		);
+		expect(setNullabilitySnql("agency", "label", true)).toBe(
+			"alter column agency.label set nullable"
+		);
+		expect(setNullabilitySnql("agency", "label", false)).toBe(
+			"alter column agency.label set not null"
+		);
+		expect(setDefaultSnql("agency", "label", ' "y" ')).toBe(
+			'alter column agency.label set default "y"'
+		);
+		expect(dropDefaultSnql("agency", "label")).toBe(
+			"alter column agency.label drop default"
+		);
+		expect(dropColumnSnql("agency", "label")).toBe(
+			"drop column label from agency"
+		);
+	});
+});
+
 describe("previewChange (ADR-039 D3)", () => {
 	const pg = schema("agency") as unknown as SnqlSchemaModel;
+	const withLabel = {
+		...pg,
+		collections: [
+			{
+				...collection("agency"),
+				fields: [
+					...collection("agency").fields,
+					{
+						name: "label",
+						type: "string",
+						nullable: false,
+						source: "declared"
+					}
+				]
+			}
+		]
+	} as SnqlSchemaModel;
 
 	it("direct : le DDL du moteur ; migrations Prisma : le DDL du profil", () => {
 		const src = "add column code string unique into agency";
@@ -147,29 +198,40 @@ describe("previewChange (ADR-039 D3)", () => {
 	});
 
 	it("avertissement de casse applicative (ADR-036 D7)", () => {
-		const withName = {
-			...pg,
-			collections: [
-				{
-					...collection("agency"),
-					fields: [
-						...collection("agency").fields,
-						{
-							name: "label",
-							type: "string",
-							nullable: false,
-							source: "declared"
-						}
-					]
-				}
-			]
-		} as SnqlSchemaModel;
 		expect(
-			previewChange("rename column agency.label to name", withName, {
+			previewChange("rename column agency.label to name", withLabel, {
 				kind: "direct"
 			}).warnings
 		).toEqual([
 			"Les requêtes et le code qui utilisent 'agency.label' devront passer à 'name'."
 		]);
+		expect(
+			previewChange(setNullabilitySnql("agency", "label", true), withLabel, {
+				kind: "direct"
+			})
+		).toMatchObject({
+			statements: ['ALTER TABLE "agency" ALTER COLUMN "label" DROP NOT NULL'],
+			warnings: []
+		});
+	});
+
+	it("suppression de colonne : casse applicative, valeurs perdues, saisie de la console à retaper", () => {
+		const preview = previewChange(
+			dropColumnSnql("agency", "label"),
+			withLabel,
+			{ kind: "direct" }
+		);
+		expect(preview.statements).toEqual([
+			'ALTER TABLE "agency" DROP COLUMN "label" RESTRICT'
+		]);
+		expect(preview.warnings).toEqual([
+			"Les requêtes et le code qui utilisent 'agency.label' échoueront ; ses valeurs seront perdues."
+		]);
+		expect(preview.confirm).toBe("DROP agency");
+		expect(
+			previewChange(renameColumnSnql("agency", "label", "name"), withLabel, {
+				kind: "direct"
+			}).confirm
+		).toBeUndefined();
 	});
 });

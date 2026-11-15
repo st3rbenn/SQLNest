@@ -16,7 +16,10 @@ import "./canvas-overrides.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useCurrentUser } from "../auth/sessionQuery";
 import type { CanvasTool } from "./CanvasToolbar";
-import { CanvasProviders } from "./canvas/CanvasContext";
+import {
+	type CanvasContextMenuState,
+	CanvasProviders
+} from "./canvas/CanvasContext";
 import { CanvasZoomVariable } from "./canvas/CanvasZoomVariable";
 import { useResizableDrawer } from "./canvas/DrawerPane";
 import { CanvasBottomBar } from "./canvas/floating/CanvasBottomBar";
@@ -130,6 +133,14 @@ function makeNode(schema: SchemaModel) {
 			data: { collection, dimmed: false, focused: false, matched: false }
 		};
 	};
+}
+
+/** Champ de la ligne sous le pointeur, dans une carte de table. */
+function fieldAt(event: {
+	readonly target: EventTarget | null;
+}): string | undefined {
+	const row = (event.target as Element | null)?.closest?.("[data-field]");
+	return row?.getAttribute("data-field") ?? undefined;
 }
 
 function makeEdge(rel: SchemaModel["relations"][number], i: number): Edge {
@@ -259,11 +270,7 @@ function CanvasInner({
 	const [hiddenIds, setHiddenIds] = useState<ReadonlySet<string>>(
 		() => new Set()
 	);
-	const [menu, setMenu] = useState<{
-		x: number;
-		y: number;
-		tableName: string;
-	} | null>(null);
+	const [menu, setMenu] = useState<CanvasContextMenuState | null>(null);
 	// Outil actif de la toolbar canvas. « frame » = mode explicite : cursor
 	// crosshair sur le pane, un lasso au release crée un frame à partir des
 	// tables touchées puis revient à « select ». Le raccourci F reste dispo
@@ -1150,13 +1157,22 @@ function CanvasInner({
 					}
 					focusNode(node.id);
 				}}
-				onNodeDoubleClick={(_, node) => {
+				onNodeDoubleClick={(event, node) => {
 					const t = (node as { type?: string }).type;
 					if (t === "frame") return;
 					if (t === "console") {
 						// T5 : double-clic console → entre en focus mode (zoom +
 						// fade UI). Sortie via Esc ou bouton focus dans le node.
 						enterConsoleFocus(node.id);
+						return;
+					}
+					const field = fieldAt(event);
+					if (field !== undefined) {
+						setGesture({
+							kind: "rename-column",
+							table: node.id,
+							column: field
+						});
 						return;
 					}
 					focusAndZoom(node.id);
@@ -1168,10 +1184,12 @@ function CanvasInner({
 					// Focus visuel sans fitView : la vue ne bouge pas, donc le menu
 					// positionné en clientX/Y reste face à la carte cliquée.
 					focusNode(node.id);
+					const field = fieldAt(event);
 					setMenu({
 						x: event.clientX,
 						y: event.clientY,
-						tableName: node.id
+						tableName: node.id,
+						...(field !== undefined ? { field } : {})
 					});
 				}}
 				// Tables et frames changent de frame en suivant le pointeur.

@@ -15,6 +15,12 @@ describe("ddlImpactHint (ADR-036 D7)", () => {
 		});
 	});
 
+	it("drop column : le code qui s'en sert casse, les valeurs sont perdues", () => {
+		expect(hint("drop column phone from agency")?.message).toBe(
+			"Les requêtes et le code qui utilisent 'agency.phone' échoueront ; ses valeurs seront perdues."
+		);
+	});
+
 	it("set type et set not null : rappellent l'effet sur le code et les écritures", () => {
 		expect(hint("alter column agency.zip set type int")?.message).toBe(
 			"Le code qui lit 'agency.zip' recevra des valeurs de type int."

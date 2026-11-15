@@ -21,6 +21,13 @@ export function ddlImpactHint(statement: Statement): DivergenceHint | null {
 			message: `Les requêtes et le code qui utilisent '${statement.target}.${statement.column}' devront passer à '${statement.newName}'.`
 		};
 	}
+	if (statement.kind === "drop-column") {
+		return {
+			span,
+			code: "ddl_drop_column_impact",
+			message: `Les requêtes et le code qui utilisent '${statement.target}.${statement.column}' échoueront ; ses valeurs seront perdues.`
+		};
+	}
 	if (
 		statement.kind === "alter-column" &&
 		statement.action.kind === "set-type"

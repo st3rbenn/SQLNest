@@ -1,7 +1,8 @@
 /**
  * Aperçu d'un changement (ADR-039 D3, D4), compilé dans le navigateur : le DDL
- * que le mode retenu produira (profil de l'ORM en mode migrations), et les
- * avertissements à lire avant d'appliquer. Aucun aller-retour.
+ * que le mode retenu produira (profil de l'ORM en mode migrations), les
+ * avertissements à lire avant d'appliquer, et la saisie qui confirme une
+ * suppression. Aucun aller-retour.
  */
 
 import {
@@ -15,6 +16,8 @@ import {
 	tokenize
 } from "@sqlnest/snql";
 import { ddlImpactHint } from "../../query/ddlImpactHints";
+import { collectUnfilteredWrites } from "../../query/unfilteredWrites";
+import { expectedFor } from "../../query/WriteConfirmBar";
 import type { EditMode } from "./editMode";
 
 export interface ChangePreview {
@@ -22,6 +25,8 @@ export interface ChangePreview {
 	/** DDL natif : instructions SQL, ou opérations Mongo. */
 	readonly statements: readonly string[];
 	readonly warnings: readonly string[];
+	/** Chaîne à retaper avant une suppression (ADR-029 D7), comme dans la console. */
+	readonly confirm?: string;
 	readonly error?: string;
 }
 
@@ -48,10 +53,12 @@ export function previewChange(
 		);
 		const native = getMapper(schema.engine as SupportedEngine).mapDDL?.(plan);
 		const impact = ddlImpactHint(statement);
+		const [drop] = collectUnfilteredWrites(statement);
 		return {
 			plan,
 			statements: native !== undefined ? nativeStatements(native) : [],
-			warnings: impact !== null ? [impact.message] : []
+			warnings: impact !== null ? [impact.message] : [],
+			...(drop !== undefined ? { confirm: expectedFor(drop) } : {})
 		};
 	} catch (err) {
 		return {

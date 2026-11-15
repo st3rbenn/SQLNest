@@ -13,15 +13,37 @@ import {
 import { Button } from "@sqlnest/design-system";
 import type { SchemaModel as SnqlSchemaModel } from "@sqlnest/snql";
 import { ORM_LABELS, type TunnelSchemaCheck } from "@sqlnest/tunnel-protocol";
-import { IconColumnInsertRight } from "@tabler/icons-react";
+import {
+	IconAsterisk,
+	IconCircleDashed,
+	IconColumnInsertRight,
+	IconColumnRemove,
+	IconCursorText,
+	IconEraser,
+	IconPencil,
+	IconTransform
+} from "@tabler/icons-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useMemo, useState } from "react";
+import { matchesExpected } from "../../query/WriteConfirmBar";
 import { useCanvasData, useCanvasUI } from "../canvas/CanvasContext";
 import { CanvasSidePanel } from "../canvas/floating/CanvasSidePanel";
+import type { Field } from "../schema-model";
 import { applyChange, type ChangeOutcome } from "./applyChange";
-import { previewChange } from "./changePreview";
-import { addColumnSnql, COLUMN_TYPES } from "./changeSnql";
+import { type ChangePreview, previewChange } from "./changePreview";
+import {
+	addColumnSnql,
+	COLUMN_TYPES,
+	type ChangeGesture,
+	type ColumnGesture,
+	dropColumnSnql,
+	dropDefaultSnql,
+	renameColumnSnql,
+	setDefaultSnql,
+	setNullabilitySnql,
+	setTypeSnql
+} from "./changeSnql";
 import { canApply, type EditMode } from "./editMode";
 import { projectStatusQueryKey } from "./useProjectStatus";
 
@@ -46,6 +68,20 @@ const DEFAULT_PLACEHOLDERS: Readonly<Record<string, string>> = {
 	uuid: "uuid()"
 };
 
+const ICON = { size: 15, color: "var(--sqlnest-text-secondary)" } as const;
+
+/** Une clé par ouverture : rouvrir le même geste repart d'un formulaire vide. */
+const gestureKeys = new WeakMap<ChangeGesture, number>();
+let lastGestureKey = 0;
+function keyOf(gesture: ChangeGesture): number {
+	let key = gestureKeys.get(gesture);
+	if (key === undefined) {
+		key = ++lastGestureKey;
+		gestureKeys.set(gesture, key);
+	}
+	return key;
+}
+
 /**
  * Panneau d'un changement de schéma (ADR-039 D3 à D5) : formulaire du geste,
  * SNQL, DDL, avertissements, puis résultat de l'application.
@@ -53,12 +89,15 @@ const DEFAULT_PLACEHOLDERS: Readonly<Record<string, string>> = {
 export function ChangePanel() {
 	const { gesture, setGesture } = useCanvasUI();
 	if (gesture === null) return null;
-	return (
+	const onClose = () => setGesture(null);
+	return gesture.kind === "add-column" ? (
 		<AddColumnPanel
-			key={gesture.table}
+			key={keyOf(gesture)}
 			table={gesture.table}
-			onClose={() => setGesture(null)}
+			onClose={onClose}
 		/>
+	) : (
+		<ColumnPanel key={keyOf(gesture)} gesture={gesture} onClose={onClose} />
 	);
 }
 
@@ -69,27 +108,348 @@ function AddColumnPanel({
 	readonly table: string;
 	readonly onClose: () => void;
 }) {
-	const { schema, editMode, teamSlug, connectionId } = useCanvasData();
-	const navigate = useNavigate();
-	const queryClient = useQueryClient();
 	const [name, setName] = useState("");
 	const [type, setType] = useState<string>("string");
 	const [nullable, setNullable] = useState(true);
 	const [defaultExpr, setDefaultExpr] = useState("");
+	return (
+		<ChangeFrame
+			icon={<IconColumnInsertRight {...ICON} />}
+			title="Ajouter une colonne"
+			table={table}
+			source={
+				name.trim() === ""
+					? undefined
+					: addColumnSnql({ table, name, type, nullable, defaultExpr })
+			}
+			onClose={onClose}
+		>
+			{(locked) => (
+				<>
+					<TextInput
+						size="xs"
+						label="Nom"
+						value={name}
+						onChange={(e) => setName(e.currentTarget.value)}
+						autoComplete="off"
+						disabled={locked}
+						data-autofocus
+						autoFocus
+					/>
+					<TypeSelect value={type} onChange={setType} disabled={locked} />
+					<Checkbox
+						size="xs"
+						label="Nullable"
+						checked={nullable}
+						onChange={(e) => setNullable(e.currentTarget.checked)}
+						disabled={locked}
+					/>
+					<TextInput
+						size="xs"
+						label="Défaut"
+						value={defaultExpr}
+						placeholder={DEFAULT_PLACEHOLDERS[type] ?? ""}
+						onChange={(e) => setDefaultExpr(e.currentTarget.value)}
+						autoComplete="off"
+						disabled={locked}
+					/>
+				</>
+			)}
+		</ChangeFrame>
+	);
+}
+
+/** Gestes d'une colonne existante. */
+function ColumnPanel({
+	gesture,
+	onClose
+}: {
+	readonly gesture: ColumnGesture;
+	readonly onClose: () => void;
+}) {
+	const { schema } = useCanvasData();
+	// La colonne telle qu'à l'ouverture : le schéma relu après l'application
+	// ne la connaît plus sous ce nom, ou plus du tout.
+	const [field] = useState(() =>
+		schema.collections
+			.find((c) => c.name === gesture.table)
+			?.fields.find((f) => f.name === gesture.column)
+	);
+	const { table, column } = gesture;
+	switch (gesture.kind) {
+		case "rename-column":
+			return (
+				<RenameColumnPanel table={table} column={column} onClose={onClose} />
+			);
+		case "set-type":
+			return (
+				<SetTypePanel
+					table={table}
+					column={column}
+					current={field?.enumTypeName ?? field?.type ?? "unknown"}
+					onClose={onClose}
+				/>
+			);
+		case "set-nullability":
+			return (
+				<ChangeFrame
+					icon={
+						gesture.nullable ? (
+							<IconCircleDashed {...ICON} />
+						) : (
+							<IconAsterisk {...ICON} />
+						)
+					}
+					title={gesture.nullable ? "Rendre nullable" : "Rendre obligatoire"}
+					table={table}
+					column={column}
+					source={setNullabilitySnql(table, column, gesture.nullable)}
+					onClose={onClose}
+				/>
+			);
+		case "set-default":
+			return (
+				<SetDefaultPanel
+					table={table}
+					column={column}
+					field={field}
+					onClose={onClose}
+				/>
+			);
+		case "drop-default":
+			return (
+				<ChangeFrame
+					icon={<IconEraser {...ICON} />}
+					title="Retirer le défaut"
+					table={table}
+					column={column}
+					source={dropDefaultSnql(table, column)}
+					onClose={onClose}
+				>
+					{() => <CurrentDefault field={field} />}
+				</ChangeFrame>
+			);
+		case "drop-column":
+			return (
+				<ChangeFrame
+					icon={<IconColumnRemove {...ICON} />}
+					title="Supprimer la colonne"
+					table={table}
+					column={column}
+					source={dropColumnSnql(table, column)}
+					onClose={onClose}
+				/>
+			);
+	}
+}
+
+function RenameColumnPanel({
+	table,
+	column,
+	onClose
+}: {
+	readonly table: string;
+	readonly column: string;
+	readonly onClose: () => void;
+}) {
+	const [name, setName] = useState("");
+	const trimmed = name.trim();
+	return (
+		<ChangeFrame
+			icon={<IconCursorText {...ICON} />}
+			title="Renommer la colonne"
+			table={table}
+			column={column}
+			source={
+				trimmed === "" || trimmed === column
+					? undefined
+					: renameColumnSnql(table, column, name)
+			}
+			onClose={onClose}
+		>
+			{(locked) => (
+				<TextInput
+					size="xs"
+					label="Nouveau nom"
+					value={name}
+					onChange={(e) => setName(e.currentTarget.value)}
+					autoComplete="off"
+					disabled={locked}
+					data-autofocus
+					autoFocus
+				/>
+			)}
+		</ChangeFrame>
+	);
+}
+
+function SetTypePanel({
+	table,
+	column,
+	current,
+	onClose
+}: {
+	readonly table: string;
+	readonly column: string;
+	readonly current: string;
+	readonly onClose: () => void;
+}) {
+	const [type, setType] = useState(current);
+	return (
+		<ChangeFrame
+			icon={<IconTransform {...ICON} />}
+			title="Changer le type"
+			table={table}
+			column={column}
+			source={type === current ? undefined : setTypeSnql(table, column, type)}
+			onClose={onClose}
+		>
+			{(locked) => (
+				<TypeSelect
+					value={type}
+					current={current}
+					onChange={setType}
+					disabled={locked}
+				/>
+			)}
+		</ChangeFrame>
+	);
+}
+
+function SetDefaultPanel({
+	table,
+	column,
+	field,
+	onClose
+}: {
+	readonly table: string;
+	readonly column: string;
+	readonly field: Field | undefined;
+	readonly onClose: () => void;
+}) {
+	const [defaultExpr, setDefaultExpr] = useState("");
+	return (
+		<ChangeFrame
+			icon={<IconPencil {...ICON} />}
+			title={field?.hasDefault ? "Changer le défaut" : "Ajouter un défaut"}
+			table={table}
+			column={column}
+			source={
+				defaultExpr.trim() === ""
+					? undefined
+					: setDefaultSnql(table, column, defaultExpr)
+			}
+			onClose={onClose}
+		>
+			{(locked) => (
+				<>
+					<CurrentDefault field={field} />
+					<TextInput
+						size="xs"
+						label="Défaut"
+						value={defaultExpr}
+						placeholder={DEFAULT_PLACEHOLDERS[field?.type ?? ""] ?? ""}
+						onChange={(e) => setDefaultExpr(e.currentTarget.value)}
+						autoComplete="off"
+						disabled={locked}
+						data-autofocus
+						autoFocus
+					/>
+				</>
+			)}
+		</ChangeFrame>
+	);
+}
+
+/** Le défaut tel que la base l'exprime. */
+function CurrentDefault({ field }: { readonly field: Field | undefined }) {
+	if (field?.defaultExpr === undefined) return null;
+	return (
+		<Row label="Actuel">
+			<Text size="xs" ff="monospace" style={BREAK_ANYWHERE}>
+				{field.defaultExpr}
+			</Text>
+		</Row>
+	);
+}
+
+/** Types SNQL et enums du schéma ; le type actuel en tête s'il n'en fait pas partie. */
+function TypeSelect({
+	value,
+	current,
+	onChange,
+	disabled
+}: {
+	readonly value: string;
+	readonly current?: string;
+	readonly onChange: (type: string) => void;
+	readonly disabled: boolean;
+}) {
+	const { schema } = useCanvasData();
+	const options = [
+		...COLUMN_TYPES,
+		...((schema as unknown as SnqlSchemaModel).enums ?? []).map((e) => e.name)
+	];
+	return (
+		<NativeSelect
+			size="xs"
+			label="Type"
+			value={value}
+			onChange={(e) => onChange(e.currentTarget.value)}
+			disabled={disabled}
+			data={
+				current !== undefined && !options.includes(current)
+					? [current, ...options]
+					: options
+			}
+		/>
+	);
+}
+
+/**
+ * Ce que les gestes partagent : cible, mode, SNQL et DDL compilés,
+ * avertissements, saisie qui confirme une suppression, application et
+ * résultat. `source` absent : formulaire incomplet, rien à compiler.
+ */
+function ChangeFrame({
+	icon,
+	title,
+	table,
+	column,
+	source,
+	onClose,
+	children
+}: {
+	readonly icon: ReactNode;
+	readonly title: string;
+	readonly table: string;
+	readonly column?: string;
+	readonly source: string | undefined;
+	readonly onClose: () => void;
+	/** Formulaire du geste, figé une fois le changement appliqué. */
+	readonly children?: (locked: boolean) => ReactNode;
+}) {
+	const { schema, editMode, teamSlug, connectionId } = useCanvasData();
+	const navigate = useNavigate();
+	const queryClient = useQueryClient();
+	const [typed, setTyped] = useState("");
 	const [running, setRunning] = useState(false);
 	const [outcome, setOutcome] = useState<ChangeOutcome | null>(null);
+	// L'aperçu de ce qui est parti : recompilé sur le schéma relu, il ne
+	// verrait plus la colonne renommée ou supprimée.
+	const [sent, setSent] = useState<ChangePreview | null>(null);
 
-	const enums = (schema as unknown as SnqlSchemaModel).enums ?? [];
-	const source = addColumnSnql({ table, name, type, nullable, defaultExpr });
-	const preview = useMemo(
+	const live = useMemo(
 		() =>
-			name.trim() === ""
+			source === undefined
 				? undefined
 				: previewChange(source, schema as unknown as SnqlSchemaModel, editMode),
-		[name, source, schema, editMode]
+		[source, schema, editMode]
 	);
+	const preview = sent ?? live;
 
 	const apply = async () => {
+		if (source === undefined || preview === undefined) return;
 		if (editMode.kind !== "direct" && editMode.kind !== "migrations") return;
 		setRunning(true);
 		const result = await applyChange({
@@ -101,6 +461,7 @@ function AddColumnPanel({
 		setRunning(false);
 		setOutcome(result);
 		if (result.ok) {
+			setSent(preview);
 			void queryClient.invalidateQueries({
 				queryKey: ["schema", teamSlug, connectionId]
 			});
@@ -115,25 +476,22 @@ function AddColumnPanel({
 		canApply(editMode) &&
 		preview !== undefined &&
 		preview.error === undefined &&
+		(preview.confirm === undefined ||
+			matchesExpected(typed, preview.confirm)) &&
 		!running &&
 		!done;
 
 	return (
 		<CanvasSidePanel
-			icon={
-				<IconColumnInsertRight
-					size={15}
-					color="var(--sqlnest-text-secondary)"
-				/>
-			}
-			title="Ajouter une colonne"
+			icon={icon}
+			title={title}
 			onClose={onClose}
 			footer={
 				<Group justify="space-between" wrap="nowrap">
 					<Button
 						size="xs"
 						variant="secondary"
-						disabled={name.trim() === ""}
+						disabled={source === undefined}
 						onClick={() =>
 							void navigate({
 								to: "/canvas/$connId/query",
@@ -169,48 +527,19 @@ function AddColumnPanel({
 							{table}
 						</Text>
 					</Row>
+					{column !== undefined ? (
+						<Row label="Colonne">
+							<Text size="xs" ff="monospace">
+								{column}
+							</Text>
+						</Row>
+					) : null}
 					<Row label="Mode">
 						<ModeLabel mode={editMode} />
 					</Row>
 					{canApply(editMode) ? (
 						<>
-							<TextInput
-								size="xs"
-								label="Nom"
-								value={name}
-								onChange={(e) => setName(e.currentTarget.value)}
-								autoComplete="off"
-								disabled={done}
-								data-autofocus
-								autoFocus
-							/>
-							<NativeSelect
-								size="xs"
-								label="Type"
-								value={type}
-								onChange={(e) => setType(e.currentTarget.value)}
-								disabled={done}
-								data={[
-									...COLUMN_TYPES,
-									...enums.map((e) => ({ value: e.name, label: e.name }))
-								]}
-							/>
-							<Checkbox
-								size="xs"
-								label="Nullable"
-								checked={nullable}
-								onChange={(e) => setNullable(e.currentTarget.checked)}
-								disabled={done}
-							/>
-							<TextInput
-								size="xs"
-								label="Défaut"
-								value={defaultExpr}
-								placeholder={DEFAULT_PLACEHOLDERS[type] ?? ""}
-								onChange={(e) => setDefaultExpr(e.currentTarget.value)}
-								autoComplete="off"
-								disabled={done}
-							/>
+							{children?.(done)}
 							{preview !== undefined ? (
 								<>
 									<Block label="SNQL">{source}</Block>
@@ -226,6 +555,15 @@ function AddColumnPanel({
 											{w}
 										</Text>
 									))}
+									{preview.confirm !== undefined && !done ? (
+										<TextInput
+											size="xs"
+											label={`Retapez : ${preview.confirm}`}
+											value={typed}
+											onChange={(e) => setTyped(e.currentTarget.value)}
+											autoComplete="off"
+										/>
+									) : null}
 								</>
 							) : null}
 						</>

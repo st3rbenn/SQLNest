@@ -82,6 +82,7 @@ export function CanvasOverlays() {
 					open
 					position={{ x: menu.x, y: menu.y }}
 					tableName={menu.tableName}
+					{...(menu.field !== undefined ? { field: menu.field } : {})}
 					schema={schema}
 					schemaLabel={schemaLabel}
 					frames={framesApi.frames}
