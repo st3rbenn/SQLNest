@@ -29,7 +29,7 @@ export interface ConsoleTab {
 	readonly id: string;
 	readonly name: string;
 	readonly source: string;
-	readonly lastResult?: ConsoleTabLastResult;
+	readonly lastResult?: ConsoleTabLastResult | undefined;
 }
 
 export interface ConsoleState {

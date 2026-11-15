@@ -108,9 +108,11 @@ function rewriteUpdate(
 		// Disclaimer : un INNER JOIN qui ne matche pas tout drop les rows
 		// sans correspondance — le count peut différer si le join a des
 		// filtres implicites. Affiché sous le nombre dans WriteConfirmBar.
-		note: hasJoins
-			? "Count via join — peut différer si le join a des filtres implicites"
-			: undefined
+		...(hasJoins
+			? {
+					note: "Count via join — peut différer si le join a des filtres implicites"
+				}
+			: {})
 	};
 }
 

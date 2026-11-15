@@ -11,7 +11,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { PairPage } from "../features/tunnel/PairPage";
 
 interface PairSearch {
-	code: string | null;
+	code?: string | null;
 }
 
 function validateSearch(raw: Record<string, unknown>): PairSearch {

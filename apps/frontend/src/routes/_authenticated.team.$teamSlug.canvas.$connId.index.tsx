@@ -52,7 +52,7 @@ function TeamCanvasPage() {
 	//     silencieux, pas de texte intermédiaire.
 	useCanvasErrorNotif({ error, isUnknown });
 
-	if (data) {
+	if (data && teamSlug !== null) {
 		return (
 			<div style={pageStyle}>
 				<SchemaCanvas
@@ -91,6 +91,8 @@ function useCanvasErrorNotif({
 		}
 		if (message === null) return;
 		const id = notifyError(message);
-		return () => notifications.hide(id);
+		return () => {
+			notifications.hide(id);
+		};
 	}, [errorMessage, isUnknown]);
 }

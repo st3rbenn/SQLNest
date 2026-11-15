@@ -44,7 +44,10 @@ export function ConfirmModal({
 				<Button variant="default" onClick={onClose}>
 					{cancelLabel}
 				</Button>
-				<Button color={destructive ? "red" : undefined} onClick={handleConfirm}>
+				<Button
+					{...(destructive ? { color: "red" } : {})}
+					onClick={handleConfirm}
+				>
 					{confirmLabel}
 				</Button>
 			</Group>

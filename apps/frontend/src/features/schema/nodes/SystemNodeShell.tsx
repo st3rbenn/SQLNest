@@ -60,12 +60,14 @@ export interface SystemNodeShellProps {
 	/** Contenu additionnel à droite du header, AVANT le badge SYSTÈME
 	 * (ex : count). */
 	readonly headerRight?: React.ReactNode;
-	readonly onResizeEnd?: (params: {
-		width: number;
-		height: number;
-		x: number;
-		y: number;
-	}) => void;
+	readonly onResizeEnd?:
+		| ((params: {
+				width: number;
+				height: number;
+				x: number;
+				y: number;
+		  }) => void)
+		| undefined;
 	readonly children: React.ReactNode;
 }
 

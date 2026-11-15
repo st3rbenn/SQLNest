@@ -91,7 +91,7 @@ export async function fetchPreviewCount(
 			return {
 				status: "ok",
 				estimatedRowCount: n,
-				disclaimer: rewrite.note
+				...(rewrite.note !== undefined ? { disclaimer: rewrite.note } : {})
 			};
 		})
 		.catch((): PreviewResult => ({ status: "unavailable", reason: "run_error" }));

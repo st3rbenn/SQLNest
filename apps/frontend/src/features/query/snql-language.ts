@@ -32,12 +32,14 @@ const CM_TYPE: Readonly<Record<SnqlCompletionType, string>> = {
 	collection: "class",
 	field: "property",
 	relation: "function",
-	alias: "variable"
+	alias: "variable",
+	type: "type"
 };
 
 // Le contexte de complétion ne change pas tant qu'on tape des identifiants : CM
 // peut filtrer localement (validFor) sans re-solliciter la source.
 const IDENT_CONTINUE = /^[A-Za-z0-9_]*$/;
+const TRAILING_SPACE = /\s+$/;
 
 /**
  * Source CodeMirror pure — délègue au language service `completeSnql` du cœur et
@@ -110,7 +112,7 @@ function smartFieldApply(name: string, kind: "string" | "number" | "raw") {
 		// Char non-whitespace le plus récent AVANT `from` (regarde jusqu'à 60 chars
 		// avant, largement suffisant pour trouver le `{` ou `,`).
 		const scan = doc.sliceString(Math.max(0, from - 60), from);
-		const trimmed = scan.replace(/\s+$/, "");
+		const trimmed = scan.replace(TRAILING_SPACE, "");
 		const lastNonWs = trimmed.slice(-1);
 		const afterOpener = lastNonWs === "{" || lastNonWs === ",";
 

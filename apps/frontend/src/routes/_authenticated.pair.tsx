@@ -18,7 +18,7 @@ const defaultTeamQueryOptions = queryOptions({
 });
 
 interface PairSearch {
-	code: string | null;
+	code?: string | null;
 }
 
 function validateSearch(raw: Record<string, unknown>): PairSearch {
@@ -37,7 +37,7 @@ export const Route = createFileRoute("/_authenticated/pair")({
 		throw redirect({
 			to: "/team/$teamSlug/pair",
 			params: { teamSlug: team.slug },
-			search: { code: search.code }
+			search: search.code !== undefined ? { code: search.code } : {}
 		});
 	}
 });

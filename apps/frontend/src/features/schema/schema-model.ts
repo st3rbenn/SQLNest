@@ -71,6 +71,14 @@ export interface SchemaModel {
 	readonly collections: readonly Collection[];
 	readonly relations: readonly Relation[];
 	readonly refs?: readonly RefDef[];
+	readonly enums?: readonly EnumTypeDef[];
+}
+
+/** Enum nommé de la base (ou sa métadonnée équivalente sur un moteur sans enums). */
+export interface EnumTypeDef {
+	readonly name: string;
+	readonly members: readonly string[];
+	readonly source: SchemaSource;
 }
 
 // --- Exemples : le même schéma logique vu par les DEUX moteurs ---

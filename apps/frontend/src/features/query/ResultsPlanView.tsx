@@ -221,7 +221,10 @@ function compileForExplain(
 	const mapper = getMapper(engine);
 	switch (statement.operation) {
 		case "select": {
-			const { native } = compile(source, { engine, schema });
+			const { native } = compile(source, {
+				engine,
+				...(schema !== undefined ? { schema } : {})
+			});
 			return native;
 		}
 		case "insert":
@@ -246,7 +249,7 @@ function compileForExplain(
 			return mapper.mapLet(lowerLet(statement, schema));
 		case "raw":
 		case "introspect":
-		case "savepoint":
+		case "ddl":
 			throw new Error(
 				`Explain non supporté pour l'operation '${statement.operation}'.`
 			);
@@ -266,9 +269,8 @@ function analyzeNative(native: NativeQuery): PlanStage[] {
 			}
 		];
 	}
-	if (native.kind === "sql-transaction") {
-		const steps = (native as { steps?: readonly unknown[] }).steps ?? [];
-		return steps.map((step, i) => ({
+	if (native.kind === "transaction") {
+		return native.steps.map((step, i) => ({
 			index: i + 1,
 			operator: "SQL step",
 			payload: step,
@@ -295,14 +297,15 @@ function analyzeNative(native: NativeQuery): PlanStage[] {
 			documents?: unknown;
 			pipeline?: readonly Record<string, unknown>[];
 		};
-		if (Array.isArray(w.pipeline)) {
-			return w.pipeline.map((stage, i) => {
+		const { pipeline } = w;
+		if (Array.isArray(pipeline)) {
+			return pipeline.map((stage, i) => {
 				const operator = Object.keys(stage)[0] ?? "?";
 				return {
 					index: i + 1,
 					operator,
 					payload: stage[operator],
-					badge: badgeForMongoStage(operator, stage, w.pipeline!, i)
+					badge: badgeForMongoStage(operator, stage, pipeline, i)
 				};
 			});
 		}

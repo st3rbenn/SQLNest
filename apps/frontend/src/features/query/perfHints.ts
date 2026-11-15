@@ -46,7 +46,7 @@ export function collectPerfHints(statement: Statement): readonly PerfHint[] {
 }
 
 function walkStatement(
-	statement: Statement,
+	statement: Statement | SavepointStatement,
 	out: PerfHint[],
 	insideWritePredicate: boolean
 ): void {
@@ -132,7 +132,13 @@ function walkTransaction(stmt: TransactionStatement, out: PerfHint[]): void {
 }
 
 function walkLet(stmt: LetStatement, out: PerfHint[]): void {
-	for (const b of stmt.bindings) walkQuery(b.query, out);
+	for (const b of stmt.bindings) {
+		if (b.kind === "plain") walkQuery(b.query, out);
+		else {
+			walkQuery(b.base, out);
+			walkQuery(b.step, out);
+		}
+	}
 	walkStatement(stmt.body as unknown as Statement, out, false);
 }
 
@@ -189,9 +195,6 @@ function walkExpr(
 				walkExpr(a, out, outerQuery, insideWritePredicate);
 			}
 			return;
-		case "isNull":
-			walkExpr(expr.operand, out, outerQuery, insideWritePredicate);
-			return;
 		case "case":
 			for (const b of expr.branches) {
 				walkExpr(b.cond, out, outerQuery, insideWritePredicate);
@@ -212,7 +215,6 @@ function walkExpr(
 		case "literal":
 		case "field":
 		case "windowCall":
-		case "upsertNew":
 			return;
 	}
 }
@@ -245,8 +247,12 @@ function checkCorrelated(
 		switch (e.type) {
 			case "field":
 				if (e.path.length > 1) {
-					const head = e.path[0]!;
-					if (head !== subLocalAlias && outerAliases.has(head)) {
+					const head = e.path[0];
+					if (
+						head !== undefined &&
+						head !== subLocalAlias &&
+						outerAliases.has(head)
+					) {
 						hasCorrelation = true;
 					}
 				}
@@ -258,7 +264,6 @@ function checkCorrelated(
 				walk(e.right);
 				return;
 			case "not":
-			case "isNull":
 			case "cast":
 				walk(e.operand);
 				return;
@@ -286,7 +291,6 @@ function checkCorrelated(
 			case "exists":
 			case "literal":
 			case "windowCall":
-			case "upsertNew":
 				return;
 		}
 	};

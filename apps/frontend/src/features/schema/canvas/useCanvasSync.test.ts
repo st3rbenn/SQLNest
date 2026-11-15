@@ -55,15 +55,13 @@ function makeWrapper() {
 /**
  * Fabrique un ensemble d'opts complet pour `useCanvasSync`. Les 4 replaceAll
  * sont des `vi.fn` : les tests inspectent leur nombre d'appels et leurs
- * arguments. `signature` a une forme conforme au regex backend
- * `^[a-z]+:[a-zA-Z0-9_,.-]+$`.
+ * arguments.
  */
 function makeOpts(
 	overrides: Partial<UseCanvasSyncOptions> = {}
 ): UseCanvasSyncOptions {
 	return {
 		connectionId: "test-conn-id",
-		signature: "postgres:orders,users",
 		positions: {} as PositionsMap,
 		sizes: {} as SizesMap,
 		frames: [] as readonly Frame[],

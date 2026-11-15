@@ -12,7 +12,7 @@ interface SchemaTreeProps {
 	readonly focusId: string | null;
 	readonly search: string;
 	readonly onSelect: (id: string) => void;
-	readonly onHoverTable?: (name: string | null) => void;
+	readonly onHoverTable?: ((name: string | null) => void) | undefined;
 }
 
 const PARTITIONED = /^([a-z][a-z0-9]*)_p\d+/;

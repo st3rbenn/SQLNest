@@ -198,7 +198,10 @@ async function fetchPairingStatus(
 	signal?: AbortSignal
 ): Promise<StatusResponse | null> {
 	const url = `${apiBase()}/api/teams/${encodeURIComponent(teamSlug)}/tunnels/pairings/${encodeURIComponent(canonicalCode)}/status`;
-	const res = await fetch(url, { credentials: "include", signal });
+	const res = await fetch(url, {
+		credentials: "include",
+		...(signal !== undefined ? { signal } : {})
+	});
 	if (!res.ok) return null;
 	return (await res.json()) as StatusResponse;
 }
@@ -337,7 +340,7 @@ export function PairPage() {
 	// Timeout `TUNNEL_POLL_TIMEOUT_MS` → fallback gallery (Q5b) : évite
 	// de bloquer l'user si le CLI est mort (docker down, WSS bloqué).
 	useEffect(() => {
-		if (!success) return;
+		if (!success || teamSlug === null) return;
 		const targetName = existingConnection?.name ?? deviceName.trim();
 		const targetIdFromCascade = existingConnection?.id ?? null;
 		const isReconnect = targetIdFromCascade !== null;

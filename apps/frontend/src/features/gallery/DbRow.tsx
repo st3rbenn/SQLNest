@@ -5,7 +5,7 @@
  */
 
 import { Link } from "@tanstack/react-router";
-import type { CSSProperties } from "react";
+import type { CSSProperties, MouseEvent } from "react";
 import { useCurrentTeam } from "../teams/useCurrentTeam";
 import type { DbConnection } from "../db-connections/useDbConnections";
 
@@ -78,7 +78,10 @@ export function DbRow({
 	isPending
 }: {
 	readonly connection: DbConnection;
-	readonly onClick?: (connId: string) => void;
+	readonly onClick?: (
+		e: MouseEvent<HTMLAnchorElement>,
+		connId: string
+	) => void;
 	readonly isPending?: boolean;
 }): React.ReactNode {
 	const team = useCurrentTeam();
@@ -119,12 +122,7 @@ export function DbRow({
 				params={{ teamSlug, connId: connection.id }}
 				className="sqlnest-db-row"
 				style={style}
-				onClick={(e) => {
-					if (onClick) {
-						e.preventDefault();
-						onClick(connection.id);
-					}
-				}}
+				onClick={onClick ? (e) => onClick(e, connection.id) : undefined}
 			>
 				{content}
 			</Link>
@@ -136,12 +134,7 @@ export function DbRow({
 			params={{ connId: connection.id }}
 			className="sqlnest-db-row"
 			style={style}
-			onClick={(e) => {
-				if (onClick) {
-					e.preventDefault();
-					onClick(connection.id);
-				}
-			}}
+			onClick={onClick ? (e) => onClick(e, connection.id) : undefined}
 		>
 			{content}
 		</Link>

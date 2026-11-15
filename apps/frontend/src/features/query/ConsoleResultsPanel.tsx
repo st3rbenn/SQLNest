@@ -165,10 +165,10 @@ export function ConsoleResultsPanel({
 	/** Source du dernier run — utilisée pour détecter `transaction { … }`
 	 * racine côté frontend sans re-parser à chaque render. Absent = pas
 	 * de header. */
-	readonly lastSource?: string;
+	readonly lastSource?: string | undefined;
 	/** Schema consommé par ResultsPlanView pour compile local et afficher
 	 * les stages du native query avec badges. */
-	readonly schema?: SchemaModel;
+	readonly schema?: SchemaModel | undefined;
 }): React.ReactNode {
 	const [viewMode, setViewMode] = useLocalStorage<ResultsViewMode>({
 		key: VIEW_STORAGE_KEY,

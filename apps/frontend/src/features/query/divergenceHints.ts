@@ -51,7 +51,10 @@ export function collectDivergenceHints(
 	return hints;
 }
 
-function walkStatement(statement: Statement, out: DivergenceHint[]): void {
+function walkStatement(
+	statement: Statement | SavepointStatement,
+	out: DivergenceHint[]
+): void {
 	switch (statement.operation) {
 		case "select":
 			walkQuery(statement, out);
@@ -135,7 +138,13 @@ function walkTransaction(stmt: TransactionStatement, out: DivergenceHint[]): voi
 }
 
 function walkLet(stmt: LetStatement, out: DivergenceHint[]): void {
-	for (const b of stmt.bindings) walkQuery(b.query, out);
+	for (const b of stmt.bindings) {
+		if (b.kind === "plain") walkQuery(b.query, out);
+		else {
+			walkQuery(b.base, out);
+			walkQuery(b.step, out);
+		}
+	}
 	walkStatement(stmt.body as unknown as Statement, out);
 }
 
@@ -177,9 +186,6 @@ function walkExpr(expr: Expr, out: DivergenceHint[]): void {
 			walkExpr(expr.target, out);
 			for (const v of expr.values) walkExpr(v, out);
 			return;
-		case "isNull":
-			walkExpr(expr.operand, out);
-			return;
 		case "case":
 			for (const b of expr.branches) {
 				walkExpr(b.cond, out);
@@ -205,7 +211,6 @@ function walkExpr(expr: Expr, out: DivergenceHint[]): void {
 		case "literal":
 		case "field":
 		case "windowCall":
-		case "upsertNew":
 			return;
 	}
 }
@@ -215,10 +220,8 @@ function emitFor(
 	span: { start: { offset: number }; end: { offset: number } },
 	out: DivergenceHint[]
 ): void {
-	const entries = hintsForConstruct(construct);
-	if (entries.length === 0) return;
-	const first = entries[0]!;
-	if (first.hintMessage === undefined) return;
+	const first = hintsForConstruct(construct)[0];
+	if (first?.hintMessage === undefined) return;
 	const serializedSpan: SerializedSpan = [
 		span.start.offset,
 		span.end.offset - span.start.offset

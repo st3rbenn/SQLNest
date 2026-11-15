@@ -124,8 +124,8 @@ const resizeHandleStyle: CSSProperties = {
 export interface ConsoleShellInnerProps {
 	readonly teamSlug: string;
 	readonly connId: string;
-	readonly initialSource?: string;
-	readonly initialAutorun?: boolean;
+	readonly initialSource?: string | undefined;
+	readonly initialAutorun?: boolean | undefined;
 	/** Variante du header — voir le doc du fichier. */
 	readonly variant?: ConsoleHeaderVariant;
 	/** Détacher = popout. Requis en `route`, ignoré en `node`. */
@@ -303,11 +303,11 @@ export function ConsoleShellInner({
 	// Injection depuis les search params ?source= (avant tout run éventuel).
 	// Le hook n'écrase que si le tab actif est vide (évite d'effacer un
 	// travail en cours).
+	// biome-ignore lint/correctness/useExhaustiveDependencies: injection unique au montage, la rejouer à chaque frappe écraserait la saisie
 	useEffect(() => {
 		if (initialSource && activeSource === "") {
 			tabs.updateSource(activeTabId, initialSource);
 		}
-		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
 
 	// Pending confirmation state — quand l'user hit ⌘⏎/clic Exécuter sur
@@ -330,6 +330,7 @@ export function ConsoleShellInner({
 	// Reset immédiat si la source change pendant qu'un pending est actif
 	// — l'AST recalculé peut invalider les findings, la confirmation en
 	// attente ne correspond plus au source d'origine.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: activeSource est le déclencheur, pas une valeur lue
 	useEffect(() => {
 		setPending(null);
 		setPreviewResult(null);
@@ -557,6 +558,7 @@ export function ConsoleShellInner({
 	// ré-armer au reload (defense in depth : le check reste actif même sans le
 	// query param, mais on veut que la page revienne à un état sain).
 	const [autorunRefused, setAutorunRefused] = useState(false);
+	// biome-ignore lint/correctness/useExhaustiveDependencies: execute change à chaque rendu ; autoranRef garantit un seul départ
 	useEffect(() => {
 		if (
 			!initialAutorun ||
@@ -595,7 +597,6 @@ export function ConsoleShellInner({
 			return;
 		}
 		execute();
-		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [initialAutorun, tabs.activeTab.source]);
 
 	// Hotkeys communs aux deux variants. Escape et mod+shift+K sont

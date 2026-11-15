@@ -42,10 +42,8 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef } from "react";
 import { useCurrentUser } from "../../auth/sessionQuery";
-import {
-	type PreviewSnapshot,
-	putPreviewSnapshot
-} from "../../db-connections/previewSnapshotClient";
+import { putPreviewSnapshot } from "../../db-connections/previewSnapshotClient";
+import type { PreviewSnapshot } from "../../db-connections/useDbConnections";
 import { useCurrentTeamSlug } from "../../teams/useCurrentTeam";
 import type { Frame } from "../frames";
 
@@ -95,7 +93,7 @@ const SNAPSHOT_MAX_FRAMES = 50;
 export function computePreviewSnapshot(
 	opts: Omit<UsePreviewSnapshotSyncOptions, "connectionId" | "canvasReady">
 ): PreviewSnapshot {
-	const nodes: PreviewSnapshot["nodes"] = [];
+	const nodes: PreviewSnapshot["nodes"][number][] = [];
 	const nodesByName = new Map<
 		string,
 		{ x: number; y: number; w: number; h: number }
@@ -121,7 +119,7 @@ export function computePreviewSnapshot(
 	}
 
 	const nodeSet = new Set(nodes.map((n) => n.id));
-	const edges: PreviewSnapshot["edges"] = [];
+	const edges: PreviewSnapshot["edges"][number][] = [];
 	for (const r of opts.relations) {
 		if (edges.length >= SNAPSHOT_MAX_EDGES) break;
 		if (!nodeSet.has(r.from.collection) || !nodeSet.has(r.to.collection)) {
@@ -130,7 +128,7 @@ export function computePreviewSnapshot(
 		edges.push({ source: r.from.collection, target: r.to.collection });
 	}
 
-	const frames: PreviewSnapshot["frames"] = [];
+	const frames: PreviewSnapshot["frames"][number][] = [];
 	for (const f of opts.frames) {
 		if (frames.length >= SNAPSHOT_MAX_FRAMES) break;
 		let rect = f.rect;
@@ -298,6 +296,7 @@ export function usePreviewSnapshotSync(
 	// Deps vide → l'effet install les listeners une seule fois au mount ;
 	// `pendingRef` capture la connectionId à l'armement (via l'effet ci-dessus),
 	// pas besoin de recréer les listeners au switch de canvas.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: teamSlug relance l'effet pour que le snapshot en attente parte avant le changement d'équipe
 	useEffect(() => {
 		function flushPending(): void {
 			const pending = pendingRef.current;

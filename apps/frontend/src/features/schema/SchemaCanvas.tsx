@@ -87,6 +87,7 @@ const nodeTypes = {
 	"system-enums": SystemEnumsNode
 };
 const edgeTypes = { fk: InteractiveEdge };
+const FRAME_ID_PREFIX = /^frame:/;
 
 type SchemaNode =
 	| TableNodeType
@@ -797,7 +798,7 @@ function CanvasInner({
 		if (focusFrameKey !== null && focusedFrame === undefined) {
 			setFocusFrameKey(null);
 		}
-	}, [focusFrameKey, focusedFrame]);
+	}, [focusFrameKey, focusedFrame, setFocusFrameKey]);
 
 	// Actions destructives / massives : auto-layout, hide, frame creation.
 	// Voir `useCanvasActions` pour la doc de chacune. Le hook expose aussi
@@ -1089,7 +1090,7 @@ function CanvasInner({
 					// (leur propre useNodesState). Chaque handler filtre les
 					// changes par id internally.
 					handleNodesChange(changes);
-					onConsoleNodesChange(changes);
+					onConsoleNodesChange(changes as never);
 					for (const c of systemNodeControls) {
 						c.onNodesChange(changes as never);
 					}
@@ -1150,7 +1151,7 @@ function CanvasInner({
 						return;
 					}
 					if (t === "frame") {
-						const frameKey = node.id.replace(/^frame:/, "");
+						const frameKey = node.id.replace(FRAME_ID_PREFIX, "");
 						focusFrame(frameKey);
 						return;
 					}
@@ -1193,12 +1194,12 @@ function CanvasInner({
 				}}
 				// Tables et frames changent de frame en suivant le pointeur.
 				canReparent={canReparentNode}
-				onNodeDragStop={(event, node, others) => {
+				onNodeDragStop={(event, node) => {
 					// Compose : logique frames (drag lifecycle) puis persist de
 					// la position du node console. Le state des consoles a déjà été update
 					// par onConsoleNodesChange pendant le drag — au drop on
 					// snapshotte `node.position` (position finale) dans persist.
-					onNodeDragStop(event, node, others);
+					onNodeDragStop(event, node);
 					if (
 						(node as { type?: string }).type === "console" &&
 						node.id !== focusedConsoleId

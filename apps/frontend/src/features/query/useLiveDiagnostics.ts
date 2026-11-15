@@ -70,6 +70,8 @@ import type { SerializedSpan } from "./useRunQuery";
 
 /** Délai d'inactivité avant de re-compiler. Trade-off réactivité vs bruit. */
 const DEBOUNCE_MS = 300;
+/** Mot qui attend un opérande à sa droite, en fin de saisie. */
+const TRAILING_OPERATOR = /(\s|^)(and|or|not|in|like|by|as|on)\s*$/i;
 
 /** Résultat du hook — LiveDiagnostic (squiggly warn/error éphémère) + span
  * du RawStatement racine s'il existe (décoration permanente D1 dans
@@ -122,9 +124,10 @@ export function useLiveDiagnostics(
 				// amont ; le lower success confirme que la source est complète
 				// et cohérente).
 				const findings = collectUnfilteredWrites(statement);
-				if (findings.length > 0) {
+				const firstFinding = findings[0];
+				if (firstFinding !== undefined) {
 					setState({
-						diag: findingToDiagnostic(findings[0]!, findings.length),
+						diag: findingToDiagnostic(firstFinding, findings.length),
 						rawStatementSpan
 					});
 					return;
@@ -143,9 +146,10 @@ export function useLiveDiagnostics(
 				// précédé.
 				if (engine === "mongodb") {
 					const hints = collectDivergenceHints(statement);
-					if (hints.length > 0) {
+					const firstHint = hints[0];
+					if (firstHint !== undefined) {
 						setState({
-							diag: hintToDiagnostic(hints[0]!, hints.length),
+							diag: hintToDiagnostic(firstHint, hints.length),
 							rawStatementSpan
 						});
 						return;
@@ -155,9 +159,10 @@ export function useLiveDiagnostics(
 					// Priorité inférieure aux divergences (info correction avant
 					// info perf).
 					const perf = collectPerfHints(statement);
-					if (perf.length > 0) {
+					const firstPerf = perf[0];
+					if (firstPerf !== undefined) {
 						setState({
-							diag: perfToDiagnostic(perf[0]!, perf.length),
+							diag: perfToDiagnostic(firstPerf, perf.length),
 							rawStatementSpan
 						});
 						return;
@@ -293,10 +298,6 @@ function validateStatement(
 			}, statement);
 			return;
 		}
-		case "savepoint":
-			// Standalone `savepoint` (hors transaction) n'est pas exécutable —
-			// mais le parser l'accepte comme statement. Rien à valider ici.
-			return;
 	}
 	// Défense : capability check symbolique pour un engine inconnu (au cas où
 	// on route sur un mauvais moteur — refuse au niveau live diag avec un
@@ -319,7 +320,7 @@ function assertWithSpan(fn: () => void, statement: Statement): void {
 		if (err instanceof SnqlError && err.span === undefined) {
 			throw new SnqlError(
 				err.message,
-				err.code as Parameters<typeof SnqlError>[1],
+				err.code as ConstructorParameters<typeof SnqlError>[1],
 				statement.span
 			);
 		}
@@ -392,6 +393,6 @@ function isObviouslyIncomplete(source: string): boolean {
 	const last = trimmed.charAt(trimmed.length - 1);
 	if (last === "," || last === "." || last === "=" || last === "<" || last === ">") return true;
 	// Se termine par `and`/`or`/`in`/`like`/`not` — attend un opérande.
-	if (/(\s|^)(and|or|not|in|like|by|as|on)\s*$/i.test(trimmed)) return true;
+	if (TRAILING_OPERATOR.test(trimmed)) return true;
 	return false;
 }

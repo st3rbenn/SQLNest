@@ -47,7 +47,6 @@ import type {
 	Span,
 	Statement,
 	TransactionBodyItem,
-	TransactionStatement,
 	UpdateStatement
 } from "@sqlnest/snql";
 
@@ -89,7 +88,10 @@ export function collectUnfilteredWrites(stmt: Statement): UnfilteredFinding[] {
 	return out;
 }
 
-function walk(stmt: Statement, out: UnfilteredFinding[]): void {
+function walk(
+	stmt: Statement | SavepointStatement,
+	out: UnfilteredFinding[]
+): void {
 	switch (stmt.operation) {
 		case "select":
 		case "introspect":
@@ -119,9 +121,8 @@ function walk(stmt: Statement, out: UnfilteredFinding[]): void {
 			walkBody(stmt.body, out);
 			return;
 		case "savepoint":
-			// Le walker se déclenche AUSSI sur savepoint racine standalone
-			// (usage typique : composer une tx en tapant d'abord les
-			// savepoints — le user doit voir le warning en construction).
+			// Défensif : le parser refuse un savepoint en racine, il n'arrive
+			// ici que si un appelant passe le nœud lui-même.
 			walkBody(stmt.body, out);
 			return;
 		case "let":

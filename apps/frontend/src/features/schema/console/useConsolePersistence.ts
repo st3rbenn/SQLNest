@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 
-type Engine = "postgres" | "mongodb";
 
 const CONSOLE_LS_KEY = "sqlnest:canvas-console:source";
 const CONSOLE_HEIGHT_LS_KEY = "sqlnest:canvas-console:height";
@@ -44,10 +43,12 @@ export interface AddHistoryMeta {
 export const CONSOLE_HEIGHT_MIN = 180;
 export const CONSOLE_HEIGHT_EXPANDED_DEFAULT = 340;
 
-const EXAMPLES: Record<Engine, string> = {
-	postgres: "get <table> pick <fields>",
-	mongodb: "get <collection> pick <fields>"
-};
+/** Mongo parle de collections ; les autres moteurs, de tables. */
+function exampleFor(engine: string): string {
+	return engine === "mongodb"
+		? "get <collection> pick <fields>"
+		: "get <table> pick <fields>";
+}
 
 /**
  * Charge l'history depuis localStorage avec migration soft des anciennes
@@ -98,8 +99,8 @@ export function maxConsoleHeight(): number {
 	return Math.max(CONSOLE_HEIGHT_MIN, window.innerHeight - 80);
 }
 
-export function consoleExampleFor(engine: Engine): string {
-	return EXAMPLES[engine];
+export function consoleExampleFor(engine: string): string {
+	return exampleFor(engine);
 }
 
 export interface ConsolePersistence {
@@ -119,16 +120,16 @@ export interface ConsolePersistence {
  * éphémère sans connexion active).
  */
 export function useConsolePersistence(
-	engine: Engine,
+	engine: string,
 	connectionId?: string
 ): ConsolePersistence {
 	const historyStorageKey = historyKeyFor(connectionId);
 	const [source, setSource] = useState<string>(() => {
-		if (typeof window === "undefined") return EXAMPLES[engine];
+		if (typeof window === "undefined") return exampleFor(engine);
 		try {
-			return window.localStorage.getItem(CONSOLE_LS_KEY) ?? EXAMPLES[engine];
+			return window.localStorage.getItem(CONSOLE_LS_KEY) ?? exampleFor(engine);
 		} catch {
-			return EXAMPLES[engine];
+			return exampleFor(engine);
 		}
 	});
 	useEffect(() => {

@@ -117,7 +117,7 @@ function EnumRow({
 	readonly entry: EnumNodeEntry;
 	readonly expanded: boolean;
 	readonly onToggle: () => void;
-	readonly onAddMember?: () => void;
+	readonly onAddMember?: (() => void) | undefined;
 }) {
 	return (
 		<div>

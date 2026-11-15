@@ -29,8 +29,8 @@ export function ConsolePage({
 }: {
 	readonly teamSlug: string;
 	readonly connId: string;
-	readonly initialSource?: string;
-	readonly initialAutorun?: boolean;
+	readonly initialSource?: string | undefined;
+	readonly initialAutorun?: boolean | undefined;
 }): React.ReactNode {
 	const navigate = useNavigate();
 	const isPopout = useIsPopout();
