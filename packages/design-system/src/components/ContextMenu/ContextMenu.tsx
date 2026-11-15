@@ -4,6 +4,7 @@ import {
 	type CSSProperties,
 	type ReactNode,
 	useEffect,
+	useLayoutEffect,
 	useRef,
 	useState,
 } from "react";
@@ -197,6 +198,9 @@ function ItemRow({
 	);
 }
 
+/** Écart minimal entre le menu et les bords de la fenêtre. */
+const VIEWPORT_MARGIN = 8;
+
 /**
  * Menu contextuel positionné en coordonnées écran (portal + `position: fixed`).
  * Se ferme sur `Escape`, clic-extérieur, ou choix d'action. Sous-menus rendus
@@ -212,11 +216,29 @@ export function ContextMenu({
 	width = 260,
 }: ContextMenuProps) {
 	const containerRef = useRef<HTMLDivElement | null>(null);
+	// En état : le portail monte le menu après ce composant, la mesure attend l'élément.
+	const [menuEl, setMenuEl] = useState<HTMLDivElement | null>(null);
 	const [submenu, setSubmenu] = useState<{
 		item: ContextMenuSubmenuItem;
 		x: number;
 		y: number;
 	} | null>(null);
+	// Ouvert près d'un bord, le menu en sortirait : on le remonte ou le
+	// décale vers la gauche, avant l'affichage.
+	const [shift, setShift] = useState({ x: 0, y: 0 });
+	useLayoutEffect(() => {
+		if (!open || menuEl === null) return;
+		const rect = menuEl.getBoundingClientRect();
+		const x = Math.min(
+			0,
+			window.innerWidth - VIEWPORT_MARGIN - (position.x + rect.width),
+		);
+		const y = Math.min(
+			0,
+			window.innerHeight - VIEWPORT_MARGIN - (position.y + rect.height),
+		);
+		setShift((prev) => (prev.x === x && prev.y === y ? prev : { x, y }));
+	}, [open, menuEl, position.x, position.y, items, header]);
 
 	// Escape : useHotkeys monté inconditionnellement (règle React) ; le
 	// handler no-op si le menu est fermé — équivalent au listener
@@ -280,11 +302,12 @@ export function ContextMenu({
 			/>
 			<div ref={containerRef}>
 				<Box
+					ref={setMenuEl}
 					role="menu"
 					style={{
 						position: "fixed",
-						left: position.x,
-						top: position.y,
+						left: Math.max(VIEWPORT_MARGIN, position.x + shift.x),
+						top: Math.max(VIEWPORT_MARGIN, position.y + shift.y),
 						width,
 						background: "var(--sqlnest-surface)",
 						border: "1px solid var(--sqlnest-border)",

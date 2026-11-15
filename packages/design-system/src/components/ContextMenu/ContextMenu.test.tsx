@@ -135,6 +135,27 @@ describe("ContextMenu", () => {
 		expect(menu.style.top).toBe("180px");
 	});
 
+	it("stays inside the window when opened near its bottom-right corner", () => {
+		const rect = vi
+			.spyOn(HTMLElement.prototype, "getBoundingClientRect")
+			.mockReturnValue({ width: 260, height: 300 } as DOMRect);
+		try {
+			renderWithProviders(
+				<ContextMenu
+					open
+					position={{ x: window.innerWidth - 20, y: window.innerHeight - 20 }}
+					onClose={() => {}}
+					items={items}
+				/>,
+			);
+			const menu = screen.getByRole("menu");
+			expect(menu.style.left).toBe(`${window.innerWidth - 8 - 260}px`);
+			expect(menu.style.top).toBe(`${window.innerHeight - 8 - 300}px`);
+		} finally {
+			rect.mockRestore();
+		}
+	});
+
 	it("renders a submenu label with a chevron indicator", () => {
 		renderWithProviders(
 			<ContextMenu
