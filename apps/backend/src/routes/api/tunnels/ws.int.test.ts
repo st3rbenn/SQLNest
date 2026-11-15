@@ -143,6 +143,25 @@ async function seedSessionToken(
 	return { sessionId: rows[0]!.id, token };
 }
 
+/**
+ * Attend que le serveur ait rattaché le CLI au tunnel. `open` côté client
+ * précède l'authentification du jeton côté serveur : sans cette attente, un
+ * second CLI peut être rattaché avant le premier.
+ */
+async function waitForCliAttached(
+	app: FastifyInstance,
+	tunnelId: string,
+	timeoutMs = 2_000
+): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	while (app.tunnelRegistry.getSlot(tunnelId)?.cli == null) {
+		if (Date.now() > deadline) {
+			throw new Error(`CLI non rattaché au tunnel après ${timeoutMs}ms`);
+		}
+		await new Promise((r) => setTimeout(r, 10));
+	}
+}
+
 /** Attend `ws.open`. Throw sur `error` ou `close` avant open. */
 function waitForOpen(ws: WebSocket): Promise<void> {
 	return new Promise((resolve, reject) => {
@@ -399,6 +418,7 @@ describe.skipIf(!DATABASE_URL)("WSS /api/tunnels — relais bête", () => {
 			)
 		);
 		await waitForOpen(oldCli);
+		await waitForCliAttached(app, sessionId);
 
 		const closeSignal = waitForClose(oldCli);
 
