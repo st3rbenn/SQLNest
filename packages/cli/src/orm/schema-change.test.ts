@@ -193,7 +193,9 @@ describe("applySchemaChange (ADR-037 D3, D4, D5)", () => {
 				adapter({ apply: async () => fail("P3018 : doublons")() }),
 				connection(BEFORE)
 			)
-		).rejects.toThrow("P3018 : doublons");
+		).rejects.toThrow(
+			/^P3018 : doublons\nRien n'a changé : migration annulée, modèle et base comme avant\.$/
+		);
 		expect(calls).toEqual([
 			"preflight",
 			"writeMigration",
@@ -232,7 +234,7 @@ describe("applySchemaChange (ADR-037 D3, D4, D5)", () => {
 			run(adapter({ apply: async () => fail("P3018 : doublons")() }), conn, {
 				src: "add unique index (name) into agency"
 			})
-		).rejects.toThrow(/^P3018 : doublons$/);
+		).rejects.toThrow(/^P3018 : doublons\nRien n'a changé/);
 		expect(conn.execute).toHaveBeenLastCalledWith(
 			expect.objectContaining({
 				text: 'DROP INDEX CONCURRENTLY IF EXISTS "agency_name_key"'
@@ -384,7 +386,9 @@ describe("applySchemaChange (ADR-037 D3, D4, D5)", () => {
 		});
 		await expect(
 			run(adapter({ migrations: () => false }), conn)
-		).rejects.toThrow(/^Document failed validation$/);
+		).rejects.toThrow(
+			/^Document failed validation\nRien n'a changé : modèle et base comme avant\.$/
+		);
 		expect(calls).toEqual([
 			"preflight",
 			"patchModel",

@@ -142,11 +142,20 @@ export async function applySchemaChange(
 		const left = await restoreDatabase(change, err);
 		if (left !== undefined) notes.push(left);
 		undo(written);
-		throw notes.length === 0
-			? err
-			: new SchemaChangeError(
-					[messageOf(err), ...notes.map((note) => `(${note})`)].join("\n")
-				);
+		// Dit après l'erreur de l'outil : celle de Prisma annonce une migration
+		// à résoudre, que le retour arrière vient de résoudre.
+		throw new SchemaChangeError(
+			[
+				messageOf(err),
+				...(notes.length === 0
+					? [
+							migration !== undefined
+								? "Rien n'a changé : migration annulée, modèle et base comme avant."
+								: "Rien n'a changé : modèle et base comme avant."
+						]
+					: notes.map((note) => `(${note})`))
+			].join("\n")
+		);
 	}
 	return result(true, [
 		...(await nativeChecks(adapter, change, migration, true)),
