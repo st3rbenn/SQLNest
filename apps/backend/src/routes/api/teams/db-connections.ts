@@ -75,7 +75,9 @@ export default function teamsDbConnectionsRoute(fastify: FastifyInstance) {
 							createdAt: r.createdAt.toISOString(),
 							isOnline,
 							lastPreviewSnapshot:
-								(r.lastPreviewSnapshot as unknown as ListDbConnectionsResponse["_output"]["connections"][number]["lastPreviewSnapshot"]) ??
+								(r.lastPreviewSnapshot as unknown as z.infer<
+									typeof ListDbConnectionsResponse
+								>["connections"][number]["lastPreviewSnapshot"]) ??
 								null
 						};
 					})

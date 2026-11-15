@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
+import z from "zod/v4";
 import { createApiToken } from "../../../domains/api-tokens/create";
 import { listApiTokens } from "../../../domains/api-tokens/list";
 import { revokeApiToken } from "../../../domains/api-tokens/revoke";
@@ -151,6 +152,7 @@ export default function apiTokensRoute(fastify: FastifyInstance) {
 			schema: {
 				params: ApiTokenIdParams,
 				response: {
+					204: z.null(),
 					403: ApiTokensErrorResponse,
 					404: ApiTokensErrorResponse
 				}

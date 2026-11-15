@@ -100,8 +100,8 @@ function inspectColumn(
 
 describe("packages/db schema — règle 1 sécu (aucune col creds DB)", () => {
 	test("aucune colonne du schéma ne matche un nom de creds DB (ou est whitelistée avec justification)", () => {
-		const tables = Object.values(schema).filter((v): v is PgTable =>
-			is(v, PgTable)
+		const tables = (Object.values(schema) as unknown[]).filter(
+			(v): v is PgTable => is(v, PgTable)
 		);
 
 		// Sanity : sinon un import cassé masquerait le guard silencieusement.

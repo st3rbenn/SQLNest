@@ -76,7 +76,7 @@ function mapErrorToReply(
 	err: unknown,
 	reply: FastifyReply,
 	request: FastifyRequest
-): unknown {
+): FastifyReply {
 	if (err instanceof ConnectionNotInTeamError) {
 		return reply.code(404).send({ message: err.message });
 	}
@@ -112,6 +112,14 @@ function mapErrorToReply(
 	return reply.code(500).send({ message: "Erreur interne" });
 }
 
+/**
+ * Réponse du CLI relayée telle quelle. Le backend n'en connaît pas la forme :
+ * quand la route déclare un schéma 200, c'est lui qui la valide à l'envoi.
+ */
+async function relay(pending: Promise<unknown>): Promise<never> {
+	return (await pending) as never;
+}
+
 export default function teamsDbConnectionsProxyRoute(fastify: FastifyInstance) {
 	const instance = fastify.withTypeProvider<ZodTypeProvider>();
 
@@ -141,9 +149,9 @@ export default function teamsDbConnectionsProxyRoute(fastify: FastifyInstance) {
 					request.team.id,
 					params.id
 				);
-				return await fastify.backendProxy.sendReq(tunnelId, {
+				return await relay(fastify.backendProxy.sendReq(tunnelId, {
 					op: "introspect"
-				});
+				}));
 			} catch (err) {
 				return mapErrorToReply(err, reply, request);
 			}
@@ -179,10 +187,10 @@ export default function teamsDbConnectionsProxyRoute(fastify: FastifyInstance) {
 					request.team.id,
 					params.id
 				);
-				return await fastify.backendProxy.sendReq(tunnelId, {
+				return await relay(fastify.backendProxy.sendReq(tunnelId, {
 					op: "runSnql",
 					src: request.body.source
-				});
+				}));
 			} catch (err) {
 				return mapErrorToReply(err, reply, request);
 			}
@@ -218,9 +226,9 @@ export default function teamsDbConnectionsProxyRoute(fastify: FastifyInstance) {
 					request.team.id,
 					params.id
 				);
-				return await fastify.backendProxy.sendReq(tunnelId, {
+				return await relay(fastify.backendProxy.sendReq(tunnelId, {
 					op: "projectStatus"
-				});
+				}));
 			} catch (err) {
 				return mapErrorToReply(err, reply, request);
 			}
@@ -261,7 +269,7 @@ export default function teamsDbConnectionsProxyRoute(fastify: FastifyInstance) {
 					params.id
 				);
 				const { source, names } = request.body;
-				return await fastify.backendProxy.sendReq(
+				return await relay(fastify.backendProxy.sendReq(
 					tunnelId,
 					{
 						op: "applySchemaChange",
@@ -269,7 +277,7 @@ export default function teamsDbConnectionsProxyRoute(fastify: FastifyInstance) {
 						...(names !== undefined ? { names } : {})
 					},
 					{ timeoutMs: SCHEMA_CHANGE_TIMEOUT_MS }
-				);
+				));
 			} catch (err) {
 				if (err instanceof TunnelCliError && err.pgError === undefined) {
 					return reply.code(422).send({ message: err.cliMessage });
@@ -312,11 +320,11 @@ export default function teamsDbConnectionsProxyRoute(fastify: FastifyInstance) {
 					params.id
 				);
 				const { source, names } = request.body;
-				return await fastify.backendProxy.sendReq(tunnelId, {
+				return await relay(fastify.backendProxy.sendReq(tunnelId, {
 					op: "previewSchemaChange",
 					src: source,
 					...(names !== undefined ? { names } : {})
-				});
+				}));
 			} catch (err) {
 				if (err instanceof TunnelCliError && err.pgError === undefined) {
 					return reply.code(422).send({ message: err.cliMessage });

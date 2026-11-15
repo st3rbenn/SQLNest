@@ -118,7 +118,7 @@ describe.skipIf(!DATABASE_URL)("team auto-signup", () => {
 			.where(eq(schema.team.ownerId, userId));
 		const firstId = before[0]?.id;
 		expect(firstId).toBeDefined();
-		const result = await createPersonalTeam(app.db, userId, "Personal");
+		const result = await createPersonalTeam(app.db, userId);
 		expect(result.wasCreated).toBe(false);
 		expect(result.teamId).toBe(firstId);
 		const after = await app.db
