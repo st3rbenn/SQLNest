@@ -11,7 +11,9 @@
 	},
 	"scripts": {
 		"dev": "tsx src/index.ts | pino-pretty",
-		"test": "vitest",
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"type-check": "tsc -b --noEmit",
 		"check": "biome check --write"
 	},
 	"dependencies": {

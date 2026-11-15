@@ -4,6 +4,8 @@
 	"scripts": {
 		"preinstall": "npx only-allow pnpm",
 		"check": "biome check --write .",
+		"type-check": "pnpm -r type-check",
+		"test": "pnpm -r test",
 		"db:up": "docker compose -f infra/docker-compose.yml up -d",
 		"db:down": "docker compose -f infra/docker-compose.yml down",
 		"db:reset": "docker compose -f infra/docker-compose.yml down -v && docker compose -f infra/docker-compose.yml up -d",

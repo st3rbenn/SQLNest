@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Types et tests unitaires
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm type-check
+      # Le backend a son job : ses tests exigent une base Postgres.
+      # Sans URL de base, les tests d'intégration de l'engine se désactivent seuls.
+      - run: pnpm --filter '!@sqlnest/backend' -r test
+
+  backend:
+    name: Backend (Postgres)
+    runs-on: ubuntu-latest
+    env:
+      # `test-setup.ts` refuse une URL qui ne contient pas « test ».
+      DATABASE_URL_TEST: postgres://sqlnest_test:sqlnest_test_dev@localhost:5435/sqlnest_test
+      AUTH_SECRET: ci-only-secret-0123456789-abcdefghijklmnop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: docker compose -f infra/docker-compose.yml up -d --wait postgres-test
+      - run: pnpm app:db:test:migrate
+      - run: pnpm --filter @sqlnest/backend test
+
+  integration:
+    name: Engine sur Postgres et MongoDB
+    runs-on: ubuntu-latest
+    env:
+      SNQL_TEST_PG_URL: postgres://sqlnest:sqlnest@localhost:5433/sqlnest_demo
+      SNQL_TEST_MONGO_URL: mongodb://localhost:27017/sqlnest_demo?directConnection=true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Les bases de dev du dépôt, avec leurs jeux de données.
+      - run: docker compose -f infra/docker-compose.yml up -d --wait postgres mongo
+      - run: pnpm --filter @sqlnest/engine test
