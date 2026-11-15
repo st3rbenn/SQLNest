@@ -2,6 +2,7 @@ import { Box } from "@mantine/core";
 import { SelectionChip, Spotlight } from "@sqlnest/design-system";
 import { CanvasContextMenu } from "../../CanvasContextMenu";
 import { ChangePanel } from "../../editor/ChangePanel";
+import { RelationContextMenu } from "../../RelationContextMenu";
 import { RelationInferenceLayer } from "../../relation-inference/RelationInferenceLayer";
 import {
 	useCanvasActionsCtx,
@@ -77,7 +78,14 @@ export function CanvasOverlays() {
 				<HiddenChip count={hiddenIds.size} onUnhideAll={unhideAll} />
 			) : null}
 
-			{menu !== null ? (
+			{menu !== null && "relation" in menu ? (
+				<RelationContextMenu
+					position={{ x: menu.x, y: menu.y }}
+					relation={menu.relation}
+					schema={schema}
+					onClose={() => setMenu(null)}
+				/>
+			) : menu !== null ? (
 				<CanvasContextMenu
 					open
 					position={{ x: menu.x, y: menu.y }}

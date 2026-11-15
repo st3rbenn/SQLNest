@@ -21,6 +21,12 @@ describe("ddlImpactHint (ADR-036 D7)", () => {
 		);
 	});
 
+	it("drop ref : le code qui suit la relation casse, les valeurs ne sont plus contrôlées", () => {
+		expect(hint("drop ref fk_orders_user from orders")?.message).toBe(
+			"Le code qui suit la relation 'fk_orders_user' échouera ; plus rien ne contrôlera les valeurs de sa colonne."
+		);
+	});
+
 	it("set type et set not null : rappellent l'effet sur le code et les écritures", () => {
 		expect(hint("alter column agency.zip set type int")?.message).toBe(
 			"Le code qui lit 'agency.zip' recevra des valeurs de type int."

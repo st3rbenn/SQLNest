@@ -3,19 +3,19 @@ import { useMemo } from "react";
 import { bestHandles, type Side, spreadOffsets } from "../edgeRouting";
 import type { InteractiveEdgeData } from "../InteractiveEdge";
 import type { LayoutResult } from "../layout";
+import type { SchemaModel } from "../schema-model";
 import type { TableNodeType } from "../TableNode";
 import { NODE_WIDTH, nodeHeight } from "../TableNode";
 import type { AnchorMap } from "../useEdgeAnchors";
+import { DECLARED_EDGE, INFERRED_EDGE, relationEdges } from "./relationEdge";
 
-// Couleurs edges (dupliquées volontairement avec SchemaCanvas pour éviter
-// une import cyclique. Une future extraction commune dans `constants.ts`
-// est possible mais pas nécessaire tant que ces valeurs restent stables.)
-const DECLARED = "#0d99ff";
-const INFERRED = "#ffc933";
 const DIM = "#7a7a7a";
 
 export interface UseCanvasEdgesOptions {
 	readonly base: LayoutResult | null;
+	/** Schéma courant : ses relations font les arêtes, y compris celles
+	 * posées ou retirées depuis le calcul du layout. */
+	readonly schema: SchemaModel;
 	readonly nodes: readonly TableNodeType[];
 	readonly hiddenIds: ReadonlySet<string>;
 	readonly focusId: string | null;
@@ -28,6 +28,8 @@ export interface UseCanvasEdgesOptions {
 		) => void;
 		readonly clearOverride: (edgeId: string) => void;
 	};
+	/** Clic droit sur une arête (identité stable attendue). */
+	readonly onMenu?: InteractiveEdgeData["onMenu"];
 }
 
 export interface UseCanvasEdgesReturn {
@@ -59,17 +61,24 @@ export interface UseCanvasEdgesReturn {
 export function useCanvasEdges(
 	opts: UseCanvasEdgesOptions
 ): UseCanvasEdgesReturn {
-	const { base, nodes, hiddenIds, focusId, edgeAnchors } = opts;
+	const { base, schema, nodes, hiddenIds, focusId, edgeAnchors, onMenu } = opts;
+
+	// Le layout est calculé une fois par connexion ; les arêtes, elles,
+	// suivent le schéma relu. Rien tant que le layout n'a pas placé les tables.
+	const edges = useMemo(
+		() => (base === null ? null : relationEdges(schema)),
+		[base, schema]
+	);
 
 	const neighbors = useMemo(() => {
-		if (focusId === null || base === null) return null;
+		if (focusId === null || edges === null) return null;
 		const set = new Set<string>([focusId]);
-		for (const e of base.edges) {
+		for (const e of edges) {
 			if (e.source === focusId) set.add(e.target);
 			if (e.target === focusId) set.add(e.source);
 		}
 		return set;
-	}, [focusId, base]);
+	}, [focusId, edges]);
 
 	// Index rapide pour l'auto-routing des edges — évite un O(n) par edge.
 	const nodeById = useMemo(() => {
@@ -84,13 +93,14 @@ export function useCanvasEdges(
 	const anchorApi = useMemo<InteractiveEdgeData>(
 		() => ({
 			setOverride: edgeAnchors.setOverride,
-			clearOverride: edgeAnchors.clearOverride
+			clearOverride: edgeAnchors.clearOverride,
+			...(onMenu !== undefined ? { onMenu } : {})
 		}),
-		[edgeAnchors.setOverride, edgeAnchors.clearOverride]
+		[edgeAnchors.setOverride, edgeAnchors.clearOverride, onMenu]
 	);
 
 	const displayEdges = useMemo(() => {
-		const visible = (base?.edges ?? []).filter(
+		const visible = (edges ?? []).filter(
 			(e) => !hiddenIds.has(e.source) && !hiddenIds.has(e.target)
 		);
 		// Pass 1 : résout side source + side target de chaque edge
@@ -175,7 +185,7 @@ export function useCanvasEdges(
 				...(targetHandle !== undefined ? { targetHandle } : {}),
 				style: {
 					...e.style,
-					stroke: dim ? DIM : inferred ? INFERRED : DECLARED,
+					stroke: dim ? DIM : inferred ? INFERRED_EDGE : DECLARED_EDGE,
 					strokeWidth: touchesFocus ? 2.5 : 1.5,
 					opacity: dim ? 0.5 : 1
 				},
@@ -188,7 +198,7 @@ export function useCanvasEdges(
 				}
 			};
 		});
-	}, [base, focusId, hiddenIds, nodeById, edgeAnchors.overrides, anchorApi]);
+	}, [edges, focusId, hiddenIds, nodeById, edgeAnchors.overrides, anchorApi]);
 
 	return { displayEdges, neighbors };
 }

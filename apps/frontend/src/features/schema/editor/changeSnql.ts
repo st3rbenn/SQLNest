@@ -6,7 +6,29 @@
 /** Geste en cours, ouvert dans le panneau de changement. */
 export type ChangeGesture =
 	| { readonly kind: "add-column"; readonly table: string }
-	| ColumnGesture;
+	| ColumnGesture
+	| AddRefGesture
+	| DropRefGesture;
+
+/** Relation tracée d'un champ (qui portera la FK) vers le champ référencé. */
+export interface AddRefGesture {
+	readonly kind: "add-ref";
+	readonly table: string;
+	readonly column: string;
+	readonly targetTable: string;
+	readonly targetColumn: string;
+}
+
+/** FK retirée depuis le menu de son arête. */
+export interface DropRefGesture {
+	readonly kind: "drop-ref";
+	readonly table: string;
+	readonly column: string;
+	readonly targetTable: string;
+	readonly targetColumn: string;
+	/** Nom de la contrainte. */
+	readonly name: string;
+}
 
 /** Geste sur une colonne existante (menu du champ, double-clic sur son nom). */
 export type ColumnGesture = {
@@ -98,4 +120,31 @@ export function dropDefaultSnql(table: string, column: string): string {
 
 export function dropColumnSnql(table: string, column: string): string {
 	return `drop column ${column} from ${table}`;
+}
+
+/** Règle d'une FK quand la ligne référencée est supprimée ou que sa clé change. */
+export const REF_RULES = ["restrict", "cascade", "set null"] as const;
+export type RefRule = (typeof REF_RULES)[number];
+
+export interface AddRefDraft {
+	readonly table: string;
+	readonly column: string;
+	readonly targetTable: string;
+	readonly targetColumn: string;
+	readonly onDelete: RefRule;
+	readonly onUpdate: RefRule;
+}
+
+/** `restrict` est la règle par défaut du langage : elle ne s'écrit pas. */
+export function addRefSnql(d: AddRefDraft): string {
+	return [
+		`add ref (${d.column}) references ${d.targetTable}.${d.targetColumn}`,
+		...(d.onDelete !== "restrict" ? [`on delete ${d.onDelete}`] : []),
+		...(d.onUpdate !== "restrict" ? [`on update ${d.onUpdate}`] : []),
+		`into ${d.table}`
+	].join(" ");
+}
+
+export function dropRefSnql(table: string, name: string): string {
+	return `drop ref ${name} from ${table}`;
 }

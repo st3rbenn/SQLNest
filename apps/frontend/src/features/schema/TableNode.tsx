@@ -85,7 +85,8 @@ const HIDDEN_HANDLE: CSSProperties = { opacity: 0, border: "none" };
  * chacun sur une paire précise via `sourceHandle`/`targetHandle` (calculée
  * dans `SchemaCanvas.displayEdges` selon les positions relatives). Sans ces
  * 4 côtés, on n'aurait que Left/Right et les tables empilées verticalement
- * verraient leurs arrows partir dans le vide.
+ * verraient leurs arrows partir dans le vide. Points d'ancrage seulement :
+ * une relation se trace de champ à champ (`FieldHandles`).
  */
 const HANDLE_SIDES: readonly { id: Side; position: Position }[] = [
 	{ id: "top", position: Position.Top },
@@ -103,16 +104,56 @@ function AllHandles() {
 						id={s.id}
 						type="source"
 						position={s.position}
+						isConnectable={false}
 						style={HIDDEN_HANDLE}
 					/>
 					<Handle
 						id={s.id}
 						type="target"
 						position={s.position}
+						isConnectable={false}
 						style={HIDDEN_HANDLE}
 					/>
 				</Fragment>
 			))}
+		</>
+	);
+}
+
+/** Préfixe des handles d'un champ : `field:<colonne>`. */
+const FIELD_HANDLE = "field:";
+
+/** Colonne d'un handle de champ ; `undefined` pour un handle de côté de table. */
+export function fieldOfHandle(handleId: string | null): string | undefined {
+	return handleId?.startsWith(FIELD_HANDLE)
+		? handleId.slice(FIELD_HANDLE.length)
+		: undefined;
+}
+
+/**
+ * Tracé d'une relation (ADR-039 D2) : le point à droite du champ est le
+ * départ, la ligne entière d'un autre champ est l'arrivée.
+ */
+function FieldHandles({ field }: { readonly field: string }) {
+	return (
+		<>
+			<Handle
+				id={`${FIELD_HANDLE}${field}`}
+				type="source"
+				position={Position.Right}
+				isConnectableEnd={false}
+				className="sqlnest-field-source"
+				// Remplace la connexion « au clic » du moteur : un clic sur le
+				// point armerait un tracé que le prochain clic sur un champ finirait.
+				onClick={(e) => e.stopPropagation()}
+			/>
+			<Handle
+				id={`${FIELD_HANDLE}${field}`}
+				type="target"
+				position={Position.Left}
+				isConnectableStart={false}
+				className="sqlnest-field-target"
+			/>
 		</>
 	);
 }
@@ -276,6 +317,7 @@ function TableNodeComponent({
 						key={f.name}
 						data-field={f.name}
 						style={{
+							position: "relative",
 							display: "flex",
 							alignItems: "center",
 							justifyContent: "space-between",
@@ -300,6 +342,7 @@ function TableNodeComponent({
 							{f.name}
 						</span>
 						<TypePill type={f.type} nullable={f.nullable} />
+						<FieldHandles field={f.name} />
 					</div>
 				))}
 				{hidden > 0 ? (

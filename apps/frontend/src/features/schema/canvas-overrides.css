@@ -170,3 +170,40 @@
 [data-console-focus="true"] > *:not(.nest-canvas) {
 	pointer-events: none;
 }
+
+/*
+ * Poignée d'un champ : le point d'où part le tracé d'une relation. Visible
+ * et saisissable au survol de sa ligne seulement — invisible, elle prendrait
+ * les clics du bord droit, où se saisit le redimensionnement.
+ */
+.nest-handle.sqlnest-field-source {
+	top: 50%;
+	right: 2px;
+	width: 8px;
+	height: 8px;
+	transform: translateY(-50%);
+	background: var(--sqlnest-accent);
+	border: 1.5px solid var(--sqlnest-surface);
+	opacity: 0;
+	pointer-events: none;
+	z-index: 5;
+	transition: opacity 80ms ease-out;
+}
+[data-field]:hover > .nest-handle.sqlnest-field-source,
+.nest-handle.sqlnest-field-source.connectingfrom {
+	opacity: 1;
+	pointer-events: all;
+}
+/* Arrivée du tracé : toute la ligne du champ. */
+.nest-handle.sqlnest-field-target {
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	transform: none;
+	border: none;
+	border-radius: 0;
+	background: transparent;
+}
+.nest-handle.sqlnest-field-target.connectingto {
+	background: rgba(13, 153, 255, 0.18);
+}

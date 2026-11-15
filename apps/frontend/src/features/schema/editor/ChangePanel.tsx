@@ -12,7 +12,12 @@ import {
 } from "@mantine/core";
 import { Button } from "@sqlnest/design-system";
 import type { SchemaModel as SnqlSchemaModel } from "@sqlnest/snql";
-import { ORM_LABELS, type TunnelSchemaCheck } from "@sqlnest/tunnel-protocol";
+import { useDebouncedValue } from "@mantine/hooks";
+import {
+	ORM_LABELS,
+	type TunnelSchemaChangeNames,
+	type TunnelSchemaCheck
+} from "@sqlnest/tunnel-protocol";
 import {
 	IconAsterisk,
 	IconCircleDashed,
@@ -20,25 +25,37 @@ import {
 	IconColumnRemove,
 	IconCursorText,
 	IconEraser,
+	IconLink,
 	IconPencil,
-	IconTransform
+	IconTransform,
+	IconUnlink
 } from "@tabler/icons-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useMemo, useState } from "react";
 import { matchesExpected } from "../../query/WriteConfirmBar";
 import { useCanvasData, useCanvasUI } from "../canvas/CanvasContext";
 import { CanvasSidePanel } from "../canvas/floating/CanvasSidePanel";
 import type { Field } from "../schema-model";
-import { applyChange, type ChangeOutcome } from "./applyChange";
+import {
+	applyChange,
+	type ChangeOutcome,
+	fetchChangeNames,
+	typedNames
+} from "./applyChange";
 import { type ChangePreview, previewChange } from "./changePreview";
 import {
+	type AddRefGesture,
 	addColumnSnql,
+	addRefSnql,
 	COLUMN_TYPES,
 	type ChangeGesture,
 	type ColumnGesture,
 	dropColumnSnql,
 	dropDefaultSnql,
+	dropRefSnql,
+	REF_RULES,
+	type RefRule,
 	renameColumnSnql,
 	setDefaultSnql,
 	setNullabilitySnql,
@@ -90,14 +107,72 @@ export function ChangePanel() {
 	const { gesture, setGesture } = useCanvasUI();
 	if (gesture === null) return null;
 	const onClose = () => setGesture(null);
-	return gesture.kind === "add-column" ? (
-		<AddColumnPanel
-			key={keyOf(gesture)}
+	const key = keyOf(gesture);
+	switch (gesture.kind) {
+		case "add-column":
+			return (
+				<AddColumnPanel key={key} table={gesture.table} onClose={onClose} />
+			);
+		case "add-ref":
+			return <AddRefPanel key={key} gesture={gesture} onClose={onClose} />;
+		case "drop-ref":
+			return (
+				<ChangeFrame
+					key={key}
+					icon={<IconUnlink {...ICON} />}
+					title="Supprimer la relation"
+					table={gesture.table}
+					column={gesture.column}
+					reference={`${gesture.targetTable}.${gesture.targetColumn}`}
+					source={dropRefSnql(gesture.table, gesture.name)}
+					onClose={onClose}
+				/>
+			);
+		default:
+			return <ColumnPanel key={key} gesture={gesture} onClose={onClose} />;
+	}
+}
+
+function AddRefPanel({
+	gesture,
+	onClose
+}: {
+	readonly gesture: AddRefGesture;
+	readonly onClose: () => void;
+}) {
+	const [onDelete, setOnDelete] = useState<RefRule>("restrict");
+	const [onUpdate, setOnUpdate] = useState<RefRule>("restrict");
+	return (
+		<ChangeFrame
+			icon={<IconLink {...ICON} />}
+			title="Ajouter une relation"
 			table={gesture.table}
+			column={gesture.column}
+			reference={`${gesture.targetTable}.${gesture.targetColumn}`}
+			source={addRefSnql({ ...gesture, onDelete, onUpdate })}
 			onClose={onClose}
-		/>
-	) : (
-		<ColumnPanel key={keyOf(gesture)} gesture={gesture} onClose={onClose} />
+		>
+			{(locked) => (
+				<>
+					<NativeSelect
+						size="xs"
+						label="À la suppression"
+						value={onDelete}
+						onChange={(e) => setOnDelete(e.currentTarget.value as RefRule)}
+						disabled={locked}
+						data={[...REF_RULES]}
+					/>
+					<NativeSelect
+						size="xs"
+						label="À la mise à jour"
+						value={onUpdate}
+						onChange={(e) => setOnUpdate(e.currentTarget.value as RefRule)}
+						disabled={locked}
+						data={[...REF_RULES]}
+					/>
+				</>
+			)}
+		</ChangeFrame>
 	);
 }
 
@@ -416,6 +491,7 @@ function ChangeFrame({
 	title,
 	table,
 	column,
+	reference,
 	source,
 	onClose,
 	children
@@ -424,6 +500,8 @@ function ChangeFrame({
 	readonly title: string;
 	readonly table: string;
 	readonly column?: string;
+	/** `table.colonne` référencée, pour une relation. */
+	readonly reference?: string;
 	readonly source: string | undefined;
 	readonly onClose: () => void;
 	/** Formulaire du geste, figé une fois le changement appliqué. */
@@ -447,16 +525,38 @@ function ChangeFrame({
 		[source, schema, editMode]
 	);
 	const preview = sent ?? live;
+	const done = outcome?.ok === true;
+
+	// Noms que la base ne donne pas (ADR-039 D3) : le CLI les propose d'après
+	// le modèle du projet, la saisie les remplace.
+	const [named, setNamed] = useState<TunnelSchemaChangeNames>({});
+	const [settled] = useDebouncedValue(source, 300);
+	const proposed = useQuery({
+		queryKey: ["schema-change-names", teamSlug, connectionId, settled],
+		queryFn: () =>
+			fetchChangeNames({ teamSlug, connectionId, source: settled ?? "" }),
+		enabled:
+			editMode.kind === "migrations" &&
+			settled !== undefined &&
+			settled === source &&
+			live?.error === undefined &&
+			!done,
+		retry: false,
+		staleTime: Number.POSITIVE_INFINITY,
+		gcTime: 0
+	});
 
 	const apply = async () => {
 		if (source === undefined || preview === undefined) return;
 		if (editMode.kind !== "direct" && editMode.kind !== "migrations") return;
 		setRunning(true);
+		const names = typedNames(named);
 		const result = await applyChange({
 			teamSlug,
 			connectionId,
 			mode: editMode.kind,
-			source
+			source,
+			...(names !== undefined ? { names } : {})
 		});
 		setRunning(false);
 		setOutcome(result);
@@ -471,7 +571,6 @@ function ChangeFrame({
 		}
 	};
 
-	const done = outcome?.ok === true;
 	const ready =
 		canApply(editMode) &&
 		preview !== undefined &&
@@ -534,12 +633,32 @@ function ChangeFrame({
 							</Text>
 						</Row>
 					) : null}
+					{reference !== undefined ? (
+						<Row label="Référence">
+							<Text size="xs" ff="monospace" style={BREAK_ANYWHERE}>
+								{reference}
+							</Text>
+						</Row>
+					) : null}
 					<Row label="Mode">
 						<ModeLabel mode={editMode} />
 					</Row>
 					{canApply(editMode) ? (
 						<>
 							{children?.(done)}
+							{proposed.data !== null && proposed.data !== undefined ? (
+								<NamesFields
+									proposed={proposed.data}
+									named={named}
+									onChange={setNamed}
+									disabled={done}
+								/>
+							) : null}
+							{proposed.error !== null ? (
+								<Text size="xs" c="red">
+									{proposed.error.message}
+								</Text>
+							) : null}
 							{preview !== undefined ? (
 								<>
 									<Block label="SNQL">{source}</Block>
@@ -574,6 +693,80 @@ function ChangeFrame({
 				</Stack>
 			</ScrollArea>
 		</CanvasSidePanel>
+	);
+}
+
+/**
+ * Noms du modèle de l'ORM : la proposition du CLI en indication, un champ
+ * laissé vide la garde.
+ */
+function NamesFields({
+	proposed,
+	named,
+	onChange,
+	disabled
+}: {
+	readonly proposed: TunnelSchemaChangeNames;
+	readonly named: TunnelSchemaChangeNames;
+	readonly onChange: (names: TunnelSchemaChangeNames) => void;
+	readonly disabled: boolean;
+}) {
+	const relations = Object.entries(proposed.relations ?? {});
+	const setRelation = (
+		key: string,
+		part: "field" | "back" | "name",
+		value: string
+	) =>
+		onChange({
+			...named,
+			relations: {
+				...named.relations,
+				[key]: { ...named.relations?.[key], [part]: value }
+			}
+		});
+	return (
+		<>
+			{proposed.model !== undefined ? (
+				<TextInput
+					size="xs"
+					label="Modèle"
+					value={named.model ?? ""}
+					placeholder={proposed.model}
+					onChange={(e) => onChange({ ...named, model: e.currentTarget.value })}
+					autoComplete="off"
+					disabled={disabled}
+				/>
+			) : null}
+			{relations.map(([key, relation]) => (
+				<Stack key={key} gap="sm">
+					{relations.length > 1 ? (
+						<Text size="xs" c="dimmed" ff="monospace" style={BREAK_ANYWHERE}>
+							{key}
+						</Text>
+					) : null}
+					{(
+						[
+							["field", "Champ de relation"],
+							["back", "Champ retour"],
+							["name", "Nom de relation"]
+						] as const
+					).map(([part, label]) =>
+						relation[part] !== undefined ? (
+							<TextInput
+								key={part}
+								size="xs"
+								label={label}
+								value={named.relations?.[key]?.[part] ?? ""}
+								placeholder={relation[part]}
+								onChange={(e) => setRelation(key, part, e.currentTarget.value)}
+								autoComplete="off"
+								disabled={disabled}
+							/>
+						) : null
+					)}
+				</Stack>
+			))}
+		</>
 	);
 }
 

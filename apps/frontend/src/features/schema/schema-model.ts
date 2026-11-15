@@ -51,10 +51,26 @@ export interface Relation {
 	readonly confidence: number;
 }
 
+/** FK déclarée : son nom de contrainte, que `drop ref` adresse. */
+export interface RefDef {
+	readonly name: string;
+	readonly fromCollection: string;
+	readonly fromColumn: string;
+	readonly toCollection: string;
+	readonly toColumn: string;
+	readonly onDelete: RefRule;
+	readonly onUpdate: RefRule;
+	readonly source: SchemaSource;
+	readonly emulated?: boolean;
+}
+
+export type RefRule = "restrict" | "cascade" | "set-null";
+
 export interface SchemaModel {
 	readonly engine: string;
 	readonly collections: readonly Collection[];
 	readonly relations: readonly Relation[];
+	readonly refs?: readonly RefDef[];
 }
 
 // --- Exemples : le même schéma logique vu par les DEUX moteurs ---

@@ -4,7 +4,7 @@ import type { CanvasTool } from "../CanvasToolbar";
 import type { ChangeGesture } from "../editor/changeSnql";
 import type { EditMode } from "../editor/editMode";
 import type { Frame } from "../frames";
-import type { SchemaModel } from "../schema-model";
+import type { Relation, SchemaModel } from "../schema-model";
 import type { FramesApi } from "../useFrames";
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -70,13 +70,18 @@ export interface ResizableDrawerHandleProps {
 	readonly onPointerCancel: (e: React.PointerEvent<HTMLDivElement>) => void;
 }
 
-export interface CanvasContextMenuState {
+/** Menu contextuel ouvert : celui d'une table (ou d'un de ses champs), ou celui d'une arête. */
+export type CanvasContextMenuState = {
 	readonly x: number;
 	readonly y: number;
-	readonly tableName: string;
-	/** Champ sous le pointeur : le menu ouvre sur les gestes de la colonne. */
-	readonly field?: string;
-}
+} & (
+	| {
+			readonly tableName: string;
+			/** Champ sous le pointeur : le menu ouvre sur les gestes de la colonne. */
+			readonly field?: string;
+	  }
+	| { readonly relation: Relation }
+);
 
 export interface CanvasUIContextValue {
 	readonly search: string;

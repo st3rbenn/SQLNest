@@ -1,8 +1,7 @@
 import { useHotkeys } from "@mantine/hooks";
 import {
 	Background,
-	type Edge,
-	MarkerType,
+	type Connection,
 	NestCanvas,
 	NestCanvasProvider,
 	Panel,
@@ -27,6 +26,7 @@ import { CanvasLeftPanel } from "./canvas/floating/CanvasLeftPanel";
 import { CanvasOverlays } from "./canvas/floating/CanvasOverlays";
 import { CanvasTopRightHUD } from "./canvas/floating/CanvasTopRightHUD";
 import { canReparentNode, withFrameParents } from "./canvas/frameTree";
+import { makeEdge } from "./canvas/relationEdge";
 import { createTableDecorator } from "./canvas/tableDecorator";
 import type { ChangeGesture } from "./editor/changeSnql";
 import { editModeOf } from "./editor/editMode";
@@ -54,7 +54,7 @@ import { FrameNode, type FrameNodeType } from "./FrameNode";
 import { InteractiveEdge } from "./InteractiveEdge";
 import { buildLayout, type LayoutResult } from "./layout";
 import { ConsoleNode, type ConsoleNodeType } from "./nodes/ConsoleNode";
-import type { SchemaModel } from "./schema-model";
+import type { Relation, SchemaModel } from "./schema-model";
 import {
 	SystemSchemaEventsNode,
 	SYSTEM_TABLE_ID,
@@ -68,6 +68,7 @@ import {
 } from "../enums/SystemEnumsNode";
 import { useEnumsNode } from "../enums/useEnumsNode";
 import {
+	fieldOfHandle,
 	NODE_WIDTH,
 	nodeHeight,
 	TableNode,
@@ -78,11 +79,6 @@ import { useFrames } from "./useFrames";
 import { useTablePositions } from "./useTablePositions";
 import { useTableSizes } from "./useTableSizes";
 
-// Couleurs des edges — accent bleu pour les FK déclarées, jaune warning
-// pour les FK inférées (jamais confirmées par la DB). Toutes deux
-// choisies pour rester lisibles sur `#1E1E1E`.
-const DECLARED = "#0d99ff";
-const INFERRED = "#ffc933";
 const nodeTypes = {
 	table: TableNode,
 	frame: FrameNode,
@@ -141,27 +137,6 @@ function fieldAt(event: {
 }): string | undefined {
 	const row = (event.target as Element | null)?.closest?.("[data-field]");
 	return row?.getAttribute("data-field") ?? undefined;
-}
-
-function makeEdge(rel: SchemaModel["relations"][number], i: number): Edge {
-	const inferred = rel.origin !== "foreign-key";
-	return {
-		id: `e${i}-${rel.from.collection}-${rel.to.collection}`,
-		source: rel.from.collection,
-		target: rel.to.collection,
-		// Custom edge type — dessine le path + expose des poignées drag aux
-		// endpoints (voir `InteractiveEdge`).
-		type: "fk",
-		markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14 },
-		style: {
-			stroke: inferred ? INFERRED : DECLARED,
-			strokeWidth: 1.5,
-			strokeDasharray: inferred ? "5 4" : undefined
-		},
-		// `relation` intégral pour que le tooltip du hover puisse formater
-		// les colonnes reliées, la kind/origine et le preview SQL du join.
-		data: { inferred, relation: rel }
-	};
 }
 
 interface CanvasInnerProps {
@@ -438,12 +413,19 @@ function CanvasInner({
 	// Edges + neighbors dérivés — pipeline routing/offset dans un hook
 	// dédié (voir `useCanvasEdges` : override user > auto bestHandles,
 	// spread offsets pour edges partageant un handle, style focus/dim).
+	const openRelationMenu = useCallback(
+		(at: { x: number; y: number }, relation: Relation) =>
+			setMenu({ ...at, relation }),
+		[]
+	);
 	const { displayEdges, neighbors } = useCanvasEdges({
 		base,
+		schema,
 		nodes,
 		hiddenIds,
 		focusId,
-		edgeAnchors
+		edgeAnchors,
+		onMenu: openRelationMenu
 	});
 
 	// Nom de la table survolée dans le SchemaTree (side panel). Décide de
@@ -478,6 +460,23 @@ function CanvasInner({
 	useEffect(() => {
 		if (inferencePanelOpen) setGestureState(null);
 	}, [inferencePanelOpen]);
+	// Tracé relâché sur un champ : la FK part du champ de départ.
+	const traceRelation = useCallback(
+		(c: Connection) => {
+			const column = fieldOfHandle(c.sourceHandle);
+			const targetColumn = fieldOfHandle(c.targetHandle);
+			if (column === undefined || targetColumn === undefined) return;
+			if (c.source === c.target && column === targetColumn) return;
+			setGesture({
+				kind: "add-ref",
+				table: c.source,
+				column,
+				targetTable: c.target,
+				targetColumn
+			});
+		},
+		[setGesture]
+	);
 
 	// Nœuds table affichés : positions vivantes (drag) + drapeaux focus + masqués.
 	// Injecte aussi le callback `onResizeEnd` — TableNode s'en sert pour le
@@ -1211,6 +1210,7 @@ function CanvasInner({
 						sys.updatePosition(node.position);
 					}
 				}}
+				onConnect={traceRelation}
 				onNodesDelete={(deleted) => {
 					// Le moteur fire ce callback quand le user press Backspace/Delete
 					// sur un node sélectionné. On clean uniquement les geoms +

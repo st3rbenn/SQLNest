@@ -32,6 +32,8 @@ export interface InteractiveEdgeData {
 	/** Relation FK complète pour formatter le tooltip au hover (colonnes
 	 * reliées, kind/origine, preview SQL du join). */
 	readonly relation?: Relation;
+	/** Clic droit sur l'arête : menu de la relation. */
+	readonly onMenu?: (at: { x: number; y: number }, relation: Relation) => void;
 	readonly [key: string]: unknown;
 }
 
@@ -315,6 +317,12 @@ export function InteractiveEdge(props: EdgeProps) {
 				strokeWidth={20}
 				onMouseEnter={show}
 				onMouseLeave={hide}
+				onContextMenu={(e) => {
+					if (relation === undefined || api?.onMenu === undefined) return;
+					e.preventDefault();
+					e.stopPropagation();
+					api.onMenu({ x: e.clientX, y: e.clientY }, relation);
+				}}
 			/>
 			{showTooltip && relation !== undefined ? (
 				<EdgeTooltip

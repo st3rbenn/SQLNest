@@ -1,9 +1,12 @@
 import type { SchemaModel as SnqlSchemaModel } from "@sqlnest/snql";
 import { describe, expect, it } from "vitest";
 import type { SchemaModel } from "../schema-model";
+import { typedNames } from "./applyChange";
 import { previewChange } from "./changePreview";
 import {
 	addColumnSnql,
+	addRefSnql,
+	dropRefSnql,
 	dropColumnSnql,
 	dropDefaultSnql,
 	renameColumnSnql,
@@ -138,6 +141,94 @@ describe("gestes de colonne (ADR-039 D2)", () => {
 		expect(dropColumnSnql("agency", "label")).toBe(
 			"drop column label from agency"
 		);
+	});
+});
+
+describe("gestes de relation (ADR-039 D2)", () => {
+	const ref = {
+		table: "pet",
+		column: "owner_id",
+		targetTable: "owner",
+		targetColumn: "id"
+	};
+
+	it("relier : la règle par défaut ne s'écrit pas ; supprimer : par le nom de la contrainte", () => {
+		expect(
+			addRefSnql({ ...ref, onDelete: "restrict", onUpdate: "restrict" })
+		).toBe("add ref (owner_id) references owner.id into pet");
+		expect(
+			addRefSnql({ ...ref, onDelete: "set null", onUpdate: "cascade" })
+		).toBe(
+			"add ref (owner_id) references owner.id on delete set null on update cascade into pet"
+		);
+		expect(dropRefSnql("pet", "pet_owner_id_fkey")).toBe(
+			"drop ref pet_owner_id_fkey from pet"
+		);
+	});
+
+	it("aperçu : FK au nom du profil ; suppression : nom de la contrainte à retaper", () => {
+		const pets = {
+			engine: "postgres",
+			collections: [
+				collection("owner"),
+				{
+					...collection("pet"),
+					fields: [
+						...collection("pet").fields,
+						{
+							name: "owner_id",
+							type: "int",
+							nullable: false,
+							source: "declared"
+						}
+					]
+				}
+			],
+			relations: [],
+			refs: [
+				{
+					name: "pet_owner_id_fkey",
+					fromCollection: "pet",
+					fromColumn: "owner_id",
+					toCollection: "owner",
+					toColumn: "id",
+					onDelete: "restrict",
+					onUpdate: "restrict",
+					source: "declared"
+				}
+			]
+		} as unknown as SnqlSchemaModel;
+		const added = previewChange(
+			addRefSnql({ ...ref, onDelete: "cascade", onUpdate: "restrict" }),
+			{ ...pets, refs: [] },
+			{ kind: "migrations", orm: "prisma", apply: true }
+		);
+		expect(added.error).toBeUndefined();
+		expect(added.statements.join("\n")).toContain(
+			'CONSTRAINT "pet_owner_id_fkey" FOREIGN KEY ("owner_id") REFERENCES "owner" ("id") ON DELETE CASCADE'
+		);
+		const dropped = previewChange(
+			dropRefSnql("pet", "pet_owner_id_fkey"),
+			pets,
+			{ kind: "direct" }
+		);
+		expect(dropped.confirm).toBe("DROP pet_owner_id_fkey");
+		expect(dropped.warnings).toEqual([
+			"Le code qui suit la relation 'pet_owner_id_fkey' échouera ; plus rien ne contrôlera les valeurs de sa colonne."
+		]);
+	});
+
+	it("noms saisis : seuls les champs remplis partent, la proposition du CLI garde les autres", () => {
+		expect(typedNames({})).toBeUndefined();
+		expect(
+			typedNames({
+				model: " ",
+				relations: { "pet.owner_id": { field: "", back: " pets " } }
+			})
+		).toEqual({ relations: { "pet.owner_id": { back: "pets" } } });
+		expect(
+			typedNames({ relations: { "pet.owner_id": { field: "", back: "" } } })
+		).toBeUndefined();
 	});
 });
 

@@ -76,6 +76,55 @@ export async function applyChange(
 	}
 }
 
+/**
+ * Noms que le changement prendrait dans le modèle du projet relié (ADR-039
+ * D3) : champ de relation, champ retour, modèle. Rien n'est écrit.
+ */
+export async function fetchChangeNames(input: {
+	readonly teamSlug: string;
+	readonly connectionId: string;
+	readonly source: string;
+}): Promise<TunnelSchemaChangeNames | null> {
+	const url = `${API_BASE}/api/teams/${encodeURIComponent(input.teamSlug)}/db-connections/${encodeURIComponent(input.connectionId)}/schema-change/preview`;
+	const res = await fetch(url, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		credentials: "include",
+		body: JSON.stringify({ source: input.source })
+	});
+	const data = (await res.json().catch(() => ({}))) as {
+		names?: TunnelSchemaChangeNames;
+		message?: string;
+	};
+	if (!res.ok) {
+		throw new Error(data.message ?? `Aperçu refusé (HTTP ${res.status})`);
+	}
+	return data.names ?? null;
+}
+
+/** Les noms saisis, sans les champs laissés vides ; `undefined` : aucun. */
+export function typedNames(
+	names: TunnelSchemaChangeNames
+): TunnelSchemaChangeNames | undefined {
+	const filled = (value: string | undefined): value is string =>
+		value !== undefined && value.trim() !== "";
+	const relations = Object.fromEntries(
+		Object.entries(names.relations ?? {}).flatMap(([key, r]) => {
+			const kept = {
+				...(filled(r.field) ? { field: r.field.trim() } : {}),
+				...(filled(r.back) ? { back: r.back.trim() } : {}),
+				...(filled(r.name) ? { name: r.name.trim() } : {})
+			};
+			return Object.keys(kept).length > 0 ? [[key, kept]] : [];
+		})
+	);
+	const out = {
+		...(filled(names.model) ? { model: names.model.trim() } : {}),
+		...(Object.keys(relations).length > 0 ? { relations } : {})
+	};
+	return Object.keys(out).length > 0 ? out : undefined;
+}
+
 function messageOf(err: unknown): string {
 	return err instanceof Error ? err.message : String(err);
 }
