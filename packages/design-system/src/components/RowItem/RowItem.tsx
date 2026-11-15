@@ -20,6 +20,8 @@ export interface RowItemProps {
 	readonly monospace?: boolean;
 	/** Override du padding gauche (utilisé pour l'indentation dans l'arbre). */
 	readonly paddingLeft?: number;
+	/** Entrée et sortie du pointeur sur la ligne. */
+	readonly onHoverChange?: ((hovered: boolean) => void) | undefined;
 }
 
 interface SizeSpec {
@@ -50,6 +52,7 @@ export function RowItem({
 	size = "md",
 	monospace = false,
 	paddingLeft,
+	onHoverChange,
 }: RowItemProps) {
 	const [hover, setHover] = useState(false);
 	const spec = SIZES[size];
@@ -97,8 +100,14 @@ export function RowItem({
 		<UnstyledButton
 			onClick={onClick}
 			title={title}
-			onMouseEnter={() => setHover(true)}
-			onMouseLeave={() => setHover(false)}
+			onMouseEnter={() => {
+				setHover(true);
+				onHoverChange?.(true);
+			}}
+			onMouseLeave={() => {
+				setHover(false);
+				onHoverChange?.(false);
+			}}
 			style={buttonStyle}
 		>
 			{color !== undefined ? <ColorDot color={color} size="sm" /> : null}

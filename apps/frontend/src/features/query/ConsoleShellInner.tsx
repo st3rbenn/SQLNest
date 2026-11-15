@@ -79,6 +79,7 @@ const SPLIT_STORAGE_KEY = "sqlnest.console.editorHeight";
 const SPLIT_MIN_TOP = 120;
 const SPLIT_MIN_BOTTOM = 200;
 const SPLIT_DEFAULT = 220;
+const SPLIT_KEY_STEP = 16;
 
 const shellStyle: CSSProperties = {
 	display: "flex",
@@ -193,6 +194,28 @@ export function ConsoleShellInner({
 	function startDrag(e: React.PointerEvent<HTMLDivElement>): void {
 		e.preventDefault();
 		setIsDragging(true);
+	}
+
+	/** Hauteur d'éditeur la plus grande qui laisse sa place aux résultats. */
+	function maxEditorHeight(): number {
+		const bodyHeight = bodyRef.current?.clientHeight;
+		return bodyHeight === undefined
+			? editorHeight
+			: Math.max(SPLIT_MIN_TOP, bodyHeight - SPLIT_MIN_BOTTOM);
+	}
+
+	// Flèches : un pas ; Maj : un grand pas ; Début / Fin : les bornes.
+	function resizeWithKeyboard(e: React.KeyboardEvent<HTMLDivElement>): void {
+		const step = e.shiftKey ? SPLIT_KEY_STEP * 4 : SPLIT_KEY_STEP;
+		const max = maxEditorHeight();
+		let next: number;
+		if (e.key === "ArrowUp") next = editorHeight - step;
+		else if (e.key === "ArrowDown") next = editorHeight + step;
+		else if (e.key === "Home") next = SPLIT_MIN_TOP;
+		else if (e.key === "End") next = max;
+		else return;
+		e.preventDefault();
+		setEditorHeight(Math.max(SPLIT_MIN_TOP, Math.min(max, next)));
 	}
 
 	useEffect(() => {
@@ -709,6 +732,7 @@ export function ConsoleShellInner({
 				) : null}
 				{hasRun ? (
 					<>
+						{/* biome-ignore lint/a11y/useSemanticElements: séparateur déplaçable, pas une règle horizontale */}
 						<div
 							style={{
 								...resizeHandleStyle,
@@ -717,9 +741,15 @@ export function ConsoleShellInner({
 									: "var(--sqlnest-border)"
 							}}
 							onPointerDown={startDrag}
+							onKeyDown={resizeWithKeyboard}
 							role="separator"
+							tabIndex={0}
+							className="mantine-focus-auto"
 							aria-orientation="horizontal"
 							aria-label="Redimensionner l'éditeur"
+							aria-valuenow={Math.round(editorHeight)}
+							aria-valuemin={SPLIT_MIN_TOP}
+							aria-valuemax={Math.round(maxEditorHeight())}
 						/>
 						<ConsoleResultsPanel
 							result={queryState.data}

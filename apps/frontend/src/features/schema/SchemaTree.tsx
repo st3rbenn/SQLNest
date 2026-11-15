@@ -226,17 +226,14 @@ export function SchemaTree({
 						</UnstyledButton>
 						{showChildren
 							? g.tables.map((t) => (
-									<div
-										key={t}
-										onMouseEnter={
-											onHoverTable ? () => onHoverTable(t) : undefined
-										}
-										onMouseLeave={
-											onHoverTable ? () => onHoverTable(null) : undefined
-										}
-									>
+									<div key={t}>
 										<RowItem
 											label={t}
+											onHoverChange={
+												onHoverTable
+													? (hovered) => onHoverTable(hovered ? t : null)
+													: undefined
+											}
 											color={colorFor(t).border}
 											active={t === focusId}
 											onClick={() => onSelect(t)}
