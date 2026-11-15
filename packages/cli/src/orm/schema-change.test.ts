@@ -14,7 +14,7 @@ import {
 	type SchemaChange,
 	SchemaChangeError
 } from "./adapter";
-import { applySchemaChange } from "./schema-change";
+import { applySchemaChange, previewSchemaChange } from "./schema-change";
 
 const field = (name: string, type: Field["type"]): Field => ({
 	name,
@@ -75,6 +75,10 @@ function adapter(overrides: Partial<OrmAdapter> = {}): OrmAdapter {
 				files: ["prisma/schema.prisma"],
 				undo: () => calls.push("undo model")
 			};
+		},
+		previewNames: () => {
+			calls.push("previewNames");
+			return { relations: { "agency.owner_id": { field: "owner" } } };
 		},
 		validate: step("validate"),
 		apply: step("apply"),
@@ -142,6 +146,34 @@ const run = (
 const fail = (message: string) => () => {
 	throw new SchemaChangeError(message);
 };
+
+describe("previewSchemaChange (ADR-039 D3)", () => {
+	beforeEach(() => {
+		calls = [];
+		changes = [];
+	});
+
+	it("les noms que le modèle prendrait : rien n'est écrit, la base n'est que lue", async () => {
+		const conn = connection(BEFORE);
+		expect(
+			await previewSchemaChange(
+				{
+					project: PROJECT,
+					src: SRC,
+					databaseUrl: "postgres://u@localhost/app",
+					connection: conn,
+					env: {}
+				},
+				{ prisma: adapter() }
+			)
+		).toEqual({
+			orm: "prisma",
+			names: { relations: { "agency.owner_id": { field: "owner" } } }
+		});
+		expect(calls).toEqual(["previewNames"]);
+		expect(conn.execute).not.toHaveBeenCalled();
+	});
+});
 
 describe("applySchemaChange (ADR-037 D3, D4, D5)", () => {
 	beforeEach(() => {

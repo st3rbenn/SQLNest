@@ -65,6 +65,8 @@ export interface OrmAdapter {
 	preflight(change: SchemaChange): Promise<void>;
 	writeMigration(change: SchemaChange): Promise<WrittenMigration>;
 	patchModel(change: SchemaChange): Promise<PatchedModel>;
+	/** Noms que `patchModel` retiendrait, sans rien écrire (aperçu, ADR-039 D3). */
+	previewNames(change: SchemaChange): TunnelSchemaChangeNames | undefined;
 	/** Mise en forme et validation du modèle par l'outil de l'ORM, avant la base. */
 	validate(change: SchemaChange): Promise<void>;
 	apply(change: SchemaChange, migration: WrittenMigration): Promise<void>;

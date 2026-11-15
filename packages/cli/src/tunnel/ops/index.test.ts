@@ -1,4 +1,10 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Connection } from "@sqlnest/engine";
@@ -255,5 +261,111 @@ describe("applySchemaChange (ADR-037 D3)", () => {
 		).rejects.toThrow("Le projet relié n'est plus un projet Prisma");
 		expect(t.schema.get()).toBeUndefined();
 		expect(conn.close).toHaveBeenCalledOnce();
+	});
+});
+
+describe("previewSchemaChange (ADR-039 D3)", () => {
+	let dir: string;
+	beforeEach(() => {
+		dir = mkdtempSync(join(tmpdir(), "sqlnest-schema-preview-"));
+		process.env.SQLNEST_CONFIG_DIR = join(dir, "config");
+	});
+	afterEach(() => {
+		delete process.env.SQLNEST_CONFIG_DIR;
+		rmSync(dir, { recursive: true, force: true });
+	});
+
+	const field = (name: string) => ({
+		name,
+		type: "int" as const,
+		nullable: false,
+		source: "declared" as const
+	});
+	const PETS: SchemaModel = {
+		engine: "postgres",
+		collections: [
+			{
+				name: "owner",
+				source: "declared",
+				primaryKey: ["id"],
+				fields: [field("id")]
+			},
+			{
+				name: "pet",
+				source: "declared",
+				primaryKey: ["id"],
+				fields: [field("id"), field("owner_id")]
+			}
+		],
+		relations: []
+	};
+	const MODEL = `datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model owner {
+  id Int @id
+}
+
+model pet {
+  id       Int @id
+  owner_id Int
+}
+`;
+
+	it("relation tracée : champ, champ retour proposés ; le modèle n'est pas touché", async () => {
+		const project = join(dir, "app");
+		mkdirSync(join(project, "prisma"), { recursive: true });
+		mkdirSync(join(project, "node_modules", ".bin"), { recursive: true });
+		writeFileSync(join(project, "node_modules", ".bin", "prisma"), "");
+		writeFileSync(join(project, "prisma", "schema.prisma"), MODEL);
+		saveLocalConnections({
+			version: 2,
+			connections: [
+				{
+					name: "apollon",
+					url: "postgres://u@h/db",
+					project: { path: project, orm: "prisma", apply: true }
+				}
+			]
+		});
+		const t = target(fakeConnection({ introspect: vi.fn(async () => PETS) }));
+		expect(
+			await dispatchOp(
+				{
+					op: "previewSchemaChange",
+					src: "add ref (owner_id) references owner.id into pet"
+				},
+				t
+			)
+		).toEqual({
+			ok: true,
+			data: {
+				orm: "prisma",
+				names: {
+					relations: { "pet.owner_id": { field: "owner", back: "pet" } }
+				}
+			}
+		});
+		expect(
+			await dispatchOp(
+				{
+					op: "previewSchemaChange",
+					src: "add ref (owner_id) references owner.id into pet",
+					names: { relations: { "pet.owner_id": { back: "pets" } } }
+				},
+				t
+			)
+		).toMatchObject({
+			data: {
+				names: {
+					relations: { "pet.owner_id": { field: "owner", back: "pets" } }
+				}
+			}
+		});
+		expect(readFileSync(join(project, "prisma", "schema.prisma"), "utf8")).toBe(
+			MODEL
+		);
 	});
 });

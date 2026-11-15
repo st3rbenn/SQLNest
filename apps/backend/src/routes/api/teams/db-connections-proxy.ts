@@ -22,7 +22,8 @@ import {
 	ProxyQueryBody,
 	ProxyQueryResponse,
 	SchemaChangeBody,
-	SchemaChangeResponse
+	SchemaChangeResponse,
+	SchemaPreviewResponse
 } from "../../../domains/db-connections/proxy-schema";
 import {
 	assertTeamAccess,
@@ -269,6 +270,53 @@ export default function teamsDbConnectionsProxyRoute(fastify: FastifyInstance) {
 					},
 					{ timeoutMs: SCHEMA_CHANGE_TIMEOUT_MS }
 				);
+			} catch (err) {
+				if (err instanceof TunnelCliError && err.pgError === undefined) {
+					return reply.code(422).send({ message: err.cliMessage });
+				}
+				return mapErrorToReply(err, reply, request);
+			}
+		}
+	);
+
+	// ─── POST /:slug/db-connections/:id/schema-change/preview ────────
+	// Aperçu d'un changement dans le projet relié (ADR-039 D3) : les noms
+	// que le modèle prendrait (champ de relation, champ retour, modèle).
+	// Rien n'est écrit, ni fichier ni base.
+	instance.post(
+		"/:slug/db-connections/:id/schema-change/preview",
+		{
+			preHandler: [requireTeamAccess],
+			schema: {
+				params: SlugAndConnectionParams,
+				body: SchemaChangeBody,
+				response: {
+					200: SchemaPreviewResponse,
+					404: ProxyErrorResponse,
+					422: ProxyErrorResponse,
+					500: ProxyErrorResponse,
+					502: ProxyErrorResponse,
+					503: ProxyErrorResponse,
+					504: ProxyErrorResponse
+				}
+			}
+		},
+		async (request, reply) => {
+			assertTeamAccess(request);
+			try {
+				const params = request.params as SlugAndConnectionParamsT;
+				const { tunnelId } = await resolveActiveTunnelInTeam(
+					fastify,
+					request.user.id,
+					request.team.id,
+					params.id
+				);
+				const { source, names } = request.body;
+				return await fastify.backendProxy.sendReq(tunnelId, {
+					op: "previewSchemaChange",
+					src: source,
+					...(names !== undefined ? { names } : {})
+				});
 			} catch (err) {
 				if (err instanceof TunnelCliError && err.pgError === undefined) {
 					return reply.code(422).send({ message: err.cliMessage });

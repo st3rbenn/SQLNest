@@ -60,7 +60,8 @@ export type {
 	TunnelSchemaChangeData,
 	TunnelSchemaChangeNames,
 	TunnelSchemaCheck,
-	TunnelSchemaDifference
+	TunnelSchemaDifference,
+	TunnelSchemaPreviewData
 } from "./ops";
 export {
 	ORM_HISTORY_TABLES,

@@ -24,7 +24,8 @@ import {
 import type {
 	TunnelSchemaChangeData,
 	TunnelSchemaChangeNames,
-	TunnelSchemaCheck
+	TunnelSchemaCheck,
+	TunnelSchemaPreviewData
 } from "@sqlnest/tunnel-protocol";
 import type { LocalConnectionProject } from "../services/local-connections";
 import {
@@ -51,10 +52,11 @@ export interface SchemaChangeInput {
 	readonly env: NodeJS.ProcessEnv;
 }
 
-export async function applySchemaChange(
+/** Le changement compilé avec le profil de l'ORM, sur une introspection fraîche. */
+async function prepare(
 	input: SchemaChangeInput,
-	adapters: Partial<Record<OrmName, OrmAdapter>> = ADAPTERS
-): Promise<TunnelSchemaChangeData> {
+	adapters: Partial<Record<OrmName, OrmAdapter>>
+): Promise<{ readonly adapter: OrmAdapter; readonly change: SchemaChange }> {
 	const { project, connection } = input;
 	const adapter = adapters[project.orm];
 	if (adapter === undefined) {
@@ -83,14 +85,44 @@ export async function applySchemaChange(
 			`Pas de DDL ${connection.engine} pour ce changement`
 		);
 	}
-	const history = adapter.migrations(connection.engine);
-	const change: SchemaChange = {
-		...input,
-		plan,
-		native,
-		...(history ? { sql: migrationSql(native, input.src) } : {}),
-		before
+	return {
+		adapter,
+		change: {
+			...input,
+			plan,
+			native,
+			...(adapter.migrations(connection.engine)
+				? { sql: migrationSql(native, input.src) }
+				: {}),
+			before
+		}
 	};
+}
+
+/**
+ * Aperçu (ADR-039 D3) : les noms que le changement donnerait dans le modèle
+ * du projet. Rien n'est écrit, la base n'est que lue.
+ */
+export async function previewSchemaChange(
+	input: SchemaChangeInput,
+	adapters: Partial<Record<OrmName, OrmAdapter>> = ADAPTERS
+): Promise<TunnelSchemaPreviewData> {
+	const { adapter, change } = await prepare(input, adapters);
+	const names = adapter.previewNames(change);
+	return {
+		orm: input.project.orm,
+		...(names !== undefined ? { names } : {})
+	};
+}
+
+export async function applySchemaChange(
+	input: SchemaChangeInput,
+	adapters: Partial<Record<OrmName, OrmAdapter>> = ADAPTERS
+): Promise<TunnelSchemaChangeData> {
+	const { project, connection } = input;
+	const { adapter, change } = await prepare(input, adapters);
+	const { native } = change;
+	const history = adapter.migrations(connection.engine);
 	await adapter.preflight(change);
 
 	const written: Written[] = [];

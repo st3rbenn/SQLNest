@@ -176,3 +176,15 @@ export const SchemaChangeResponse = z.object({
 z.globalRegistry.add(SchemaChangeResponse, {
 	id: "DbConnectionsSchemaChangeResponse"
 });
+
+/**
+ * Réponse de POST …/schema-change/preview (ADR-039 D3) : les noms que le
+ * changement donnerait dans le modèle du projet. Rien n'est écrit.
+ */
+export const SchemaPreviewResponse = z.object({
+	orm: z.enum(["prisma", "doctrine", "sequelize", "seaorm"]),
+	names: SchemaChangeNames.optional()
+});
+z.globalRegistry.add(SchemaPreviewResponse, {
+	id: "DbConnectionsSchemaPreviewResponse"
+});

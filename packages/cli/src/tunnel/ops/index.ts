@@ -10,6 +10,7 @@ import { applySchemaChangeOp } from "./apply-schema-change";
 import { introspectOp } from "./introspect";
 import type { OpDefinition, SchemaCache } from "./op";
 import { pingOp } from "./ping";
+import { previewSchemaChangeOp } from "./preview-schema-change";
 import { projectStatusOp } from "./project-status";
 import { runSnqlOp } from "./run-snql";
 
@@ -19,7 +20,8 @@ const OPS: { readonly [K in TunnelOpName]: OpDefinition<K> } = {
 	introspect: introspectOp,
 	runSnql: runSnqlOp,
 	projectStatus: projectStatusOp,
-	applySchemaChange: applySchemaChangeOp
+	applySchemaChange: applySchemaChangeOp,
+	previewSchemaChange: previewSchemaChangeOp
 };
 
 /** Cache de schéma d'une connexion, pour la durée du process CLI. */

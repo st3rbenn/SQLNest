@@ -114,6 +114,16 @@ export interface TunnelSchemaChangeData {
 }
 
 /**
+ * Aperçu d'un changement dans le projet relié (ADR-039 D3) : rien n'est
+ * écrit, ni fichier ni base.
+ */
+export interface TunnelSchemaPreviewData {
+	readonly orm: OrmName;
+	/** Noms que le changement retiendrait, fournis ou déduits. */
+	readonly names?: TunnelSchemaChangeNames;
+}
+
+/**
  * Table des ops : nom → requête (champs en plus de `op`) et données de la
  * réponse. `introspect` rend le `SchemaModel` de `@sqlnest/snql`, que ce
  * paquet n'importe pas.
@@ -135,6 +145,13 @@ export interface TunnelOpTable {
 			readonly names?: TunnelSchemaChangeNames;
 		};
 		readonly data: TunnelSchemaChangeData;
+	};
+	readonly previewSchemaChange: {
+		readonly req: {
+			readonly src: string;
+			readonly names?: TunnelSchemaChangeNames;
+		};
+		readonly data: TunnelSchemaPreviewData;
 	};
 }
 
