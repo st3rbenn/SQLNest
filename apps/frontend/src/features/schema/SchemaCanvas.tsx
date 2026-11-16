@@ -83,6 +83,9 @@ type SchemaNode =
  *  pose rien dessous. */
 const TOOLBAR_HEIGHT = 38;
 const TOOLBAR_GAP = 8;
+/** Marge basse du bouton « tout afficher » : il se pose au-dessus de la
+ *  barre d'outils (à 16 px du bas, haute de 52 px), pas dessous. */
+const ABOVE_TOOLBAR = 16 + 52 + 8;
 
 interface CanvasInnerProps {
 	schema: SchemaModel;
@@ -262,7 +265,10 @@ function CanvasInner({
 		teamSlug,
 		editMode,
 		setGesture,
-		openConsoleWithSource: consoles.openWithSource
+		openConsoleWithSource: consoles.openWithSource,
+		tableNodes: nodes,
+		frames: framesApi.frames,
+		ready: canvasReady
 	});
 
 	// ─── Nodes affichés ───────────────────────────────────────────────────
@@ -496,7 +502,10 @@ function CanvasInner({
 					<CanvasTopRightHUD />
 				</Panel>
 				{focusId ? (
-					<Panel position="bottom-center">
+					<Panel
+						position="bottom-center"
+						style={{ marginBottom: ABOVE_TOOLBAR }}
+					>
 						<ShowAllButton onClick={clearFocus} />
 					</Panel>
 				) : null}

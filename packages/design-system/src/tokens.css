@@ -194,3 +194,15 @@ html,
 body {
 	overscroll-behavior: none;
 }
+
+/* Bouton désactivé : il garde sa forme. Le défaut de Mantine lui donnait le
+ * fond d'une carte (`--sqlnest-surface`) sans bordure : posé sur une carte,
+ * il se lisait comme du texte nu. */
+.mantine-Button-root:where(
+		:disabled:not([data-loading]),
+		[data-disabled]:not([data-loading])
+	) {
+	background: var(--sqlnest-surface-hover);
+	border-color: var(--sqlnest-border);
+	color: var(--sqlnest-text-tertiary);
+}

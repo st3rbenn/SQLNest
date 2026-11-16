@@ -76,7 +76,7 @@ function TokenMissing() {
  * Page /reset-password?token=...
  *
  * Contrat :
- * - `search.token` peut être `null` — dans ce cas on rend `<TokenMissing />`.
+ * - `search.token` peut manquer — dans ce cas on rend `<TokenMissing />`.
  * - Form : nouveau mot de passe + confirmation.
  * - Succès : notification globale + `navigate({ to: '/login' })` — le nouveau
  *   mot de passe est actif, l'utilisateur doit se re-log (Better Auth ne
@@ -86,7 +86,7 @@ function TokenMissing() {
 export function ResetPasswordPage() {
 	const { token } = ResetRoute.useSearch();
 
-	if (token === null) {
+	if (token === undefined) {
 		return <TokenMissing />;
 	}
 

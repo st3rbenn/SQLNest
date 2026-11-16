@@ -32,6 +32,7 @@ export function useSchemaEventsNode(
 	>["onNodesChange"];
 	readonly updatePosition: (position: { x: number; y: number }) => void;
 	readonly updateGeom: (geom: SystemNodeGeom) => void;
+	readonly hasStoredGeom: () => boolean;
 } {
 	const geomApi = useSystemNodeGeom<SystemSchemaEventsNodeType>(
 		connectionId,
@@ -75,6 +76,7 @@ export function useSchemaEventsNode(
 		node,
 		onNodesChange: geomApi.onNodesChange,
 		updatePosition: geomApi.updatePosition,
-		updateGeom: geomApi.updateGeom
+		updateGeom: geomApi.updateGeom,
+		hasStoredGeom: geomApi.hasStoredGeom
 	};
 }

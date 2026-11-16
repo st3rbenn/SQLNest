@@ -55,6 +55,8 @@ export interface UseSystemNodeGeomApi<TNode extends Node> {
 	) => void;
 	readonly updatePosition: (position: { x: number; y: number }) => void;
 	readonly updateGeom: (geom: SystemNodeGeom) => void;
+	/** Une géométrie est-elle déjà gardée pour ce node sur cette connexion ? */
+	readonly hasStoredGeom: () => boolean;
 }
 
 /**
@@ -97,7 +99,7 @@ export function useSystemNodeGeom<TNode extends Node>(
 		}
 	}, [key, initial, setNodes]);
 
-	const nodeId = initial[0]!.id;
+	const nodeId = initial[0]?.id;
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: `defaults` est une constante de module côté feature
 	const updatePosition = useCallback(
@@ -125,10 +127,16 @@ export function useSystemNodeGeom<TNode extends Node>(
 		[key, nodeId, setNodes]
 	);
 
+	const hasStoredGeom = useCallback(
+		(): boolean => readJson(key) !== undefined,
+		[key]
+	);
+
 	return {
 		node: nodes[0] as TNode,
 		onNodesChange,
 		updatePosition,
-		updateGeom
+		updateGeom,
+		hasStoredGeom
 	};
 }

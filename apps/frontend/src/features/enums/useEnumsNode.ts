@@ -37,6 +37,7 @@ export function useEnumsNode(
 		typeof useSystemNodeGeom<SystemEnumsNodeType>
 	>["onNodesChange"];
 	readonly updatePosition: (position: { x: number; y: number }) => void;
+	readonly hasStoredGeom: () => boolean;
 } {
 	const geomApi = useSystemNodeGeom<SystemEnumsNodeType>(
 		connectionId,
@@ -78,6 +79,7 @@ export function useEnumsNode(
 	return {
 		node,
 		onNodesChange: geomApi.onNodesChange,
-		updatePosition: geomApi.updatePosition
+		updatePosition: geomApi.updatePosition,
+		hasStoredGeom: geomApi.hasStoredGeom
 	};
 }

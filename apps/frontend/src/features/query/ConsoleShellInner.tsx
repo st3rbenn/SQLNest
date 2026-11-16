@@ -196,21 +196,32 @@ export function ConsoleShellInner({
 		setIsDragging(true);
 	}
 
+	const [bodyHeight, setBodyHeight] = useState<number | undefined>(undefined);
+	useEffect(() => {
+		const el = bodyRef.current;
+		if (el === null || typeof ResizeObserver === "undefined") return;
+		const observer = new ResizeObserver(() => setBodyHeight(el.clientHeight));
+		observer.observe(el);
+		setBodyHeight(el.clientHeight);
+		return () => observer.disconnect();
+	}, []);
+
 	/** Hauteur d'éditeur la plus grande qui laisse sa place aux résultats. */
-	function maxEditorHeight(): number {
-		const bodyHeight = bodyRef.current?.clientHeight;
-		return bodyHeight === undefined
+	const maxEditorHeight =
+		bodyHeight === undefined
 			? editorHeight
 			: Math.max(SPLIT_MIN_TOP, bodyHeight - SPLIT_MIN_BOTTOM);
-	}
+	// La hauteur mémorisée peut venir d'une fenêtre plus grande : elle est
+	// gardée telle quelle, seule la hauteur affichée est bornée.
+	const shownEditorHeight = Math.min(editorHeight, maxEditorHeight);
 
 	// Flèches : un pas ; Maj : un grand pas ; Début / Fin : les bornes.
 	function resizeWithKeyboard(e: React.KeyboardEvent<HTMLDivElement>): void {
 		const step = e.shiftKey ? SPLIT_KEY_STEP * 4 : SPLIT_KEY_STEP;
-		const max = maxEditorHeight();
+		const max = maxEditorHeight;
 		let next: number;
-		if (e.key === "ArrowUp") next = editorHeight - step;
-		else if (e.key === "ArrowDown") next = editorHeight + step;
+		if (e.key === "ArrowUp") next = shownEditorHeight - step;
+		else if (e.key === "ArrowDown") next = shownEditorHeight + step;
 		else if (e.key === "Home") next = SPLIT_MIN_TOP;
 		else if (e.key === "End") next = max;
 		else return;
@@ -693,7 +704,7 @@ export function ConsoleShellInner({
 					style={{
 						...editorWrapperStyle,
 						...(hasRun
-							? { height: editorHeight }
+							? { height: shownEditorHeight }
 							: { flex: 1, minHeight: 0 })
 					}}
 				>
@@ -747,9 +758,9 @@ export function ConsoleShellInner({
 							className="mantine-focus-auto"
 							aria-orientation="horizontal"
 							aria-label="Redimensionner l'éditeur"
-							aria-valuenow={Math.round(editorHeight)}
+							aria-valuenow={Math.round(shownEditorHeight)}
 							aria-valuemin={SPLIT_MIN_TOP}
-							aria-valuemax={Math.round(maxEditorHeight())}
+							aria-valuemax={Math.round(maxEditorHeight)}
 						/>
 						<ConsoleResultsPanel
 							result={queryState.data}

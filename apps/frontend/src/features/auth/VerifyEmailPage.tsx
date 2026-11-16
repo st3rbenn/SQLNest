@@ -73,7 +73,7 @@ export function TokenMissing() {
  * Page /verify-email?token=...
  *
  * Contrat :
- * - `search.token` peut être `null` — dans ce cas on rend `<TokenMissing />`.
+ * - `search.token` peut manquer — dans ce cas on rend `<TokenMissing />`.
  * - Sinon on appelle `authClient.verifyEmail({ query: { token } })` (le SDK
  *   Better Auth gère la réponse 302/JSON et normalise en `{ data, error }`).
  * - States :
@@ -86,7 +86,7 @@ export function TokenMissing() {
 export function VerifyEmailPage() {
 	const { token } = VerifyRoute.useSearch();
 
-	if (token === null) {
+	if (token === undefined) {
 		return <TokenMissing />;
 	}
 

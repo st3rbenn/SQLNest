@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import {
 	SYSTEM_TABLE_ID,
 	type SystemSchemaEventsNodeType
@@ -11,8 +11,11 @@ import {
 import { useEnumsNode } from "../../enums/useEnumsNode";
 import type { ChangeGesture } from "../editor/changeSnql";
 import { canApply, type EditMode } from "../editor/editMode";
+import type { Frame } from "../frames";
 import type { SchemaModel } from "../schema-model";
+import type { TableNodeType } from "../TableNode";
 import type { XY } from "../useTablePositions";
+import { placeBesideContent, type Rect } from "./systemNodePlacement";
 
 export type SystemNodeType = SystemSchemaEventsNodeType | SystemEnumsNodeType;
 
@@ -24,6 +27,12 @@ export interface UseSystemNodesOptions {
 	readonly setGesture: (gesture: ChangeGesture | null) => void;
 	/** Ouvre une console remplie : le repli quand l'édition est fermée. */
 	readonly openConsoleWithSource: (source: string) => void;
+	/** Contenu du canvas : un node système sans place se pose à côté. */
+	readonly tableNodes: readonly TableNodeType[];
+	readonly frames: readonly Frame[];
+	/** Positions du canvas appliquées (état serveur compris) : avant cela,
+	 *  le contenu n'est pas encore là où l'utilisateur l'a rangé. */
+	readonly ready: boolean;
 }
 
 export interface UseSystemNodesReturn {
@@ -46,7 +55,10 @@ export function useSystemNodes({
 	teamSlug,
 	editMode,
 	setGesture,
-	openConsoleWithSource
+	openConsoleWithSource,
+	tableNodes,
+	frames,
+	ready
 }: UseSystemNodesOptions): UseSystemNodesReturn {
 	const systemEvents = useSchemaEventsNode(connectionId, teamSlug);
 
@@ -80,24 +92,61 @@ export function useSystemNodes({
 					id: SYSTEM_TABLE_ID,
 					node: systemEvents.node as SystemNodeType | null,
 					onNodesChange: systemEvents.onNodesChange as (changes: never) => void,
-					updatePosition: systemEvents.updatePosition
+					updatePosition: systemEvents.updatePosition,
+					hasStoredGeom: systemEvents.hasStoredGeom
 				},
 				{
 					id: ENUMS_NODE_ID,
 					node: enumsSystem.node as SystemNodeType | null,
 					onNodesChange: enumsSystem.onNodesChange as (changes: never) => void,
-					updatePosition: enumsSystem.updatePosition
+					updatePosition: enumsSystem.updatePosition,
+					hasStoredGeom: enumsSystem.hasStoredGeom
 				}
 			] as const,
 		[
 			systemEvents.node,
 			systemEvents.onNodesChange,
 			systemEvents.updatePosition,
+			systemEvents.hasStoredGeom,
 			enumsSystem.node,
 			enumsSystem.onNodesChange,
-			enumsSystem.updatePosition
+			enumsSystem.updatePosition,
+			enumsSystem.hasStoredGeom
 		]
 	);
+
+	// Un node système qui apparaît pour la première fois sur cette connexion
+	// se pose à côté du contenu du canvas, pas à un point fixe où une table
+	// peut déjà se trouver. Sa place est ensuite gardée comme après un drag.
+	const contentRef = useRef<readonly Rect[]>([]);
+	contentRef.current = [
+		...tableNodes.map((n) => ({
+			x: n.position.x,
+			y: n.position.y,
+			width: n.width ?? 0,
+			height: n.height ?? 0
+		})),
+		...frames.flatMap((f) => (f.rect !== undefined ? [f.rect] : []))
+	];
+	const hasContent = ready && tableNodes.length > 0;
+	const present = controls.map((c) => (c.node !== null ? c.id : "")).join("|");
+	// biome-ignore lint/correctness/useExhaustiveDependencies: `present` résume les nodes affichés ; le contenu se lit par ref, à l'instant du placement
+	useEffect(() => {
+		if (!hasContent) return;
+		const taken: Rect[] = [];
+		for (const c of controls) {
+			if (c.node === null) continue;
+			const size = { width: c.node.width ?? 0, height: c.node.height ?? 0 };
+			if (c.hasStoredGeom()) {
+				taken.push({ ...c.node.position, ...size });
+				continue;
+			}
+			const spot = placeBesideContent(contentRef.current, taken, size);
+			if (spot === null) continue;
+			c.updatePosition(spot);
+			taken.push({ ...spot, ...size });
+		}
+	}, [hasContent, present]);
 
 	const nodes = useMemo(
 		() => controls.flatMap((c) => (c.node !== null ? [c.node] : [])),
