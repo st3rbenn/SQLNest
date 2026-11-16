@@ -14,6 +14,7 @@ import {
 import { extractCorrelatedLookups } from "./mongodb-correlated";
 import { mongoField, toExprOperand } from "./mongodb-expr";
 import { mergeMatchDocs, renderMatch } from "./mongodb-match";
+import { defined } from "../invariant";
 
 /**
  * Étapes du pipeline : projection, tri, fenêtres, assemblage étape par étape.
@@ -101,7 +102,7 @@ export function appendStage(
 				}
 				const sortRefsMissing = op.keys.some((k) => {
 					const path = mongoField(k.path, alias);
-					const head = path.split(".")[0]!;
+					const head = defined(path.split(".")[0]);
 					return !projectedFields.has(head);
 				});
 				if (sortRefsMissing) {
@@ -262,9 +263,9 @@ function extractWindowCallsToSlots(
 				w.partitionKeys.length === 0
 					? null
 					: w.partitionKeys.length === 1
-						? `$${mongoField(w.partitionKeys[0]!, alias)}`
+						? `$${mongoField(defined(w.partitionKeys[0]), alias)}`
 						: w.partitionKeys.reduce<Record<string, string>>((acc, p) => {
-								const seg = p[p.length - 1]!;
+								const seg = defined(p[p.length - 1]);
 								acc[seg] = `$${mongoField(p, alias)}`;
 								return acc;
 							}, {});

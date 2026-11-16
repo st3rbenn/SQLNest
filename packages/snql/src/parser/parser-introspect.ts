@@ -9,6 +9,7 @@ import {
 	parseWhere,
 	rejectTrailingStage
 } from "./parser-select";
+import { defined } from "../invariant";
 
 /**
  * Introspection : `list …` et `describe <table>`.
@@ -35,7 +36,7 @@ export function parseIntrospectList(cursor: TokenCursor): IntrospectStatement {
 		const tail = parseIntrospectTail(cursor);
 		const endSpan =
 			tail.stages.length > 0
-				? tail.stages[tail.stages.length - 1]!.span
+				? defined(tail.stages[tail.stages.length - 1]).span
 				: subTok.span;
 		return {
 			operation: "introspect",
@@ -49,7 +50,7 @@ export function parseIntrospectList(cursor: TokenCursor): IntrospectStatement {
 		const tail = parseIntrospectTail(cursor);
 		const endSpan =
 			tail.stages.length > 0
-				? tail.stages[tail.stages.length - 1]!.span
+				? defined(tail.stages[tail.stages.length - 1]).span
 				: subTok.span;
 		return {
 			operation: "introspect",
@@ -80,7 +81,7 @@ export function parseIntrospectList(cursor: TokenCursor): IntrospectStatement {
 		const tail = parseIntrospectTail(cursor);
 		const endSpan =
 			tail.stages.length > 0
-				? tail.stages[tail.stages.length - 1]!.span
+				? defined(tail.stages[tail.stages.length - 1]).span
 				: { start: targetEnd, end: targetEnd };
 		return {
 			operation: "introspect",
@@ -95,7 +96,7 @@ export function parseIntrospectList(cursor: TokenCursor): IntrospectStatement {
 		const tail = parseIntrospectTail(cursor);
 		const endSpan =
 			tail.stages.length > 0
-				? tail.stages[tail.stages.length - 1]!.span
+				? defined(tail.stages[tail.stages.length - 1]).span
 				: subTok.span;
 		return {
 			operation: "introspect",
@@ -109,7 +110,7 @@ export function parseIntrospectList(cursor: TokenCursor): IntrospectStatement {
 		const tail = parseIntrospectTail(cursor);
 		const endSpan =
 			tail.stages.length > 0
-				? tail.stages[tail.stages.length - 1]!.span
+				? defined(tail.stages[tail.stages.length - 1]).span
 				: subTok.span;
 		return {
 			operation: "introspect",
@@ -123,7 +124,7 @@ export function parseIntrospectList(cursor: TokenCursor): IntrospectStatement {
 		const tail = parseIntrospectTail(cursor);
 		const endSpan =
 			tail.stages.length > 0
-				? tail.stages[tail.stages.length - 1]!.span
+				? defined(tail.stages[tail.stages.length - 1]).span
 				: subTok.span;
 		return {
 			operation: "introspect",
@@ -158,7 +159,7 @@ export function parseIntrospectDescribe(
 		const tail = parseIntrospectTail(cursor);
 		const endSpan =
 			tail.stages.length > 0
-				? tail.stages[tail.stages.length - 1]!.span
+				? defined(tail.stages[tail.stages.length - 1]).span
 				: nameTok.span;
 		return {
 			operation: "introspect",
@@ -180,7 +181,7 @@ export function parseIntrospectDescribe(
 	const tail = parseIntrospectTail(cursor);
 	const endSpan =
 		tail.stages.length > 0
-			? tail.stages[tail.stages.length - 1]!.span
+			? defined(tail.stages[tail.stages.length - 1]).span
 			: target.span;
 	return {
 		operation: "introspect",
@@ -215,7 +216,7 @@ function parseIntrospectForShortcut(cursor: TokenCursor): Stage {
 		if (cursor.peek().kind !== "comma") break;
 		cursor.next();
 	}
-	const lastSpan = names[names.length - 1]!.span;
+	const lastSpan = defined(names[names.length - 1]).span;
 	const span = { start: forTok.span.start, end: lastSpan.end };
 	const predicate: Expr = {
 		type: "in",

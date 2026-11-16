@@ -9,6 +9,7 @@ import type {
 } from "../parser/ast";
 import type { SchemaModel, SnqlType } from "../schema/model";
 import { type OuterScope, outerScopeStack } from "./lower-scope";
+import { defined } from "../invariant";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // typecheck cross-type au lower (schema-aware)
@@ -144,7 +145,7 @@ function resolveExprType(
 		if (pickStage?.type !== "pick" || pickStage.fields.length === 0) {
 			return "unknown";
 		}
-		const first = pickStage.fields[0]!;
+		const first = defined(pickStage.fields[0]);
 		const subSource = {
 			collection: expr.query.source.collection,
 			...(expr.query.source.alias !== undefined
@@ -178,8 +179,8 @@ function resolveFieldTypeInAst(
 	// Ex : `find users as u where exists (find orders as o where o.total > u.age)`
 	// → `u.age` doit résoudre vers `users.age` via outer scope.
 	if (path.length === 2) {
-		const head = path[0]!;
-		const rest = path[1]!;
+		const head = defined(path[0]);
+		const rest = defined(path[1]);
 		// Priorité 1 : alias source current
 		if (source.alias === head) {
 			const coll = schema.collections.find((c) => c.name === source.collection);
@@ -187,7 +188,7 @@ function resolveFieldTypeInAst(
 		}
 		// Priorité 2 : outer scopes (correlated)
 		for (let i = outerScopeStack.length - 1; i >= 0; i -= 1) {
-			const outerScope = outerScopeStack[i]!;
+			const outerScope = defined(outerScopeStack[i]);
 			const matchesAlias = outerScope.alias === head;
 			if (matchesAlias) {
 				const coll = schema.collections.find(
@@ -267,7 +268,7 @@ function typecheckExprTypes(
 			typecheckExprTypes(expr.target, source, schema);
 			// in (subquery) — target vs 1re field du pick sub.
 			if (expr.values.length === 1 && expr.values[0]?.type === "subquery") {
-				const subExpr = expr.values[0]!;
+				const subExpr = defined(expr.values[0]);
 				// Descend dans la subquery pour typecheck son propre contenu
 				// (uncorrelated — son propre source context).
 				typecheckQuery((subExpr as Expr & { type: "subquery" }).query, schema);

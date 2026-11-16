@@ -40,6 +40,7 @@ import {
 	type Scope,
 	STAGES
 } from "./complete-scope";
+import { defined } from "../invariant";
 
 export type {
 	SnqlCompletion,
@@ -156,7 +157,7 @@ function skipToClosingQuote(source: string, at: number): string {
 	let i = at;
 	let escaped = false;
 	while (i < source.length) {
-		const ch = source[i]!;
+		const ch = defined(source[i]);
 		if (escaped) {
 			escaped = false;
 		} else if (ch === "\\") {

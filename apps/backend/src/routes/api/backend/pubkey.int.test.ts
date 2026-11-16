@@ -87,8 +87,8 @@ describe.skipIf(!DATABASE_URL)("GET /api/backend/pubkey", () => {
 	// '05-tunnels') — le plugin est vérifié indirectement par les
 	// futurs tests de proxy (Bloc B.3+) qui monteront la stack entière.
 	test("plugin `06-backend-identity` a bien un `dependencies: ['05-tunnels']`", () => {
-		// biome-ignore lint/suspicious/noExplicitAny: introspection interne fp
 		expect(
+			// biome-ignore lint/suspicious/noExplicitAny: introspection interne fp
 			(backendIdentityPlugin as any)[Symbol.for("plugin-meta")]
 		).toBeDefined();
 	});

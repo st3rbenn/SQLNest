@@ -104,7 +104,7 @@ export function lowerStage(
 					} else if (f.path.length > 0) {
 						// Strip source alias so `u.year` matches groupKey `year`.
 						const strippedPath = stripAlias(f.path, sourceAlias).join(".");
-						if (groupKeySet !== undefined && groupKeySet.has(strippedPath)) {
+						if (groupKeySet?.has(strippedPath)) {
 							continue;
 						}
 						const pathStr = f.path.join(".");
@@ -133,7 +133,7 @@ export function lowerStage(
 				const fieldOutputNames = new Set(
 					fields.map((f) => f.alias ?? f.path[f.path.length - 1] ?? "")
 				);
-				for (const [i, k] of strippedDistinctKeys.entries()) {
+				for (const k of strippedDistinctKeys) {
 					const keyStr = k.join(".");
 					// La key peut matcher soit un output alias, soit le dernier
 					// segment d'un field path projeté.
@@ -142,7 +142,7 @@ export function lowerStage(
 						throw new SnqlError(
 							`'unique on (${keyStr})' — key '${keyStr}' absente des fields projetés ; ajoute '${keyStr}' à pick ou retire-la de 'on'`,
 							"lower_unique_on_key_not_projected",
-							stage.distinctOnKeys![i]!.length > 0 ? stage.span : stage.span
+							stage.span
 						);
 					}
 				}

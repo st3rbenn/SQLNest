@@ -59,7 +59,6 @@ async function signup(
 		throw new Error(`sign-up failed: ${res.statusCode} ${res.body}`);
 	}
 	const body = res.json() as { user?: { id?: string } };
-	// biome-ignore lint/style/noNonNullAssertion: sign-up returns user
 	return { userId: body.user!.id! };
 }
 
@@ -92,15 +91,11 @@ describe.skipIf(!DATABASE_URL)("team auto-signup", () => {
 			.where(eq(schema.team.ownerId, userId));
 		expect(teams.length).toBe(1);
 		const first = teams[0];
-		// biome-ignore lint/style/noNonNullAssertion: length checked
 		expect(first!.ownerId).toBe(userId);
 		// Le name stocké est VIDE — le frontend compose `${user.name}'s team`
 		// à l'affichage à partir de la source of truth `user.name`.
-		// biome-ignore lint/style/noNonNullAssertion: length checked
 		expect(first!.name).toBe("");
-		// biome-ignore lint/style/noNonNullAssertion: length checked
 		expect(first!.isPersonal).toBe(true);
-		// biome-ignore lint/style/noNonNullAssertion: length checked
 		expect(first!.slug).toMatch(TEAM_SLUG_REGEX);
 	});
 
@@ -179,7 +174,6 @@ describe.skipIf(!DATABASE_URL)("team auto-signup", () => {
 		await app.db.insert(schema.dbConnection).values([
 			{
 				userId,
-				// biome-ignore lint/style/noNonNullAssertion: checked above
 				teamId: teamAlpha!.id,
 				name: "prod",
 				cliFingerprint: "a".repeat(64),
@@ -187,7 +181,6 @@ describe.skipIf(!DATABASE_URL)("team auto-signup", () => {
 			},
 			{
 				userId,
-				// biome-ignore lint/style/noNonNullAssertion: checked above
 				teamId: teamBetaId!,
 				name: "prod",
 				cliFingerprint: "b".repeat(64),
@@ -199,13 +192,11 @@ describe.skipIf(!DATABASE_URL)("team auto-signup", () => {
 		const alphaConns = await app.db
 			.select({ id: schema.dbConnection.id })
 			.from(schema.dbConnection)
-			// biome-ignore lint/style/noNonNullAssertion: checked above
 			.where(eq(schema.dbConnection.teamId, teamAlpha!.id));
 		expect(alphaConns.length).toBe(1);
 		const betaConns = await app.db
 			.select({ id: schema.dbConnection.id })
 			.from(schema.dbConnection)
-			// biome-ignore lint/style/noNonNullAssertion: checked above
 			.where(eq(schema.dbConnection.teamId, teamBetaId!));
 		expect(betaConns.length).toBe(1);
 		expect(alphaConns[0]?.id).not.toBe(betaConns[0]?.id);
@@ -226,7 +217,6 @@ describe.skipIf(!DATABASE_URL)("team auto-signup", () => {
 		expect(teamId).toBeDefined();
 		await app.db.insert(schema.dbConnection).values({
 			userId,
-			// biome-ignore lint/style/noNonNullAssertion: checked above
 			teamId: teamId!,
 			name: "will-die",
 			cliFingerprint: "c".repeat(64),
@@ -235,15 +225,12 @@ describe.skipIf(!DATABASE_URL)("team auto-signup", () => {
 		const before = await app.db
 			.select()
 			.from(schema.dbConnection)
-			// biome-ignore lint/style/noNonNullAssertion: checked above
 			.where(eq(schema.dbConnection.teamId, teamId!));
 		expect(before.length).toBe(1);
-		// biome-ignore lint/style/noNonNullAssertion: checked above
 		await app.db.delete(schema.team).where(eq(schema.team.id, teamId!));
 		const after = await app.db
 			.select()
 			.from(schema.dbConnection)
-			// biome-ignore lint/style/noNonNullAssertion: checked above
 			.where(eq(schema.dbConnection.teamId, teamId!));
 		expect(after.length).toBe(0);
 	});

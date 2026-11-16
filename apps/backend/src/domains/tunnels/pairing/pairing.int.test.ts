@@ -223,13 +223,9 @@ describe.skipIf(!DATABASE_URL)("/api/tunnels — device flow", () => {
 				.from(schema.tunnelPairing)
 				.where(eq(schema.tunnelPairing.code, canonical));
 			expect(rows.length).toBe(1);
-			// biome-ignore lint/style/noNonNullAssertion: length checked
 			expect(rows[0]!.userId).toBeNull();
-			// biome-ignore lint/style/noNonNullAssertion: length checked
 			expect(rows[0]!.cliPubkeyEd25519).toBe(pubkeyHex);
-			// biome-ignore lint/style/noNonNullAssertion: length checked
 			expect(rows[0]!.approvedAt).toBeNull();
-			// biome-ignore lint/style/noNonNullAssertion: length checked
 			expect(rows[0]!.consumedAt).toBeNull();
 		});
 	});
@@ -400,7 +396,6 @@ describe.skipIf(!DATABASE_URL)("/api/tunnels — device flow", () => {
 				existingConnection: { id: string; name: string } | null;
 			};
 			expect(body.existingConnection).not.toBeNull();
-			// biome-ignore lint/style/noNonNullAssertion: assert ci-dessus
 			expect(body.existingConnection!.name).toBe("apollon_db");
 		});
 
@@ -622,9 +617,7 @@ describe.skipIf(!DATABASE_URL)("/api/tunnels — device flow", () => {
 				.from(schema.tunnelSession)
 				.where(eq(schema.tunnelSession.id, body.tunnelId));
 			expect(sessions.length).toBe(1);
-			// biome-ignore lint/style/noNonNullAssertion: length checked
 			expect(sessions[0]!.hash).toBe(hashSha256Hex(body.token));
-			// biome-ignore lint/style/noNonNullAssertion: length checked
 			expect(sessions[0]!.connectionId).toBe(body.connectionId);
 
 			// db_connection créée avec bon user + name + fingerprint.
@@ -632,11 +625,8 @@ describe.skipIf(!DATABASE_URL)("/api/tunnels — device flow", () => {
 				.select()
 				.from(schema.dbConnection)
 				.where(eq(schema.dbConnection.id, body.connectionId));
-			// biome-ignore lint/style/noNonNullAssertion: length checked
 			expect(conns[0]!.userId).toBe(userId);
-			// biome-ignore lint/style/noNonNullAssertion: length checked
 			expect(conns[0]!.name).toBe("nora-mac");
-			// biome-ignore lint/style/noNonNullAssertion: length checked
 			expect(conns[0]!.cliFingerprint).toBe(hashSha256Hex(pubkeyHex));
 
 			// pairing marqué consumed.
@@ -644,7 +634,6 @@ describe.skipIf(!DATABASE_URL)("/api/tunnels — device flow", () => {
 				.select({ consumedAt: schema.tunnelPairing.consumedAt })
 				.from(schema.tunnelPairing)
 				.where(eq(schema.tunnelPairing.code, "HAPP0001"));
-			// biome-ignore lint/style/noNonNullAssertion: length checked
 			expect(pairings[0]!.consumedAt).toBeInstanceOf(Date);
 
 			// GARANTIE règle sécu #2 : le clair du token n'existe nulle part
@@ -655,7 +644,6 @@ describe.skipIf(!DATABASE_URL)("/api/tunnels — device flow", () => {
 				FROM tunnel_session
 				WHERE hash = ${body.token}
 			`);
-			// biome-ignore lint/style/noNonNullAssertion: aggregate returns 1 row
 			expect((clearHits[0]! as { n: number }).n).toBe(0);
 		});
 
@@ -689,7 +677,6 @@ describe.skipIf(!DATABASE_URL)("/api/tunnels — device flow", () => {
 				.select({ dbFingerprint: schema.dbConnection.dbFingerprint })
 				.from(schema.dbConnection)
 				.where(eq(schema.dbConnection.id, body.connectionId));
-			// biome-ignore lint/style/noNonNullAssertion: length checked
 			expect(conns[0]!.dbFingerprint).toBe("postgres:9876543210/chinook");
 		});
 
@@ -722,7 +709,6 @@ describe.skipIf(!DATABASE_URL)("/api/tunnels — device flow", () => {
 				.select({ dbFingerprint: schema.dbConnection.dbFingerprint })
 				.from(schema.dbConnection)
 				.where(eq(schema.dbConnection.id, body.connectionId));
-			// biome-ignore lint/style/noNonNullAssertion: length checked
 			expect(conns[0]!.dbFingerprint).toBeNull();
 		});
 
@@ -942,7 +928,6 @@ describe.skipIf(!DATABASE_URL)("/api/tunnels — device flow", () => {
 				.select({ dbFingerprint: schema.dbConnection.dbFingerprint })
 				.from(schema.dbConnection)
 				.where(eq(schema.dbConnection.id, firstBody.connectionId));
-			// biome-ignore lint/style/noNonNullAssertion: length checked
 			expect(conns[0]!.dbFingerprint).toBe("mongo:rs0/chinook");
 		});
 
@@ -1190,9 +1175,7 @@ describe.skipIf(!DATABASE_URL)("/api/tunnels — device flow", () => {
 				})
 				.from(schema.dbConnection)
 				.where(eq(schema.dbConnection.id, auth.connectionId));
-			// biome-ignore lint/style/noNonNullAssertion: length checked
 			expect(conn[0]!.dbFingerprint).toBe("pg:7600431566186733602/apollon");
-			// biome-ignore lint/style/noNonNullAssertion: length checked
 			expect(conn[0]!.dbSchemaChecksum).toBe("postgres:abc123def456");
 		});
 
@@ -1220,9 +1203,7 @@ describe.skipIf(!DATABASE_URL)("/api/tunnels — device flow", () => {
 				})
 				.from(schema.dbConnection)
 				.where(eq(schema.dbConnection.id, auth.connectionId));
-			// biome-ignore lint/style/noNonNullAssertion: length checked
 			expect(conn[0]!.dbFingerprint).toBeNull();
-			// biome-ignore lint/style/noNonNullAssertion: length checked
 			expect(conn[0]!.dbSchemaChecksum).toBeNull();
 		});
 
@@ -1279,7 +1260,6 @@ describe.skipIf(!DATABASE_URL)("/api/tunnels — device flow", () => {
 				.select({ dbFingerprint: schema.dbConnection.dbFingerprint })
 				.from(schema.dbConnection)
 				.where(eq(schema.dbConnection.id, auth.connectionId));
-			// biome-ignore lint/style/noNonNullAssertion: length checked
 			expect(conn[0]!.dbFingerprint).toBe("pg:2222222222/db-v2");
 		});
 	});

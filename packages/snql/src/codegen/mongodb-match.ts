@@ -8,6 +8,7 @@ import {
 	mongoField,
 	toExprOperand
 } from "./mongodb-expr";
+import { defined } from "../invariant";
 
 /**
  * Filtres : prédicats rendus en `$match`, avec la logique à trois valeurs
@@ -24,7 +25,7 @@ export function mergeMatchDocs(
 	additions: readonly Record<string, unknown>[]
 ): Record<string, unknown> {
 	if (residual === null) {
-		if (additions.length === 1) return additions[0]!;
+		if (additions.length === 1) return defined(additions[0]);
 		return { $and: [...additions] };
 	}
 	if (additions.length === 0) return residual;

@@ -79,8 +79,8 @@ export interface RelationalFkRow {
 export function buildRefsFromFkRows(rows: readonly RelationalFkRow[]): RefDef[] {
 	const refs: RefDef[] = [];
 	for (const group of groupByConstraint(rows).values()) {
-		if (group.length !== 1) continue; // composite FK → hors scope nav V1
-		const fk = group[0]!;
+		const fk = group[0];
+		if (fk === undefined || group.length !== 1) continue; // composite FK → hors scope nav V1
 		refs.push({
 			name: fk.constraintName,
 			fromCollection: fk.fromTable,
@@ -104,19 +104,25 @@ export function buildRefsFromFkRows(rows: readonly RelationalFkRow[]): RefDef[] 
 export function buildRelationsFromFkRows(
 	rows: readonly RelationalFkRow[]
 ): Relation[] {
-	return [...groupByConstraint(rows).values()].map((group) => ({
-		from: {
-			collection: group[0]!.fromTable,
-			fields: group.map((r) => r.fromColumn)
-		},
-		to: {
-			collection: group[0]!.toTable,
-			fields: group.map((r) => r.toColumn)
-		},
-		kind: "many-to-one" as const,
-		origin: "foreign-key" as const,
-		confidence: 1
-	}));
+	return [...groupByConstraint(rows).values()].flatMap((group) => {
+		const first = group[0];
+		if (first === undefined) return [];
+		return [
+			{
+				from: {
+					collection: first.fromTable,
+					fields: group.map((r) => r.fromColumn)
+				},
+				to: {
+					collection: first.toTable,
+					fields: group.map((r) => r.toColumn)
+				},
+				kind: "many-to-one" as const,
+				origin: "foreign-key" as const,
+				confidence: 1
+			}
+		];
+	});
 }
 
 function groupByConstraint(

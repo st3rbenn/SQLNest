@@ -1,3 +1,4 @@
+// biome-ignore-all lint/suspicious/noTemplateCurlyInString: les chaînes `${VAR}` sont ce que ces tests lisent
 import { describe, expect, it } from "vitest";
 import { parseDotenv } from "./dotenv";
 

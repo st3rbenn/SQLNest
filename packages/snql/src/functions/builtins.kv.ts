@@ -11,6 +11,7 @@
  */
 
 import type { EngineRenderer } from "./registry";
+import { defined } from "../invariant";
 
 /**
  * `if(cond, then, else)` — short-circuit strict. `cond` doit être bool
@@ -270,7 +271,7 @@ function collectAggMulti(
 	const orderedRows =
 		ctx.sortKeys !== undefined && ctx.sortKeys.length > 0
 			? [...rows].sort((ra, rb) => {
-					for (const k of ctx.sortKeys!) {
+					for (const k of defined(ctx.sortKeys)) {
 						const va = getPath(ra, k.path);
 						const vb = getPath(rb, k.path);
 						const cmp = compareForSort(va, vb);

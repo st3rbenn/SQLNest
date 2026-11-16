@@ -217,7 +217,6 @@ describe("integration — flow complet CLI ↔ browser", () => {
 		// ─── 6. Tamper de la 2e frame ──────────────────────────────────
 		// Un attaquant flip le dernier byte du ciphertext.
 		const tampered = new Uint8Array(alicePkt2.bytes);
-		// biome-ignore lint/style/noNonNullAssertion: length > 0
 		tampered[tampered.length - 1] = tampered[tampered.length - 1]! ^ 0xff;
 		// Le decode peut réussir (MessagePack tolère) mais la sig doit
 		// échouer OU le decrypt lever. Dans les 2 cas, la frame est

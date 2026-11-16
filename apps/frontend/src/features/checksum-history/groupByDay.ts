@@ -44,7 +44,9 @@ export function groupByDay(
 	}
 	const groups: DayGroup[] = [];
 	for (const [key, bucketEntries] of buckets) {
-		const firstDate = new Date(bucketEntries[0]!.seenAt);
+		const first = bucketEntries[0];
+		if (first === undefined) continue;
+		const firstDate = new Date(first.seenAt);
 		groups.push({
 			key,
 			label: labelFor(firstDate, now),

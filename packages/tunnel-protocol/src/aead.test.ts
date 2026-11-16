@@ -86,7 +86,6 @@ describe("decryptPayload — cas d'erreur", () => {
 		const pt = new Uint8Array([1, 2, 3, 4]);
 		const ct = encryptPayload(key, header, pt);
 		const tampered = new Uint8Array(ct);
-		// biome-ignore lint/style/noNonNullAssertion: length is > 0
 		tampered[tampered.length - 1] = tampered[tampered.length - 1]! ^ 0xff;
 		expect(() => decryptPayload(key, header, tampered)).toThrow();
 	});

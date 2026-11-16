@@ -10,6 +10,7 @@ import {
 	refTargetColumns,
 	type SnqlCompletion
 } from "./complete-items";
+import { defined } from "../invariant";
 
 /**
  * Complétion du DDL : tables, colonnes, index, clés étrangères, enums.
@@ -199,7 +200,7 @@ function refClauseCompletions(
 
 	// `ref X.|` → colonnes de X.
 	if (last.kind === "dot" && at(n - 2)?.kind === "ident" && isRef(at(n - 3))) {
-		const targetColl = at(n - 2)!.value;
+		const targetColl = defined(at(n - 2)).value;
 		return refTargetColumns(schema, targetColl);
 	}
 

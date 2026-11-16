@@ -273,11 +273,8 @@ describe.skipIf(!DATABASE_URL)(
 				.select()
 				.from(schema.dbConnection)
 				.where(eq(schema.dbConnection.id, body.connectionId));
-			// biome-ignore lint/style/noNonNullAssertion: length checked
 			expect(conns[0]!.userId).toBe(userId);
-			// biome-ignore lint/style/noNonNullAssertion: length checked
 			expect(conns[0]!.name).toBe("ci-runner");
-			// biome-ignore lint/style/noNonNullAssertion: length checked
 			expect(conns[0]!.cliFingerprint).toBe(hashSha256Hex(pubkeyHex));
 
 			// tunnel_session avec hash correct.
@@ -285,7 +282,6 @@ describe.skipIf(!DATABASE_URL)(
 				.select()
 				.from(schema.tunnelSession)
 				.where(eq(schema.tunnelSession.id, body.tunnelId));
-			// biome-ignore lint/style/noNonNullAssertion: length checked
 			expect(sessions[0]!.hash).toBe(hashSha256Hex(body.token));
 
 			// last_used_at bumpé sur l'api_token.
@@ -293,7 +289,6 @@ describe.skipIf(!DATABASE_URL)(
 				.select({ lastUsedAt: schema.apiToken.lastUsedAt })
 				.from(schema.apiToken)
 				.where(eq(schema.apiToken.id, apiTokenId));
-			// biome-ignore lint/style/noNonNullAssertion: length checked
 			expect(tokens[0]!.lastUsedAt).toBeInstanceOf(Date);
 		});
 
@@ -344,7 +339,6 @@ describe.skipIf(!DATABASE_URL)(
 				.select({ name: schema.dbConnection.name })
 				.from(schema.dbConnection);
 			expect(rows.length).toBe(1);
-			// biome-ignore lint/style/noNonNullAssertion: length checked
 			expect(rows[0]!.name).toBe("first-name");
 		});
 

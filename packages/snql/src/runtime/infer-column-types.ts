@@ -27,6 +27,7 @@ import { linearize } from "../ir/plan";
 import type { CompensationOp, PhysicalPlan } from "../planner/planner";
 import type { Collection, Field, SchemaModel, SnqlType } from "../schema/model";
 import type { ResultColumn } from "./result";
+import { defined } from "../invariant";
 
 /**
  * Mapping runtime des 7 targets canoniques SNQL vers le vocabulaire `SnqlType`
@@ -415,7 +416,7 @@ function resolveFieldType(
 ): SnqlType | null {
 	if (path.length === 0) return null;
 	if (path.length === 1) {
-		const name = path[0]!;
+		const name = defined(path[0]);
 		if (state.joinAliases.has(name)) return "array";
 		const resolved = findField(schema, state.sourceCollection, name);
 		return resolved?.type ?? null;
@@ -423,12 +424,12 @@ function resolveFieldType(
 	const [prefix, ...rest] = path;
 	if (prefix === undefined) return null;
 	if (prefix === state.sourceAlias && rest.length === 1) {
-		const resolved = findField(schema, state.sourceCollection, rest[0]!);
+		const resolved = findField(schema, state.sourceCollection, defined(rest[0]));
 		return resolved?.type ?? null;
 	}
 	const joined = state.joinAliases.get(prefix);
 	if (joined !== undefined && rest.length === 1) {
-		const resolved = findField(schema, joined, rest[0]!);
+		const resolved = findField(schema, joined, defined(rest[0]));
 		return resolved?.type ?? null;
 	}
 	return null;

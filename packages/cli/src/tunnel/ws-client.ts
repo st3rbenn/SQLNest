@@ -430,8 +430,8 @@ function defaultSocketFactory(url: string): WsSocket {
 	const ws = new NodeWebSocket(url);
 	// Le client `ws` de Node envoie des Buffer en mode default. On
 	// normalise vers Uint8Array pour le contrat WsSocket.
-	// biome-ignore lint/suspicious/noExplicitAny: cast interne — les 4 overloads
-	// du contrat WsSocket sont typés par le caller.
+	// Les 4 overloads du contrat WsSocket sont typés par le caller.
+	// biome-ignore lint/suspicious/noExplicitAny: cast interne
 	const on = (event: string, cb: (...args: any[]) => void): void => {
 		if (event === "message") {
 			ws.on("message", (data) => {

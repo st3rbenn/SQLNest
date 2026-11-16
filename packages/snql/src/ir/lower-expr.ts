@@ -10,6 +10,7 @@ import { CAST_TARGETS } from "../parser/ast";
 import { lower } from "./lower-query";
 import { scopeState } from "./lower-scope";
 import type { CompareOp, PlanExpr, SqlValue } from "./plan";
+import { defined } from "../invariant";
 
 /**
  * Expressions : champs, littéraux, comparaisons, appels de fonction,
@@ -72,20 +73,20 @@ export function lowerExpr(expr: Expr): PlanExpr {
 			const isSubqueryVariant =
 				expr.values.length === 1 && expr.values[0]?.type === "subquery";
 			if (isSubqueryVariant) {
-				const subExpr = expr.values[0]! as Expr & { type: "subquery" };
+				const subExpr = defined(expr.values[0]) as Expr & { type: "subquery" };
 				const pickStage = subExpr.query.stages.find((s) => s.type === "pick");
 				if (pickStage === undefined || pickStage.type !== "pick") {
 					throw new SnqlError(
 						"'in (subquery)' — la sub-query doit avoir un 'pick' avec exactement 1 field",
 						"lower_in_subquery_no_pick",
-						expr.values[0]!.span
+						defined(expr.values[0]).span
 					);
 				}
 				if (pickStage.fields.length !== 1) {
 					throw new SnqlError(
 						`'in (subquery)' — la sub-query doit projeter exactement 1 field, reçu ${pickStage.fields.length}`,
 						"lower_in_subquery_arity",
-						expr.values[0]!.span
+						defined(expr.values[0]).span
 					);
 				}
 			}
@@ -284,7 +285,7 @@ function assertBranchLiteralsHomogeneous(
 	throw new SnqlError(
 		`${prefix} : branches de types incompatibles {${[...unique].join(", ")}} — cast explicite requis (ex: cast(x as text))`,
 		errCode,
-		values[0]!.span
+		defined(values[0]).span
 	);
 }
 
@@ -552,8 +553,8 @@ function lowerCall(expr: Expr & { type: "call" }): PlanExpr {
 	// guards spécifiques `if(cond, then, else)` — miroir des
 	// gardes `case`. cond bool-shaped + branches homogènes (then/else).
 	if (entry.name === "if" && expr.args.length === 3) {
-		assertCondIsBoolShaped(expr.args[0]!, "if");
-		assertBranchLiteralsHomogeneous([expr.args[1]!, expr.args[2]!], "if");
+		assertCondIsBoolShaped(defined(expr.args[0]), "if");
+		assertBranchLiteralsHomogeneous([defined(expr.args[1]), defined(expr.args[2])], "if");
 	}
 	// forward star/unique flags sur PlanCall — le codegen les
 	// consomme via ctx.star / ctx.unique.
@@ -632,7 +633,7 @@ function validateJsonPathSegments(
 		);
 	}
 	for (let i = 1; i < expr.args.length; i += 1) {
-		const seg = expr.args[i]!;
+		const seg = defined(expr.args[i]);
 		if (seg.type !== "literal") {
 			throw new SnqlError(
 				`Fonction '${fnName}' segment path ${i} : expression dynamique non supportée v1 — attend un littéral string ou int`,

@@ -9,6 +9,7 @@ import type {
 } from "../ir/plan";
 import { isSqlDecimal } from "../ir/plan";
 import type { CompensationOp } from "../planner/planner";
+import { defined } from "../invariant";
 
 /** Une ligne de résultat, engine-agnostique. */
 export type Row = Record<string, unknown>;
@@ -29,7 +30,7 @@ export function compensate(
 ): Row[] {
 	let out: Row[] = [...rows];
 	for (let i = 0; i < ops.length; i += 1) {
-		const op = ops[i]!;
+		const op = defined(ops[i]);
 		switch (op.op) {
 			case "filter":
 				out = out.filter((row) => evalBool(op.predicate, row) === true);
@@ -513,7 +514,7 @@ function bucketFoldAggregate(
 				// depuis 1re row du bucket.
 				const lastSeg = field.path[field.path.length - 1] as string;
 				if (groupKeyLastSegs.has(lastSeg)) {
-					foldedRow[aliasName] = getPath(bucketRows[0] as Row, groupKeyLastSegs.get(lastSeg)!);
+					foldedRow[aliasName] = getPath(bucketRows[0] as Row, defined(groupKeyLastSegs.get(lastSeg)));
 				} else {
 					throw new SnqlError(
 						`Field bare '${field.path.join(".")}' dans pick agg group — bug lower/runtime sync`,
@@ -776,7 +777,7 @@ function preprocessWindowCalls(
 	// Clone rows pour ne pas muter l'input compensate.
 	const enriched = rows.map((r) => ({ ...r }));
 	for (const w of windowCalls) {
-		const slot = slotByKey.get(windowCallKvKey(w))!;
+		const slot = defined(slotByKey.get(windowCallKvKey(w)));
 		// Bucket par partition keys.
 		const buckets = new Map<string, { row: Row; origIdx: number }[]>();
 		for (const [origIdx, row] of enriched.entries()) {
@@ -808,7 +809,6 @@ function preprocessWindowCalls(
 			let currentRank = 0;
 			let currentDenseRank = 0;
 			let prevSortValues: unknown[] | null = null;
-			let sameGroupCount = 0;
 			for (const [idx, entry] of bucket.entries()) {
 				const rowNumber = idx + 1;
 				// Check if this row shares sort values with previous (for RANK/DENSE_RANK ties).
@@ -816,13 +816,10 @@ function preprocessWindowCalls(
 				const isSameGroup =
 					prevSortValues !== null &&
 					w.sortKeys.length > 0 &&
-					currentSortValues.every((v, i) => compareForSort(v, prevSortValues![i]) === 0);
+					currentSortValues.every((v, i) => compareForSort(v, defined(prevSortValues)[i]) === 0);
 				if (!isSameGroup) {
 					currentRank = rowNumber;
 					currentDenseRank += 1;
-					sameGroupCount = 1;
-				} else {
-					sameGroupCount += 1;
 				}
 				prevSortValues = currentSortValues;
 				let value: number;

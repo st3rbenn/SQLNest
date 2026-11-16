@@ -16,6 +16,7 @@ import { isSqlDecimal, linearize } from "../ir/plan";
 import type { Span } from "../lexer/token";
 import type { CompensationOp } from "../planner/planner";
 import type { SerializedSpan, SqlQuery, SqlTransactionStep } from "./mapper";
+import { defined } from "../invariant";
 
 /**
  * Noyau de codegen SQL partagé — la mécanique commune aux mappers SQL
@@ -316,7 +317,7 @@ export function createSqlRenderer(dialect: SqlDialect): SqlRenderer {
 	}
 
 	function renderJoinPath(path: readonly string[], alias: string): string {
-		if (path.length === 1) return `${quoteIdent(alias)}.${quoteIdent(path[0]!)}`;
+		if (path.length === 1) return `${quoteIdent(alias)}.${quoteIdent(defined(path[0]))}`;
 		return renderPath(path);
 	}
 

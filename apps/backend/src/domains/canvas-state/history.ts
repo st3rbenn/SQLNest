@@ -110,12 +110,10 @@ export async function getCanvasChecksumHistory(
 		seenAt: r.seenAt.toISOString()
 	}));
 
+	const last = entries.at(-1);
 	const nextCursor =
-		hasMore && entries.length > 0
-			? encodeCursor({
-					seenAt: entries[entries.length - 1]!.seenAt,
-					id: entries[entries.length - 1]!.id
-				})
+		hasMore && last !== undefined
+			? encodeCursor({ seenAt: last.seenAt, id: last.id })
 			: null;
 
 	return { canvasId: canvas.id, entries, nextCursor };

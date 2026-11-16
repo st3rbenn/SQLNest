@@ -126,7 +126,7 @@ export function lowerLet(
 			// schema disponible au lower (introspection non cachée), le shadow-check
 			// silently skip — divergence potentielle PG throw / Mongo empty rowset.
 			// Fix complet reporté : listCollections() cache au bootstrap CLI.
-			if (schema && schema.collections.some((c) => c.name === b.name)) {
+			if (schema?.collections.some((c) => c.name === b.name)) {
 				throw new SnqlError(
 					`CTE '${b.name}' masque la table '${b.name}' — renomme (ex: 'active_${b.name}', '${b.name}_view').`,
 					"lower_let_shadows_collection",

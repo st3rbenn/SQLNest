@@ -113,17 +113,11 @@ describe.skipIf(!DATABASE_URL)("tunnels schema — contraintes DB", () => {
 
 			expect(rows.length).toBe(1);
 			const row = rows[0];
-			// biome-ignore lint/style/noNonNullAssertion: length checked above
 			expect(row!.name).toBe("GitHub Actions");
-			// biome-ignore lint/style/noNonNullAssertion: length checked above
 			expect(row!.hash).toBe("a".repeat(64));
-			// biome-ignore lint/style/noNonNullAssertion: length checked above
 			expect(row!.prefix).toBe("sn_1a2b");
-			// biome-ignore lint/style/noNonNullAssertion: length checked above
 			expect(row!.lastUsedAt).toBeNull();
-			// biome-ignore lint/style/noNonNullAssertion: length checked above
 			expect(row!.revokedAt).toBeNull();
-			// biome-ignore lint/style/noNonNullAssertion: length checked above
 			expect(row!.createdAt).toBeInstanceOf(Date);
 		});
 
@@ -238,13 +232,9 @@ describe.skipIf(!DATABASE_URL)("tunnels schema — contraintes DB", () => {
 
 			expect(rows.length).toBe(1);
 			const row = rows[0];
-			// biome-ignore lint/style/noNonNullAssertion: length checked above
 			expect(row!.userId).toBeNull();
-			// biome-ignore lint/style/noNonNullAssertion: length checked above
 			expect(row!.approvedAt).toBeNull();
-			// biome-ignore lint/style/noNonNullAssertion: length checked above
 			expect(row!.consumedAt).toBeNull();
-			// biome-ignore lint/style/noNonNullAssertion: length checked above
 			expect(row!.cliPubkeyEd25519).toBe(cliPubkey);
 		});
 
@@ -316,13 +306,9 @@ describe.skipIf(!DATABASE_URL)("tunnels schema — contraintes DB", () => {
 				.from(schema.tunnelPairing)
 				.where(eq(schema.tunnelPairing.code, "CYCL-0001"));
 			expect(rows.length).toBe(1);
-			// biome-ignore lint/style/noNonNullAssertion: length checked above
 			expect(rows[0]!.userId).toBe(userId);
-			// biome-ignore lint/style/noNonNullAssertion: length checked above
 			expect(rows[0]!.deviceName).toBe("erin's MacBook");
-			// biome-ignore lint/style/noNonNullAssertion: length checked above
 			expect(rows[0]!.approvedAt).toBeInstanceOf(Date);
-			// biome-ignore lint/style/noNonNullAssertion: length checked above
 			expect(rows[0]!.consumedAt).toBeInstanceOf(Date);
 		});
 
@@ -392,15 +378,10 @@ describe.skipIf(!DATABASE_URL)("tunnels schema — contraintes DB", () => {
 				.where(eq(schema.dbConnection.userId, userId));
 			expect(rows.length).toBe(1);
 			const row = rows[0];
-			// biome-ignore lint/style/noNonNullAssertion: length checked above
 			expect(row!.name).toBe("prod");
-			// biome-ignore lint/style/noNonNullAssertion: length checked above
 			expect(row!.engine).toBe("postgres");
-			// biome-ignore lint/style/noNonNullAssertion: length checked above
 			expect(row!.engineMetadata).toEqual({});
-			// biome-ignore lint/style/noNonNullAssertion: length checked above
 			expect(row!.lastSeenAt).toBeNull();
-			// biome-ignore lint/style/noNonNullAssertion: length checked above
 			expect(row!.activeSince).toBeInstanceOf(Date);
 		});
 
@@ -453,7 +434,6 @@ describe.skipIf(!DATABASE_URL)("tunnels schema — contraintes DB", () => {
 			const total = await app.db
 				.select({ count: sql<number>`count(*)::int` })
 				.from(schema.dbConnection);
-			// biome-ignore lint/style/noNonNullAssertion: aggregate always returns 1 row
 			expect(total[0]!.count).toBe(2);
 		});
 
@@ -478,7 +458,6 @@ describe.skipIf(!DATABASE_URL)("tunnels schema — contraintes DB", () => {
 				.select()
 				.from(schema.dbConnection)
 				.where(eq(schema.dbConnection.userId, userId));
-			// biome-ignore lint/style/noNonNullAssertion: length checked above
 			expect(rows[0]!.engineMetadata).toEqual(meta);
 		});
 

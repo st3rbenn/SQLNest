@@ -15,6 +15,7 @@ import {
 	type RefDef,
 	type SchemaModel
 } from "../schema/model";
+import { defined } from "../invariant";
 
 const ID_SUFFIX = /_id$/;
 
@@ -185,7 +186,7 @@ export function desugarReverseNav(query: Query, schema?: SchemaModel): Query {
 				f.path.length === 2 &&
 				f.path[1] === "count"
 			) {
-				const revColl = f.path[0]!;
+				const revColl = defined(f.path[0]);
 				const ref = revMap.get(revColl);
 				if (ref !== undefined) {
 					const alias = `${revColl}_count`;

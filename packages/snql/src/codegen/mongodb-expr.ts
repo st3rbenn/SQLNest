@@ -7,6 +7,7 @@ import {
 	type PlanExpr,
 	type SqlValue
 } from "../ir/plan";
+import { defined } from "../invariant";
 
 /**
  * Valeurs et expressions : littéraux BSON, chemins de champ, opérandes
@@ -38,7 +39,7 @@ export function renderMongoAggExpr(
 		}
 		case "field": {
 			if (expr.path.length > 1) {
-				const head = expr.path[0]!;
+				const head = defined(expr.path[0]);
 				if (head !== subLocalAlias) {
 					const col = expr.path.slice(1).join(".");
 					const letVar = outerLetVars.get(col);

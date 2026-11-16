@@ -75,7 +75,6 @@ async function seedConnection(
 			engine: "postgres"
 		})
 		.returning({ id: schema.dbConnection.id });
-	// biome-ignore lint/style/noNonNullAssertion: returning row exists
 	return rows[0]!.id;
 }
 
@@ -97,7 +96,6 @@ async function seedSession(
 				: {})
 		})
 		.returning({ id: schema.tunnelSession.id });
-	// biome-ignore lint/style/noNonNullAssertion: returning row exists
 	return rows[0]!.id;
 }
 
@@ -136,7 +134,6 @@ describe.skipIf(!DATABASE_URL)("authenticateTunnelSession", () => {
 			.select({ lastUsedAt: schema.tunnelSession.lastUsedAt })
 			.from(schema.tunnelSession)
 			.where(eq(schema.tunnelSession.id, sessId));
-		// biome-ignore lint/style/noNonNullAssertion: length checked implicitly
 		expect(rows[0]!.lastUsedAt).toBeInstanceOf(Date);
 	});
 

@@ -10,6 +10,7 @@ import {
 	mongoRenderCast,
 	toExprOperand
 } from "./mongodb-expr";
+import { defined } from "../invariant";
 
 /**
  * Agrégats et `group by` : étapes `$group`, `$setWindowFields`, `distinct`.
@@ -202,7 +203,7 @@ export function renderAggregatePipeline(
 					};
 					const existing = slotByKey.get(key);
 					if (existing !== undefined) return foldOf(existing);
-					const argRendered = toExprOperand(expr.args[0]!, alias);
+					const argRendered = toExprOperand(defined(expr.args[0]), alias);
 					const uSlot = `__u_${uSlotCounter}`;
 					uSlotCounter += 1;
 					slotByKey.set(key, uSlot);

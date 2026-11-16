@@ -21,6 +21,7 @@ import {
 	introspectHintFor,
 	isIntrospectSupported
 } from "./introspect/support";
+import { defined } from "../invariant";
 
 /**
  * Opérateur de compensation : à appliquer dans le runtime SNQL, au-dessus du
@@ -306,7 +307,7 @@ function assertCastTargetsSupported(
 		}
 	});
 	if (unsupported.size === 0) return;
-	const [target, span] = [...unsupported.entries()][0]!;
+	const [target, span] = defined([...unsupported.entries()][0]);
 	const message =
 		target === "json" && capabilities.engine === "mongodb"
 			? "cast(_ as json) non supporté sur mongodb — les documents Mongo sont déjà des BSON, aucun cast nécessaire"
@@ -439,7 +440,7 @@ export function assertMutationCastTargetsSupported(
 		}
 	}
 	if (unsupported.size === 0) return;
-	const [target, span] = [...unsupported.entries()][0]!;
+	const [target, span] = defined([...unsupported.entries()][0]);
 	const message =
 		target === "json" && capabilities.engine === "mongodb"
 			? "cast(_ as json) non supporté sur mongodb — les documents Mongo sont déjà des BSON, aucun cast nécessaire"
@@ -1112,7 +1113,7 @@ function assertCorrelatedSubqueryInRootExpr(
 					expr.kind === "subquery" ? expr.plan : expr.subplan;
 				const outerAliases = detectOuterAliasesInSubplan(subplan);
 				if (outerAliases.length === 0) return;
-				const first = outerAliases[0]!;
+				const first = defined(outerAliases[0]);
 				assertCorrelatedSubqueryLiftableShape(
 					subplan,
 					outerAliases,
@@ -1306,7 +1307,7 @@ function detectOuterAliasesInSubplan(subPlan: LogicalPlan): string[] {
 		switch (expr.kind) {
 			case "field":
 				if (expr.path.length > 1) {
-					const head = expr.path[0]!;
+					const head = defined(expr.path[0]);
 					if (head !== localAlias) found.add(head);
 				}
 				return;

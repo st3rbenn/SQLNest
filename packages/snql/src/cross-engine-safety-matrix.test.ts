@@ -24,7 +24,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { assertMongoRefused, pgSql, tokenize } from "./index";
+import { pgSql, tokenize } from "./index";
 import { parse } from "./index";
 import { SnqlError } from "./diagnostics";
 

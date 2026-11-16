@@ -3,6 +3,7 @@ import type { Token } from "../lexer/token";
 import type { SchemaModel } from "../schema/model";
 import type { SnqlCompletion } from "./complete-items";
 import { identAfter, type Scope } from "./complete-scope";
+import { defined } from "../invariant";
 
 /**
  * Complétion dans un document d'insertion et dans un `set` : colonnes
@@ -41,7 +42,7 @@ export function insertDocContext(
 	let depth = 0;
 	let lastOpenIdx = -1;
 	for (let i = 0; i < prefixToks.length; i += 1) {
-		const t = prefixToks[i]!;
+		const t = defined(prefixToks[i]);
 		if (t.kind === "lbrace") {
 			depth += 1;
 			lastOpenIdx = i;
@@ -84,7 +85,7 @@ export function updateSetContext(
 	if (operation !== "update" || scope.source === undefined) return null;
 	let setIdx = -1;
 	for (let i = 0; i < prefixToks.length; i += 1) {
-		const t = prefixToks[i]!;
+		const t = defined(prefixToks[i]);
 		if (t.kind === "keyword" && t.value === "set") setIdx = i;
 	}
 	if (setIdx === -1) return null;
@@ -99,7 +100,7 @@ export function updateSetContext(
 	const flushSegment = (start: number, end: number): void => {
 		// Premier ident du segment = col affectée.
 		for (let i = start; i < end; i += 1) {
-			const t = prefixToks[i]!;
+			const t = defined(prefixToks[i]);
 			if (t.kind === "ident") {
 				usedFields.add(t.value);
 				break;
@@ -107,7 +108,7 @@ export function updateSetContext(
 		}
 	};
 	for (let i = setIdx + 1; i < prefixToks.length; i += 1) {
-		if (prefixToks[i]!.kind === "comma") {
+		if (defined(prefixToks[i]).kind === "comma") {
 			flushSegment(segStart, i);
 			segStart = i + 1;
 		}
@@ -120,7 +121,7 @@ export function updateSetContext(
 	} else {
 		position = "value";
 		for (let i = segStart; i < eqIdxInLast; i += 1) {
-			const t = prefixToks[i]!;
+			const t = defined(prefixToks[i]);
 			if (t.kind === "ident") {
 				currentColumn = t.value;
 				break;
@@ -148,7 +149,7 @@ function docCursorPosition(
 	let segStart = lbraceIdx + 1;
 	let depth = 0;
 	for (let i = lbraceIdx + 1; i < toks.length; i += 1) {
-		const t = toks[i]!;
+		const t = defined(toks[i]);
 		if (t.kind === "lbrace" || t.kind === "lbracket" || t.kind === "lparen")
 			depth += 1;
 		else if (
@@ -164,7 +165,7 @@ function docCursorPosition(
 	// currentColumn = premier ident du segment (avant `:`).
 	let currentColumn: string | undefined;
 	for (let i = segStart; i < colonIdx; i += 1) {
-		const t = toks[i]!;
+		const t = defined(toks[i]);
 		if (t.kind === "ident") {
 			currentColumn = t.value;
 			break;
@@ -184,7 +185,7 @@ function collectDocKeys(
 	let depth = 0;
 	let expectingKey = true;
 	for (let i = lbraceIdx + 1; i < toks.length; i += 1) {
-		const t = toks[i]!;
+		const t = defined(toks[i]);
 		if (t.kind === "lbrace" || t.kind === "lbracket" || t.kind === "lparen") {
 			depth += 1;
 			continue;
@@ -229,7 +230,7 @@ function findLastOp(
 	value: string
 ): number {
 	for (let i = end - 1; i >= start; i -= 1) {
-		const t = toks[i]!;
+		const t = defined(toks[i]);
 		if (t.kind === "op" && t.value === value) return i;
 	}
 	return -1;

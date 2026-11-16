@@ -214,13 +214,11 @@ describe("connect — happy path", () => {
 
 		// La sig doit vérifier contre la pubkey pour le code canonique.
 		const sigBytes = Uint8Array.from(
-			// biome-ignore lint/style/noNonNullAssertion: length is even (128)
 			capturedSig
 				.match(/.{2}/g)!
 				.map((h) => Number.parseInt(h, 16))
 		);
 		const pubBytes = Uint8Array.from(
-			// biome-ignore lint/style/noNonNullAssertion: length is even (64)
 			capturedPubkey
 				.match(/.{2}/g)!
 				.map((h) => Number.parseInt(h, 16))

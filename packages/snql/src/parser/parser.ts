@@ -37,6 +37,7 @@ import {
 import { parseDelete, parseInsert, parseUpdate } from "./parser-mutation";
 import { peekIdent, peekKeyword } from "./parser-peek";
 import { parseSelect } from "./parser-select";
+import { defined } from "../invariant";
 
 export { DDL_DEFAULT_FUNCTIONS, SNQL_TYPE_ALIAS } from "./parser-ddl";
 
@@ -272,7 +273,7 @@ function parseLet(cursor: TokenCursor): LetStatement {
 			bodyStart.span
 		);
 	}
-	const lastBinding = bindings[bindings.length - 1]!;
+	const lastBinding = defined(bindings[bindings.length - 1]);
 	return {
 		operation: "let",
 		bindings,

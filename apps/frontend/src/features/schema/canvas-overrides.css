@@ -4,8 +4,8 @@
  * masquer les tables sous le rectangle en cours de dessin.
  */
 .nest-selection {
-	background: rgba(13, 153, 255, 0.08) !important;
-	border: 1px solid var(--sqlnest-accent) !important;
+	background: rgba(13, 153, 255, 0.08);
+	border: 1px solid var(--sqlnest-accent);
 }
 
 /*
@@ -95,20 +95,22 @@
  * cursor sur les tables draggables.
  */
 .canvas-tool-frame .nest-pane {
+	/* biome-ignore lint/complexity/noImportantStyles: passe devant les curseurs d'état du moteur (grab, grabbing), plus précis */
 	cursor: crosshair !important;
 }
 /* Les frames laissent passer le pointeur : un lasso commencé dans un frame
  * y dessine un sous-frame au lieu de le déplacer. */
 .canvas-tool-frame .nest-node-frame,
 .canvas-tool-frame .nest-node-frame * {
+	/* biome-ignore lint/complexity/noImportantStyles: le moteur pose `pointer-events` en style en ligne sur chaque node */
 	pointer-events: none !important;
 }
 .canvas-tool-frame .nest-selection {
 	/* Filet bleu accent pour appuyer la sémantique « frame draw » — on
 	 * réutilise `--sqlnest-accent` déjà utilisé pour la sélection normale
 	 * mais on pousse l'opacité et le trait pour distinguer visuellement. */
-	background: var(--sqlnest-accent-soft) !important;
-	border: 2px dashed var(--sqlnest-accent) !important;
+	background: var(--sqlnest-accent-soft);
+	border: 2px dashed var(--sqlnest-accent);
 }
 
 /*

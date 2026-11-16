@@ -100,7 +100,6 @@ async function createTestUser(
 	const cookie = getSessionCookie(signUp.headers);
 	if (!cookie) throw new Error("no cookie");
 	const body = signUp.json() as { user?: { id?: string } };
-	// biome-ignore lint/style/noNonNullAssertion: guarded above
 	return { cookie, userId: body.user!.id! };
 }
 
@@ -120,7 +119,6 @@ async function seedConnection(
 			engine: "postgres"
 		})
 		.returning({ id: schema.dbConnection.id });
-	// biome-ignore lint/style/noNonNullAssertion: length checked
 	return rows[0]!.id;
 }
 
@@ -139,7 +137,6 @@ async function seedSessionToken(
 			expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
 		})
 		.returning({ id: schema.tunnelSession.id });
-	// biome-ignore lint/style/noNonNullAssertion: length checked
 	return { sessionId: rows[0]!.id, token };
 }
 

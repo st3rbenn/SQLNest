@@ -3,6 +3,7 @@ import { SNQL_FUNCTIONS } from "../functions";
 import type { Expr } from "../parser/ast";
 import { stripAlias } from "./lower-columns";
 import type { PlanExpr } from "./plan";
+import { defined } from "../invariant";
 
 /**
  * Agrégats et fonctions de fenêtre : les repérer dans l'AST et refuser les
@@ -181,7 +182,7 @@ function validateInAggWrapperAst(
 			return;
 		}
 		if (expr.name === "if" && expr.args.length === 3) {
-			const condSpan = firstAggregateSpanAst(expr.args[0]!);
+			const condSpan = firstAggregateSpanAst(defined(expr.args[0]));
 			if (condSpan !== undefined) {
 				throw new SnqlError(
 					"'if(cond, …, …)' : la cond doit être scalaire per-row, pas un aggregate global",
@@ -190,13 +191,13 @@ function validateInAggWrapperAst(
 				);
 			}
 			validateInAggWrapperAst(
-				expr.args[0]!,
+				defined(expr.args[0]),
 				insideAgg,
 				groupKeySet,
 				sourceAlias
 			);
 			for (const branchIdx of [1, 2]) {
-				const branch = expr.args[branchIdx]!;
+				const branch = defined(expr.args[branchIdx]);
 				const branchAggSpan = firstAggregateSpanAst(branch);
 				if (branchAggSpan !== undefined) {
 					throw new SnqlError(
@@ -219,7 +220,7 @@ function validateInAggWrapperAst(
 		case "field": {
 			if (!insideAgg) {
 				const strippedPath = stripAlias(expr.path, sourceAlias).join(".");
-				if (groupKeySet !== undefined && groupKeySet.has(strippedPath)) {
+				if (groupKeySet?.has(strippedPath)) {
 					return;
 				}
 				const pathStr = expr.path.join(".");

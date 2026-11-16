@@ -121,7 +121,6 @@ async function createTestUser(
 	}
 	const cookie = getSessionCookie(signUp.headers);
 	const body = signUp.json() as { user?: { id?: string } };
-	// biome-ignore lint/style/noNonNullAssertion: checked above
 	return { cookie, userId: body.user!.id! };
 }
 
@@ -142,7 +141,6 @@ async function seedConnectionAndSession(
 		})
 		.returning({ id: schema.dbConnection.id });
 	const token = `tn_${Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("hex")}`;
-	// biome-ignore lint/style/noNonNullAssertion: length
 	const connectionId = conn[0]!.id;
 	const sess = await app.db
 		.insert(schema.tunnelSession)
@@ -152,7 +150,6 @@ async function seedConnectionAndSession(
 			expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
 		})
 		.returning({ id: schema.tunnelSession.id });
-	// biome-ignore lint/style/noNonNullAssertion: length
 	return { connectionId, sessionId: sess[0]!.id, token };
 }
 

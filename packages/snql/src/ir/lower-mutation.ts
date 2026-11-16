@@ -34,6 +34,7 @@ import type {
 	PlanOnConflict,
 	PlanRowValue
 } from "./plan";
+import { defined } from "../invariant";
 
 /**
  * Écritures : `add`, `update`, `remove`, upsert et `add … from <requête>`.
@@ -142,7 +143,7 @@ function lowerMutationPlan(
 		// pour un update).
 		for (const [i, a] of assignments.entries()) {
 			refuseWindowCallInPosition(
-				statement.assignments[i]!.value,
+				defined(statement.assignments[i]).value,
 				"lower_window_in_set",
 				`set ${a.column}`
 			);
@@ -576,7 +577,7 @@ function lowerOnConflict(
 	// (parité update ordinaire).
 	for (const [i, a] of loweredAssignments.entries()) {
 		refuseWindowCallInPosition(
-			clause.action.assignments[i]!.value,
+			defined(clause.action.assignments[i]).value,
 			"lower_window_in_set",
 			`on conflict edit set ${a.column}`
 		);
@@ -643,7 +644,7 @@ function rewriteUpsertNew(
 						node.span
 					);
 				}
-				const col = tail[0]!;
+				const col = defined(tail[0]);
 				if (!insertColumns.has(col)) {
 					throw new SnqlError(
 						`'new.${col}' — la colonne '${col}' n'est pas dans le document inséré`,
@@ -740,7 +741,7 @@ function lowerInsertSelect(
 	statement: InsertStatement,
 	schema: SchemaModel | undefined
 ): MutationPlan {
-	const sourceQuery = statement.sourceQuery!;
+	const sourceQuery = defined(statement.sourceQuery);
 	if (statement.onConflict !== undefined) {
 		throw new SnqlError(
 			"'add (find …) into t on conflict …' non supporté v1 — sépare l'INSERT SELECT et l'upsert.",

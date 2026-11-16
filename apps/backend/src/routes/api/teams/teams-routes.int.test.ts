@@ -85,7 +85,6 @@ async function signup(
 	}
 	const cookie = cookieOf(res.headers);
 	const body = res.json() as { user?: { id?: string } };
-	// biome-ignore lint/style/noNonNullAssertion: sign-up returns user
 	return { cookie, userId: body.user!.id! };
 }
 
@@ -413,7 +412,6 @@ describe.skipIf(!DATABASE_URL)("/api/teams routes", () => {
 			.select()
 			.from(schema.tunnelPairing)
 			.where(eq(schema.tunnelPairing.code, codeCanonical));
-		// biome-ignore lint/style/noNonNullAssertion: checked above
 		expect(pairing[0]!.teamId).toBe(t!.id);
 	});
 
@@ -465,9 +463,7 @@ describe.skipIf(!DATABASE_URL)("/api/teams routes", () => {
 				.from(schema.tunnelPairing)
 				.where(eq(schema.tunnelPairing.code, codeCanonical))
 		)[0];
-		// biome-ignore lint/style/noNonNullAssertion: checked above
 		expect(pairing!.teamId).toBe(t!.id);
-		// biome-ignore lint/style/noNonNullAssertion: checked above
 		expect(pairing!.deviceName).toBe("my-cli");
 	});
 

@@ -188,15 +188,10 @@ describe.skipIf(!DATABASE_URL)("/api/api-tokens", () => {
 				.from(schema.apiToken)
 				.where(eq(schema.apiToken.id, body.id));
 			expect(rows.length).toBe(1);
-			// biome-ignore lint/style/noNonNullAssertion: length checked
 			expect(rows[0]!.hash).toBe(hashApiToken(body.token));
-			// biome-ignore lint/style/noNonNullAssertion: length checked
 			expect(rows[0]!.userId).toBe(userId);
-			// biome-ignore lint/style/noNonNullAssertion: length checked
 			expect(rows[0]!.prefix).toBe(body.prefix);
-			// biome-ignore lint/style/noNonNullAssertion: length checked
 			expect(rows[0]!.lastUsedAt).toBeNull();
-			// biome-ignore lint/style/noNonNullAssertion: length checked
 			expect(rows[0]!.revokedAt).toBeNull();
 
 			// GARANTIE règle 2 sécu : le clair n'existe pas en DB — un scan
@@ -207,7 +202,6 @@ describe.skipIf(!DATABASE_URL)("/api/api-tokens", () => {
 				FROM api_token
 				WHERE hash = ${body.token}
 			`);
-			// biome-ignore lint/style/noNonNullAssertion: aggregate row
 			expect((clearHits[0]! as { n: number }).n).toBe(0);
 		});
 
@@ -351,13 +345,9 @@ describe.skipIf(!DATABASE_URL)("/api/api-tokens", () => {
 				}>;
 			};
 			expect(body.tokens.length).toBe(2);
-			// biome-ignore lint/style/noNonNullAssertion: length checked
 			expect(body.tokens[0]!.name).toBe("ci-2");
-			// biome-ignore lint/style/noNonNullAssertion: length checked
 			expect(body.tokens[0]!.revokedAt).not.toBeNull();
-			// biome-ignore lint/style/noNonNullAssertion: length checked
 			expect(body.tokens[1]!.name).toBe("ci-1");
-			// biome-ignore lint/style/noNonNullAssertion: length checked
 			expect(body.tokens[1]!.revokedAt).toBeNull();
 
 			// GARANTIE : le clair n'est jamais dans la réponse GET. On stringify
@@ -415,7 +405,6 @@ describe.skipIf(!DATABASE_URL)("/api/api-tokens", () => {
 				tokens: Array<{ name: string }>;
 			};
 			expect(aliceBody.tokens.length).toBe(1);
-			// biome-ignore lint/style/noNonNullAssertion: length checked
 			expect(aliceBody.tokens[0]!.name).toBe("alice-ci");
 		});
 	});
@@ -512,7 +501,6 @@ describe.skipIf(!DATABASE_URL)("/api/api-tokens", () => {
 				.select()
 				.from(schema.apiToken)
 				.where(eq(schema.apiToken.id, id));
-			// biome-ignore lint/style/noNonNullAssertion: length checked
 			expect(rows[0]!.revokedAt).toBeInstanceOf(Date);
 		});
 
@@ -565,7 +553,6 @@ describe.skipIf(!DATABASE_URL)("/api/api-tokens", () => {
 				.select()
 				.from(schema.apiToken)
 				.where(eq(schema.apiToken.id, id));
-			// biome-ignore lint/style/noNonNullAssertion: length checked
 			expect(rows[0]!.revokedAt).toBeNull();
 		});
 	});

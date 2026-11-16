@@ -55,11 +55,8 @@ describe("createApiClient — createPairing", () => {
 
 		expect(res).toEqual(payload);
 		expect(calls.length).toBe(1);
-		// biome-ignore lint/style/noNonNullAssertion: length checked
 		expect(calls[0]!.url).toBe("http://localhost:4000/api/tunnels/pairings");
-		// biome-ignore lint/style/noNonNullAssertion: length checked
 		expect(calls[0]!.init?.method).toBe("POST");
-		// biome-ignore lint/style/noNonNullAssertion: length checked
 		const body = JSON.parse(String(calls[0]!.init?.body));
 		expect(body).toEqual({ cliPubkeyEd25519: pubkey });
 	});
@@ -72,7 +69,6 @@ describe("createApiClient — createPairing", () => {
 		});
 		const api = createApiClient("http://localhost:4000//", { fetch });
 		await api.createPairing("a".repeat(64));
-		// biome-ignore lint/style/noNonNullAssertion: length checked
 		expect(calls[0]!.url).toBe("http://localhost:4000/api/tunnels/pairings");
 	});
 
@@ -101,11 +97,9 @@ describe("createApiClient — getPairingStatus", () => {
 		});
 		const api = createApiClient("http://localhost:4000", { fetch });
 		await api.getPairingStatus("ABCD-1234");
-		// biome-ignore lint/style/noNonNullAssertion: length checked
 		expect(calls[0]!.url).toBe(
 			"http://localhost:4000/api/tunnels/pairings/ABCD-1234/status"
 		);
-		// biome-ignore lint/style/noNonNullAssertion: length checked
 		expect(calls[0]!.init?.method).toBe("GET");
 	});
 
@@ -143,11 +137,9 @@ describe("createApiClient — authenticatePairing (device flow)", () => {
 		const res = await api.authenticatePairing("ABCD-1234", sig);
 
 		expect(res).toEqual(payload);
-		// biome-ignore lint/style/noNonNullAssertion: length checked
 		expect(calls[0]!.url).toBe(
 			"http://localhost:4000/api/tunnels/authenticate"
 		);
-		// biome-ignore lint/style/noNonNullAssertion: length checked
 		const body = JSON.parse(String(calls[0]!.init?.body));
 		expect(body).toEqual({ code: "ABCD-1234", signature: sig });
 	});
@@ -179,7 +171,6 @@ describe("createApiClient — authenticatePairing (device flow)", () => {
 			"b".repeat(128),
 			"postgres:9876543210/chinook"
 		);
-		// biome-ignore lint/style/noNonNullAssertion: length checked
 		const body = JSON.parse(String(calls[0]!.init?.body));
 		expect(body.dbFingerprint).toBe("postgres:9876543210/chinook");
 	});
@@ -194,7 +185,6 @@ describe("createApiClient — authenticatePairing (device flow)", () => {
 		const { fetch, calls } = mockFetchOk(payload);
 		const api = createApiClient("http://localhost:4000", { fetch });
 		await api.authenticatePairing("ABCD-1234", "b".repeat(128), null);
-		// biome-ignore lint/style/noNonNullAssertion: length checked
 		const body = JSON.parse(String(calls[0]!.init?.body));
 		expect("dbFingerprint" in body).toBe(false);
 	});
@@ -216,14 +206,11 @@ describe("createApiClient — authenticateWithToken (CI Bearer)", () => {
 		const res = await api.authenticateWithToken(bearer, pubkey, "ci-runner");
 
 		expect(res).toEqual(payload);
-		// biome-ignore lint/style/noNonNullAssertion: length checked
 		expect(calls[0]!.url).toBe(
 			"http://localhost:4000/api/tunnels/authenticate-token"
 		);
-		// biome-ignore lint/style/noNonNullAssertion: length checked
 		const headers = calls[0]!.init?.headers as Record<string, string>;
 		expect(headers.authorization).toBe(`Bearer ${bearer}`);
-		// biome-ignore lint/style/noNonNullAssertion: length checked
 		const body = JSON.parse(String(calls[0]!.init?.body));
 		expect(body).toEqual({
 			cliPubkeyEd25519: pubkey,
@@ -263,7 +250,6 @@ describe("createApiClient — authenticateWithToken (CI Bearer)", () => {
 			null,
 			"mongo:rs0/chinook"
 		);
-		// biome-ignore lint/style/noNonNullAssertion: length checked
 		const body = JSON.parse(String(calls[0]!.init?.body));
 		expect(body.dbFingerprint).toBe("mongo:rs0/chinook");
 	});
@@ -281,12 +267,9 @@ describe("createApiClient — heartbeat", () => {
 			"pg:76004321/apollon",
 			"postgres:abc123def"
 		);
-		// biome-ignore lint/style/noNonNullAssertion: length checked
 		expect(calls[0]!.url).toBe("http://localhost:4000/api/tunnels/heartbeat");
-		// biome-ignore lint/style/noNonNullAssertion: length checked
 		const headers = calls[0]!.init?.headers as Record<string, string>;
 		expect(headers.authorization).toBe(`Bearer tn_${"a".repeat(64)}`);
-		// biome-ignore lint/style/noNonNullAssertion: length checked
 		const body = JSON.parse(String(calls[0]!.init?.body));
 		expect(body).toEqual({
 			dbFingerprint: "pg:76004321/apollon",
@@ -298,7 +281,6 @@ describe("createApiClient — heartbeat", () => {
 		const { fetch, calls } = mockFetchOk({ ok: true, connectionId: "conn-2" });
 		const api = createApiClient("http://localhost:4000", { fetch });
 		await api.heartbeat(`tn_${"b".repeat(64)}`);
-		// biome-ignore lint/style/noNonNullAssertion: length checked
 		const body = JSON.parse(String(calls[0]!.init?.body));
 		expect(body).toEqual({});
 	});

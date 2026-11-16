@@ -9,13 +9,7 @@ import { compensate } from "./runtime/compensate";
 import { SnqlError } from "./diagnostics";
 import type { Capability } from "./ir/plan";
 import { SNQL_FUNCTIONS } from "./functions";
-import {
-	compile,
-	parse,
-	plan,
-	planFor,
-	tokenize
-} from "./index";
+import { compile, plan, tokenize } from "./index";
 
 // Un moteur fictif qui ne sait QUE scanner → tout le reste est compensé.
 // Pattern hérité de compensate.test.ts : garantit que la compensation

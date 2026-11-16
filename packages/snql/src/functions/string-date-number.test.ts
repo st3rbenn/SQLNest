@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from "vitest";
 import { SnqlError } from "../diagnostics";
-import { compile, getMapper, lowerMutation, parse, tokenize } from "../index";
+import { compile, lowerMutation, parse, tokenize } from "../index";
 
 function sqlOf(source: string): string {
 	const { native } = compile(source, { engine: "postgres" });

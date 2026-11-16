@@ -52,6 +52,16 @@
 		},
 		{
 			"includes": [
+				"**/*.test.ts",
+				"**/*.test.tsx",
+				"**/*.stories.tsx",
+				"**/test/**",
+				"**/test-utils/**"
+			],
+			"linter": { "rules": { "style": { "noNonNullAssertion": "off" } } }
+		},
+		{
+			"includes": [
 				"packages/snql/src/codegen/mongodb*.ts",
 				"packages/snql/src/functions/builtins.mongo.ts"
 			],

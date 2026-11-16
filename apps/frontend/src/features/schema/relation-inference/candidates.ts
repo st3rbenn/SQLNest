@@ -248,12 +248,15 @@ export function detectRelationCandidates(
 		if (carriers.every((t) => owners.includes(t))) continue;
 		const token = groupToken(columns);
 		const { reference } = pickReference(columns, owners, token);
+		const sortedOwners = owners.slice().sort();
+		const firstOwner = sortedOwners[0];
+		if (firstOwner === undefined) continue;
 		candidates.push({
 			id: `pk:${columns.join("+")}`,
 			columns,
 			carriers: [...carriers].sort(),
-			suggestedReference: reference ?? owners.slice().sort()[0]!,
-			referenceOptions: owners.slice().sort(),
+			suggestedReference: reference ?? firstOwner,
+			referenceOptions: sortedOwners,
 			anchor: "primary-key"
 		});
 	}
@@ -315,12 +318,15 @@ export function detectRelationCandidates(
 			carriers,
 			token
 		);
+		const sortedCarriers = [...carriers].sort();
+		const firstCarrier = sortedCarriers[0];
+		if (firstCarrier === undefined) continue;
 		candidates.push({
 			id: `co:${sortedColumns.join("+")}`,
 			columns: sortedColumns,
-			carriers: [...carriers].sort(),
-			suggestedReference: reference ?? [...carriers].sort()[0]!,
-			referenceOptions: options.length > 0 ? options : [...carriers].sort(),
+			carriers: sortedCarriers,
+			suggestedReference: reference ?? firstCarrier,
+			referenceOptions: options.length > 0 ? options : [...sortedCarriers],
 			anchor: matched ? "name" : "co-occurrence"
 		});
 	}

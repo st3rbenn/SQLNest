@@ -2,6 +2,7 @@ import { SnqlError } from "../diagnostics";
 import type { Expr, FieldSelection, Stage } from "../parser/ast";
 import type { SchemaModel } from "../schema/model";
 import { outerScopeStack } from "./lower-scope";
+import { defined } from "../invariant";
 
 /**
  * Contrôles des colonnes et des alias cités par une requête : alias défini,
@@ -339,16 +340,16 @@ function levenshtein(a: string, b: string): number {
 	const dp: number[] = new Array(n + 1);
 	for (let j = 0; j <= n; j += 1) dp[j] = j;
 	for (let i = 1; i <= m; i += 1) {
-		let prev = dp[0]!;
+		let prev = defined(dp[0]);
 		dp[0] = i;
 		for (let j = 1; j <= n; j += 1) {
-			const tmp = dp[j]!;
+			const tmp = defined(dp[j]);
 			dp[j] =
-				a[i - 1] === b[j - 1] ? prev : 1 + Math.min(prev, dp[j]!, dp[j - 1]!);
+				a[i - 1] === b[j - 1] ? prev : 1 + Math.min(prev, defined(dp[j]), defined(dp[j - 1]));
 			prev = tmp;
 		}
 	}
-	return dp[n]!;
+	return defined(dp[n]);
 }
 
 /** Noms de sortie d'un `pick` = alias, sinon dernier segment du chemin. */

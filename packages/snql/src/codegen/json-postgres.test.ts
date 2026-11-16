@@ -21,16 +21,6 @@ function mutation(source: string): { text: string; params: readonly unknown[] } 
 	return { text: nat.text, params: nat.params };
 }
 
-function expectCode(fn: () => unknown, code: string): void {
-	try {
-		fn();
-		throw new Error(`SnqlError attendu avec code=${code}`);
-	} catch (e) {
-		if (!(e instanceof SnqlError)) throw e;
-		expect(e.code).toBe(code);
-	}
-}
-
 describe("PG json_get — chain -> + cast per-segment", () => {
 	it('json_get(meta, "role") single key', () => {
 		expect(sql('find t pick json_get(meta, "role") as r').text).toBe(
