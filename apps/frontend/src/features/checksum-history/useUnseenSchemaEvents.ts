@@ -1,6 +1,7 @@
 import { useLocalStorage } from "@mantine/hooks";
 import { useQuery } from "@tanstack/react-query";
 import { useCallback } from "react";
+import { connectionKey } from "../storage/localStore";
 import { fetchChecksumHistory } from "./checksumHistoryClient";
 
 /**
@@ -26,9 +27,7 @@ export function useUnseenSchemaEvents(
 	readonly capped: boolean;
 	readonly markSeen: () => void;
 } {
-	const storageKey = connectionId
-		? `sqlnest:schemaEvents:lastSeenAt:${connectionId}`
-		: "sqlnest:schemaEvents:lastSeenAt:_null";
+	const storageKey = connectionKey("schemaEvents:lastSeenAt", connectionId);
 	const [lastSeenAt, setLastSeenAt] = useLocalStorage<string>({
 		key: storageKey,
 		// Première visite = aucun événement compté (l'user vient d'arriver

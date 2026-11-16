@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { readJson, schemaSliceKey, writeJson } from "../storage/localStore";
 import type { SchemaModel } from "./schema-model";
 
 export interface TableSize {
@@ -14,12 +15,7 @@ export type SizesMap = Readonly<Record<string, TableSize>>;
  * base → pas de collision, on repart avec les dimensions par défaut.
  */
 function schemaKey(schema: SchemaModel): string {
-	const names = schema.collections
-		.map((c) => c.name)
-		.slice()
-		.sort()
-		.join(",");
-	return `sqlnest:sizes:${schema.engine}:${names}`;
+	return schemaSliceKey("sizes", schema);
 }
 
 export interface SizesApi {
@@ -36,14 +32,7 @@ export interface SizesApi {
  * plusieurs cartes).
  */
 function loadSizes(key: string): SizesMap {
-	if (typeof window === "undefined") return {};
-	try {
-		const raw = window.localStorage.getItem(key);
-		if (raw !== null) return JSON.parse(raw) as SizesMap;
-	} catch {
-		/* storage indispo / JSON corrompu */
-	}
-	return {};
+	return (readJson(key) as SizesMap | null | undefined) ?? {};
 }
 
 export interface UseTableSizesOptions {
@@ -81,13 +70,8 @@ export function useTableSizes(
 	// Skip complet quand persistLocal=false (loggé, server-only).
 	useEffect(() => {
 		if (!persistLocal) return;
-		if (typeof window === "undefined") return;
 		if (loadedKey.current !== key) return;
-		try {
-			window.localStorage.setItem(key, JSON.stringify(sizes));
-		} catch {
-			/* quota / private mode */
-		}
+		writeJson(key, sizes);
 	}, [key, sizes, persistLocal]);
 
 	const setSize = useCallback((name: string, size: TableSize) => {

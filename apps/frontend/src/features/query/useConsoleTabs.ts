@@ -5,7 +5,8 @@
  * dans la tab bar en badge.
  *
  * Persistance :
- *   clé `sqlnest.console.tabs.<connId>[.<scopeSuffix>]` → `{ tabs, activeTabId }`
+ *   tranche `console-tabs` de la connexion, suffixée par `scopeSuffix`
+ *   → `{ tabs, activeTabId }`
  *
  * Le `scopeSuffix` (optionnel) permet d'isoler plusieurs consoles sur
  * la même connexion — utile quand la console vit dans un node canvas et
@@ -19,6 +20,7 @@
 
 import { useLocalStorage } from "@mantine/hooks";
 import { useCallback } from "react";
+import { connectionKey } from "../storage/localStore";
 
 export interface ConsoleTabLastResult {
 	readonly rowCount: number;
@@ -55,6 +57,14 @@ function makeDefaultState(): ConsoleState {
 	return { tabs: [first], activeTabId: first.id };
 }
 
+/** Clé des onglets d'une console : celle de la connexion, ou d'un node (`scopeSuffix`). */
+export function consoleTabsKey(
+	connectionId: string,
+	scopeSuffix?: string
+): string {
+	return connectionKey("console-tabs", connectionId, scopeSuffix);
+}
+
 export interface UseConsoleTabsApi {
 	readonly state: ConsoleState;
 	readonly activeTab: ConsoleTab;
@@ -71,12 +81,8 @@ export function useConsoleTabs(
 	connectionId: string,
 	scopeSuffix?: string
 ): UseConsoleTabsApi {
-	const storageKey =
-		scopeSuffix !== undefined && scopeSuffix !== ""
-			? `sqlnest.console.tabs.${connectionId}.${scopeSuffix}`
-			: `sqlnest.console.tabs.${connectionId}`;
 	const [state, setState] = useLocalStorage<ConsoleState>({
-		key: storageKey,
+		key: consoleTabsKey(connectionId, scopeSuffix),
 		defaultValue: makeDefaultState(),
 		getInitialValueInEffect: false
 	});

@@ -1,8 +1,9 @@
 import { useSyncExternalStore } from "react";
+import { readJson, storageKeys, writeJson } from "../storage/localStore";
 
 /**
  * MRU des db_connections ouvertes récemment. Persiste dans localStorage
- * (clé `sqlnest:recent-connections` → JSON array d'ids, ordre MRU, max 10).
+ * (clé `storageKeys.recentConnections` → JSON array d'ids, ordre MRU, max 10).
  *
  * Storage LOCAL uniquement — pas de round-trip backend. Chaque device a
  * son propre historique (cohérent avec la sémantique "ouvertes RÉCEMMENT
@@ -15,7 +16,7 @@ import { useSyncExternalStore } from "react";
  *  - `clearRecentConnections()` : reset (settings future)
  */
 
-const STORAGE_KEY = "sqlnest:recent-connections";
+const STORAGE_KEY = storageKeys.recentConnections;
 const MAX_ENTRIES = 10;
 
 // Event bus in-process pour que useSyncExternalStore réagisse aux appels
@@ -24,25 +25,13 @@ const MAX_ENTRIES = 10;
 const listeners = new Set<() => void>();
 
 function readStorage(): readonly string[] {
-	if (typeof window === "undefined") return [];
-	try {
-		const raw = window.localStorage.getItem(STORAGE_KEY);
-		if (!raw) return [];
-		const parsed = JSON.parse(raw) as unknown;
-		if (!Array.isArray(parsed)) return [];
-		return parsed.filter((v): v is string => typeof v === "string");
-	} catch {
-		return [];
-	}
+	const parsed = readJson(STORAGE_KEY);
+	if (!Array.isArray(parsed)) return [];
+	return parsed.filter((v): v is string => typeof v === "string");
 }
 
 function writeStorage(ids: readonly string[]): void {
-	if (typeof window === "undefined") return;
-	try {
-		window.localStorage.setItem(STORAGE_KEY, JSON.stringify(ids));
-	} catch {
-		// Ignore quota / privacy mode — la MRU est nice-to-have.
-	}
+	writeJson(STORAGE_KEY, ids);
 }
 
 function notify(): void {

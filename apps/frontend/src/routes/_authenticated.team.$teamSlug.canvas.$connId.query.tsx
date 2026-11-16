@@ -11,6 +11,7 @@
  */
 
 import { createFileRoute } from "@tanstack/react-router";
+import { requireConnectionId } from "../features/db-connections/connectionRoute";
 import { ConsolePage } from "../features/query/ConsolePage";
 
 interface QuerySearch {
@@ -37,6 +38,7 @@ export const Route = createFileRoute(
 	"/_authenticated/team/$teamSlug/canvas/$connId/query"
 )({
 	validateSearch,
+	beforeLoad: ({ params }) => requireConnectionId(params),
 	component: TeamQueryPage
 });
 

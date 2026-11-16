@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Side } from "./edgeRouting";
+import { readJson, schemaSliceKey, writeJson } from "../storage/localStore";
 import type { SchemaModel } from "./schema-model";
 
 export interface EdgeAnchor {
@@ -15,12 +16,7 @@ export type AnchorMap = Readonly<Record<string, EdgeAnchor>>;
  * nouvelle base (structure différente) → pas de collision, on repart à zéro.
  */
 function schemaKey(schema: SchemaModel): string {
-	const names = schema.collections
-		.map((c) => c.name)
-		.slice()
-		.sort()
-		.join(",");
-	return `sqlnest:edge-anchors:${schema.engine}:${names}`;
+	return schemaSliceKey("edge-anchors", schema);
 }
 
 export interface AnchorsApi {
@@ -56,25 +52,13 @@ export function useEdgeAnchors(
 	const key = schemaKey(schema);
 	const [overrides, setOverrides] = useState<AnchorMap>(() => {
 		if (!persistLocal) return {};
-		if (typeof window === "undefined") return {};
-		try {
-			const raw = window.localStorage.getItem(key);
-			if (raw !== null) return JSON.parse(raw) as AnchorMap;
-		} catch {
-			/* storage indispo / JSON corrompu */
-		}
-		return {};
+		return (readJson(key) as AnchorMap | null | undefined) ?? {};
 	});
 
 	// Persist à chaque mutation — skip complet en mode server-only.
 	useEffect(() => {
 		if (!persistLocal) return;
-		if (typeof window === "undefined") return;
-		try {
-			window.localStorage.setItem(key, JSON.stringify(overrides));
-		} catch {
-			/* quota / private mode */
-		}
+		writeJson(key, overrides);
 	}, [key, overrides, persistLocal]);
 
 	// Re-seed quand la signature change (nouvelle base).
@@ -82,17 +66,7 @@ export function useEdgeAnchors(
 		// Connecté, l'état appartient à la connexion : une table créée ou
 		// supprimée ne le vide pas (le canvas n'est plus remonté, ADR-039 D5).
 		if (!persistLocal) return;
-		if (typeof window === "undefined") return;
-		const raw = window.localStorage.getItem(key);
-		if (raw !== null) {
-			try {
-				setOverrides(JSON.parse(raw) as AnchorMap);
-				return;
-			} catch {
-				/* fallthrough */
-			}
-		}
-		setOverrides({});
+		setOverrides((readJson(key) as AnchorMap | null | undefined) ?? {});
 	}, [key, persistLocal]);
 
 	const setOverride = useCallback(

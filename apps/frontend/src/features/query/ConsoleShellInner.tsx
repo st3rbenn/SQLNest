@@ -36,6 +36,7 @@ import {
 	useRef,
 	useState
 } from "react";
+import { storageKeys } from "../storage/localStore";
 import { useDbConnections } from "../db-connections/useDbConnections";
 import { useConsolePersistence } from "../schema/console/useConsolePersistence";
 import { useSchema } from "../schema/useSchema";
@@ -75,7 +76,6 @@ function isSerializedSpan(value: unknown): value is SerializedSpan {
 	);
 }
 
-const SPLIT_STORAGE_KEY = "sqlnest.console.editorHeight";
 const SPLIT_MIN_TOP = 120;
 const SPLIT_MIN_BOTTOM = 200;
 const SPLIT_DEFAULT = 220;
@@ -184,7 +184,7 @@ export function ConsoleShellInner({
 	// Split resize state (persisted, partagé entre toutes les instances —
 	// c'est un préférence globale de layout console, pas per-instance).
 	const [editorHeight, setEditorHeight] = useLocalStorage<number>({
-		key: SPLIT_STORAGE_KEY,
+		key: storageKeys.consoleEditorHeight,
 		defaultValue: SPLIT_DEFAULT,
 		getInitialValueInEffect: false
 	});

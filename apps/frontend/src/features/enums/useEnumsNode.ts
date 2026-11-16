@@ -11,7 +11,6 @@ import {
 	type SystemEnumsNodeType
 } from "./SystemEnumsNode";
 
-const STORAGE_PREFIX = "sqlnest:systemNode:enums:";
 const DEFAULT_GEOM: SystemNodeGeom = {
 	// Décalé sous le node schema_events (40,40) pour ne pas se superposer
 	// au premier rendu — l'user replace ensuite, position persistée.
@@ -41,7 +40,7 @@ export function useEnumsNode(
 } {
 	const geomApi = useSystemNodeGeom<SystemEnumsNodeType>(
 		connectionId,
-		STORAGE_PREFIX,
+		"systemNode:enums",
 		DEFAULT_GEOM,
 		(geom) => ({
 			id: ENUMS_NODE_ID,

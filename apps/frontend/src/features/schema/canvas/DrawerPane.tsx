@@ -8,11 +8,11 @@ import { SchemaTree } from "../SchemaTree";
 import type { SchemaModel } from "../schema-model";
 import { TableDetails } from "../table-details";
 import type { useFrames } from "../useFrames";
+import { readText, storageKeys, writeText } from "../../storage/localStore";
 
 const DRAWER_MIN_WIDTH = 260;
 const DRAWER_MAX_WIDTH = 600;
 const DRAWER_DEFAULT_WIDTH = 320;
-const DRAWER_STORAGE_KEY = "sqlnest:leftDrawer:width";
 
 interface ResizableDrawerHandleProps {
 	readonly onPointerDown: (e: React.PointerEvent<HTMLDivElement>) => void;
@@ -32,19 +32,13 @@ export function useResizableDrawer(): {
 	readonly handleProps: ResizableDrawerHandleProps;
 } {
 	const [width, setWidth] = useState<number>(() => {
-		if (typeof window === "undefined") return DRAWER_DEFAULT_WIDTH;
-		const raw = window.localStorage.getItem(DRAWER_STORAGE_KEY);
+		const raw = readText(storageKeys.leftDrawerWidth);
 		const parsed = raw !== null ? Number.parseInt(raw, 10) : Number.NaN;
 		if (!Number.isFinite(parsed)) return DRAWER_DEFAULT_WIDTH;
 		return Math.min(DRAWER_MAX_WIDTH, Math.max(DRAWER_MIN_WIDTH, parsed));
 	});
 	useEffect(() => {
-		if (typeof window === "undefined") return;
-		try {
-			window.localStorage.setItem(DRAWER_STORAGE_KEY, String(width));
-		} catch {
-			/* quota / private mode — no-op */
-		}
+		writeText(storageKeys.leftDrawerWidth, String(width));
 	}, [width]);
 
 	const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);

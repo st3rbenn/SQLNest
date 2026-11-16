@@ -14,6 +14,8 @@ import "@sqlnest/canvas/style.css";
 import "./canvas-overrides.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useCurrentUser } from "../auth/sessionQuery";
+import { consoleTabsKey } from "../query/useConsoleTabs";
+import { purgeSchemaSlices, writeJson } from "../storage/localStore";
 import type { CanvasTool } from "./CanvasToolbar";
 import {
 	type CanvasContextMenuState,
@@ -202,26 +204,10 @@ function CanvasInner({
 	const persistLocal = session?.user == null;
 	const hookOpts = useMemo(() => ({ persistLocal }), [persistLocal]);
 
-	// Purge des entrées `sqlnest:*:*` des slices canvas dès qu'on détecte
-	// un user loggé. Sans ça, les keys anonymes restent sur disque et
-	// peuvent réapparaître à un logout futur ou à un swap de compte.
+	// Connecté : les tranches écrites hors connexion sont retirées, sans quoi
+	// elles reviendraient à la prochaine déconnexion ou sous un autre compte.
 	useEffect(() => {
-		if (persistLocal) return;
-		if (typeof window === "undefined") return;
-		const prefixes = [
-			"sqlnest:positions:",
-			"sqlnest:sizes:",
-			"sqlnest:frames:",
-			"sqlnest:edge-anchors:"
-		];
-		try {
-			const stale = Object.keys(window.localStorage).filter((k) =>
-				prefixes.some((p) => k.startsWith(p))
-			);
-			for (const k of stale) window.localStorage.removeItem(k);
-		} catch {
-			/* quota / private mode */
-		}
+		if (!persistLocal) purgeSchemaSlices();
 	}, [persistLocal]);
 
 	const tablePositions = useTablePositions(schema, hookOpts);
@@ -677,9 +663,8 @@ function CanvasInner({
 	// Sprint EN : node système « Enums » — rend `schema.enums` visible (un
 	// enum n'est pas une table, il était invisible au canvas). L'action
 	// « + membre » ouvre une console au centre pré-remplie `add enum member
-	// <name> ""` : on seed la clé localStorage des tabs
-	// (`sqlnest.console.tabs.<connId>.<nodeId>`) juste après `create()` —
-	// `useConsoleTabs` la lit au mount du shell, la console s'ouvre remplie.
+	// <name> ""` : on seed les onglets du node juste après `create()` —
+	// `useConsoleTabs` les lit au mount du shell, la console s'ouvre remplie.
 	const seedConsoleWithSource = useCallback(
 		(source: string) => {
 			const pt = viewCenter();
@@ -688,22 +673,15 @@ function CanvasInner({
 				x: pt.x - CONSOLE_NODE_DEFAULT_WIDTH / 2,
 				y: pt.y - CONSOLE_NODE_DEFAULT_HEIGHT / 2
 			});
-			try {
-				const tabId =
-					typeof crypto !== "undefined" &&
-					typeof crypto.randomUUID === "function"
-						? crypto.randomUUID()
-						: `tab-${Math.random().toString(36).slice(2, 10)}`;
-				window.localStorage.setItem(
-					`sqlnest.console.tabs.${connectionId}.${nodeId}`,
-					JSON.stringify({
-						tabs: [{ id: tabId, name: "Sans titre", source }],
-						activeTabId: tabId
-					})
-				);
-			} catch {
-				// quota / private mode — la console s'ouvre vide, pas bloquant.
-			}
+			const tabId =
+				typeof crypto !== "undefined" &&
+				typeof crypto.randomUUID === "function"
+					? crypto.randomUUID()
+					: `tab-${Math.random().toString(36).slice(2, 10)}`;
+			writeJson(consoleTabsKey(connectionId, nodeId), {
+				tabs: [{ id: tabId, name: "Sans titre", source }],
+				activeTabId: tabId
+			});
 		},
 		[viewCenter, consoleNodes, connectionId]
 	);

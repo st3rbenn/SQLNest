@@ -10,9 +10,6 @@ import {
 	type SystemSchemaEventsNodeType
 } from "./SystemSchemaEventsNode";
 
-// Préfixe historique conservé tel quel — les positions déjà persistées des
-// users ne doivent pas être perdues par le refactor vers useSystemNodeGeom.
-const STORAGE_PREFIX = "sqlnest:systemNode:schemaEvents:";
 const DEFAULT_GEOM: SystemNodeGeom = {
 	position: { x: 40, y: 40 },
 	width: SYSTEM_TABLE_DEFAULT_WIDTH,
@@ -38,7 +35,7 @@ export function useSchemaEventsNode(
 } {
 	const geomApi = useSystemNodeGeom<SystemSchemaEventsNodeType>(
 		connectionId,
-		STORAGE_PREFIX,
+		"systemNode:schemaEvents",
 		DEFAULT_GEOM,
 		(geom) => ({
 			id: SYSTEM_TABLE_ID,

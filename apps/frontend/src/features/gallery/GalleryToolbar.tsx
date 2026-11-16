@@ -10,7 +10,7 @@
  *    `light` sur l'actif) — identique au CanvasToolbar du canvas view.
  *
  * Choix persistés dans localStorage via `useLocalStorage`
- * (@mantine/hooks) — clés `sqlnest.gallery.sort` / `.view`
+ * (@mantine/hooks) — clés `storageKeys.gallerySort` / `.galleryView`,
  * device-scoped, rien côté backend.
  */
 

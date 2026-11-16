@@ -26,6 +26,7 @@ import {
 } from "@tabler/icons-react";
 import type { CSSProperties } from "react";
 import { useMemo, useState } from "react";
+import { storageKeys } from "../storage/localStore";
 import { ErrorBlock } from "./ErrorBlock";
 import { ResultsGraphPlaceholder } from "./ResultsGraphPlaceholder";
 import { ResultsJsonView } from "./ResultsJsonView";
@@ -41,8 +42,6 @@ import {
 
 export type ResultsViewMode = "table" | "json" | "graph" | "plan";
 
-const VIEW_STORAGE_KEY = "sqlnest.console.results.view";
-const PAGE_SIZE_STORAGE_KEY = "sqlnest.console.results.pageSize";
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 250, 500] as const;
 
 const containerStyle: CSSProperties = {
@@ -171,12 +170,12 @@ export function ConsoleResultsPanel({
 	readonly schema?: SchemaModel | undefined;
 }): React.ReactNode {
 	const [viewMode, setViewMode] = useLocalStorage<ResultsViewMode>({
-		key: VIEW_STORAGE_KEY,
+		key: storageKeys.consoleResultsView,
 		defaultValue: "table",
 		getInitialValueInEffect: false
 	});
 	const [pageSize, setPageSize] = useLocalStorage<number>({
-		key: PAGE_SIZE_STORAGE_KEY,
+		key: storageKeys.consoleResultsPageSize,
 		defaultValue: 50,
 		getInitialValueInEffect: false
 	});

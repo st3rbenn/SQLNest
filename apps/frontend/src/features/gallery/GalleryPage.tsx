@@ -6,6 +6,7 @@ import {
 	useDbConnections
 } from "../db-connections/useDbConnections";
 import { useRecentConnectionIds } from "../db-connections/useRecentConnections";
+import { storageKeys } from "../storage/localStore";
 import { useCurrentTeam } from "../teams/useCurrentTeam";
 import { DbCard } from "./DbCard";
 import { DbRow } from "./DbRow";
@@ -118,8 +119,6 @@ const VIEW_TITLES: Record<GalleryView, string> = {
 	recents: "Récents"
 };
 
-const SORT_STORAGE_KEY = "sqlnest.gallery.sort";
-const VIEW_STORAGE_KEY = "sqlnest.gallery.view";
 
 function sortConnections(
 	items: readonly DbConnection[],
@@ -165,12 +164,12 @@ export function GalleryPage({
 	// Préférences user (sort + view mode) persistées device-scoped.
 	// Défauts : nom A→Z + grille pour matcher le comportement pré-toolbar.
 	const [sort, setSort] = useLocalStorage<CanvasSortKey>({
-		key: SORT_STORAGE_KEY,
+		key: storageKeys.gallerySort,
 		defaultValue: "name-asc",
 		getInitialValueInEffect: false
 	});
 	const [viewMode, setViewMode] = useLocalStorage<CanvasViewMode>({
-		key: VIEW_STORAGE_KEY,
+		key: storageKeys.galleryView,
 		defaultValue: "grid",
 		getInitialValueInEffect: false
 	});

@@ -7,7 +7,7 @@
  * résultat sont gérés par `useConsoleTabs(connId, nodeId)` à l'intérieur
  * de chaque node (scope suffix = nodeId → tabs isolés par node).
  *
- * Persistance : localStorage `sqlnest:console-nodes:<connId>` →
+ * Persistance : tranche `console-nodes` de la connexion →
  * `ConsoleNodeGeom[]`. Pas encore branché sur canvas_state serveur.
  *
  * Les geometries console sont locales au device (comme les tabs), l'user
@@ -16,6 +16,13 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { consoleTabsKey } from "../../query/useConsoleTabs";
+import {
+	connectionKey,
+	readJson,
+	removeKey,
+	writeJson
+} from "../../storage/localStore";
 
 export interface ConsoleNodeGeom {
 	readonly id: string;
@@ -30,37 +37,26 @@ export const CONSOLE_NODE_MIN_WIDTH = 380;
 export const CONSOLE_NODE_MIN_HEIGHT = 240;
 
 function storageKey(connectionId: string): string {
-	return `sqlnest:console-nodes:${connectionId}`;
+	return connectionKey("console-nodes", connectionId);
 }
 
 function loadFromStorage(connectionId: string): ConsoleNodeGeom[] {
-	if (typeof window === "undefined") return [];
-	try {
-		const raw = window.localStorage.getItem(storageKey(connectionId));
-		if (raw == null) return [];
-		const parsed = JSON.parse(raw) as unknown;
-		if (!Array.isArray(parsed)) return [];
-		return parsed.filter(
-			(x): x is ConsoleNodeGeom =>
-				typeof x === "object" &&
-				x !== null &&
-				typeof (x as { id?: unknown }).id === "string" &&
-				typeof (x as { width?: unknown }).width === "number" &&
-				typeof (x as { height?: unknown }).height === "number" &&
-				typeof (x as { position?: { x?: unknown; y?: unknown } }).position === "object"
-		);
-	} catch {
-		return [];
-	}
+	const parsed = readJson(storageKey(connectionId));
+	if (!Array.isArray(parsed)) return [];
+	return parsed.filter(
+		(x): x is ConsoleNodeGeom =>
+			typeof x === "object" &&
+			x !== null &&
+			typeof (x as { id?: unknown }).id === "string" &&
+			typeof (x as { width?: unknown }).width === "number" &&
+			typeof (x as { height?: unknown }).height === "number" &&
+			typeof (x as { position?: { x?: unknown; y?: unknown } }).position ===
+				"object"
+	);
 }
 
 function saveToStorage(connectionId: string, geoms: readonly ConsoleNodeGeom[]): void {
-	if (typeof window === "undefined") return;
-	try {
-		window.localStorage.setItem(storageKey(connectionId), JSON.stringify(geoms));
-	} catch {
-		/* quota / private mode */
-	}
+	writeJson(storageKey(connectionId), geoms);
 }
 
 function makeId(): string {
@@ -171,15 +167,7 @@ export function useConsoleNodes(connectionId: string): UseConsoleNodesApi {
 			// Clean les tabs orphelins de ce node — sans ça, un user qui
 			// recrée un node avec un id différent laisse des tabs pouvant
 			// accumuler indéfiniment dans localStorage.
-			if (typeof window !== "undefined") {
-				try {
-					window.localStorage.removeItem(
-						`sqlnest.console.tabs.${connectionId}.${id}`
-					);
-				} catch {
-					/* quota / private mode */
-				}
-			}
+			removeKey(consoleTabsKey(connectionId, id));
 		},
 		[connectionId]
 	);

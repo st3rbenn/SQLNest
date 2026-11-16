@@ -8,6 +8,10 @@ import { useConsolePersistence } from "./useConsolePersistence";
  */
 
 const GLOBAL_KEY = "sqlnest:canvas-console:history";
+const CONN_1 = "11111111-1111-4111-8111-111111111111";
+const CONN_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const CONN_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const CONN_42 = "42424242-4242-4242-8242-424242424242";
 function connKey(id: string): string {
 	return `${GLOBAL_KEY}:${id}`;
 }
@@ -19,7 +23,7 @@ beforeEach(() => {
 describe("useConsolePersistence — addHistory + HistoryEntry", () => {
 	it("addHistory sans meta → entry {source} seulement", () => {
 		const { result } = renderHook(() =>
-			useConsolePersistence("postgres", "conn-1")
+			useConsolePersistence("postgres", CONN_1)
 		);
 		act(() => result.current.addHistory("find users pick id"));
 		expect(result.current.history).toHaveLength(1);
@@ -28,7 +32,7 @@ describe("useConsolePersistence — addHistory + HistoryEntry", () => {
 
 	it("addHistory avec written=true → entry a le flag", () => {
 		const { result } = renderHook(() =>
-			useConsolePersistence("postgres", "conn-1")
+			useConsolePersistence("postgres", CONN_1)
 		);
 		act(() =>
 			result.current.addHistory("update users set active = false where id = 1", {
@@ -45,7 +49,7 @@ describe("useConsolePersistence — addHistory + HistoryEntry", () => {
 
 	it("addHistory avec rolledBack=true → tracer le rollback", () => {
 		const { result } = renderHook(() =>
-			useConsolePersistence("postgres", "conn-1")
+			useConsolePersistence("postgres", CONN_1)
 		);
 		act(() =>
 			result.current.addHistory("transaction { remove from users }", {
@@ -61,7 +65,7 @@ describe("useConsolePersistence — addHistory + HistoryEntry", () => {
 
 	it("dédup par source — le récent l'emporte en tête + met à jour meta", () => {
 		const { result } = renderHook(() =>
-			useConsolePersistence("postgres", "conn-1")
+			useConsolePersistence("postgres", CONN_1)
 		);
 		act(() => result.current.addHistory("find users pick id"));
 		act(() =>
@@ -77,10 +81,10 @@ describe("useConsolePersistence — addHistory + HistoryEntry", () => {
 describe("useConsolePersistence — scoping per-connection (D9)", () => {
 	it("conn-A et conn-B ont des histories séparés", () => {
 		const { result: a } = renderHook(() =>
-			useConsolePersistence("postgres", "conn-A")
+			useConsolePersistence("postgres", CONN_A)
 		);
 		const { result: b } = renderHook(() =>
-			useConsolePersistence("postgres", "conn-B")
+			useConsolePersistence("postgres", CONN_B)
 		);
 		act(() => a.current.addHistory("query for conn A"));
 		act(() => b.current.addHistory("query for conn B"));
@@ -99,10 +103,10 @@ describe("useConsolePersistence — scoping per-connection (D9)", () => {
 
 	it("connectionId présent → clé scopée `history:<id>`", () => {
 		const { result } = renderHook(() =>
-			useConsolePersistence("postgres", "conn-42")
+			useConsolePersistence("postgres", CONN_42)
 		);
 		act(() => result.current.addHistory("scoped query"));
-		const raw = window.localStorage.getItem(connKey("conn-42"));
+		const raw = window.localStorage.getItem(connKey(CONN_42));
 		expect(raw).toContain("scoped query");
 		expect(window.localStorage.getItem(GLOBAL_KEY)).toBeNull();
 	});
@@ -111,11 +115,11 @@ describe("useConsolePersistence — scoping per-connection (D9)", () => {
 describe("useConsolePersistence — migration soft old string[] → HistoryEntry[]", () => {
 	it("Load anciennes entries string dans localStorage → upgrade en {source}", () => {
 		window.localStorage.setItem(
-			connKey("conn-1"),
+			connKey(CONN_1),
 			JSON.stringify(["find old query 1", "find old query 2"])
 		);
 		const { result } = renderHook(() =>
-			useConsolePersistence("postgres", "conn-1")
+			useConsolePersistence("postgres", CONN_1)
 		);
 		expect(result.current.history).toEqual([
 			{ source: "find old query 1" },
@@ -125,14 +129,14 @@ describe("useConsolePersistence — migration soft old string[] → HistoryEntry
 
 	it("Mix string + HistoryEntry → tout est normalisé HistoryEntry", () => {
 		window.localStorage.setItem(
-			connKey("conn-1"),
+			connKey(CONN_1),
 			JSON.stringify([
 				"legacy string",
 				{ source: "already object", written: true, rolledBack: false }
 			])
 		);
 		const { result } = renderHook(() =>
-			useConsolePersistence("postgres", "conn-1")
+			useConsolePersistence("postgres", CONN_1)
 		);
 		expect(result.current.history[0]).toEqual({ source: "legacy string" });
 		expect(result.current.history[1]).toMatchObject({
@@ -143,16 +147,16 @@ describe("useConsolePersistence — migration soft old string[] → HistoryEntry
 	});
 
 	it("JSON corrompu → history vide (safe fallback)", () => {
-		window.localStorage.setItem(connKey("conn-1"), "{not json");
+		window.localStorage.setItem(connKey(CONN_1), "{not json");
 		const { result } = renderHook(() =>
-			useConsolePersistence("postgres", "conn-1")
+			useConsolePersistence("postgres", CONN_1)
 		);
 		expect(result.current.history).toEqual([]);
 	});
 
 	it("Entry sans source valide → filtrée", () => {
 		window.localStorage.setItem(
-			connKey("conn-1"),
+			connKey(CONN_1),
 			JSON.stringify([
 				{ source: "ok" },
 				{ noSource: true },
@@ -161,7 +165,7 @@ describe("useConsolePersistence — migration soft old string[] → HistoryEntry
 			])
 		);
 		const { result } = renderHook(() =>
-			useConsolePersistence("postgres", "conn-1")
+			useConsolePersistence("postgres", CONN_1)
 		);
 		expect(result.current.history).toEqual([{ source: "ok" }]);
 	});
@@ -170,7 +174,7 @@ describe("useConsolePersistence — migration soft old string[] → HistoryEntry
 describe("useConsolePersistence — clearHistory", () => {
 	it("clearHistory vide le state + localStorage de la clé courante", () => {
 		const { result } = renderHook(() =>
-			useConsolePersistence("postgres", "conn-1")
+			useConsolePersistence("postgres", CONN_1)
 		);
 		act(() => result.current.addHistory("a"));
 		act(() => result.current.addHistory("b"));

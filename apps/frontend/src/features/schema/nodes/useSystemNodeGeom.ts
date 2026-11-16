@@ -1,5 +1,11 @@
 import { type Node, useNodesState } from "@sqlnest/canvas";
 import { useCallback, useEffect, useMemo, useRef } from "react";
+import {
+	type ConnectionSlice,
+	connectionKey,
+	readJson,
+	writeJson
+} from "../../storage/localStore";
 import { SYSTEM_NODE_CLASS } from "./SystemNodeShell";
 
 /**
@@ -17,39 +23,27 @@ export interface SystemNodeGeom {
 }
 
 function loadGeom(key: string, fallback: SystemNodeGeom): SystemNodeGeom {
-	if (typeof window === "undefined") return fallback;
-	try {
-		const raw = window.localStorage.getItem(key);
-		if (raw === null) return fallback;
-		const parsed = JSON.parse(raw) as unknown;
+	const parsed = readJson(key);
+	if (
+		typeof parsed === "object" &&
+		parsed !== null &&
+		typeof (parsed as { position?: unknown }).position === "object" &&
+		typeof (parsed as { width?: unknown }).width === "number" &&
+		typeof (parsed as { height?: unknown }).height === "number"
+	) {
+		const p = parsed as SystemNodeGeom;
 		if (
-			typeof parsed === "object" &&
-			parsed !== null &&
-			typeof (parsed as { position?: unknown }).position === "object" &&
-			typeof (parsed as { width?: unknown }).width === "number" &&
-			typeof (parsed as { height?: unknown }).height === "number"
+			typeof p.position?.x === "number" &&
+			typeof p.position?.y === "number"
 		) {
-			const p = parsed as SystemNodeGeom;
-			if (
-				typeof p.position?.x === "number" &&
-				typeof p.position?.y === "number"
-			) {
-				return p;
-			}
+			return p;
 		}
-	} catch {
-		/* JSON malformé — retombe sur le défaut */
 	}
 	return fallback;
 }
 
 function saveGeom(key: string, geom: SystemNodeGeom): void {
-	if (typeof window === "undefined") return;
-	try {
-		window.localStorage.setItem(key, JSON.stringify(geom));
-	} catch {
-		/* quota / private mode — perte de position acceptable */
-	}
+	writeJson(key, geom);
 }
 
 export interface UseSystemNodeGeomApi<TNode extends Node> {
@@ -64,18 +58,18 @@ export interface UseSystemNodeGeomApi<TNode extends Node> {
 }
 
 /**
- * State + persistence d'UN node système. `storagePrefix` est suffixé par
- * `connectionId` (clé stable par canvas). `build` construit le node initial
+ * State + persistence d'UN node système, dans la tranche `slice` de la
+ * connexion (clé stable par canvas). `build` construit le node initial
  * depuis la géométrie chargée — appelé au mount et au changement de
  * connection (reset, pour ne pas trainer la géométrie du canvas précédent).
  */
 export function useSystemNodeGeom<TNode extends Node>(
 	connectionId: string,
-	storagePrefix: string,
+	slice: ConnectionSlice,
 	defaults: SystemNodeGeom,
 	build: (geom: SystemNodeGeom) => TNode
 ): UseSystemNodeGeomApi<TNode> {
-	const key = `${storagePrefix}${connectionId}`;
+	const key = connectionKey(slice, connectionId);
 
 	const initial = useMemo<TNode[]>(
 		() => {

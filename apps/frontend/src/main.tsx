@@ -4,7 +4,10 @@ import { createRouter, RouterProvider } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { queryClient } from "./api/queryClient";
+import { initLocalStore } from "./features/storage/localStore";
 import { routeTree } from "./routeTree.gen";
+
+initLocalStore();
 
 const router = createRouter({
 	routeTree,

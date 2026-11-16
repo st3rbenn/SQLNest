@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { readJson, schemaSliceKey, writeJson } from "../storage/localStore";
 import type { SchemaModel } from "./schema-model";
 
 export interface XY {
@@ -14,12 +15,7 @@ export type PositionsMap = Readonly<Record<string, XY>>;
  * (structure différente) → pas de collision, on repart à zéro.
  */
 function schemaKey(schema: SchemaModel): string {
-	const names = schema.collections
-		.map((c) => c.name)
-		.slice()
-		.sort()
-		.join(",");
-	return `sqlnest:positions:${schema.engine}:${names}`;
+	return schemaSliceKey("positions", schema);
 }
 
 export interface PositionsApi {
@@ -39,14 +35,7 @@ export interface PositionsApi {
  * fournit pas de reset — l'utilisateur clear en supprimant `localStorage`.
  */
 function loadPositions(key: string): PositionsMap {
-	if (typeof window === "undefined") return {};
-	try {
-		const raw = window.localStorage.getItem(key);
-		if (raw !== null) return JSON.parse(raw) as PositionsMap;
-	} catch {
-		/* storage indispo / JSON corrompu */
-	}
-	return {};
+	return (readJson(key) as PositionsMap | null | undefined) ?? {};
 }
 
 export interface UseTablePositionsOptions {
@@ -93,13 +82,8 @@ export function useTablePositions(
 	// corromprait le storage. Skip complet quand persistLocal=false (loggé).
 	useEffect(() => {
 		if (!persistLocal) return;
-		if (typeof window === "undefined") return;
 		if (loadedKey.current !== key) return;
-		try {
-			window.localStorage.setItem(key, JSON.stringify(positions));
-		} catch {
-			/* quota / private mode */
-		}
+		writeJson(key, positions);
 	}, [key, positions, persistLocal]);
 
 	const setPosition = useCallback((name: string, xy: XY) => {

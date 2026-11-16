@@ -1,15 +1,19 @@
 import { useEffect, useState } from "react";
+import {
+	connectionKey,
+	readJson,
+	readText,
+	storageKeys,
+	writeJson,
+	writeText
+} from "../../storage/localStore";
 
-
-const CONSOLE_LS_KEY = "sqlnest:canvas-console:source";
-const CONSOLE_HEIGHT_LS_KEY = "sqlnest:canvas-console:height";
 /** History clé scopée par connectionId — pas de leak dev→prod
  * cross-connection. Global fallback pour rétrocompatibilité (canvas
  * console éphémère sans connId). */
-const CONSOLE_HISTORY_LS_KEY = "sqlnest:canvas-console:history";
 function historyKeyFor(connectionId: string | undefined): string {
-	if (connectionId === undefined) return CONSOLE_HISTORY_LS_KEY;
-	return `${CONSOLE_HISTORY_LS_KEY}:${connectionId}`;
+	if (connectionId === undefined) return storageKeys.canvasConsoleHistory;
+	return connectionKey("canvas-console:history", connectionId);
 }
 const HISTORY_MAX = 20;
 
@@ -56,11 +60,8 @@ function exampleFor(engine: string): string {
  * private mode — retombe sur [] sans throw.
  */
 function loadHistory(storageKey: string): readonly HistoryEntry[] {
-	if (typeof window === "undefined") return [];
 	try {
-		const raw = window.localStorage.getItem(storageKey);
-		if (raw === null) return [];
-		const parsed = JSON.parse(raw);
+		const parsed = readJson(storageKey);
 		if (!Array.isArray(parsed)) return [];
 		return parsed
 			.map((entry): HistoryEntry | null => {
@@ -125,47 +126,27 @@ export function useConsolePersistence(
 ): ConsolePersistence {
 	const historyStorageKey = historyKeyFor(connectionId);
 	const [source, setSource] = useState<string>(() => {
-		if (typeof window === "undefined") return exampleFor(engine);
-		try {
-			return window.localStorage.getItem(CONSOLE_LS_KEY) ?? exampleFor(engine);
-		} catch {
-			return exampleFor(engine);
-		}
+		return readText(storageKeys.canvasConsoleSource) ?? exampleFor(engine);
 	});
 	useEffect(() => {
-		if (typeof window === "undefined") return;
-		try {
-			window.localStorage.setItem(CONSOLE_LS_KEY, source);
-		} catch {
-			/* quota / private mode */
-		}
+		writeText(storageKeys.canvasConsoleSource, source);
 	}, [source]);
 
 	const [height, setHeight] = useState<number>(() => {
-		if (typeof window === "undefined") return CONSOLE_HEIGHT_EXPANDED_DEFAULT;
-		try {
-			const raw = window.localStorage.getItem(CONSOLE_HEIGHT_LS_KEY);
-			if (raw !== null) {
-				const n = Number(raw);
-				if (
-					Number.isFinite(n) &&
-					n >= CONSOLE_HEIGHT_MIN &&
-					n <= maxConsoleHeight()
-				)
-					return n;
-			}
-		} catch {
-			/* storage indispo */
+		const raw = readText(storageKeys.canvasConsoleHeight);
+		if (raw !== null) {
+			const n = Number(raw);
+			if (
+				Number.isFinite(n) &&
+				n >= CONSOLE_HEIGHT_MIN &&
+				n <= maxConsoleHeight()
+			)
+				return n;
 		}
 		return CONSOLE_HEIGHT_EXPANDED_DEFAULT;
 	});
 	useEffect(() => {
-		if (typeof window === "undefined") return;
-		try {
-			window.localStorage.setItem(CONSOLE_HEIGHT_LS_KEY, String(height));
-		} catch {
-			/* quota / private mode */
-		}
+		writeText(storageKeys.canvasConsoleHeight, String(height));
 	}, [height]);
 
 	// Load history — migration soft depuis old string[] vers
@@ -182,15 +163,7 @@ export function useConsolePersistence(
 		setHistory(loadHistory(historyStorageKey));
 	}, [historyStorageKey]);
 	useEffect(() => {
-		if (typeof window === "undefined") return;
-		try {
-			window.localStorage.setItem(
-				historyStorageKey,
-				JSON.stringify(history)
-			);
-		} catch {
-			/* quota / private mode */
-		}
+		writeJson(historyStorageKey, history);
 	}, [history, historyStorageKey]);
 
 	const addHistory = (source: string, meta?: AddHistoryMeta) => {

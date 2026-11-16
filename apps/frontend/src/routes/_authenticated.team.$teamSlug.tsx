@@ -12,6 +12,7 @@
 
 import { queryOptions } from "@tanstack/react-query";
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
+import { useConnectionRegistrySync } from "../features/db-connections/useConnectionRegistrySync";
 import { fetchTeamBySlug } from "../features/teams/teamsClient";
 
 const teamQueryOptions = (slug: string) =>
@@ -36,5 +37,7 @@ export const Route = createFileRoute("/_authenticated/team/$teamSlug")({
 });
 
 function TeamLayout() {
+	const { teamSlug } = Route.useParams();
+	useConnectionRegistrySync(teamSlug);
 	return <Outlet />;
 }

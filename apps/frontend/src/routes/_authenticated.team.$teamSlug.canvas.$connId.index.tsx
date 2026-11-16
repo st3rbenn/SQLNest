@@ -8,6 +8,10 @@
 import { notifications } from "@mantine/notifications";
 import { createFileRoute } from "@tanstack/react-router";
 import { type CSSProperties, useEffect } from "react";
+import {
+	requireConnectionId,
+	UNKNOWN_CONNECTION_MESSAGE
+} from "../features/db-connections/connectionRoute";
 import { useDbConnections } from "../features/db-connections/useDbConnections";
 import { pushRecentConnection } from "../features/db-connections/useRecentConnections";
 import { notifyError } from "../features/notifications/notify";
@@ -18,6 +22,7 @@ import { useCurrentTeamSlug } from "../features/teams/useCurrentTeam";
 export const Route = createFileRoute(
 	"/_authenticated/team/$teamSlug/canvas/$connId/"
 )({
+	beforeLoad: ({ params }) => requireConnectionId(params),
 	component: TeamCanvasPage
 });
 
@@ -85,7 +90,7 @@ function useCanvasErrorNotif({
 	useEffect(() => {
 		let message: string | null = null;
 		if (isUnknown) {
-			message = "Cette connection n'existe pas ou n'est plus disponible.";
+			message = UNKNOWN_CONNECTION_MESSAGE;
 		} else if (errorMessage !== null) {
 			message = errorMessage;
 		}

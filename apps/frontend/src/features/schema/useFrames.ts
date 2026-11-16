@@ -4,6 +4,7 @@ import { FRAME_PAD } from "./canvas/computeFrameNodes";
 import { growFramesToContain, normalizeFrames } from "./canvas/frameTree";
 import type { Frame, FrameRect } from "./frames";
 import { framesFor } from "./frames";
+import { readJson, schemaSliceKey, writeJson } from "../storage/localStore";
 import type { SchemaModel } from "./schema-model";
 
 /**
@@ -12,12 +13,7 @@ import type { SchemaModel } from "./schema-model";
  * une table → clé distincte (recalcul ok, frames obsolètes ignorés).
  */
 function schemaKey(schema: SchemaModel): string {
-	const names = schema.collections
-		.map((c) => c.name)
-		.slice()
-		.sort()
-		.join(",");
-	return `sqlnest:frames:${schema.engine}:${names}`;
+	return schemaSliceKey("frames", schema);
 }
 
 const HUE_POOL: readonly number[] = [
@@ -84,12 +80,13 @@ export interface FramesApi {
  * frames statiques du sample). Toutes les mutations ré-écrivent le storage.
  */
 function loadFrames(schema: SchemaModel): readonly Frame[] {
-	if (typeof window === "undefined") return framesFor(schema);
-	try {
-		const raw = window.localStorage.getItem(schemaKey(schema));
-		if (raw !== null) return normalizeFrames(JSON.parse(raw) as Frame[]);
-	} catch {
-		// storage indispo / JSON corrompu — repart des seeds.
+	const stored = readJson(schemaKey(schema));
+	if (Array.isArray(stored)) {
+		try {
+			return normalizeFrames(stored as Frame[]);
+		} catch {
+			// Contenu d'une autre forme : repart des frames de départ.
+		}
 	}
 	return framesFor(schema);
 }
@@ -132,13 +129,8 @@ export function useFrames(
 	// Skip complet quand persistLocal=false (loggé, server-only).
 	useEffect(() => {
 		if (!persistLocal) return;
-		if (typeof window === "undefined") return;
 		if (loadedKey.current !== key) return;
-		try {
-			window.localStorage.setItem(key, JSON.stringify(frames));
-		} catch {
-			/* quota / private mode */
-		}
+		writeJson(key, frames);
 	}, [key, frames, persistLocal]);
 
 	const frameOfTable = useCallback(
