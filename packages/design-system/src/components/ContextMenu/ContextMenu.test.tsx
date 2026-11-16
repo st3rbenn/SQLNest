@@ -19,7 +19,7 @@ describe("ContextMenu", () => {
 			<ContextMenu
 				open={false}
 				position={{ x: 0, y: 0 }}
-				onClose={() => {}}
+				onClose={() => undefined}
 				items={items}
 			/>,
 		);
@@ -31,7 +31,7 @@ describe("ContextMenu", () => {
 			<ContextMenu
 				open
 				position={{ x: 100, y: 200 }}
-				onClose={() => {}}
+				onClose={() => undefined}
 				items={items}
 			/>,
 		);
@@ -51,7 +51,7 @@ describe("ContextMenu", () => {
 			<ContextMenu
 				open
 				position={{ x: 0, y: 0 }}
-				onClose={() => {}}
+				onClose={() => undefined}
 				items={items}
 				title="orders"
 			/>,
@@ -64,7 +64,7 @@ describe("ContextMenu", () => {
 			<ContextMenu
 				open
 				position={{ x: 0, y: 0 }}
-				onClose={() => {}}
+				onClose={() => undefined}
 				items={items}
 			/>,
 		);
@@ -125,7 +125,7 @@ describe("ContextMenu", () => {
 			<ContextMenu
 				open
 				position={{ x: 240, y: 180 }}
-				onClose={() => {}}
+				onClose={() => undefined}
 				items={items}
 			/>,
 		);
@@ -144,7 +144,7 @@ describe("ContextMenu", () => {
 				<ContextMenu
 					open
 					position={{ x: window.innerWidth - 20, y: window.innerHeight - 20 }}
-					onClose={() => {}}
+					onClose={() => undefined}
 					items={items}
 				/>,
 			);
@@ -161,7 +161,7 @@ describe("ContextMenu", () => {
 			<ContextMenu
 				open
 				position={{ x: 0, y: 0 }}
-				onClose={() => {}}
+				onClose={() => undefined}
 				items={[
 					{
 						kind: "submenu",

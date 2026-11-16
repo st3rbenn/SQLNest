@@ -46,6 +46,7 @@ export function displayTeamName(
 export function useCurrentTeam(): TeamContext | null {
 	let matches: ReturnType<typeof useMatches>;
 	try {
+		// biome-ignore lint/correctness/useHookAtTopLevel: appelé à chaque rendu ; le try ne couvre que l'absence de RouterProvider
 		matches = useMatches();
 	} catch {
 		// Hors RouterProvider (tests) — pas de team.

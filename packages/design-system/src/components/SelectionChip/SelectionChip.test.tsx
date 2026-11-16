@@ -12,7 +12,7 @@ describe("SelectionChip", () => {
 			<SelectionChip
 				count={3}
 				actions={[]}
-				onClear={() => {}}
+				onClear={() => undefined}
 				label="tables"
 			/>,
 		);
@@ -21,7 +21,7 @@ describe("SelectionChip", () => {
 
 	it("uses singular label for a single selection", () => {
 		renderWithProviders(
-			<SelectionChip count={1} actions={[]} onClear={() => {}} label="table" />,
+			<SelectionChip count={1} actions={[]} onClear={() => undefined} label="table" />,
 		);
 		expect(screen.getByText(/1 table sélectionnée/i)).toBeInTheDocument();
 	});
@@ -32,7 +32,7 @@ describe("SelectionChip", () => {
 			<SelectionChip
 				count={3}
 				actions={[{ id: "frame", label: "Frame", hint: "F", onClick: onFrame }]}
-				onClear={() => {}}
+				onClear={() => undefined}
 				label="tables"
 			/>,
 		);

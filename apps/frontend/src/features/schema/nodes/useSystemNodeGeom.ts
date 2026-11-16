@@ -71,6 +71,7 @@ export function useSystemNodeGeom<TNode extends Node>(
 ): UseSystemNodeGeomApi<TNode> {
 	const key = connectionKey(slice, connectionId);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies: `build` et `defaults` hors deps, le node initial ne dépend que de la connexion
 	const initial = useMemo<TNode[]>(
 		() => {
 			const built = build(loadGeom(key, defaults));
@@ -82,7 +83,6 @@ export function useSystemNodeGeom<TNode extends Node>(
 		// `build` volontairement hors deps : les hooks feature le passent
 		// inline — le node initial ne dépend que de la connection (la data
 		// live est recomposée par-dessus côté feature).
-		// eslint-disable-next-line react-hooks/exhaustive-deps
 		[key]
 	);
 
@@ -99,6 +99,7 @@ export function useSystemNodeGeom<TNode extends Node>(
 
 	const nodeId = initial[0]!.id;
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies: `defaults` est une constante de module côté feature
 	const updatePosition = useCallback(
 		(position: { x: number; y: number }): void => {
 			setNodes((prev) =>
@@ -107,8 +108,6 @@ export function useSystemNodeGeom<TNode extends Node>(
 			const geom = loadGeom(key, defaults);
 			saveGeom(key, { ...geom, position });
 		},
-		// defaults est un literal stable côté feature (constante module).
-		// eslint-disable-next-line react-hooks/exhaustive-deps
 		[key, nodeId, setNodes]
 	);
 

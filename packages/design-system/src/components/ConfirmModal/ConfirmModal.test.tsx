@@ -11,8 +11,8 @@ describe("ConfirmModal", () => {
 		renderWithProviders(
 			<ConfirmModal
 				opened
-				onClose={() => {}}
-				onConfirm={() => {}}
+				onClose={() => undefined}
+				onConfirm={() => undefined}
 				title="Titre"
 				message="Message important"
 			/>,
@@ -29,8 +29,8 @@ describe("ConfirmModal", () => {
 		renderWithProviders(
 			<ConfirmModal
 				opened
-				onClose={() => {}}
-				onConfirm={() => {}}
+				onClose={() => undefined}
+				onConfirm={() => undefined}
 				title="X"
 				message="Y"
 				confirmLabel="Réappliquer"
@@ -83,8 +83,8 @@ describe("ConfirmModal", () => {
 		renderWithProviders(
 			<ConfirmModal
 				opened={false}
-				onClose={() => {}}
-				onConfirm={() => {}}
+				onClose={() => undefined}
+				onConfirm={() => undefined}
 				title="Titre caché"
 				message="Message caché"
 			/>,

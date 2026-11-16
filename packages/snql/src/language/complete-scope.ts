@@ -20,6 +20,9 @@ export const STAGES: Readonly<Record<OperationKind, readonly string[]>> = {
 	insert: []
 };
 
+/** Suffixe d'une colonne de clé étrangère : `user_id` se navigue par `user`. */
+const ID_SUFFIX = /_id$/;
+
 /** Mots-clés de stage (utilisés pour détecter l'étape active dans un flux tokens). */
 const STAGE_KEYWORDS: ReadonlySet<string> = new Set([
 	"with",
@@ -46,7 +49,7 @@ export function resolveDotTarget(
 	}
 	if (scope.source !== undefined) {
 		for (const ref of getOutgoingRefs(schema, scope.source)) {
-			if (ref.fromColumn.replace(/_id$/, "") === head) return ref.toCollection;
+			if (ref.fromColumn.replace(ID_SUFFIX, "") === head) return ref.toCollection;
 		}
 	}
 	return undefined;
@@ -229,7 +232,7 @@ function navSuggestions(
 	const out: SnqlCompletion[] = [];
 	const seen = new Set<string>();
 	for (const ref of getOutgoingRefs(schema, scope.source)) {
-		const nav = ref.fromColumn.replace(/_id$/, "");
+		const nav = ref.fromColumn.replace(ID_SUFFIX, "");
 		if (localNames.has(nav) || joinAliases.has(nav) || seen.has(nav)) continue;
 		seen.add(nav);
 		out.push({

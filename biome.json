@@ -6,7 +6,15 @@
 		"useIgnoreFile": false
 	},
 	"files": {
-		"includes": ["apps/**/*", "packages/**/*", "!**/*.gen.ts", "!**/generated"],
+		"includes": [
+			"apps/**/*",
+			"packages/**/*",
+			"!**/*.gen.ts",
+			"!**/generated",
+			"!**/dist/**",
+			"!**/coverage/**",
+			"!**/storybook-static/**"
+		],
 		"experimentalScannerIgnores": ["**/node_modules/**", "**/dist/**"]
 	},
 	"formatter": {
@@ -39,8 +47,15 @@
 	},
 	"overrides": [
 		{
-			"includes": ["**/*.test.ts"],
+			"includes": ["**/*.test.ts", "**/*.test.tsx"],
 			"linter": { "rules": { "performance": { "useTopLevelRegex": "off" } } }
+		},
+		{
+			"includes": [
+				"packages/snql/src/codegen/mongodb*.ts",
+				"packages/snql/src/functions/builtins.mongo.ts"
+			],
+			"linter": { "rules": { "suspicious": { "noThenProperty": "off" } } }
 		}
 	]
 }

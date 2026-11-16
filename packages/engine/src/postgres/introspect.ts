@@ -7,7 +7,7 @@ import type {
 	SchemaModel,
 	SnqlType
 } from "@sqlnest/snql";
-import type { Pool as PgPool, QueryResultRow } from "pg";
+import type { Pool as PgPool, QueryResult, QueryResultRow } from "pg";
 import { EngineIntrospectionError } from "../errors";
 import {
 	buildIndexesFromRows,
@@ -306,7 +306,8 @@ export async function introspectPostgres(
 	// (RNAcentral, DB SaaS multi-tenant) peut se voir refuser l'accès à
 	// pg_enum / pg_constraint (SQLSTATE 42501). Soft-fail chacune pour
 	// dégrader gracieusement plutôt que de bloquer tout le canvas.
-	let tables, columns;
+	let tables: QueryResult<{ table_name: string }>;
+	let columns: QueryResult<ColumnRow>;
 	try {
 		[tables, columns] = await Promise.all([
 			pool.query<{ table_name: string }>(TABLES_SQL, params),

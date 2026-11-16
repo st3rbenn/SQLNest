@@ -6,8 +6,8 @@ const meta = {
 	component: ConfirmModal,
 	args: {
 		opened: true,
-		onClose: () => {},
-		onConfirm: () => {},
+		onClose: () => undefined,
+		onConfirm: () => undefined,
 	},
 } satisfies Meta<typeof ConfirmModal>;
 

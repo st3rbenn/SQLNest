@@ -133,6 +133,7 @@ export function useCanvasViewport(
 
 	// Reset du flag "user touched" quand base change (nouveau schéma =
 	// nouvelle vue par défaut, on ré-auto-fit jusqu'à interaction).
+	// biome-ignore lint/correctness/useExhaustiveDependencies: `base` est le déclencheur, pas une valeur lue
 	useEffect(() => {
 		userTouchedViewportRef.current = false;
 	}, [base]);

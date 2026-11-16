@@ -59,7 +59,9 @@ export function collectIdentSpans(statement: Statement): IdentSpans {
 
 	function push(name: string, span: Span | undefined): void {
 		if (name === "" || span === undefined) return;
-		(out[name] ??= []).push(ser(span));
+		const spans = out[name] ?? [];
+		spans.push(ser(span));
+		out[name] = spans;
 	}
 
 	// Émet chaque segment d'un path (`r.upi` → deux entrées `r`+`upi`) sous

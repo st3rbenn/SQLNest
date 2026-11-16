@@ -70,6 +70,9 @@ const MONGO_ROLLBACK_ERROR_LABELS = [
 	"transient-transaction-error"
 ];
 
+/** Code d'erreur dans un message Mongo : « code: 112 », « MongoError: code 251 ». */
+const MONGO_ERROR_CODE = /(?:code|MongoError)[:\s]+(\d+)/i;
+
 /**
  * Renvoie la nature du rollback (ou ordinary si l'erreur n'en est pas un).
  * Ne throw jamais, safe fallback sur `ordinary`.
@@ -98,7 +101,7 @@ export function classifyRuntimeError(err: SnqlRuntimeError): RollbackKind {
 
 	// Certains messages Mongo commencent par un code numérique "code: 112"
 	// ou "MongoError: code 251". Extraction best-effort.
-	const codeMatch = combined.match(/(?:code|MongoError)[:\s]+(\d+)/i);
+	const codeMatch = combined.match(MONGO_ERROR_CODE);
 	if (codeMatch?.[1] !== undefined) {
 		const n = Number.parseInt(codeMatch[1], 10);
 		if (Number.isFinite(n) && MONGO_ROLLBACK_ERROR_CODES.has(n)) {

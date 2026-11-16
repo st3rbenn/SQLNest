@@ -14,10 +14,10 @@ export const ThreeTables: Story = {
 	args: {
 		count: 3,
 		label: "tables",
-		onClear: () => {},
+		onClear: () => undefined,
 		actions: [
-			{ id: "frame", label: "Frame", hint: "F", onClick: () => {} },
-			{ id: "hide", label: "Masquer", onClick: () => {} },
+			{ id: "frame", label: "Frame", hint: "F", onClick: () => undefined },
+			{ id: "hide", label: "Masquer", onClick: () => undefined },
 		],
 	},
 };
@@ -26,7 +26,7 @@ export const One: Story = {
 	args: {
 		count: 1,
 		label: "table",
-		onClear: () => {},
-		actions: [{ id: "frame", label: "Frame", hint: "F", onClick: () => {} }],
+		onClear: () => undefined,
+		actions: [{ id: "frame", label: "Frame", hint: "F", onClick: () => undefined }],
 	},
 };

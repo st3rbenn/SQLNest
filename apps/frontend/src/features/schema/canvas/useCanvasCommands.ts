@@ -38,6 +38,7 @@ export function useCanvasCommands(
 
 	useCommandPaletteShortcut(spotlight.open);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies: onFocusTable/onFitView sont assez stables pour la durée de vie de la palette
 	const commandGroups = useMemo(
 		() =>
 			buildCanvasCommands(schema, {
@@ -58,7 +59,6 @@ export function useCanvasCommands(
 						autoClose: 2000
 					})
 			}),
-		// biome-ignore lint/correctness/useExhaustiveDependencies: onFocusTable/onFitView sont assez stables pour la durée de vie de la palette
 		[schema]
 	);
 

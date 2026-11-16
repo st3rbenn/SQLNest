@@ -24,7 +24,7 @@ function detectIsMac(): boolean {
 // `platform` ne change pas au runtime — on peut retourner un snapshot fixe
 // et un subscribe no-op. Le seul intérêt du store est SSR-safety : le server
 // retourne false, le client peut retourner true au mount.
-const subscribe = (): (() => void) => () => {};
+const subscribe = (): (() => void) => () => undefined;
 
 function useIsMac(): boolean {
 	return useSyncExternalStore(

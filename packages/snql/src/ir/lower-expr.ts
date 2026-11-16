@@ -653,7 +653,7 @@ function validateJsonPathSegments(
 		}
 		if (v.kind === "number") {
 			// Raw parsing : rejeter float, bigint hors range, décimal exact.
-			if (/[.eE]/.test(v.raw)) {
+			if (FLOAT_HINT.test(v.raw)) {
 				throw new SnqlError(
 					`Fonction '${fnName}' segment path ${i} : type reçu float — attend int littéral positif`,
 					"lower_call_json_path_invalid_segment_type",

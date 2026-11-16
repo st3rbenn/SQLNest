@@ -101,7 +101,7 @@ export const Default: Story = {
 		items,
 		header: richHeader,
 		width: 280,
-		onClose: () => {},
+		onClose: () => undefined,
 	},
 };
 
@@ -114,7 +114,7 @@ export const TitleFallback: Story = {
 			{ kind: "action", id: "a", label: "Action simple" },
 			{ kind: "action", id: "b", label: "Autre action" },
 		],
-		onClose: () => {},
+		onClose: () => undefined,
 	},
 };
 
@@ -140,12 +140,12 @@ export const LongLabelAndHint: Story = {
 				hint: <Kbd size="xs">⌘K</Kbd>,
 			},
 		],
-		onClose: () => {},
+		onClose: () => undefined,
 	},
 };
 
 export const TriggeredOnRightClick: Story = {
-	args: { open: false, position: { x: 0, y: 0 }, items, onClose: () => {} },
+	args: { open: false, position: { x: 0, y: 0 }, items, onClose: () => undefined },
 	render: () => {
 		const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
 		return (

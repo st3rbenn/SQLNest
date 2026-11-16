@@ -16,9 +16,11 @@ import {
 	type SchemaModel
 } from "../schema/model";
 
+const ID_SUFFIX = /_id$/;
+
 /** Nom de nav d'une FK sortante : `user_id` → `user`, `parent_id` → `parent`. */
 function navNameOf(ref: RefDef): string {
-	return ref.fromColumn.replace(/_id$/, "");
+	return ref.fromColumn.replace(ID_SUFFIX, "");
 }
 
 /** Collecte les paths de champ d'un `Expr` (walk récursif) pour détecter un nav
