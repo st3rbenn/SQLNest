@@ -2,6 +2,10 @@ import type { NodeProps } from "@sqlnest/canvas";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConsoleQueryState } from "../../query/consoleQueriesStore";
+import {
+	ConsoleLinksContext,
+	type ConsoleLinksValue
+} from "./ConsoleLinksContext";
 import { ResultNode, type ResultNodeType } from "./ResultNode";
 
 let state: ConsoleQueryState = { isPending: false, error: null };
@@ -9,12 +13,23 @@ let state: ConsoleQueryState = { isPending: false, error: null };
 vi.mock("../../query/consoleQueriesStore", () => ({
 	useConsoleQuery: () => state
 }));
+// Le handle du lien a besoin du moteur : hors canvas, il ne rend rien.
+vi.mock("@sqlnest/canvas", async (original) => ({
+	...(await original<typeof import("@sqlnest/canvas")>()),
+	Handle: () => null
+}));
 
 const SOURCE = "find track where track_id < 4 pick name";
 
 function mount(source = SOURCE, onClose = () => {}) {
 	const props = {
-		data: { queryKey: "k", title: "Pistes", source, onClose }
+		data: {
+			consoleId: "console:a",
+			queryKey: "k",
+			title: "Pistes",
+			source,
+			onClose
+		}
 	} as unknown as NodeProps<ResultNodeType>;
 	return render(<ResultNode {...props} />);
 }
@@ -82,6 +97,43 @@ describe("ResultNode", () => {
 		state = ran([{ name: "a", composer: "b" }]);
 		mount(`  ${SOURCE}\n`);
 		expect(screen.queryByText("Périmé")).toBeNull();
+	});
+
+	it("propose de rouvrir sa console quand elle est repliée", () => {
+		state = ran([{ name: "a", composer: "b" }]);
+		const open = vi.fn();
+		const links = (openIds: string[]): ConsoleLinksValue => ({
+			byTable: new Map(),
+			attached: new Set(["console:a"]),
+			openIds: new Set(openIds),
+			open,
+			fold: () => {},
+			createFor: () => {}
+		});
+		const props = {
+			data: {
+				consoleId: "console:a",
+				queryKey: "k",
+				title: "Pistes",
+				source: SOURCE,
+				onClose: () => {}
+			}
+		} as unknown as NodeProps<ResultNodeType>;
+		const { rerender } = render(
+			<ConsoleLinksContext.Provider value={links(["console:a"])}>
+				<ResultNode {...props} />
+			</ConsoleLinksContext.Provider>
+		);
+		expect(
+			screen.queryByRole("button", { name: "Ouvrir la console" })
+		).toBeNull();
+		rerender(
+			<ConsoleLinksContext.Provider value={links([])}>
+				<ResultNode {...props} />
+			</ConsoleLinksContext.Provider>
+		);
+		fireEvent.click(screen.getByRole("button", { name: "Ouvrir la console" }));
+		expect(open).toHaveBeenCalledWith("console:a", "inPlace");
 	});
 
 	it("se ferme par sa croix", () => {

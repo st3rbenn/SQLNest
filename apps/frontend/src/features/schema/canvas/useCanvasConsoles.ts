@@ -37,6 +37,9 @@ export interface UseCanvasConsolesReturn {
 	readonly remove: (id: string) => void;
 }
 
+/** Décalage d'une console créée là où une autre se trouve déjà. */
+const CASCADE = 32;
+
 function makeTabId(): string {
 	return typeof crypto !== "undefined" &&
 		typeof crypto.randomUUID === "function"
@@ -152,11 +155,23 @@ export function useCanvasConsoles({
 	const createCentered = useCallback((): string | null => {
 		const pt = viewCenter();
 		if (pt === null) return null;
-		return create({
+		const position = {
 			x: pt.x - CONSOLE_NODE_DEFAULT_WIDTH / 2,
 			y: pt.y - CONSOLE_NODE_DEFAULT_HEIGHT / 2
-		});
-	}, [viewCenter, create]);
+		};
+		// Une console déjà posée là cacherait la nouvelle : en cascade.
+		const taken = (at: XY): boolean =>
+			consoleNodes.geoms.some(
+				(g) =>
+					Math.abs(g.position.x - at.x) < CASCADE / 2 &&
+					Math.abs(g.position.y - at.y) < CASCADE / 2
+			);
+		while (taken(position)) {
+			position.x += CASCADE;
+			position.y += CASCADE;
+		}
+		return create(position);
+	}, [viewCenter, create, consoleNodes.geoms]);
 	const createAtCenter = useCallback(() => {
 		createCentered();
 	}, [createCentered]);

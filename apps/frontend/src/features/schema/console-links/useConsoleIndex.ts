@@ -66,6 +66,15 @@ function readEntry(
 	};
 }
 
+export interface ConsoleIndex {
+	readonly entries: readonly ConsoleEntry[];
+	/** Faux tant que les onglets n'ont pas été lus une première fois : une
+	 * console absente de `entries` n'est alors pas encore « non rattachée ». */
+	readonly ready: boolean;
+}
+
+const EMPTY: ConsoleIndex = { entries: [], ready: false };
+
 /**
  * Consoles du canvas rattachées à une table. Les onglets vivent dans le
  * stockage local, écrits par chaque console : l'index se relit à chacune de
@@ -76,12 +85,12 @@ export function useConsoleIndex(
 	connectionId: string,
 	consoleIds: readonly string[],
 	tables: ReadonlySet<string>
-): readonly ConsoleEntry[] {
-	const [entries, setEntries] = useState<readonly ConsoleEntry[]>([]);
+): ConsoleIndex {
+	const [index, setIndex] = useState<ConsoleIndex>(EMPTY);
 	const idsKey = consoleIds.join(",");
 	useEffect(() => {
 		if (!enabled) {
-			setEntries([]);
+			setIndex(EMPTY);
 			return;
 		}
 		const ids = idsKey === "" ? [] : idsKey.split(",");
@@ -90,8 +99,10 @@ export function useConsoleIndex(
 				const entry = readEntry(connectionId, id, tables);
 				return entry === null ? [] : [entry];
 			});
-			setEntries((prev) =>
-				JSON.stringify(prev) === JSON.stringify(next) ? prev : next
+			setIndex((prev) =>
+				prev.ready && JSON.stringify(prev.entries) === JSON.stringify(next)
+					? prev
+					: { entries: next, ready: true }
 			);
 		};
 		refresh();
@@ -102,5 +113,5 @@ export function useConsoleIndex(
 			window.removeEventListener("storage", refresh);
 		};
 	}, [enabled, connectionId, idsKey, tables]);
-	return entries;
+	return index;
 }

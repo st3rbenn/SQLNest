@@ -54,6 +54,10 @@ import { useShallowMemo } from "./canvas/useShallowMemo";
 import { type SystemNodeType, useSystemNodes } from "./canvas/useSystemNodes";
 import { initialZoom, OVERVIEW_FIT } from "./canvas/viewport";
 import { ConsoleLinksContext } from "./console-links/ConsoleLinksContext";
+import {
+	QUERY_LINK_EDGE,
+	QueryLinkEdge
+} from "./console-links/QueryLinkEdge";
 import { ResultNode, type ResultNodeType } from "./console-links/ResultNode";
 import { useConsoleLinks } from "./console-links/useConsoleLinks";
 import { useSchemaEditing } from "./editor/useSchemaEditing";
@@ -75,7 +79,7 @@ const nodeTypes = {
 	"system-schema-events": SystemSchemaEventsNode,
 	"system-enums": SystemEnumsNode
 };
-const edgeTypes = { fk: InteractiveEdge };
+const edgeTypes = { fk: InteractiveEdge, [QUERY_LINK_EDGE]: QueryLinkEdge };
 
 type SchemaNode =
 	| TableNodeType

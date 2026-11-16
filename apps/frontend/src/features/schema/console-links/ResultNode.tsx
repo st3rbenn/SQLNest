@@ -1,9 +1,13 @@
-import type { Node, NodeProps } from "@sqlnest/canvas";
-import { IconX } from "@tabler/icons-react";
-import type { CSSProperties } from "react";
+import { Handle, type Node, type NodeProps, Position } from "@sqlnest/canvas";
+import { IconTerminal2, IconX } from "@tabler/icons-react";
+import { type CSSProperties, useContext } from "react";
 import { useConsoleQuery } from "../../query/consoleQueriesStore";
+import { ConsoleLinksContext } from "./ConsoleLinksContext";
+import { RESULT_OWNER_HANDLE } from "./QueryLinkEdge";
 
 export interface ResultNodeData {
+	/** Console d'où vient le résultat. */
+	readonly consoleId: string;
 	readonly queryKey: string;
 	readonly title: string;
 	/** Requête courante de la console : différente de celle exécutée, le
@@ -111,8 +115,10 @@ export function ResultNode({
 	data
 }: NodeProps<ResultNodeType>): React.ReactNode {
 	const state = useConsoleQuery(data.queryKey);
+	const links = useContext(ConsoleLinksContext);
 	const result = state.data;
 	if (result === undefined) return null;
+	const folded = links !== null && !links.openIds.has(data.consoleId);
 	const stale =
 		state.lastSource !== undefined &&
 		state.lastSource.trim() !== data.source.trim();
@@ -120,10 +126,31 @@ export function ResultNode({
 	const hidden = Math.max(result.rowCount, result.rows.length) - shown.length;
 	return (
 		<div style={shellStyle}>
+			<Handle
+				id={RESULT_OWNER_HANDLE}
+				type="target"
+				position={Position.Top}
+				isConnectable={false}
+				style={{ opacity: 0, border: "none" }}
+			/>
 			<div style={headerStyle}>
 				<span style={titleStyle}>{data.title}</span>
 				{stale ? <span style={badgeStyle("warning")}>Périmé</span> : null}
 				<span style={badgeStyle("accent")}>{rowsLabel(result.rowCount)}</span>
+				{folded ? (
+					<button
+						type="button"
+						className="nodrag nopan"
+						style={closeStyle}
+						aria-label="Ouvrir la console"
+						onClick={(e) => {
+							e.stopPropagation();
+							links.open(data.consoleId, "inPlace");
+						}}
+					>
+						<IconTerminal2 size={13} stroke={2} aria-hidden />
+					</button>
+				) : null}
 				<button
 					type="button"
 					className="nodrag nopan"
@@ -175,7 +202,7 @@ export function ResultNode({
 						const value = row[col.name];
 						return (
 							<div
-								// biome-ignore lint/suspicious/noArrayIndexKey: les lignes d'un résultat n'ont pas d'identité, leur rang en tient lieu
+								// Les lignes d'un résultat n'ont pas d'identité : leur rang en tient lieu.
 								key={`${i}:${col.name}`}
 								style={{
 									...cellStyle,

@@ -28,7 +28,13 @@
  */
 
 import { Tooltip } from "@mantine/core";
-import { type Node, type NodeProps, NodeResizer } from "@sqlnest/canvas";
+import {
+	Handle,
+	type Node,
+	type NodeProps,
+	NodeResizer,
+	Position
+} from "@sqlnest/canvas";
 import {
 	IconArrowsMaximize,
 	IconArrowsMinimize,
@@ -43,6 +49,7 @@ import {
 	CONSOLE_NODE_MIN_WIDTH
 } from "../canvas/useConsoleNodes";
 import { ConsoleLinksContext } from "../console-links/ConsoleLinksContext";
+import { CONSOLE_RESULT_HANDLE } from "../console-links/QueryLinkEdge";
 import { useContentWheel } from "./contentWheel";
 
 export interface ConsoleNodeData {
@@ -227,6 +234,14 @@ export function ConsoleNode({
 					});
 				}}
 			/>
+			{/* Point d'ancrage du lien vers le frame de résultat. */}
+			<Handle
+				id={CONSOLE_RESULT_HANDLE}
+				type="source"
+				position={Position.Bottom}
+				isConnectable={false}
+				style={{ opacity: 0, border: "none" }}
+			/>
 			<div style={outerNodeStyle}>
 				<div ref={holderRef} className="nodrag" style={innerHolderStyle}>
 					<ConsoleShellInner
@@ -252,7 +267,7 @@ export function ConsoleNode({
 											aria-label="Replier"
 											onClick={(e) => {
 												e.stopPropagation();
-												links?.fold();
+												links?.fold(id);
 											}}
 										>
 											<IconChevronsUp size={13} stroke={2} />

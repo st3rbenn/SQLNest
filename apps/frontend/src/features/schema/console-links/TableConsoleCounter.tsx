@@ -1,5 +1,5 @@
 import { Menu } from "@mantine/core";
-import { IconPlus, IconTerminal2 } from "@tabler/icons-react";
+import { IconCheck, IconPlus, IconTerminal2 } from "@tabler/icons-react";
 import { type CSSProperties, useContext } from "react";
 import { ConsoleLinksContext } from "./ConsoleLinksContext";
 
@@ -40,7 +40,7 @@ export function TableConsoleCounter({
 	if (links === null || entries === undefined || entries.length === 0) {
 		return null;
 	}
-	const active = entries.some((e) => e.id === links.openId);
+	const active = entries.some((e) => links.openIds.has(e.id));
 	return (
 		<Menu
 			shadow="md"
@@ -73,32 +73,39 @@ export function TableConsoleCounter({
 				onClick={(e) => e.stopPropagation()}
 				onDoubleClick={(e) => e.stopPropagation()}
 			>
-				{entries.map((entry) => (
-					<Menu.Item
-						key={entry.id}
-						leftSection={<IconTerminal2 size={14} stroke={2} aria-hidden />}
-						rightSection={
-							entry.lastResult !== undefined ? (
-								<span style={{ whiteSpace: "nowrap" }}>
-									{rows(entry.lastResult.rowCount)}
-								</span>
-							) : undefined
-						}
-						onClick={() => links.open(entry.id)}
-					>
-						<span
-							style={{
-								display: "block",
-								maxWidth: 150,
-								overflow: "hidden",
-								textOverflow: "ellipsis",
-								whiteSpace: "nowrap"
-							}}
+				{entries.map((entry) => {
+					const isOpen = links.openIds.has(entry.id);
+					const Icon = isOpen ? IconCheck : IconTerminal2;
+					return (
+						<Menu.Item
+							key={entry.id}
+							leftSection={<Icon size={14} stroke={2} aria-hidden />}
+							rightSection={
+								entry.lastResult !== undefined ? (
+									<span style={{ whiteSpace: "nowrap" }}>
+										{rows(entry.lastResult.rowCount)}
+									</span>
+								) : undefined
+							}
+							// Une console dépliée se replie par la même entrée.
+							onClick={() =>
+								isOpen ? links.fold(entry.id) : links.open(entry.id, "beside")
+							}
 						>
-							{entry.title}
-						</span>
-					</Menu.Item>
-				))}
+							<span
+								style={{
+									display: "block",
+									maxWidth: 150,
+									overflow: "hidden",
+									textOverflow: "ellipsis",
+									whiteSpace: "nowrap"
+								}}
+							>
+								{entry.title}
+							</span>
+						</Menu.Item>
+					);
+				})}
 				<Menu.Divider />
 				<Menu.Item
 					leftSection={<IconPlus size={14} stroke={2} aria-hidden />}

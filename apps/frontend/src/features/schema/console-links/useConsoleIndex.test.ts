@@ -31,7 +31,7 @@ describe("useConsoleIndex", () => {
 		const { result } = renderHook(() =>
 			useConsoleIndex(true, CONN, ["console:a"], TABLES)
 		);
-		expect(result.current).toEqual([
+		expect(result.current.entries).toEqual([
 			{
 				id: "console:a",
 				tabId: "t1",
@@ -51,7 +51,7 @@ describe("useConsoleIndex", () => {
 		const { result } = renderHook(() =>
 			useConsoleIndex(true, CONN, ["console:a"], TABLES)
 		);
-		expect(result.current[0]?.title).toBe("Pistes");
+		expect(result.current.entries[0]?.title).toBe("Pistes");
 	});
 
 	it("laisse libre une console vide ou hors du schéma", () => {
@@ -66,7 +66,7 @@ describe("useConsoleIndex", () => {
 				TABLES
 			)
 		);
-		expect(result.current).toEqual([]);
+		expect(result.current.entries).toEqual([]);
 	});
 
 	it("ne garde que les tables jointes connues", () => {
@@ -77,7 +77,7 @@ describe("useConsoleIndex", () => {
 		const { result } = renderHook(() =>
 			useConsoleIndex(true, CONN, ["console:a"], TABLES)
 		);
-		expect(result.current[0]?.joined).toEqual([]);
+		expect(result.current.entries[0]?.joined).toEqual([]);
 	});
 
 	it("se relit quand une console écrit ses onglets", () => {
@@ -85,12 +85,20 @@ describe("useConsoleIndex", () => {
 		const { result } = renderHook(() =>
 			useConsoleIndex(true, CONN, ["console:a"], TABLES)
 		);
-		expect(result.current).toEqual([]);
+		expect(result.current.entries).toEqual([]);
 		act(() => {
 			writeTabs("console:a", "find album pick title");
 			window.dispatchEvent(new CustomEvent("mantine-local-storage"));
 		});
-		expect(result.current[0]?.root).toBe("album");
+		expect(result.current.entries[0]?.root).toBe("album");
+	});
+
+	it("se dit prêt après la première lecture", () => {
+		writeTabs("console:a", "");
+		const { result } = renderHook(() =>
+			useConsoleIndex(true, CONN, ["console:a"], TABLES)
+		);
+		expect(result.current.ready).toBe(true);
 	});
 
 	it("reste vide quand le prototype est éteint", () => {
@@ -98,6 +106,6 @@ describe("useConsoleIndex", () => {
 		const { result } = renderHook(() =>
 			useConsoleIndex(false, CONN, ["console:a"], TABLES)
 		);
-		expect(result.current).toEqual([]);
+		expect(result.current.entries).toEqual([]);
 	});
 });

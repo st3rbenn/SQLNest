@@ -75,8 +75,8 @@ export function useCanvasNodeEvents({
 	return {
 		onNodeClick: (event, node) => {
 			const type = typeOf(node);
-			// Une console se sélectionne sans que la vue bouge.
-			if (type === "console") return;
+			// Console et résultat se sélectionnent sans que la vue bouge.
+			if (type === "console" || type === "result") return;
 			if (withModifier(event)) {
 				setFocusId(null);
 				setFocusFrameKey(null);
@@ -90,7 +90,7 @@ export function useCanvasNodeEvents({
 		},
 		onNodeDoubleClick: (event, node) => {
 			const type = typeOf(node);
-			if (type === "frame") return;
+			if (type === "frame" || type === "result") return;
 			if (type === "console") {
 				enterConsoleFocus(node.id);
 				return;
@@ -104,7 +104,7 @@ export function useCanvasNodeEvents({
 		},
 		onNodeContextMenu: (event, node) => {
 			const type = typeOf(node);
-			if (type === "frame" || type === "console") return;
+			if (type === "frame" || type === "console" || type === "result") return;
 			event.preventDefault();
 			// Focus sans recadrage : la vue ne bouge pas, le menu posé aux
 			// coordonnées du clic reste face à la carte.
