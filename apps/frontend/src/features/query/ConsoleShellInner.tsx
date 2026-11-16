@@ -139,6 +139,9 @@ export interface ConsoleShellInnerProps {
 	readonly extraLeftActions?: React.ReactNode;
 	/** Isole les tabs de cette instance — voir useConsoleTabs. */
 	readonly tabsScopeSuffix?: string;
+	/** Les lignes du résultat sont affichées hors de la console : elle ne
+	 * garde que l'éditeur et la ligne de statut. */
+	readonly resultsOutside?: boolean;
 }
 
 export function ConsoleShellInner({
@@ -150,7 +153,8 @@ export function ConsoleShellInner({
 	onDetach,
 	isPopout = false,
 	extraLeftActions,
-	tabsScopeSuffix
+	tabsScopeSuffix,
+	resultsOutside = false
 }: ConsoleShellInnerProps): React.ReactNode {
 	const queryClient = useQueryClient();
 	const { data: connections } = useDbConnections(teamSlug);
@@ -703,7 +707,7 @@ export function ConsoleShellInner({
 				<div
 					style={{
 						...editorWrapperStyle,
-						...(hasRun
+						...(hasRun && !resultsOutside
 							? { height: shownEditorHeight }
 							: { flex: 1, minHeight: 0 })
 					}}
@@ -747,6 +751,8 @@ export function ConsoleShellInner({
 						<div
 							style={{
 								...resizeHandleStyle,
+								// Sans lignes sous l'éditeur, rien à partager.
+								...(resultsOutside ? { display: "none" } : {}),
 								background: isDragging
 									? "var(--sqlnest-accent-muted)"
 									: "var(--sqlnest-border)"
@@ -771,6 +777,7 @@ export function ConsoleShellInner({
 							engine={engine}
 							lastSource={queryState.lastSource}
 							schema={schemaQuery.data ?? undefined}
+							statusOnly={resultsOutside}
 						/>
 					</>
 				) : null}

@@ -9,6 +9,9 @@ import { queryTables } from "./queryTables";
 /** Une console rattachée à une table par la requête de son onglet actif. */
 export interface ConsoleEntry {
 	readonly id: string;
+	/** Onglet actif : c'est sa requête qui rattache la console. */
+	readonly tabId: string;
+	readonly source: string;
 	readonly title: string;
 	readonly root: string;
 	readonly joined: readonly string[];
@@ -36,7 +39,13 @@ function readEntry(
 	if (!Array.isArray(tabs)) return null;
 	const list = tabs as Record<string, unknown>[];
 	const tab = list.find((t) => t.id === activeTabId) ?? list[0];
-	if (tab === undefined || typeof tab.source !== "string") return null;
+	if (
+		tab === undefined ||
+		typeof tab.source !== "string" ||
+		typeof tab.id !== "string"
+	) {
+		return null;
+	}
 	const { root, joined } = queryTables(tab.source);
 	if (root === null || !tables.has(root)) return null;
 	const firstLine =
@@ -48,6 +57,8 @@ function readEntry(
 	const lastResult = lastResultOf(tab.lastResult);
 	return {
 		id,
+		tabId: tab.id,
+		source: tab.source,
 		title: named ? (tab.name as string) : firstLine,
 		root,
 		joined: joined.filter((t) => tables.has(t)),

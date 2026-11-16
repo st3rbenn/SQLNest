@@ -149,8 +149,11 @@ export function ConsoleResultsPanel({
 	onFocusSpan,
 	engine,
 	lastSource,
-	schema
+	schema,
+	statusOnly = false
 }: {
+	/** Le résultat est affiché ailleurs : seuls le statut et l'erreur restent. */
+	readonly statusOnly?: boolean;
 	readonly result: QueryResult | undefined;
 	readonly error: Error | null;
 	readonly isPending: boolean;
@@ -266,7 +269,9 @@ export function ConsoleResultsPanel({
 		lastSource.trimStart().startsWith("transaction");
 
 	return (
-		<div style={containerStyle}>
+		<div
+			style={statusOnly ? { ...containerStyle, flex: "none" } : containerStyle}
+		>
 			{showPartialWritesHeader ? (
 				<div style={partialWritesHeaderStyle} data-testid="partial-writes-header">
 					⚠ Exécuté sans transaction — writes partiels possibles en cas d'erreur.
@@ -317,7 +322,7 @@ export function ConsoleResultsPanel({
 			    faux « 0 lignes » sur écran d'erreur). */}
 			{error ? <ErrorBlock error={error} onFocusSpan={onFocusSpan} /> : null}
 
-			{error ? null : (
+			{error || statusOnly ? null : (
 				<>
 					<div style={toolbarRowStyle}>
 				<div style={toolbarSearchStyle}>

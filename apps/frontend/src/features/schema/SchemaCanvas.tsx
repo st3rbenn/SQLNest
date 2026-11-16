@@ -54,6 +54,7 @@ import { useShallowMemo } from "./canvas/useShallowMemo";
 import { type SystemNodeType, useSystemNodes } from "./canvas/useSystemNodes";
 import { initialZoom, OVERVIEW_FIT } from "./canvas/viewport";
 import { ConsoleLinksContext } from "./console-links/ConsoleLinksContext";
+import { ResultNode, type ResultNodeType } from "./console-links/ResultNode";
 import { useConsoleLinks } from "./console-links/useConsoleLinks";
 import { useSchemaEditing } from "./editor/useSchemaEditing";
 import { FrameNode, type FrameNodeType } from "./FrameNode";
@@ -70,6 +71,7 @@ const nodeTypes = {
 	table: TableNode,
 	frame: FrameNode,
 	console: ConsoleNode,
+	result: ResultNode,
 	"system-schema-events": SystemSchemaEventsNode,
 	"system-enums": SystemEnumsNode
 };
@@ -79,6 +81,7 @@ type SchemaNode =
 	| TableNodeType
 	| FrameNodeType
 	| ConsoleNodeType
+	| ResultNodeType
 	| SystemNodeType;
 
 /** Bande basse occupée par la barre d'outils flottante : le cadrage ne
@@ -294,6 +297,7 @@ function CanvasInner({
 			...frameNodes,
 			...withFrameParents(displayTables, framesApi.frames),
 			...consoleLinks.consoleNodes,
+			...consoleLinks.resultNodes,
 			...systemNodes.nodes
 		],
 		[
@@ -301,6 +305,7 @@ function CanvasInner({
 			displayTables,
 			framesApi.frames,
 			consoleLinks.consoleNodes,
+			consoleLinks.resultNodes,
 			systemNodes.nodes
 		]
 	);
@@ -469,6 +474,7 @@ function CanvasInner({
 					onNodesChange={(changes) => {
 						handleNodesChange(changes);
 						consoles.onNodesChange(changes as never);
+						consoleLinks.onResultNodesChange(changes as never);
 						systemNodes.onNodesChange(changes as never);
 					}}
 					nodeTypes={nodeTypes}

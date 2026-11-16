@@ -111,7 +111,6 @@ const innerHolderStyle: CSSProperties = {
 	overflow: "hidden"
 };
 
-
 const focusButtonStyle: CSSProperties = {
 	display: "inline-flex",
 	alignItems: "center",
@@ -127,7 +126,11 @@ const focusButtonStyle: CSSProperties = {
 };
 
 const tooltipStyles = {
-	tooltip: { fontSize: "var(--sqlnest-font-size-11)", padding: "4px 8px", borderRadius: "var(--sqlnest-radius-6)" }
+	tooltip: {
+		fontSize: "var(--sqlnest-font-size-11)",
+		padding: "4px 8px",
+		borderRadius: "var(--sqlnest-radius-6)"
+	}
 } as const;
 
 export function ConsoleNode({
@@ -231,6 +234,8 @@ export function ConsoleNode({
 						connId={connId}
 						variant="node"
 						tabsScopeSuffix={id}
+						// Rattachée à une table, ses lignes sortent dans un frame.
+						resultsOutside={foldable}
 						extraLeftActions={
 							<>
 								{foldable ? (

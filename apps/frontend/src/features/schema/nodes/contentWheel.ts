@@ -1,7 +1,8 @@
 import { type RefObject, useEffect } from "react";
 
-/** Après un défilement du contenu, la molette lui reste acquise ce délai :
- * arriver en bout de liste ne fait pas partir le canvas dans la foulée. */
+/** Pause qui sépare deux gestes de molette. Un geste qui a défilé le
+ * contenu lui reste acquis jusqu'à cette pause : arriver en bout de liste
+ * ne fait pas partir le canvas dans la foulée. */
 const HOLD_MS = 250;
 
 const SCROLLING = new Set(["auto", "scroll", "overlay"]);
@@ -79,7 +80,10 @@ export function useContentWheel(ref: RefObject<HTMLElement | null>): void {
 				event.stopPropagation();
 				return;
 			}
+			// Même geste qu'un défilement du contenu : il reste au contenu
+			// jusqu'à une vraie pause, inertie du trackpad comprise.
 			if (event.timeStamp < heldUntil) {
+				heldUntil = event.timeStamp + HOLD_MS;
 				event.stopPropagation();
 				event.preventDefault();
 			}

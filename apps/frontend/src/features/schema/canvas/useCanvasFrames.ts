@@ -149,6 +149,9 @@ export function useCanvasFrames(
 	const onNodeDragStop = useCallback(
 		(_: unknown, node: Node) => {
 			const type = (node as { type?: string }).type;
+			// Un résultat de requête ne vit que le temps de la session : sa
+			// position ne rejoint ni la mise en page gardée ni l'historique.
+			if (type === "result") return;
 			if (type === "table" || type === "frame") {
 				persistMovedTables();
 			} else {

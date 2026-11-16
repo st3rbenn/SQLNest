@@ -51,6 +51,14 @@ export function getConsoleQueryState(key: string): ConsoleQueryState {
 	return store.get(key) ?? EMPTY;
 }
 
+/** Abonnement à une clé hors du hook : le canvas suit plusieurs consoles à la fois. */
+export function subscribeConsoleQuery(
+	key: string,
+	listener: () => void
+): () => void {
+	return subscribe(key, listener);
+}
+
 function subscribe(key: string, listener: () => void): () => void {
 	let set = listeners.get(key);
 	if (!set) {

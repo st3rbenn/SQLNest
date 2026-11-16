@@ -199,3 +199,39 @@ describe("ConsoleResultsPanel — D5 header partial-writes", () => {
 		expect(screen.queryByTestId("partial-writes-header")).toBeNull();
 	});
 });
+
+describe("ConsoleResultsPanel — statut seul", () => {
+	const withRows: QueryResult = {
+		columns: [{ name: "name", type: "string", nullable: false }],
+		rows: [{ name: "Balls to the Wall" }],
+		rowCount: 1,
+		written: false
+	};
+
+	it("garde le statut et retire le tableau quand le résultat est affiché ailleurs", () => {
+		render(
+			<ConsoleResultsPanel
+				result={withRows}
+				error={null}
+				isPending={false}
+				timingMs={12}
+				statusOnly
+			/>
+		);
+		expect(screen.getByText("1 ligne")).toBeTruthy();
+		expect(screen.queryByPlaceholderText("Filtrer les résultats…")).toBeNull();
+		expect(screen.queryByText("Balls to the Wall")).toBeNull();
+	});
+
+	it("garde le tableau par défaut", () => {
+		render(
+			<ConsoleResultsPanel
+				result={withRows}
+				error={null}
+				isPending={false}
+				timingMs={12}
+			/>
+		);
+		expect(screen.getByPlaceholderText("Filtrer les résultats…")).toBeTruthy();
+	});
+});
