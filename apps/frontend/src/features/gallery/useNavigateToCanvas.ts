@@ -6,7 +6,7 @@ import { fetchCanvasState } from "../schema/canvas/canvasStateClient";
 import {
 	canvasLayoutQueryKey,
 	computeCanvasLayout
-} from "../schema/SchemaCanvas";
+} from "../schema/canvas/useCanvasLayout";
 import { fetchSchema } from "../schema/useSchema";
 import { useCurrentTeamSlug } from "../teams/useCurrentTeam";
 

@@ -1,4 +1,6 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { Frame } from "../frames";
+import type { SchemaModel } from "../schema-model";
 
 export interface UseCanvasFocusOptions {
 	/** Appelé à la fin de clearFocus() — le parent y réapplique l'overview. */
@@ -56,4 +58,47 @@ export function useCanvasFocus(
 		focusFrame,
 		clearFocus
 	};
+}
+
+/**
+ * Frame dont le drawer montre les détails. Supprimé pendant qu'il est
+ * affiché, il n'existe plus : le focus est levé.
+ */
+export function useFocusedFrame(
+	frames: readonly Frame[],
+	focusFrameKey: string | null,
+	setFocusFrameKey: (key: string | null) => void
+): Frame | undefined {
+	const focusedFrame = useMemo(
+		() =>
+			focusFrameKey !== null
+				? frames.find((f) => f.key === focusFrameKey)
+				: undefined,
+		[focusFrameKey, frames]
+	);
+	useEffect(() => {
+		if (focusFrameKey !== null && focusedFrame === undefined) {
+			setFocusFrameKey(null);
+		}
+	}, [focusFrameKey, focusedFrame, setFocusFrameKey]);
+	return focusedFrame;
+}
+
+/**
+ * Table focalisée puis supprimée : sans focus à tenir, le reste du canvas
+ * resterait estompé. La vue ne bouge pas (pas de retour à la vue d'ensemble).
+ */
+export function useReleaseMissingFocus(
+	schema: SchemaModel,
+	focusId: string | null,
+	setFocusId: (id: string | null) => void
+): void {
+	useEffect(() => {
+		if (
+			focusId !== null &&
+			!schema.collections.some((c) => c.name === focusId)
+		) {
+			setFocusId(null);
+		}
+	}, [schema, focusId, setFocusId]);
 }

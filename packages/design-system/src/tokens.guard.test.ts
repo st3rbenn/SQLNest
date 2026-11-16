@@ -40,7 +40,7 @@ const RGB_BASELINE: Readonly<Record<string, number>> = {
 	"apps/frontend/src/features/schema/canvas-overrides.css": 2,
 	"apps/frontend/src/features/schema/nodes/SystemNodeShell.tsx": 2,
 	"apps/frontend/src/features/auth/UserBadge.tsx": 1,
-	"apps/frontend/src/features/schema/SchemaCanvas.tsx": 1,
+	"apps/frontend/src/features/schema/canvas/floating/CanvasVeil.tsx": 1,
 	"apps/frontend/src/features/schema/nodes/ConsoleNode.tsx": 1,
 	"apps/frontend/src/features/schema/edges/EdgeHandles.tsx": 1,
 	"apps/frontend/src/features/checksum-history/UnseenEventsBadge.tsx": 1,

@@ -1,83 +1,64 @@
-import { useHotkeys } from "@mantine/hooks";
 import {
 	Background,
-	type Connection,
 	NestCanvas,
 	NestCanvasProvider,
 	Panel,
 	SelectionMode,
-	useNestCanvas,
-	useNodesState
+	useNestCanvas
 } from "@sqlnest/canvas";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
 import "@sqlnest/canvas/style.css";
 import "./canvas-overrides.css";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useCurrentUser } from "../auth/sessionQuery";
-import { consoleTabsKey } from "../query/useConsoleTabs";
-import { purgeSchemaSlices, writeJson } from "../storage/localStore";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { SystemSchemaEventsNode } from "../checksum-history/SystemSchemaEventsNode";
+import { SystemEnumsNode } from "../enums/SystemEnumsNode";
 import type { CanvasTool } from "./CanvasToolbar";
 import {
+	type CanvasActionsContextValue,
 	type CanvasContextMenuState,
-	CanvasProviders
+	type CanvasDataContextValue,
+	type CanvasFocusContextValue,
+	CanvasProviders,
+	type CanvasUIContextValue
 } from "./canvas/CanvasContext";
 import { CanvasZoomVariable } from "./canvas/CanvasZoomVariable";
-import { useResizableDrawer } from "./canvas/DrawerPane";
 import { CanvasBottomBar } from "./canvas/floating/CanvasBottomBar";
 import { CanvasLeftPanel } from "./canvas/floating/CanvasLeftPanel";
 import { CanvasOverlays } from "./canvas/floating/CanvasOverlays";
 import { CanvasTopRightHUD } from "./canvas/floating/CanvasTopRightHUD";
+import { CanvasVeil, ShowAllButton } from "./canvas/floating/CanvasVeil";
 import { canReparentNode, withFrameParents } from "./canvas/frameTree";
-import { syncLayoutTables } from "./canvas/layoutTables";
-import { makeEdge } from "./canvas/relationEdge";
-import { createTableDecorator } from "./canvas/tableDecorator";
-import type { ChangeGesture } from "./editor/changeSnql";
-import { canApply, editModeOf } from "./editor/editMode";
-import { useProjectStatus } from "./editor/useProjectStatus";
 import { useCanvasActions } from "./canvas/useCanvasActions";
 import { useCanvasCommands } from "./canvas/useCanvasCommands";
+import { useCanvasConsoles } from "./canvas/useCanvasConsoles";
 import { useCanvasEdges } from "./canvas/useCanvasEdges";
-import { useCanvasFocus } from "./canvas/useCanvasFocus";
-import { useCanvasFrames } from "./canvas/useCanvasFrames";
-import { useCanvasHistory } from "./canvas/useCanvasHistory";
-import { useCanvasNodes } from "./canvas/useCanvasNodes";
 import {
-	CONSOLE_NODE_DEFAULT_HEIGHT,
-	CONSOLE_NODE_DEFAULT_WIDTH,
-	useConsoleNodes
-} from "./canvas/useConsoleNodes";
+	useCanvasFocus,
+	useFocusedFrame,
+	useReleaseMissingFocus
+} from "./canvas/useCanvasFocus";
+import { useCanvasFrames } from "./canvas/useCanvasFrames";
+import { useCanvasHotkeys } from "./canvas/useCanvasHotkeys";
+import { useCanvasLayout } from "./canvas/useCanvasLayout";
+import { useCanvasNodeEvents } from "./canvas/useCanvasNodeEvents";
+import { useCanvasNodes } from "./canvas/useCanvasNodes";
 import { useCanvasSelection } from "./canvas/useCanvasSelection";
 import { useCanvasSelectionLasso } from "./canvas/useCanvasSelectionLasso";
 import { useCanvasSyncBridge } from "./canvas/useCanvasSyncBridge";
+import { useCanvasUndo } from "./canvas/useCanvasUndo";
 import { useCanvasViewport } from "./canvas/useCanvasViewport";
+import { useDisplayTables } from "./canvas/useDisplayTables";
+import { useLeftDrawer } from "./canvas/useLeftDrawer";
+import { useLocalPersistence } from "./canvas/useLocalPersistence";
 import { usePreviewSnapshotSync } from "./canvas/usePreviewSnapshotSync";
-import { useUndoRedoShortcuts } from "./canvas/useUndoRedoShortcuts";
+import { useShallowMemo } from "./canvas/useShallowMemo";
+import { type SystemNodeType, useSystemNodes } from "./canvas/useSystemNodes";
 import { initialZoom, OVERVIEW_FIT } from "./canvas/viewport";
+import { useSchemaEditing } from "./editor/useSchemaEditing";
 import { FrameNode, type FrameNodeType } from "./FrameNode";
 import { InteractiveEdge } from "./InteractiveEdge";
-import { buildLayout, type LayoutResult } from "./layout";
 import { ConsoleNode, type ConsoleNodeType } from "./nodes/ConsoleNode";
 import type { Relation, SchemaModel } from "./schema-model";
-import {
-	SystemSchemaEventsNode,
-	SYSTEM_TABLE_ID,
-	type SystemSchemaEventsNodeType
-} from "../checksum-history/SystemSchemaEventsNode";
-import { useSchemaEventsNode } from "../checksum-history/useSchemaEventsNode";
-import {
-	ENUMS_NODE_ID,
-	SystemEnumsNode,
-	type SystemEnumsNodeType
-} from "../enums/SystemEnumsNode";
-import { useEnumsNode } from "../enums/useEnumsNode";
-import {
-	fieldOfHandle,
-	NODE_WIDTH,
-	nodeHeight,
-	tableAriaLabel,
-	TableNode,
-	type TableNodeType
-} from "./TableNode";
+import { TableNode, type TableNodeType } from "./TableNode";
 import { useEdgeAnchors } from "./useEdgeAnchors";
 import { useFrames } from "./useFrames";
 import { useTablePositions, type XY } from "./useTablePositions";
@@ -91,72 +72,26 @@ const nodeTypes = {
 	"system-enums": SystemEnumsNode
 };
 const edgeTypes = { fk: InteractiveEdge };
-const FRAME_ID_PREFIX = /^frame:/;
 
 type SchemaNode =
 	| TableNodeType
 	| FrameNodeType
 	| ConsoleNodeType
-	| SystemSchemaEventsNodeType
-	| SystemEnumsNodeType;
+	| SystemNodeType;
 
-/** Exportées + queryKey helper — permet à `useNavigateToCanvas` de
- *  prefetch le layout ELK dans le queryClient AVANT de naviguer. Le
- *  compute ELK peut prendre ~500ms-1s sur un gros graphe, sans
- *  prefetch l'user voit un fond opaque le temps que ça settle. */
-export function canvasLayoutQueryKey(connectionId: string): readonly [
-	string,
-	string
-] {
-	return ["canvas-layout", connectionId] as const;
-}
-export function computeCanvasLayout(schema: SchemaModel): Promise<LayoutResult> {
-	return buildLayout(schema, makeNode(schema), makeEdge);
-}
-
-function makeNode(schema: SchemaModel) {
-	return (name: string): TableNodeType => {
-		const collection = schema.collections.find((c) => c.name === name);
-		if (collection === undefined) {
-			throw new Error(`makeNode: collection introuvable ${name}`);
-		}
-		return {
-			id: name,
-			type: "table",
-			ariaLabel: tableAriaLabel(collection),
-			position: { x: 0, y: 0 },
-			// Dimensions explicites → fitView cadre sans attendre la mesure DOM.
-			width: NODE_WIDTH,
-			height: nodeHeight(collection),
-			// Le Backspace natif du moteur retirerait la table du state sans
-			// persistance ni retour possible : il passe par `hideSelected`
-			// (raccourci plus bas), comme le « Masquer » du chip.
-			deletable: false,
-			data: { collection, dimmed: false, focused: false, matched: false }
-		};
-	};
-}
-
-/** Champ de la ligne sous le pointeur, dans une carte de table. */
-function fieldAt(event: {
-	readonly target: EventTarget | null;
-}): string | undefined {
-	const row = (event.target as Element | null)?.closest?.("[data-field]");
-	return row?.getAttribute("data-field") ?? undefined;
-}
+/** Bande basse occupée par la barre d'outils flottante : le cadrage ne
+ *  pose rien dessous. */
+const TOOLBAR_HEIGHT = 38;
+const TOOLBAR_GAP = 8;
 
 interface CanvasInnerProps {
 	schema: SchemaModel;
-	/** Nom du schéma cible (ex : `public` pour Postgres). Affiché dans le
-	 * breadcrumb — omis pour Mongo. `| undefined` explicite pour permettre
-	 * un pass-through depuis un caller dont le prop est optionnel (sous
-	 * `exactOptionalPropertyTypes`, `schemaLabel?: string` n'accepterait pas
-	 * une valeur `string | undefined`). */
+	/** Schéma cible (`public` pour Postgres), affiché dans le fil d'Ariane ;
+	 *  omis pour Mongo. */
 	schemaLabel?: string | undefined;
 	connectionId: string;
 	dbName: string;
-	/** Team scope — nécessaire pour les nodes console qui appellent les
-	 * routes team-scoped (`POST /api/teams/:slug/db-connections/:id/query`). */
+	/** Équipe : consoles et changements de schéma passent par ses routes. */
 	teamSlug: string;
 }
 
@@ -168,57 +103,35 @@ function CanvasInner({
 	teamSlug
 }: CanvasInnerProps) {
 	const { screenToFlowPosition, fitView } = useNestCanvas();
-	// Layout ELK — async, mais caché par connectionId dans le queryClient
-	// TanStack. Sans ça, chaque re-mount (retour gallery → canvas) refait
-	// un compute ELK à froid (~500ms-1s) → flick visible avant le rendu
-	// final. Avec le cache, le 2ᵉ mount rend `base` immédiatement.
-	//
-	// Le queryKey inclut `connectionId` — 2 canvases distincts n'écrasent
-	// pas leurs layouts respectifs. `staleTime: Infinity` : le layout ne
-	// dépend que du schéma, qui est lui-même cache-warm par le prefetch
-	// de useNavigateToCanvas.
-	const layoutQuery = useQuery({
-		queryKey: canvasLayoutQueryKey(connectionId),
-		queryFn: () => computeCanvasLayout(schema),
-		staleTime: Number.POSITIVE_INFINITY,
-		gcTime: Number.POSITIVE_INFINITY,
-		refetchOnMount: false,
-		refetchOnWindowFocus: false,
-		refetchOnReconnect: false
+	const containerRef = useRef<HTMLDivElement | null>(null);
+	/** Centre de la vue courante, en coordonnées du canvas. */
+	const viewCenter = useCallback((): XY | null => {
+		const rect = containerRef.current?.getBoundingClientRect();
+		if (!rect) return null;
+		return screenToFlowPosition({
+			x: rect.left + rect.width / 2,
+			y: rect.top + rect.height / 2
+		});
+	}, [screenToFlowPosition]);
+
+	// ─── État gardé : positions, tailles, frames, ancres, layout ──────────
+	const persistence = useLocalPersistence();
+	const tablePositions = useTablePositions(schema, persistence);
+	const tableSizes = useTableSizes(schema, persistence);
+	const { base, baseRef } = useCanvasLayout({
+		schema,
+		connectionId,
+		viewCenter,
+		setManyPositions: tablePositions.setManyPositions
 	});
-	const base: LayoutResult | null = layoutQuery.data ?? null;
-	// Ref sur `base` — lue par le callback `onRestore` de useCanvasHistory
-	// pour retomber sur les positions ELK d'origine quand un node n'a pas
-	// d'override dans le snapshot restauré. Ref (pas dep du useCallback)
-	// pour garder une identité stable et éviter les stale closures.
-	const baseRef = useRef<LayoutResult | null>(null);
-	baseRef.current = base;
+	const framesApi = useFrames(schema, persistence);
+	const edgeAnchors = useEdgeAnchors(schema, persistence);
+	const [hiddenIds, setHiddenIds] = useState<ReadonlySet<string>>(
+		() => new Set()
+	);
 
-	// ─── Persistance : server-only quand loggé, localStorage quand anonyme ─
-	// Le user loggé a un canvas serveur (hydraté par useCanvasSync) — le
-	// localStorage n'apporte alors qu'un risque de stale state cross-device
-	// (logout ici, changement là-bas, refresh → vieux state réinjecté). Le
-	// user anonyme n'a pas de compte, on garde le localStorage comme unique
-	// persistance (comportement historique).
-	const { data: session } = useCurrentUser();
-	const persistLocal = session?.user == null;
-	const hookOpts = useMemo(() => ({ persistLocal }), [persistLocal]);
-
-	// Connecté : les tranches écrites hors connexion sont retirées, sans quoi
-	// elles reviendraient à la prochaine déconnexion ou sous un autre compte.
-	useEffect(() => {
-		if (!persistLocal) purgeSchemaSlices();
-	}, [persistLocal]);
-
-	const tablePositions = useTablePositions(schema, hookOpts);
-	// Sizes user persistées (NodeResizer 4 côtés de chaque table) — stocke
-	// width ET height : le user peut resize dans les 2 axes.
-	const tableSizes = useTableSizes(schema, hookOpts);
-
-	// Focus canvas — table OU frame, mutuellement exclusifs (un seul drawer
-	// détails à la fois). Extrait dans `useCanvasFocus`. `onClear` réapplique
-	// l'overview ; `applyOverview` étant défini plus bas dans ce composant,
-	// on passe une closure stable qui lit la version courante via ref.
+	// ─── Focus : une table ou un frame, jamais les deux ───────────────────
+	// `applyOverview` naît plus bas (`useCanvasViewport`) : lu par ref.
 	const applyOverviewRef = useRef<() => void>(() => {});
 	const {
 		focusId,
@@ -231,71 +144,20 @@ function CanvasInner({
 	} = useCanvasFocus({
 		onClear: useCallback(() => applyOverviewRef.current(), [])
 	});
-	// Table focalisée puis supprimée : sans focus à tenir, le reste du canvas
-	// resterait estompé. La vue ne bouge pas (pas de retour à l'overview).
-	useEffect(() => {
-		if (focusId !== null && !schema.collections.some((c) => c.name === focusId)) {
-			setFocusId(null);
-		}
-	}, [schema, focusId, setFocusId]);
+	useReleaseMissingFocus(schema, focusId, setFocusId);
+
+	// ─── État d'interface ─────────────────────────────────────────────────
 	const [search, setSearch] = useState("");
-	const [hiddenIds, setHiddenIds] = useState<ReadonlySet<string>>(
-		() => new Set()
-	);
 	const [menu, setMenu] = useState<CanvasContextMenuState | null>(null);
-	// Outil actif de la toolbar canvas. « frame » = mode explicite : cursor
-	// crosshair sur le pane, un lasso au release crée un frame à partir des
-	// tables touchées puis revient à « select ». Le raccourci F reste dispo
-	// pour créer un frame depuis une sélection existante — c'est le geste
-	// « expert », le mode toolbar est le geste « découvrable ».
+	// Outil « frame » : un lasso crée un frame puis l'outil revient à
+	// « select ». Le raccourci F fait de même depuis une sélection.
 	const [activeTool, setActiveTool] = useState<CanvasTool>("select");
-	const containerRef = useRef<HTMLDivElement | null>(null);
-	/** Centre de la vue courante, en coordonnées du canvas. */
-	const viewCenter = useCallback((): XY | null => {
-		const rect = containerRef.current?.getBoundingClientRect();
-		if (!rect) return null;
-		return screenToFlowPosition({
-			x: rect.left + rect.width / 2,
-			y: rect.top + rect.height / 2
-		});
-	}, [screenToFlowPosition]);
+	const [hoveredTableName, setHoveredTableName] = useState<string | null>(null);
+	const drawer = useLeftDrawer();
 
-	// Tables créées ou supprimées depuis le calcul du layout (ADR-039 D5) :
-	// le layout en cache suit, une table apparue se place au centre de la vue
-	// et y reste (position persistée comme un déplacement).
-	const queryClient = useQueryClient();
-	const { setManyPositions } = tablePositions;
-	useEffect(() => {
-		if (base === null) return;
-		const synced = syncLayoutTables(
-			base,
-			schema,
-			makeNode(schema),
-			viewCenter()
-		);
-		if (synced === null) return;
-		setManyPositions(synced.placed);
-		queryClient.setQueryData(canvasLayoutQueryKey(connectionId), synced.layout);
-	}, [base, schema, viewCenter, setManyPositions, queryClient, connectionId]);
-
-	// Frames user-defined (persistés en localStorage quand anonyme,
-	// server-only quand loggé — cf. `hookOpts` plus haut). Remplace le
-	// `framesFor(schema)` statique — l'utilisateur crée/retire ses frames
-	// via lasso + F et le menu contextuel « Retirer du frame ».
-	const framesApi = useFrames(schema, hookOpts);
-
-	// Overrides d'ancres par edge (source-side / target-side). Persistés
-	// en localStorage quand anonyme, server-only quand loggé (via
-	// `useCanvasSync` — payload sync inclut edgeAnchors depuis 2026-08).
-	// Déclaré ICI pour que `useCanvasSync` (juste après) puisse les
-	// observer + les remplacer via `canvasSyncReplaceAll.edgeAnchors`.
-	const edgeAnchors = useEdgeAnchors(schema, hookOpts);
-
-	// State `nodes` + handleTableResize + handleNodesChange
-	// (intercept frame changes) — voir `useCanvasNodes` pour la doc.
-	// `history.push` passé via ref (`historyPushRef`) : `useCanvasHistory`
-	// est déclaré JUSTE APRÈS mais a besoin de `setNodes` qu'on obtient
-	// ici → dépendance circulaire résolue par le ref (rebound plus bas).
+	// ─── Nodes des tables, historique, synchronisation ────────────────────
+	// `useCanvasNodes` pousse dans l'historique, qui a besoin de son
+	// `setNodes` : la dépendance circulaire passe par une ref.
 	const historyPushRef = useRef<() => void>(() => {});
 	const historyProxy = useMemo(
 		() => ({ push: () => historyPushRef.current() }),
@@ -315,72 +177,17 @@ function CanvasInner({
 		framesApi,
 		history: historyProxy
 	});
-
-	// Historique undo/redo — capture positions + sizes + frames + hiddenIds.
-	// `history.push()` doit être appelé APRÈS chaque geste user notable
-	// (drag stop, resize end, create/remove/rename frame, hide/unhide,
-	// auto-layout). Le hook maintient l'invariant « past = états
-	// pré-mutation » via un `prevRef` resynchronisé post-commit — voir
-	// `useCanvasHistory` pour l'analyse détaillée du timing.
-	//
-	// `onRestore` : le hook restore positions/sizes/frames/hiddenIds dans
-	// leurs hooks respectifs, mais le canvas garde son propre state `nodes`
-	// (via `useNodesState` plus haut) qui n'était pas resync → Cmd+Z ne
-	// bougeait visuellement rien, seul un reload rendait la vue cohérente.
-	// On applique donc ici les overlays positions/sizes du snapshot sur les
-	// `nodes`, avec fallback sur la position ELK d'origine (`baseRef`)
-	// pour les nodes non présents dans le snapshot (jamais draggés / resizés
-	// à ce moment-là de l'historique).
-	const history = useCanvasHistory({
+	const history = useCanvasUndo({
+		baseRef,
+		setNodes,
 		tablePositions,
 		tableSizes,
 		framesApi,
 		hiddenIds,
-		setHiddenIds,
-		onRestore: useCallback(
-			(snapshot) => {
-				const baseNodes = baseRef.current?.nodes;
-				if (!baseNodes) return;
-				const baseById = new Map(baseNodes.map((n) => [n.id, n]));
-				setNodes((prev) =>
-					prev.map((n) => {
-						const baseNode = baseById.get(n.id);
-						const pos = snapshot.positions[n.id];
-						const size = snapshot.sizes[n.id];
-						// Fallback chaîné : snapshot → ELK base → keep. Spread
-						// conditionnel pour width/height afin de respecter
-						// `exactOptionalPropertyTypes` (jamais `width: undefined`).
-						const w = size?.width ?? baseNode?.width;
-						const h = size?.height ?? baseNode?.height;
-						return {
-							...n,
-							position: pos ?? baseNode?.position ?? n.position,
-							...(w !== undefined ? { width: w } : {}),
-							...(h !== undefined ? { height: h } : {})
-						};
-					})
-				);
-			},
-			[setNodes]
-		)
+		setHiddenIds
 	});
-	// Bind du proxy `historyPushRef` (déclaré plus haut, consommé par
-	// `useCanvasNodes.handleTableResize`) au vrai `history.push` maintenant
-	// que `useCanvasHistory` est monté. Le pattern ref évite la dépendance
-	// circulaire entre useCanvasNodes (produit setNodes) et useCanvasHistory
-	// (consomme setNodes pour onRestore).
 	historyPushRef.current = history.push;
 
-	// Shortcuts globaux Cmd/Ctrl+Z (undo) et Cmd/Ctrl+Shift+Z ou Cmd/Ctrl+Y
-	// (redo). preventDefault critique pour bloquer le « restore tab fermée »
-	// de Chrome/Safari. Skip auto quand focus est dans un input/textarea/
-	// contenteditable — l'undo natif du champ (rename inline frame, éditeur
-	// SNQL) reste actif.
-	useUndoRedoShortcuts({ onUndo: history.undo, onRedo: history.redo });
-
-	// Sync serveur du state canvas — connectionId + replaceAll + useCanvasSync.
-	// Voir `useCanvasSyncBridge` pour la doc (repush des nodes après hydration,
-	// fallback chaîné serveur → ELK base → keep, gate anonyme).
 	const { canvasReady } = useCanvasSyncBridge({
 		connectionId,
 		baseRef,
@@ -393,10 +200,7 @@ function CanvasInner({
 		setHiddenIds,
 		onHydrated: history.resetBaseline
 	});
-
-	// Sync serveur du snapshot de preview — compute + PUT le rendu
-	// précalculé qui alimentera le fallback gallery quand le CLI est offline.
-	// Débounce 5 s, best-effort (une erreur ne bloque JAMAIS le canvas).
+	// Rendu précalculé pour la galerie quand le CLI est hors ligne.
 	usePreviewSnapshotSync({
 		connectionId,
 		canvasReady,
@@ -406,12 +210,9 @@ function CanvasInner({
 		hiddenIds
 	});
 
-	// Sélection multi-tables — alimente le chip bas-centre et le raccourci `F`.
-	// Extrait dans `useCanvasSelection` ; le callback `onMultiSelect` clear le
-	// focus dès qu'on passe à ≥2 sélectionnés (sinon les styles `focused` (bord
-	// interne bleu foncé + shadow opacité 0.25) et `.selected` (outline
-	// extérieur + shadow opacité 0.15) coexistent sur des tables différentes →
-	// mix visuellement confus).
+	// ─── Sélection, frames, arêtes ────────────────────────────────────────
+	// Dès deux tables sélectionnées le focus est levé : son anneau et le
+	// contour de sélection ne se côtoient pas.
 	const { selectedTables, clearSelection } = useCanvasSelection<TableNodeType>({
 		setNodes,
 		onMultiSelect: useCallback(() => {
@@ -419,9 +220,6 @@ function CanvasInner({
 			setFocusFrameKey(null);
 		}, [setFocusId, setFocusFrameKey])
 	});
-
-	// Frames — nodes frame (imbriqués, rognés), renommer / supprimer / focus,
-	// persistance en fin de drag. Voir `useCanvasFrames` pour la doc.
 	const { frameNodes, handleFrameRename, handleFrameDelete, onNodeDragStop } =
 		useCanvasFrames({
 			base,
@@ -433,10 +231,6 @@ function CanvasInner({
 			history: historyProxy,
 			focusFrame
 		});
-
-	// Edges + neighbors dérivés — pipeline routing/offset dans un hook
-	// dédié (voir `useCanvasEdges` : override user > auto bestHandles,
-	// spread offsets pour edges partageant un handle, style focus/dim).
 	const openRelationMenu = useCallback(
 		(at: { x: number; y: number }, relation: Relation) =>
 			setMenu({ ...at, relation }),
@@ -452,376 +246,68 @@ function CanvasInner({
 		onMenu: openRelationMenu
 	});
 
-	// Nom de la table survolée dans le SchemaTree (side panel). Décide de
-	// `data.hoverHighlight` sur les nodes table — glow bleu subtil sur
-	// la table matching, pour aider à la repérer sans cliquer.
-	const [hoveredTableName, setHoveredTableName] = useState<string | null>(null);
+	// ─── Édition du schéma, consoles, nodes système ───────────────────────
+	const {
+		editMode,
+		gesture,
+		setGesture,
+		inferencePanelOpen,
+		setInferencePanelOpen,
+		traceRelation
+	} = useSchemaEditing({ schema, teamSlug, connectionId });
+	const consoles = useCanvasConsoles({ connectionId, teamSlug, viewCenter });
+	const systemNodes = useSystemNodes({
+		schema,
+		connectionId,
+		teamSlug,
+		editMode,
+		setGesture,
+		openConsoleWithSource: consoles.openWithSource
+	});
 
-	// Panneau d'inférence de relations (base sans FK). État remonté ici pour
-	// être piloté à la fois par la bannière d'arrivée et le bouton toolbar.
-	const [inferencePanelOpen, setInferencePanelOpen] = useState(false);
-
-	// Changement de schéma (ADR-039) : mode déduit du projet relié et de la
-	// base ; un seul panneau à droite, le geste ferme celui des liens.
-	const projectStatus = useProjectStatus(teamSlug, connectionId);
-	const editMode = useMemo(
-		() =>
-			editModeOf(
-				schema,
-				projectStatus.data !== undefined
-					? { data: projectStatus.data }
-					: projectStatus.error !== null
-						? { error: projectStatus.error.message }
-						: undefined
-			),
-		[schema, projectStatus.data, projectStatus.error]
-	);
-	const [gesture, setGestureState] = useState<ChangeGesture | null>(null);
-	const setGesture = useCallback((next: ChangeGesture | null) => {
-		setGestureState(next);
-		if (next !== null) setInferencePanelOpen(false);
-	}, []);
-	useEffect(() => {
-		if (inferencePanelOpen) setGestureState(null);
-	}, [inferencePanelOpen]);
-	// Tracé relâché sur un champ : la FK part du champ de départ.
-	const traceRelation = useCallback(
-		(c: Connection) => {
-			const column = fieldOfHandle(c.sourceHandle);
-			const targetColumn = fieldOfHandle(c.targetHandle);
-			if (column === undefined || targetColumn === undefined) return;
-			if (c.source === c.target && column === targetColumn) return;
-			setGesture({
-				kind: "add-ref",
-				table: c.source,
-				column,
-				targetTable: c.target,
-				targetColumn
-			});
-		},
-		[setGesture]
-	);
-
-	// Nœuds table affichés : positions vivantes (drag) + drapeaux focus + masqués.
-	// Injecte aussi le callback `onResizeEnd` — TableNode s'en sert pour le
-	// NodeResizer 4 côtés. Absent = pas de handles (utile aux tests / rendus
-	// externes).
-	const tableResizeRef = useRef(handleTableResize);
-	tableResizeRef.current = handleTableResize;
-	const [decorateTable] = useState(() =>
-		createTableDecorator((id, size) => tableResizeRef.current(id, size))
-	);
-	const displayTableNodes = useMemo(
-		() =>
-			nodes
-				.filter((n) => !hiddenIds.has(n.id))
-				.map((n) =>
-					decorateTable(n, {
-						dimmed: neighbors !== null && !neighbors.has(n.id),
-						focused: n.id === focusId,
-						hoverHighlight: n.id === hoveredTableName
-					})
-				),
-		[nodes, neighbors, focusId, hiddenIds, decorateTable, hoveredTableName]
-	);
-
-	// (`nodesRef` exposé par `useCanvasNodes` — voir plus haut, consommé par
-	// les handlers frame drag/resize qui ont besoin de la dernière version
-	// des positions sans refermer sur une snapshot obsolète.)
-
-	// (`frameNodes` + handlers + drag lifecycle exposés par `useCanvasFrames`
-	// plus haut.)
-
-	// ─── Nodes console T5 ───────────────────────────────────────────────
-	// Chaque node console vit dans le graphe comme une table/frame ;
-	// sa géométrie est persistée localement par `useConsoleNodes` (pas
-	// encore sync serveur — deferred).
-	//
-	// Architecture : les consoles ont leur propre `useNodesState<Console>`
-	// séparé du state tables (`useCanvasNodes`) — ce state gère nativement
-	// les positions et dimensions pendant les drag/resize (identité stable,
-	// pas de re-render depuis persist). `onConsoleNodesChange` est composé
-	// avec `handleNodesChange` du parent dans `onNodesChange`. Persist
-	// depuis ce state au drop (onNodeDragStop / NodeResizer.onResizeEnd).
-	const consoleNodes = useConsoleNodes(connectionId);
-	const [focusedConsoleId, setFocusedConsoleId] = useState<string | null>(null);
-	const [consoleCanvasNodes, setConsoleCanvasNodes, onConsoleNodesChange] =
-		useNodesState<ConsoleNodeType>([]);
-
-	// Sync `consoleNodes.geoms` (persist) → state des nodes console. Preserve
-	// les valeurs existantes pour un id déjà présent (ce state est à jour
-	// pendant le drag/resize, on ne veut pas l'écraser par des valeurs
-	// persist plus anciennes). Nouveaux ids : injectés depuis geom. Ids
-	// supprimés : retirés.
-	useEffect(() => {
-		setConsoleCanvasNodes((prev) => {
-			const prevById = new Map(prev.map((n) => [n.id, n]));
-			return consoleNodes.geoms.map((g) => {
-				const existing = prevById.get(g.id);
-				if (existing) return existing;
-				return {
-					id: g.id,
-					type: "console" as const,
-					ariaLabel: "Console SNQL",
-					position: g.position,
-					width: g.width,
-					height: g.height,
-					// Placeholder — enrichi (props + data) dans consoleDisplayNodes.
-					data: {
-						teamSlug,
-						connId: connectionId,
-						isFocused: false
-					}
-				};
-			});
-		});
-	}, [consoleNodes.geoms, setConsoleCanvasNodes, teamSlug, connectionId]);
-
-	const enterConsoleFocus = useCallback((id: string) => {
-		// Fullscreen = React Portal vers document.body (dans ConsoleNode
-		// quand isFocused). Le shell rendu HORS du transform du viewport
-		// → pas de scale zoom sur le contenu, texte natif. La caméra
-		// canvas n'est pas touchée — pas d'animation "zoom depuis le
-		// centre" perceptible. Le node garde sa géom et reste dans le
-		// graphe (le CSS fade le cache derrière l'overlay).
-		setFocusedConsoleId(id);
-	}, []);
-	const exitConsoleFocus = useCallback(() => {
-		if (focusedConsoleId === null) return;
-		setFocusedConsoleId(null);
-	}, [focusedConsoleId]);
-
-	// Escape sort du fullscreen — window listener au niveau capture pour
-	// attraper la touche AVANT que CodeMirror la consomme (l'éditeur bloque
-	// autrement la sortie via clavier).
-	useEffect(() => {
-		if (focusedConsoleId === null) return;
-		function onKey(e: KeyboardEvent): void {
-			if (e.key !== "Escape") return;
-			e.preventDefault();
-			e.stopPropagation();
-			exitConsoleFocus();
-		}
-		window.addEventListener("keydown", onKey, { capture: true });
-		return () =>
-			window.removeEventListener("keydown", onKey, { capture: true });
-	}, [focusedConsoleId, exitConsoleFocus]);
-
-
-	const consoleDisplayNodes = useMemo<ConsoleNodeType[]>(
-		() =>
-			consoleCanvasNodes.map((n) => {
-				const isFocused = n.id === focusedConsoleId;
-				// Le node garde sa géom persistée quel que soit isFocused.
-				// Le fullscreen est un React Portal rendu par ConsoleNode
-				// vers document.body → hors du transform du viewport. Le node
-				// dans le graphe est juste caché par le CSS fade pendant ce
-				// temps (opacity 0 sur tous les nodes).
-				return {
-					...n,
-					// `selectable: true` : cliquer sur le node le marque `.selected`,
-					// et le CSS `.selected` garde les handles NodeResizer visibles
-					// sans hover. Click ailleurs = deselect standard.
-					selectable: !isFocused,
-					draggable: !isFocused,
-					// `deletable: false` : le Backspace natif du moteur supprime le node
-					// mais ne clean pas les tabs localStorage → on force le user
-					// à passer par le bouton `×` du header qui appelle
-					// `consoleNodes.remove` (clean tabs inclus).
-					deletable: false,
-					zIndex: 10,
-					data: {
-						teamSlug,
-						connId: connectionId,
-						isFocused,
-						onResizeEnd: (nodeId, size) =>
-							consoleNodes.updateGeom(nodeId, {
-								position: { x: size.x, y: size.y },
-								width: size.width,
-								height: size.height
-							}),
-						onEnterFocus: enterConsoleFocus,
-						onExitFocus: exitConsoleFocus,
-						onDelete: consoleNodes.remove
-					}
-				};
-			}),
-		[
-			consoleCanvasNodes,
-			consoleNodes.updateGeom,
-			consoleNodes.remove,
-			teamSlug,
-			connectionId,
-			focusedConsoleId,
-			enterConsoleFocus,
-			exitConsoleFocus
-		]
-	);
-
-	const systemEvents = useSchemaEventsNode(connectionId, teamSlug);
-
-	// Sprint EN : node système « Enums » — rend `schema.enums` visible (un
-	// enum n'est pas une table, il était invisible au canvas). L'action
-	// « + membre » ouvre une console au centre pré-remplie `add enum member
-	// <name> ""` : on seed les onglets du node juste après `create()` —
-	// `useConsoleTabs` les lit au mount du shell, la console s'ouvre remplie.
-	const seedConsoleWithSource = useCallback(
-		(source: string) => {
-			const pt = viewCenter();
-			if (pt === null) return;
-			const nodeId = consoleNodes.create({
-				x: pt.x - CONSOLE_NODE_DEFAULT_WIDTH / 2,
-				y: pt.y - CONSOLE_NODE_DEFAULT_HEIGHT / 2
-			});
-			const tabId =
-				typeof crypto !== "undefined" &&
-				typeof crypto.randomUUID === "function"
-					? crypto.randomUUID()
-					: `tab-${Math.random().toString(36).slice(2, 10)}`;
-			writeJson(consoleTabsKey(connectionId, nodeId), {
-				tabs: [{ id: tabId, name: "Sans titre", source }],
-				activeTabId: tabId
-			});
-		},
-		[viewCenter, consoleNodes, connectionId]
-	);
-	// Édition ouverte : le geste et son aperçu. Sinon la console, pré-remplie.
-	const onAddEnumMember = useCallback(
-		(enumName: string) => {
-			if (canApply(editMode)) {
-				setGesture({ kind: "add-enum-member", enumName });
-			} else {
-				seedConsoleWithSource(`add enum member ${enumName} ""`);
-			}
-		},
-		[seedConsoleWithSource, editMode, setGesture]
-	);
-	const enumEntries = useMemo(
-		() =>
-			(schema.enums ?? []).map((e) => ({
-				name: e.name,
-				members: e.members
-			})),
-		[schema.enums]
-	);
-	const enumsSystem = useEnumsNode(connectionId, enumEntries, onAddEnumMember);
-
-	// Registre des nodes système — UNE entrée par node, tout le wiring
-	// (displayNodes, onNodesChange, persist du drag) itère ce tableau.
-	// Ajouter un node système = ajouter une entrée ici, rien d'autre.
-	const systemNodeControls = useMemo(
-		() =>
-			[
-				{
-					id: SYSTEM_TABLE_ID,
-					node: systemEvents.node as SchemaNode | null,
-					onNodesChange: systemEvents.onNodesChange as (
-						changes: never
-					) => void,
-					updatePosition: systemEvents.updatePosition
-				},
-				{
-					id: ENUMS_NODE_ID,
-					node: enumsSystem.node as SchemaNode | null,
-					onNodesChange: enumsSystem.onNodesChange as (
-						changes: never
-					) => void,
-					updatePosition: enumsSystem.updatePosition
-				}
-			] as const,
-		[
-			systemEvents.node,
-			systemEvents.onNodesChange,
-			systemEvents.updatePosition,
-			enumsSystem.node,
-			enumsSystem.onNodesChange,
-			enumsSystem.updatePosition
-		]
-	);
-
+	// ─── Nodes affichés ───────────────────────────────────────────────────
+	const displayTables = useDisplayTables({
+		nodes,
+		hiddenIds,
+		neighbors,
+		focusId,
+		hoveredTableName,
+		onResize: handleTableResize
+	});
 	const displayNodes = useMemo<SchemaNode[]>(
 		() => [
 			...frameNodes,
-			...withFrameParents(displayTableNodes, framesApi.frames),
-			...consoleDisplayNodes,
-			...systemNodeControls.flatMap((c) => (c.node !== null ? [c.node] : []))
+			...withFrameParents(displayTables, framesApi.frames),
+			...consoles.nodes,
+			...systemNodes.nodes
 		],
 		[
 			frameNodes,
-			displayTableNodes,
+			displayTables,
 			framesApi.frames,
-			consoleDisplayNodes,
-			systemNodeControls
+			consoles.nodes,
+			systemNodes.nodes
 		]
 	);
 
-	// Espace réservé en bas du canvas pour la toolbar flottante — sert au
-	// safeArea du fit initial pour ne pas cacher les nodes derrière la
-	// toolbar. Constants depuis que la console SNQL n'est plus un panel
-	// bas-docké (elle vit dans un node console T5). Les 38 px approximent la
-	// hauteur de CanvasToolbar + son offset bottom-center.
-	const consoleHeight = 38;
-	const CONSOLE_GAP = 8;
-
-	// Visibilité du drawer gauche — masquable via un IconButton pour libérer
-	// de l'espace. État volatile (reset au refresh) : la persistance était
-	// plus embêtante qu'utile (le drawer revient à sa position par défaut
-	// à chaque rechargement, plus prévisible que "ce qu'il était avant").
-	const [leftDrawerVisible, setLeftDrawerVisible] = useState(false);
-
-	// Largeur du drawer — resizable via le handle droit. State + handlers
-	// encapsulés dans `useResizableDrawer` (persistance localStorage,
-	// clamp MIN/MAX). Largeur remontée ici pour dériver `leftPadding`
-	// (safeArea + console leftOffset) et positionner le toggle button.
-	const { width: leftDrawerWidth, handleProps: drawerHandleProps } =
-		useResizableDrawer();
-
-	// `leftPadding` dérivé — sert au safeArea (fit initial) et à la console
-	// SNQL (leftOffset). Suit la largeur courante du drawer + gap.
-	const leftPadding = leftDrawerVisible ? leftDrawerWidth + 8 : 8;
-
-	// `safeArea` = bandes occupées par les panels flottants ou dockés :
-	// - gauche : drawer unifié docké (300 px pleine hauteur — même largeur
-	//            en mode arborescence ET en mode détails) OU juste padding
-	// - droite : plus de drawer flottant droit (détails migrés dans le gauche)
-	// - bas   : toolbar (68 px) + console (dynamique, poussée au-dessus)
-	// Viewport : auto-fit + focusAndZoom + applyOverview + userTouched
-	// tracking. Encapsulé dans `useCanvasViewport` — voir sa doc pour la
-	// raison du safeArea via ref (évite le recadrage au toggle drawer).
+	// ─── Vue : cadrage initial, recadrage sur une table, vue d'ensemble ───
 	const { focusAndZoom, applyOverview } = useCanvasViewport({
 		base,
 		nodes,
 		containerRef,
-		leftPadding,
-		consoleHeight,
-		consoleGap: CONSOLE_GAP,
+		leftPadding: drawer.leftPadding,
+		consoleHeight: TOOLBAR_HEIGHT,
+		consoleGap: TOOLBAR_GAP,
 		setFocusId
 	});
-	// Injecte la version courante de `applyOverview` dans la ref lue par le
-	// callback `onClear` de `useCanvasFocus` (déclaré plus haut).
 	applyOverviewRef.current = applyOverview;
-
-	// Frame courant (si le drawer affiche FrameDetails). Recalculé à chaque
-	// re-render — passe à undefined si le frame a été supprimé pendant qu'on
-	// l'affichait ; l'effet ci-dessous clear alors focusFrameKey.
-	const focusedFrame = useMemo(
-		() =>
-			focusFrameKey !== null
-				? framesApi.frames.find((f) => f.key === focusFrameKey)
-				: undefined,
-		[focusFrameKey, framesApi.frames]
+	const focusedFrame = useFocusedFrame(
+		framesApi.frames,
+		focusFrameKey,
+		setFocusFrameKey
 	);
-	useEffect(() => {
-		if (focusFrameKey !== null && focusedFrame === undefined) {
-			setFocusFrameKey(null);
-		}
-	}, [focusFrameKey, focusedFrame, setFocusFrameKey]);
 
-	// Actions destructives / massives : auto-layout, hide, frame creation.
-	// Voir `useCanvasActions` pour la doc de chacune. Le hook expose aussi
-	// le state du modal Auto-layout (`layoutConfirmOpen`) car il gate
-	// l'appel à `relayoutAll` — confirmation obligatoire, geste massif
-	// non-trivialement réversible.
+	// ─── Actions, raccourcis, gestes ──────────────────────────────────────
 	const {
 		layoutConfirmOpen,
 		setLayoutConfirmOpen,
@@ -846,67 +332,17 @@ function CanvasInner({
 		applyOverview,
 		history: historyProxy
 	});
-
-	// Créer un node console au centre du viewport courant. Convertit les
-	// coords écran (centre du container DOM) en coords canvas via
-	// `screenToFlowPosition` — sinon on placerait le node à des
-	// coords canvas fixes indépendantes du pan/zoom courant.
-	const createConsoleAtCenter = useCallback(() => {
-		const pt = viewCenter();
-		if (pt === null) return;
-		consoleNodes.create({
-			x: pt.x - CONSOLE_NODE_DEFAULT_WIDTH / 2,
-			y: pt.y - CONSOLE_NODE_DEFAULT_HEIGHT / 2
-		});
-	}, [viewCenter, consoleNodes]);
-
-	// Shortcuts toolbar canvas. `useHotkeys` skip auto sur
-	// INPUT/TEXTAREA/SELECT + contentEditable (préserve l'undo/rename
-	// inline), et gère les modifier keys sans qu'on ait besoin de check
-	// `metaKey/ctrlKey/altKey` à la main.
-	const hideSelection = () => {
-		if (selectedTables.length === 0) return;
-		hideSelected();
-		clearSelection();
-	};
-	useHotkeys([
-		[
-			"Escape",
-			() => {
-				// T5 : Escape sort du focus mode console en priorité, sinon
-				// désactive le mode frame en cours.
-				if (focusedConsoleId !== null) {
-					exitConsoleFocus();
-					return;
-				}
-				if (activeTool === "frame") setActiveTool("select");
-			},
-			{ preventDefault: true }
-		],
-		["V", () => setActiveTool("select"), { preventDefault: true }],
-		[
-			"F",
-			() => {
-				// `F` a deux comportements complémentaires :
-				//  - avec sélection → crée un frame depuis la sélection.
-				//  - sans sélection → active le mode Frame (lasso).
-				if (selectedTables.length > 0) {
-					createFrameFromSelection();
-					clearSelection();
-				} else {
-					setActiveTool("frame");
-				}
-			},
-			{ preventDefault: true }
-		],
-		["C", createConsoleAtCenter, { preventDefault: true }],
-		["Backspace", hideSelection, { preventDefault: true }],
-		["Delete", hideSelection, { preventDefault: true }]
-	]);
-
-	// Mode « frame » toolbar — capture lasso + crée un frame. Voir
-	// `useCanvasSelectionLasso` pour la doc (rect = lasso pas bounds tables,
-	// création frames vides possibles, retour auto à `select`).
+	useCanvasHotkeys({
+		activeTool,
+		setActiveTool,
+		selectedTables,
+		clearSelection,
+		hideSelected,
+		createFrameFromSelection,
+		createConsole: consoles.createAtCenter,
+		focusedConsoleId: consoles.focusedId,
+		exitConsoleFocus: consoles.exitFocus
+	});
 	const { handleSelectionStart, handleSelectionEnd } = useCanvasSelectionLasso({
 		activeTool,
 		setActiveTool,
@@ -914,210 +350,117 @@ function CanvasInner({
 		history: historyProxy,
 		clearSelection
 	});
-
-	// Palette Cmd+K — spotlight shortcut + commandGroups. Voir
-	// `useCanvasCommands` pour la surface (tables + fit-view + ask-ai + theme).
 	const { commandGroups } = useCanvasCommands({
 		schema,
 		onFocusTable: focusAndZoom,
 		onFitView: applyOverview
 	});
+	const nodeEvents = useCanvasNodeEvents({
+		fitView,
+		setFocusId,
+		setFocusFrameKey,
+		focusNode,
+		focusFrame,
+		focusAndZoom,
+		setMenu,
+		setGesture,
+		enterConsoleFocus: consoles.enterFocus,
+		removeConsole: consoles.remove,
+		persistConsolePosition: consoles.persistPosition,
+		persistSystemNodePosition: systemNodes.persistPosition,
+		onFrameDragStop: onNodeDragStop
+	});
 
-	// ─── Contexts pour la couche floating (R4) ────────────────────────────
-	// Les 3 composants <CanvasBottomBar>, <CanvasLeftPanel>, <CanvasOverlays>
-	// consomment ces slots via `useCanvasData()`, `useCanvasFocusCtx()`,
-	// `useCanvasUI()`, `useCanvasActionsCtx()` — 0 prop parent. Chaque
-	// value est memoïsée par slot pour ne pas re-render tous les consumers
-	// dès qu'un state UI mineur change. Voir `CanvasContext.tsx` pour la
-	// raison du split en 4 contextes.
-	const dataCtxValue = useMemo(
-		() => ({
-			schema,
-			schemaLabel,
-			connectionId,
-			dbName,
-			teamSlug,
-			editMode,
-			framesApi,
-			hiddenIds
-		}),
-		[
-			schema,
-			schemaLabel,
-			connectionId,
-			dbName,
-			teamSlug,
-			editMode,
-			framesApi,
-			hiddenIds
-		]
-	);
-	const focusCtxValue = useMemo(
-		() => ({
-			focusId,
-			focusFrameKey,
-			focusedFrame,
-			setFocusId,
-			setFocusFrameKey,
-			focusNode,
-			focusFrame,
-			clearFocus,
-			focusAndZoom,
-			applyOverview
-		}),
-		[
-			focusId,
-			focusFrameKey,
-			focusedFrame,
-			setFocusId,
-			setFocusFrameKey,
-			focusNode,
-			focusFrame,
-			clearFocus,
-			focusAndZoom,
-			applyOverview
-		]
-	);
-	const uiCtxValue = useMemo(
-		() => ({
-			search,
-			setSearch,
-			menu,
-			setMenu,
-			activeTool,
-			setActiveTool,
-			leftDrawerVisible,
-			setLeftDrawerVisible,
-			leftDrawerWidth,
-			drawerHandleProps,
-			leftPadding,
-			consoleHeight,
-			consoleGap: CONSOLE_GAP,
-			layoutConfirmOpen,
-			setLayoutConfirmOpen,
-			selectedTables,
-			clearSelection,
-			hoveredTableName,
-			setHoveredTableName,
-			inferencePanelOpen,
-			setInferencePanelOpen,
-			gesture,
-			setGesture
-		}),
-		[
-			search,
-			menu,
-			activeTool,
-			leftDrawerVisible,
-			leftDrawerWidth,
-			drawerHandleProps,
-			leftPadding,
-			layoutConfirmOpen,
-			setLayoutConfirmOpen,
-			selectedTables,
-			clearSelection,
-			hoveredTableName,
-			inferencePanelOpen,
-			gesture,
-			setGesture
-		]
-	);
-	const actionsCtxValue = useMemo(
-		() => ({
-			hideTable,
-			unhideAll,
-			hideSelected,
-			createFrameFromSelection,
-			handleFrameRename,
-			handleFrameDelete,
-			relayoutAll,
-			addTableToFrame,
-			removeTableFromFrame,
-			commandGroups,
-			createConsole: createConsoleAtCenter
-		}),
-		[
-			hideTable,
-			unhideAll,
-			hideSelected,
-			createFrameFromSelection,
-			handleFrameRename,
-			handleFrameDelete,
-			relayoutAll,
-			addTableToFrame,
-			removeTableFromFrame,
-			commandGroups,
-			createConsoleAtCenter
-		]
-	);
+	// ─── Contextes de la couche flottante ─────────────────────────────────
+	// Un contexte par fréquence de changement (voir `CanvasContext`) : chaque
+	// valeur ne change que si un de ses champs change.
+	const dataCtx = useShallowMemo<CanvasDataContextValue>({
+		schema,
+		schemaLabel,
+		connectionId,
+		dbName,
+		teamSlug,
+		editMode,
+		framesApi,
+		hiddenIds
+	});
+	const focusCtx = useShallowMemo<CanvasFocusContextValue>({
+		focusId,
+		focusFrameKey,
+		focusedFrame,
+		setFocusId,
+		setFocusFrameKey,
+		focusNode,
+		focusFrame,
+		clearFocus,
+		focusAndZoom,
+		applyOverview
+	});
+	const uiCtx = useShallowMemo<CanvasUIContextValue>({
+		search,
+		setSearch,
+		menu,
+		setMenu,
+		activeTool,
+		setActiveTool,
+		leftDrawerVisible: drawer.visible,
+		setLeftDrawerVisible: drawer.setVisible,
+		leftDrawerWidth: drawer.width,
+		drawerHandleProps: drawer.handleProps,
+		leftPadding: drawer.leftPadding,
+		consoleHeight: TOOLBAR_HEIGHT,
+		consoleGap: TOOLBAR_GAP,
+		layoutConfirmOpen,
+		setLayoutConfirmOpen,
+		selectedTables,
+		clearSelection,
+		hoveredTableName,
+		setHoveredTableName,
+		inferencePanelOpen,
+		setInferencePanelOpen,
+		gesture,
+		setGesture
+	});
+	const actionsCtx = useShallowMemo<CanvasActionsContextValue>({
+		hideTable,
+		unhideAll,
+		hideSelected,
+		createFrameFromSelection,
+		handleFrameRename,
+		handleFrameDelete,
+		relayoutAll,
+		addTableToFrame,
+		removeTableFromFrame,
+		commandGroups,
+		createConsole: consoles.createAtCenter
+	});
 
 	return (
 		<div
 			ref={containerRef}
 			className={activeTool === "frame" ? "canvas-tool-frame" : undefined}
-			// T5 fullscreen : les autres nodes/edges + overlays sont fade via
-			// sélecteurs CSS (canvas-overrides.css) quand ce flag est présent.
-			// Le node console focus garde `opacity: 1` via sa className
-			// `sqlnest-console-focused`.
-			data-console-focus={focusedConsoleId !== null ? "true" : undefined}
+			// Console en plein écran : le CSS estompe le reste du canvas.
+			data-console-focus={consoles.focusedId !== null ? "true" : undefined}
 			style={{ position: "relative", width: "100%", height: "100%" }}
 		>
-			{/* Pendant le calcul du layout ELK, on garde juste un fond
-			 * opaque (pas de texte) — le canvas apparaît d'un coup quand
-			 * ELK settle. Overlay z-index 3 = juste au-dessus du fond
-			 * NestCanvas, mais sous l'overlay canvasReady (z-index 100). */}
-			{base === null ? (
-				<div
-					style={{
-						position: "absolute",
-						inset: 0,
-						background: "var(--sqlnest-canvas-bg)",
-						pointerEvents: "none",
-						zIndex: 3
-					}}
-				/>
-			) : null}
-
-			{/* Overlay OPAQUE tant que useCanvasSync n'a pas hydraté depuis le
-			 * serveur. Sans ça on voit brièvement l'état localStorage (frames
-			 * résiduelles, positions old) puis un saut quand `replaceAll`
-			 * applique le payload serveur. L'overlay masque cette fenêtre. */}
-			{canvasReady ? null : (
-				<div
-					style={{
-						position: "absolute",
-						inset: 0,
-						background: "var(--sqlnest-canvas-bg)",
-						zIndex: 100
-					}}
-				/>
-			)}
+			<CanvasVeil layoutPending={base === null} syncing={!canvasReady} />
 
 			<NestCanvas
 				nodes={displayNodes as unknown as TableNodeType[]}
 				edges={displayEdges}
+				// Le moteur émet les changes de tous les nodes affichés : chaque
+				// famille (tables et frames, consoles, nodes système) garde les
+				// siens.
 				onNodesChange={(changes) => {
-					// Le moteur émet les changes pour TOUS les nodes affichés — les
-					// tables/frames sont routés vers `handleNodesChange` de
-					// useCanvasNodes, les consoles vers `onConsoleNodesChange`
-					// (leur propre useNodesState). Chaque handler filtre les
-					// changes par id internally.
 					handleNodesChange(changes);
-					onConsoleNodesChange(changes as never);
-					for (const c of systemNodeControls) {
-						c.onNodesChange(changes as never);
-					}
+					consoles.onNodesChange(changes as never);
+					systemNodes.onNodesChange(changes as never);
 				}}
 				nodeTypes={nodeTypes}
 				edgeTypes={edgeTypes}
-				// Comportements souris :
-				// - wheel/trackpad → pan (Cmd/Ctrl+wheel garde le zoom)
-				// - clic gauche + drag sur le vide → lasso (sélection partielle :
-				//   sélectionne dès qu'un nœud touche le rectangle, pas besoin
-				//   d'être 100 % dedans)
-				// - clic milieu drag → pan (fallback quand pas de wheel)
-				// - clic droit sur le vide → aucun menu par défaut du navigateur
-				//   (les nœuds gardent leur propre menu via `onNodeContextMenu`)
+				// Molette et trackpad déplacent la vue (Cmd/Ctrl + molette zoome),
+				// le clic milieu aussi. Glisser sur le vide trace un lasso, qui
+				// prend un node dès qu'il le touche.
 				panOnScroll
 				zoomOnScroll={false}
 				selectionOnDrag
@@ -1125,124 +468,16 @@ function CanvasInner({
 				panOnDrag={[1]}
 				onSelectionStart={handleSelectionStart}
 				onSelectionEnd={handleSelectionEnd}
-				// Multi-select via click : accepte Shift OU le modifier natif de
-				// l'OS (Cmd sur Mac, Ctrl sur Win/Linux). Le moteur prend un array de
-				// key codes — n'importe lequel matche. Ça couvre :
-				//  - Shift+click (intuitif, cross-platform)
-				//  - Cmd+click (attendu sur Mac — convention Finder / natif)
-				//  - Ctrl+click (attendu sur Win/Linux — convention Explorer)
+				// Sélection multiple au clic : Shift, ou le modificateur du
+				// système (Cmd sur Mac, Ctrl ailleurs).
 				multiSelectionKeyCode={["Shift", "Meta", "Control"]}
 				onPaneContextMenu={(event) => event.preventDefault()}
-				// Clic gauche seul = focus visuel (drawer détails + ring + estompage).
-				// Clic avec modifier (Shift / Cmd / Ctrl) = sélection multi, on
-				// n'ouvre PAS le drawer détails (sinon il masque le SelectionChip)
-				// ET on clear un focus éventuel (sinon la table précédemment focus
-				// garde son ring bleu foncé pendant que les autres ont juste le
-				// contour selected bleu clair → styles mixtes visibles).
-				// Double-clic = recadre sur la table.
-				// Clic sur un frame → ouvre FrameDetails (liste des tables du frame)
-				// dans le même drawer, avec back button vers l'arborescence.
-				onNodeClick={(event, node) => {
-					const t = (node as { type?: string }).type;
-					if (t === "console") {
-						// Single-click console → focus modéré (zoom sur ce node
-						// sans passer en fullscreen). Double-clic pour le
-						// vrai fullscreen chrome-less. Skip si modifier
-						// (sélection multi, mais consoles sont selectable:
-						// false donc no-op de toute façon).
-						if (event.shiftKey || event.metaKey || event.ctrlKey) return;
-						fitView({
-							nodes: [{ id: node.id }],
-							padding: 0.25,
-							duration: 350
-						});
-						return;
-					}
-					if (event.shiftKey || event.metaKey || event.ctrlKey) {
-						setFocusId(null);
-						setFocusFrameKey(null);
-						return;
-					}
-					if (t === "frame") {
-						const frameKey = node.id.replace(FRAME_ID_PREFIX, "");
-						focusFrame(frameKey);
-						return;
-					}
-					focusNode(node.id);
-				}}
-				onNodeDoubleClick={(event, node) => {
-					const t = (node as { type?: string }).type;
-					if (t === "frame") return;
-					if (t === "console") {
-						// T5 : double-clic console → entre en focus mode (zoom +
-						// fade UI). Sortie via Esc ou bouton focus dans le node.
-						enterConsoleFocus(node.id);
-						return;
-					}
-					const field = fieldAt(event);
-					if (field !== undefined) {
-						setGesture({
-							kind: "rename-column",
-							table: node.id,
-							column: field
-						});
-						return;
-					}
-					focusAndZoom(node.id);
-				}}
-				onNodeContextMenu={(event, node) => {
-					const t = (node as { type?: string }).type;
-					if (t === "frame" || t === "console") return;
-					event.preventDefault();
-					// Focus visuel sans fitView : la vue ne bouge pas, donc le menu
-					// positionné en clientX/Y reste face à la carte cliquée.
-					focusNode(node.id);
-					const field = fieldAt(event);
-					setMenu({
-						x: event.clientX,
-						y: event.clientY,
-						tableName: node.id,
-						...(field !== undefined ? { field } : {})
-					});
-				}}
+				{...nodeEvents}
 				// Tables et frames changent de frame en suivant le pointeur.
 				canReparent={canReparentNode}
-				onNodeDragStop={(event, node) => {
-					// Compose : logique frames (drag lifecycle) puis persist de
-					// la position du node console. Le state des consoles a déjà été update
-					// par onConsoleNodesChange pendant le drag — au drop on
-					// snapshotte `node.position` (position finale) dans persist.
-					onNodeDragStop(event, node);
-					if (
-						(node as { type?: string }).type === "console" &&
-						node.id !== focusedConsoleId
-					) {
-						consoleNodes.updatePosition(node.id, node.position);
-					}
-					const sys = systemNodeControls.find((c) => c.id === node.id);
-					if (sys !== undefined) {
-						sys.updatePosition(node.position);
-					}
-				}}
 				onConnect={traceRelation}
-				onNodesDelete={(deleted) => {
-					// Le moteur fire ce callback quand le user press Backspace/Delete
-					// sur un node sélectionné. On clean uniquement les geoms +
-					// tabs des consoles supprimées ; les tables/frames ont leurs
-					// propres flux (hide/remove-from-frame).
-					for (const n of deleted) {
-						if ((n as { type?: string }).type === "console") {
-							consoleNodes.remove(n.id);
-						}
-					}
-				}}
-				onPaneClick={() => {
-					setFocusId(null);
-					setMenu(null);
-				}}
-				// `defaultViewport` = zoom initial garanti même quand le container
-				// n'est pas encore mesuré (Mantine AppShell hydrate en 2 passes) ;
-				// dès qu'il l'est, l'auto-fit de `useCanvasViewport` prend le relais.
+				// Zoom de départ garanti même si le conteneur n'est pas encore
+				// mesuré ; le cadrage de `useCanvasViewport` prend ensuite le relais.
 				defaultViewport={{
 					x: 0,
 					y: 0,
@@ -1253,46 +488,25 @@ function CanvasInner({
 				maxZoom={1.75}
 				onlyRenderVisibleElements
 			>
-				{/* Grille de points fine sur bg #1E1E1E — couleur pilotée par
-				 * `--sqlnest-canvas-dot` (rgba blanc à 8% pour rester discrète).
-				 * `gap` conservé à 20 px : trop fin devient trop sale au zoom
-				 * large, trop large casse la sensation de « papier millimétré ». */}
+				{/* Pas de 20 px : plus fin, la grille salit la vue large ; plus
+				 * large, elle ne se lit plus comme un papier millimétré. */}
 				<Background color="var(--sqlnest-canvas-dot)" gap={20} />
 				<CanvasZoomVariable />
-				<Panel
-					position="top-right"
-					style={{ top: 12, right: 12, margin: 0 }}
-				>
+				<Panel position="top-right" style={{ top: 12, right: 12, margin: 0 }}>
 					<CanvasTopRightHUD />
 				</Panel>
 				{focusId ? (
 					<Panel position="bottom-center">
-						<button
-							type="button"
-							onClick={clearFocus}
-							style={{
-								border: "1px solid var(--sqlnest-border)",
-								background: "var(--sqlnest-surface)",
-								color: "var(--sqlnest-accent)",
-								fontWeight: 600,
-								fontSize: "var(--sqlnest-font-size-12)",
-								padding: "6px 12px",
-								borderRadius: "var(--sqlnest-radius-8)",
-								cursor: "pointer",
-								boxShadow: "0 2px 8px rgba(0,0,0,0.32)"
-							}}
-						>
-							↺ tout afficher
-						</button>
+						<ShowAllButton onClick={clearFocus} />
 					</Panel>
 				) : null}
 			</NestCanvas>
 
 			<CanvasProviders
-				data={dataCtxValue}
-				focus={focusCtxValue}
-				ui={uiCtxValue}
-				actions={actionsCtxValue}
+				data={dataCtx}
+				focus={focusCtx}
+				ui={uiCtx}
+				actions={actionsCtx}
 			>
 				<CanvasBottomBar />
 				<CanvasLeftPanel />
