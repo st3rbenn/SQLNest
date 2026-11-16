@@ -11,6 +11,7 @@ import {
 	IconAsterisk,
 	IconCircleDashed,
 	IconColumnInsertRight,
+	IconTableMinus,
 	IconColumnRemove,
 	IconCopy,
 	IconCursorText,
@@ -384,6 +385,14 @@ export function CanvasContextMenu({
 			label: "Ajouter une colonne",
 			icon: <IconColumnInsertRight {...ICON} />,
 			onClick: () => setGesture({ kind: "add-column", table: tableName })
+		},
+		{
+			kind: "action",
+			id: "drop-table",
+			label: "Supprimer la table",
+			icon: <IconTableMinus {...ICON} />,
+			danger: true,
+			onClick: () => setGesture({ kind: "drop-table", table: tableName })
 		},
 		...(frameItem ? [frameItem] : []),
 		{

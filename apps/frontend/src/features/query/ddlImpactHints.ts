@@ -28,6 +28,20 @@ export function ddlImpactHint(statement: Statement): DivergenceHint | null {
 			message: `Le code qui suit la relation '${statement.name}' échouera ; plus rien ne contrôlera les valeurs de sa colonne.`
 		};
 	}
+	if (statement.kind === "add-enum-member") {
+		return {
+			span,
+			code: "ddl_add_enum_member_impact",
+			message: `Une valeur ajoutée à '${statement.name}' ne se retire plus.`
+		};
+	}
+	if (statement.kind === "drop-table") {
+		return {
+			span,
+			code: "ddl_drop_table_impact",
+			message: `Les requêtes et le code qui utilisent '${statement.target}' échoueront ; ses lignes seront perdues.`
+		};
+	}
 	if (statement.kind === "drop-column") {
 		return {
 			span,

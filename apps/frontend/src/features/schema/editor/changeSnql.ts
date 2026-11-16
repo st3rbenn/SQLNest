@@ -5,7 +5,13 @@
 
 /** Geste en cours, ouvert dans le panneau de changement. */
 export type ChangeGesture =
+	| { readonly kind: "create-table" }
+	| { readonly kind: "drop-table"; readonly table: string }
 	| { readonly kind: "add-column"; readonly table: string }
+	| { readonly kind: "create-enum" }
+	| { readonly kind: "add-enum-member"; readonly enumName: string }
+	| { readonly kind: "add-index"; readonly table: string }
+	| { readonly kind: "drop-index"; readonly table: string; readonly name: string }
 	| ColumnGesture
 	| AddRefGesture
 	| DropRefGesture;
@@ -60,6 +66,59 @@ export const COLUMN_TYPES = [
 	"array",
 	"uuid"
 ] as const;
+
+/** Types proposés pour la clé primaire d'une nouvelle table. */
+export const KEY_TYPES = ["int", "bigint", "uuid", "string"] as const;
+
+export interface CreateTableDraft {
+	readonly name: string;
+	readonly keyName: string;
+	readonly keyType: string;
+}
+
+/** Une table naît avec sa clé primaire ; ses colonnes s'ajoutent ensuite, une par geste. */
+export function createTableSnql(d: CreateTableDraft): string {
+	const key = d.keyName.trim();
+	return `create table ${d.name.trim()} { ${key}: ${d.keyType}, primary key (${key}) }`;
+}
+
+export function dropTableSnql(table: string): string {
+	return `drop table ${table}`;
+}
+
+/** Valeur d'enum écrite en littéral SNQL. */
+function enumLiteral(value: string): string {
+	return JSON.stringify(value);
+}
+
+/** `values` : une valeur par ligne, les lignes vides ignorées. */
+export function createEnumSnql(name: string, values: string): string {
+	const members = values
+		.split("\n")
+		.map((v) => v.trim())
+		.filter((v) => v !== "")
+		.map(enumLiteral);
+	return `create enum ${name.trim()} { ${members.join(", ")} }`;
+}
+
+export function addEnumMemberSnql(enumName: string, value: string): string {
+	return `add enum member ${enumName} ${enumLiteral(value.trim())}`;
+}
+
+export interface AddIndexDraft {
+	readonly table: string;
+	/** Colonnes de la clé, dans l'ordre choisi. */
+	readonly columns: readonly string[];
+	readonly unique: boolean;
+}
+
+export function addIndexSnql(d: AddIndexDraft): string {
+	return `add ${d.unique ? "unique " : ""}index (${d.columns.join(", ")}) into ${d.table}`;
+}
+
+export function dropIndexSnql(table: string, name: string): string {
+	return `drop index ${name} from ${table}`;
+}
 
 export interface AddColumnDraft {
 	readonly table: string;

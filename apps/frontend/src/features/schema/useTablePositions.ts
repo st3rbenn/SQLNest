@@ -77,13 +77,14 @@ export function useTablePositions(
 
 	// Re-seed quand la signature change (nouvelle base) : lit le nouveau key
 	// puis met à jour `loadedKey` — l'effet de persist ci-dessous devient alors
-	// autorisé sur ce nouveau key. Quand persistLocal=false, on re-seed vide
-	// (le serveur hydratera via useCanvasSync).
+	// autorisé sur ce nouveau key.
 	useEffect(() => {
 		if (loadedKey.current === key) return;
-		const loaded = persistLocal ? loadPositions(key) : {};
 		loadedKey.current = key;
-		setPositions(loaded);
+		// Connecté, l'état appartient à la connexion : une table créée ou
+		// supprimée ne le vide pas (le canvas n'est plus remonté, ADR-039 D5).
+		if (!persistLocal) return;
+		setPositions(loadPositions(key));
 	}, [key, persistLocal]);
 
 	// Persist positions au localStorage — SEULEMENT si le key en état matche

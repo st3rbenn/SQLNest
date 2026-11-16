@@ -8,6 +8,7 @@ import {
 	ScrollArea,
 	Stack,
 	Text,
+	Textarea,
 	TextInput
 } from "@mantine/core";
 import { Button } from "@sqlnest/design-system";
@@ -22,6 +23,11 @@ import {
 	IconAsterisk,
 	IconCircleDashed,
 	IconColumnInsertRight,
+	IconKey,
+	IconKeyOff,
+	IconListLetters,
+	IconTableMinus,
+	IconTablePlus,
 	IconColumnRemove,
 	IconCursorText,
 	IconEraser,
@@ -51,13 +57,20 @@ import {
 import {
 	type AddRefGesture,
 	addColumnSnql,
+	addEnumMemberSnql,
+	addIndexSnql,
 	addRefSnql,
 	COLUMN_TYPES,
 	type ChangeGesture,
 	type ColumnGesture,
+	createEnumSnql,
+	createTableSnql,
 	dropColumnSnql,
 	dropDefaultSnql,
+	dropIndexSnql,
 	dropRefSnql,
+	dropTableSnql,
+	KEY_TYPES,
 	REF_RULES,
 	type RefRule,
 	renameColumnSnql,
@@ -113,9 +126,48 @@ export function ChangePanel() {
 	const onClose = () => setGesture(null);
 	const key = keyOf(gesture);
 	switch (gesture.kind) {
+		case "create-table":
+			return <CreateTablePanel key={key} onClose={onClose} />;
+		case "drop-table":
+			return (
+				<ChangeFrame
+					key={key}
+					icon={<IconTableMinus {...ICON} />}
+					title="Supprimer la table"
+					table={gesture.table}
+					source={dropTableSnql(gesture.table)}
+					onClose={onClose}
+				/>
+			);
 		case "add-column":
 			return (
 				<AddColumnPanel key={key} table={gesture.table} onClose={onClose} />
+			);
+		case "create-enum":
+			return <CreateEnumPanel key={key} onClose={onClose} />;
+		case "add-enum-member":
+			return (
+				<AddEnumMemberPanel
+					key={key}
+					enumName={gesture.enumName}
+					onClose={onClose}
+				/>
+			);
+		case "add-index":
+			return (
+				<AddIndexPanel key={key} table={gesture.table} onClose={onClose} />
+			);
+		case "drop-index":
+			return (
+				<ChangeFrame
+					key={key}
+					icon={<IconKeyOff {...ICON} />}
+					title="Supprimer l'index"
+					table={gesture.table}
+					index={gesture.name}
+					source={dropIndexSnql(gesture.table, gesture.name)}
+					onClose={onClose}
+				/>
 			);
 		case "add-ref":
 			return <AddRefPanel key={key} gesture={gesture} onClose={onClose} />;
@@ -187,6 +239,55 @@ function AddRefPanel({
 	);
 }
 
+function CreateTablePanel({ onClose }: { readonly onClose: () => void }) {
+	const [name, setName] = useState("");
+	const [keyName, setKeyName] = useState("");
+	const [keyType, setKeyType] = useState<string>(KEY_TYPES[0]);
+	return (
+		<ChangeFrame
+			icon={<IconTablePlus {...ICON} />}
+			title="Créer une table"
+			source={
+				name.trim() === "" || keyName.trim() === ""
+					? undefined
+					: createTableSnql({ name, keyName, keyType })
+			}
+			onClose={onClose}
+		>
+			{(locked) => (
+				<>
+					<TextInput
+						size="xs"
+						label="Nom"
+						value={name}
+						onChange={(e) => setName(e.currentTarget.value)}
+						autoComplete="off"
+						disabled={locked}
+						data-autofocus
+						autoFocus
+					/>
+					<TextInput
+						size="xs"
+						label="Clé primaire"
+						value={keyName}
+						onChange={(e) => setKeyName(e.currentTarget.value)}
+						autoComplete="off"
+						disabled={locked}
+					/>
+					<NativeSelect
+						size="xs"
+						label="Type de la clé"
+						value={keyType}
+						onChange={(e) => setKeyType(e.currentTarget.value)}
+						disabled={locked}
+						data={[...KEY_TYPES]}
+					/>
+				</>
+			)}
+		</ChangeFrame>
+	);
+}
+
 function AddColumnPanel({
 	table,
 	onClose
@@ -237,6 +338,145 @@ function AddColumnPanel({
 						placeholder={DEFAULT_PLACEHOLDERS[type] ?? ""}
 						onChange={(e) => setDefaultExpr(e.currentTarget.value)}
 						autoComplete="off"
+						disabled={locked}
+					/>
+				</>
+			)}
+		</ChangeFrame>
+	);
+}
+
+function CreateEnumPanel({ onClose }: { readonly onClose: () => void }) {
+	const [name, setName] = useState("");
+	const [values, setValues] = useState("");
+	return (
+		<ChangeFrame
+			icon={<IconListLetters {...ICON} />}
+			title="Créer un enum"
+			source={
+				name.trim() === "" || values.trim() === ""
+					? undefined
+					: createEnumSnql(name, values)
+			}
+			onClose={onClose}
+		>
+			{(locked) => (
+				<>
+					<TextInput
+						size="xs"
+						label="Nom"
+						value={name}
+						onChange={(e) => setName(e.currentTarget.value)}
+						autoComplete="off"
+						disabled={locked}
+						data-autofocus
+						autoFocus
+					/>
+					<Textarea
+						size="xs"
+						label="Valeurs"
+						placeholder={"draft\npublished"}
+						value={values}
+						onChange={(e) => setValues(e.currentTarget.value)}
+						autosize
+						minRows={3}
+						autoComplete="off"
+						disabled={locked}
+					/>
+				</>
+			)}
+		</ChangeFrame>
+	);
+}
+
+function AddEnumMemberPanel({
+	enumName,
+	onClose
+}: {
+	readonly enumName: string;
+	readonly onClose: () => void;
+}) {
+	const [value, setValue] = useState("");
+	return (
+		<ChangeFrame
+			icon={<IconListLetters {...ICON} />}
+			title="Ajouter une valeur"
+			enumName={enumName}
+			source={
+				value.trim() === "" ? undefined : addEnumMemberSnql(enumName, value)
+			}
+			onClose={onClose}
+		>
+			{(locked) => (
+				<TextInput
+					size="xs"
+					label="Valeur"
+					value={value}
+					onChange={(e) => setValue(e.currentTarget.value)}
+					autoComplete="off"
+					disabled={locked}
+					data-autofocus
+					autoFocus
+				/>
+			)}
+		</ChangeFrame>
+	);
+}
+
+function AddIndexPanel({
+	table,
+	onClose
+}: {
+	readonly table: string;
+	readonly onClose: () => void;
+}) {
+	const { schema } = useCanvasData();
+	// Les colonnes telles qu'à l'ouverture, et la clé dans l'ordre des coches.
+	const [fields] = useState(
+		() => schema.collections.find((c) => c.name === table)?.fields ?? []
+	);
+	const [columns, setColumns] = useState<readonly string[]>([]);
+	const [unique, setUnique] = useState(false);
+	return (
+		<ChangeFrame
+			icon={<IconKey {...ICON} />}
+			title="Ajouter un index"
+			table={table}
+			source={
+				columns.length === 0
+					? undefined
+					: addIndexSnql({ table, columns, unique })
+			}
+			onClose={onClose}
+		>
+			{(locked) => (
+				<>
+					<Stack gap={6}>
+						<Text size="xs" fw={500}>
+							Colonnes
+						</Text>
+						{fields.map((f) => (
+							<Checkbox
+								key={f.name}
+								size="xs"
+								label={f.name}
+								checked={columns.includes(f.name)}
+								onChange={(e) =>
+									setColumns(
+										e.currentTarget.checked
+											? [...columns, f.name]
+											: columns.filter((c) => c !== f.name)
+									)
+								}
+								disabled={locked}
+							/>
+						))}
+					</Stack>
+					<Checkbox
+						size="xs"
+						label="Unique"
+						checked={unique}
+						onChange={(e) => setUnique(e.currentTarget.checked)}
 						disabled={locked}
 					/>
 				</>
@@ -460,6 +700,9 @@ function CurrentDefault({ field }: { readonly field: Field | undefined }) {
 }
 
 /** Types SNQL et enums du schéma ; le type actuel en tête s'il n'en fait pas partie. */
+/** Option du sélecteur de type qui ouvre la création d'un enum. */
+const NEW_ENUM = "__new_enum__";
+
 function TypeSelect({
 	value,
 	current,
@@ -472,6 +715,7 @@ function TypeSelect({
 	readonly disabled: boolean;
 }) {
 	const { schema } = useCanvasData();
+	const { setGesture } = useCanvasUI();
 	const options = [
 		...COLUMN_TYPES,
 		...((schema as unknown as SnqlSchemaModel).enums ?? []).map((e) => e.name)
@@ -481,13 +725,20 @@ function TypeSelect({
 			size="xs"
 			label="Type"
 			value={value}
-			onChange={(e) => onChange(e.currentTarget.value)}
-			disabled={disabled}
-			data={
-				current !== undefined && !options.includes(current)
-					? [current, ...options]
-					: options
+			// « Nouvel enum… » quitte ce geste pour celui qui le crée : un geste,
+			// un changement (ADR-039).
+			onChange={(e) =>
+				e.currentTarget.value === NEW_ENUM
+					? setGesture({ kind: "create-enum" })
+					: onChange(e.currentTarget.value)
 			}
+			disabled={disabled}
+			data={[
+				...(current !== undefined && !options.includes(current)
+					? [current, ...options]
+					: options),
+				{ value: NEW_ENUM, label: "Nouvel enum…" }
+			]}
 		/>
 	);
 }
@@ -503,16 +754,21 @@ function ChangeFrame({
 	table,
 	column,
 	reference,
+	index,
+	enumName,
 	source,
 	onClose,
 	children
 }: {
 	readonly icon: ReactNode;
 	readonly title: string;
-	readonly table: string;
+	/** Absent : la table n'existe pas encore, son nom est dans le formulaire. */
+	readonly table?: string;
 	readonly column?: string;
 	/** `table.colonne` référencée, pour une relation. */
 	readonly reference?: string;
+	readonly index?: string;
+	readonly enumName?: string;
 	readonly source: string | undefined;
 	readonly onClose: () => void;
 	/** Formulaire du geste, figé une fois le changement appliqué. */
@@ -632,11 +888,13 @@ function ChangeFrame({
 		>
 			<ScrollArea style={{ flex: 1 }} px="md" py="sm">
 				<Stack gap="sm">
-					<Row label="Table">
-						<Text size="xs" ff="monospace">
-							{table}
-						</Text>
-					</Row>
+					{table !== undefined ? (
+						<Row label="Table">
+							<Text size="xs" ff="monospace">
+								{table}
+							</Text>
+						</Row>
+					) : null}
 					{column !== undefined ? (
 						<Row label="Colonne">
 							<Text size="xs" ff="monospace">
@@ -648,6 +906,20 @@ function ChangeFrame({
 						<Row label="Référence">
 							<Text size="xs" ff="monospace" style={BREAK_ANYWHERE}>
 								{reference}
+							</Text>
+						</Row>
+					) : null}
+					{index !== undefined ? (
+						<Row label="Index">
+							<Text size="xs" ff="monospace" style={BREAK_ANYWHERE}>
+								{index}
+							</Text>
+						</Row>
+					) : null}
+					{enumName !== undefined ? (
+						<Row label="Enum">
+							<Text size="xs" ff="monospace" style={BREAK_ANYWHERE}>
+								{enumName}
 							</Text>
 						</Row>
 					) : null}

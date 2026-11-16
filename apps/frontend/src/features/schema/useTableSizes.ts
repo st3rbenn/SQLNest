@@ -69,9 +69,11 @@ export function useTableSizes(
 	// Re-seed quand la signature change (nouvelle base).
 	useEffect(() => {
 		if (loadedKey.current === key) return;
-		const loaded = persistLocal ? loadSizes(key) : {};
 		loadedKey.current = key;
-		setSizes(loaded);
+		// Connecté, l'état appartient à la connexion : une table créée ou
+		// supprimée ne le vide pas (le canvas n'est plus remonté, ADR-039 D5).
+		if (!persistLocal) return;
+		setSizes(loadSizes(key));
 	}, [key, persistLocal]);
 
 	// Persist — seulement si le key en état matche le key courant (voir

@@ -4,6 +4,7 @@ import { useCanvasData } from "../canvas/CanvasContext";
 import { colorFor } from "../colors";
 import type { SchemaModel } from "../schema-model";
 import { TableDetailsFields } from "./TableDetailsFields";
+import { TableDetailsIndexes } from "./TableDetailsIndexes";
 import { TableDetailsHeader } from "./TableDetailsHeader";
 import { TableDetailsRelations } from "./TableDetailsRelations";
 import { TableDetailsSuggestion } from "./TableDetailsSuggestion";
@@ -73,6 +74,7 @@ export function TableDetails({
 				incoming={incoming}
 				onSelect={onSelect}
 			/>
+			<TableDetailsIndexes table={table} />
 			<TableDetailsSuggestion table={table} />
 		</Box>
 	);

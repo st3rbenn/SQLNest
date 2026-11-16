@@ -9,6 +9,7 @@ import {
 	IconLink,
 	IconPointer,
 	IconSquareDashed,
+	IconTablePlus,
 	IconTerminal2
 } from "@tabler/icons-react";
 
@@ -34,6 +35,9 @@ interface Props {
 	readonly onSelectTool: (tool: CanvasTool) => void;
 	/** T5 : crée un node console SNQL au centre du viewport courant. */
 	readonly onCreateConsole?: () => void;
+	/** Ouvre le geste « créer une table ». Absent (édition fermée) → le
+	 * bouton n'est pas rendu. */
+	readonly onCreateTable?: () => void;
 	/** Bascule le panneau d'inférence de relations. Absent (base avec FK) →
 	 * le bouton n'est pas rendu (rien à inférer). */
 	readonly onToggleInference?: () => void;
@@ -50,6 +54,7 @@ export function CanvasToolbar({
 	activeTool,
 	onSelectTool,
 	onCreateConsole,
+	onCreateTable,
 	onToggleInference,
 	inferenceActive = false
 }: Props) {
@@ -86,6 +91,11 @@ export function CanvasToolbar({
 				>
 					<IconTerminal2 {...ICON} />
 				</ToolbarButton>
+				{onCreateTable ? (
+					<ToolbarButton label="Créer une table" onClick={onCreateTable}>
+						<IconTablePlus {...ICON} />
+					</ToolbarButton>
+				) : null}
 				<Toolbar.Divider orientation="horizontal" />
 				<ToolbarButton
 					label="Relayoute auto"

@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { CanvasToolbar } from "../../CanvasToolbar";
+import { canApply } from "../../editor/editMode";
 import { shouldOfferInference } from "../../relation-inference/candidates";
 import { AutoLayoutModal } from "../AutoLayoutModal";
 import {
@@ -13,8 +14,9 @@ import {
  * button) + modal de confirmation Auto-layout.
  */
 export function CanvasBottomBar() {
-	const { schema } = useCanvasData();
+	const { schema, editMode } = useCanvasData();
 	const {
+		setGesture,
 		activeTool,
 		setActiveTool,
 		layoutConfirmOpen,
@@ -31,6 +33,9 @@ export function CanvasBottomBar() {
 			<CanvasToolbar
 				onAutoLayout={() => setLayoutConfirmOpen(true)}
 				onCreateConsole={createConsole}
+				{...(canApply(editMode)
+					? { onCreateTable: () => setGesture({ kind: "create-table" }) }
+					: {})}
 				bottomOffset={0}
 				activeTool={activeTool}
 				onSelectTool={setActiveTool}

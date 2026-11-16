@@ -9,7 +9,7 @@ import {
 	useNestCanvas,
 	useNodesState
 } from "@sqlnest/canvas";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import "@sqlnest/canvas/style.css";
 import "./canvas-overrides.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -26,10 +26,11 @@ import { CanvasLeftPanel } from "./canvas/floating/CanvasLeftPanel";
 import { CanvasOverlays } from "./canvas/floating/CanvasOverlays";
 import { CanvasTopRightHUD } from "./canvas/floating/CanvasTopRightHUD";
 import { canReparentNode, withFrameParents } from "./canvas/frameTree";
+import { syncLayoutTables } from "./canvas/layoutTables";
 import { makeEdge } from "./canvas/relationEdge";
 import { createTableDecorator } from "./canvas/tableDecorator";
 import type { ChangeGesture } from "./editor/changeSnql";
-import { editModeOf } from "./editor/editMode";
+import { canApply, editModeOf } from "./editor/editMode";
 import { useProjectStatus } from "./editor/useProjectStatus";
 import { useCanvasActions } from "./canvas/useCanvasActions";
 import { useCanvasCommands } from "./canvas/useCanvasCommands";
@@ -71,12 +72,13 @@ import {
 	fieldOfHandle,
 	NODE_WIDTH,
 	nodeHeight,
+	tableAriaLabel,
 	TableNode,
 	type TableNodeType
 } from "./TableNode";
 import { useEdgeAnchors } from "./useEdgeAnchors";
 import { useFrames } from "./useFrames";
-import { useTablePositions } from "./useTablePositions";
+import { useTablePositions, type XY } from "./useTablePositions";
 import { useTableSizes } from "./useTableSizes";
 
 const nodeTypes = {
@@ -119,7 +121,7 @@ function makeNode(schema: SchemaModel) {
 		return {
 			id: name,
 			type: "table",
-			ariaLabel: `Table ${name}, ${collection.fields.length} champs`,
+			ariaLabel: tableAriaLabel(collection),
 			position: { x: 0, y: 0 },
 			// Dimensions explicites → fitView cadre sans attendre la mesure DOM.
 			width: NODE_WIDTH,
@@ -243,6 +245,13 @@ function CanvasInner({
 	} = useCanvasFocus({
 		onClear: useCallback(() => applyOverviewRef.current(), [])
 	});
+	// Table focalisée puis supprimée : sans focus à tenir, le reste du canvas
+	// resterait estompé. La vue ne bouge pas (pas de retour à l'overview).
+	useEffect(() => {
+		if (focusId !== null && !schema.collections.some((c) => c.name === focusId)) {
+			setFocusId(null);
+		}
+	}, [schema, focusId, setFocusId]);
 	const [search, setSearch] = useState("");
 	const [hiddenIds, setHiddenIds] = useState<ReadonlySet<string>>(
 		() => new Set()
@@ -255,6 +264,33 @@ function CanvasInner({
 	// « expert », le mode toolbar est le geste « découvrable ».
 	const [activeTool, setActiveTool] = useState<CanvasTool>("select");
 	const containerRef = useRef<HTMLDivElement | null>(null);
+	/** Centre de la vue courante, en coordonnées du canvas. */
+	const viewCenter = useCallback((): XY | null => {
+		const rect = containerRef.current?.getBoundingClientRect();
+		if (!rect) return null;
+		return screenToFlowPosition({
+			x: rect.left + rect.width / 2,
+			y: rect.top + rect.height / 2
+		});
+	}, [screenToFlowPosition]);
+
+	// Tables créées ou supprimées depuis le calcul du layout (ADR-039 D5) :
+	// le layout en cache suit, une table apparue se place au centre de la vue
+	// et y reste (position persistée comme un déplacement).
+	const queryClient = useQueryClient();
+	const { setManyPositions } = tablePositions;
+	useEffect(() => {
+		if (base === null) return;
+		const synced = syncLayoutTables(
+			base,
+			schema,
+			makeNode(schema),
+			viewCenter()
+		);
+		if (synced === null) return;
+		setManyPositions(synced.placed);
+		queryClient.setQueryData(canvasLayoutQueryKey(connectionId), synced.layout);
+	}, [base, schema, viewCenter, setManyPositions, queryClient, connectionId]);
 
 	// Frames user-defined (persistés en localStorage quand anonyme,
 	// server-only quand loggé — cf. `hookOpts` plus haut). Remplace le
@@ -646,12 +682,8 @@ function CanvasInner({
 	// `useConsoleTabs` la lit au mount du shell, la console s'ouvre remplie.
 	const seedConsoleWithSource = useCallback(
 		(source: string) => {
-			const rect = containerRef.current?.getBoundingClientRect();
-			if (!rect) return;
-			const pt = screenToFlowPosition({
-				x: rect.left + rect.width / 2,
-				y: rect.top + rect.height / 2
-			});
+			const pt = viewCenter();
+			if (pt === null) return;
 			const nodeId = consoleNodes.create({
 				x: pt.x - CONSOLE_NODE_DEFAULT_WIDTH / 2,
 				y: pt.y - CONSOLE_NODE_DEFAULT_HEIGHT / 2
@@ -673,13 +705,18 @@ function CanvasInner({
 				// quota / private mode — la console s'ouvre vide, pas bloquant.
 			}
 		},
-		[screenToFlowPosition, consoleNodes, connectionId]
+		[viewCenter, consoleNodes, connectionId]
 	);
+	// Édition ouverte : le geste et son aperçu. Sinon la console, pré-remplie.
 	const onAddEnumMember = useCallback(
 		(enumName: string) => {
-			seedConsoleWithSource(`add enum member ${enumName} ""`);
+			if (canApply(editMode)) {
+				setGesture({ kind: "add-enum-member", enumName });
+			} else {
+				seedConsoleWithSource(`add enum member ${enumName} ""`);
+			}
 		},
-		[seedConsoleWithSource]
+		[seedConsoleWithSource, editMode, setGesture]
 	);
 	const enumEntries = useMemo(
 		() =>
@@ -837,17 +874,13 @@ function CanvasInner({
 	// `screenToFlowPosition` — sinon on placerait le node à des
 	// coords canvas fixes indépendantes du pan/zoom courant.
 	const createConsoleAtCenter = useCallback(() => {
-		const rect = containerRef.current?.getBoundingClientRect();
-		if (!rect) return;
-		const pt = screenToFlowPosition({
-			x: rect.left + rect.width / 2,
-			y: rect.top + rect.height / 2
-		});
+		const pt = viewCenter();
+		if (pt === null) return;
 		consoleNodes.create({
 			x: pt.x - CONSOLE_NODE_DEFAULT_WIDTH / 2,
 			y: pt.y - CONSOLE_NODE_DEFAULT_HEIGHT / 2
 		});
-	}, [screenToFlowPosition, consoleNodes]);
+	}, [viewCenter, consoleNodes]);
 
 	// Shortcuts toolbar canvas. `useHotkeys` skip auto sur
 	// INPUT/TEXTAREA/SELECT + contentEditable (préserve l'undo/rename
@@ -1305,13 +1338,11 @@ export function SchemaCanvas({
 	dbName: string;
 	teamSlug: string;
 }) {
-	// Remonte tout le canvas au changement de schéma : état réinitialisé
-	// proprement, le graphe se recadre au montage. Clé combinant moteur, taille et
-	// première/dernière table — assez discriminante pour deux schémas distincts.
-	const cols = schema.collections;
-	const key = `${schema.engine}:${cols.length}:${cols[0]?.name ?? ""}:${cols[cols.length - 1]?.name ?? ""}`;
+	// Un canvas par connexion : en changer remonte tout, état réinitialisé et
+	// graphe recadré. Une table créée ou supprimée ne remonte rien — la vue
+	// reste où elle est et le panneau garde son résultat (ADR-039 D5).
 	return (
-		<NestCanvasProvider key={key}>
+		<NestCanvasProvider key={connectionId}>
 			<CanvasInner
 				schema={schema}
 				schemaLabel={schemaLabel}

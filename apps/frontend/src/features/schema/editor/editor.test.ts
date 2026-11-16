@@ -5,10 +5,16 @@ import { typedNames } from "./applyChange";
 import { defaultRefRules, previewChange } from "./changePreview";
 import {
 	addColumnSnql,
+	addEnumMemberSnql,
+	addIndexSnql,
 	addRefSnql,
+	createEnumSnql,
+	createTableSnql,
 	dropRefSnql,
+	dropTableSnql,
 	dropColumnSnql,
 	dropDefaultSnql,
+	dropIndexSnql,
 	renameColumnSnql,
 	setDefaultSnql,
 	setNullabilitySnql,
@@ -215,6 +221,101 @@ describe("gestes de relation (ADR-039 D2)", () => {
 		expect(dropped.confirm).toBe("DROP pet_owner_id_fkey");
 		expect(dropped.warnings).toEqual([
 			"Le code qui suit la relation 'pet_owner_id_fkey' échouera ; plus rien ne contrôlera les valeurs de sa colonne."
+		]);
+	});
+
+	it("table : créée avec sa clé primaire ; supprimée après saisie de son nom", () => {
+		const schema = {
+			engine: "postgres",
+			collections: [collection("owner")],
+			relations: []
+		} as unknown as SnqlSchemaModel;
+		const created = createTableSnql({
+			name: " visit ",
+			keyName: " id ",
+			keyType: "uuid"
+		});
+		expect(created).toBe("create table visit { id: uuid, primary key (id) }");
+		const preview = previewChange(created, schema, { kind: "direct" });
+		expect(preview.error).toBeUndefined();
+		expect(preview.statements.join("\n")).toContain('CREATE TABLE "visit"');
+		expect(preview.confirm).toBeUndefined();
+
+		const dropped = previewChange(dropTableSnql("owner"), schema, {
+			kind: "direct"
+		});
+		expect(dropped.error).toBeUndefined();
+		expect(dropped.confirm).toBe("DROP owner");
+		expect(dropped.warnings).toEqual([
+			"Les requêtes et le code qui utilisent 'owner' échoueront ; ses lignes seront perdues."
+		]);
+	});
+
+	it("index : colonnes dans l'ordre choisi, nom du profil ; supprimé par son nom", () => {
+		const schema = {
+			engine: "postgres",
+			collections: [
+				{
+					...collection("pet"),
+					fields: [
+						...collection("pet").fields,
+						{ name: "owner_id", type: "int", nullable: true, source: "declared" }
+					],
+					indexes: [
+						{ name: "pet_owner_id_idx", columns: ["owner_id"], unique: false }
+					]
+				}
+			],
+			relations: []
+		} as unknown as SnqlSchemaModel;
+		const prisma = { kind: "migrations", orm: "prisma", apply: true } as const;
+
+		const plain = addIndexSnql({
+			table: "pet",
+			columns: ["owner_id", "id"],
+			unique: false
+		});
+		expect(plain).toBe("add index (owner_id, id) into pet");
+		expect(previewChange(plain, schema, prisma).statements.join("\n")).toContain(
+			'"pet_owner_id_id_idx"'
+		);
+		const unique = addIndexSnql({ table: "pet", columns: ["id"], unique: true });
+		expect(unique).toBe("add unique index (id) into pet");
+		expect(previewChange(unique, schema, prisma).statements.join("\n")).toContain(
+			'"pet_id_key"'
+		);
+
+		const dropped = previewChange(
+			dropIndexSnql("pet", "pet_owner_id_idx"),
+			schema,
+			prisma
+		);
+		expect(dropped.error).toBeUndefined();
+		expect(dropped.confirm).toBe("DROP pet_owner_id_idx");
+	});
+
+	it("enum : une valeur par ligne ; une valeur ajoutée est annoncée irréversible", () => {
+		const schema = {
+			engine: "postgres",
+			collections: [collection("pet")],
+			relations: [],
+			enums: [{ name: "mood", members: ["calm"], source: "declared" }]
+		} as unknown as SnqlSchemaModel;
+
+		const created = createEnumSnql(" status ", "draft\n\n  published \n");
+		expect(created).toBe('create enum status { "draft", "published" }');
+		const preview = previewChange(created, schema, { kind: "direct" });
+		expect(preview.error).toBeUndefined();
+		expect(preview.statements.join("\n")).toContain("CREATE TYPE");
+
+		const added = addEnumMemberSnql("mood", ' "wild" ');
+		expect(added).toBe('add enum member mood "\\"wild\\""');
+		const plain = previewChange(addEnumMemberSnql("mood", "wild"), schema, {
+			kind: "direct"
+		});
+		expect(plain.error).toBeUndefined();
+		expect(plain.warnings).toEqual([
+			"Une valeur ajoutée à 'mood' ne se retire plus."
 		]);
 	});
 

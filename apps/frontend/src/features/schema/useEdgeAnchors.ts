@@ -79,10 +79,9 @@ export function useEdgeAnchors(
 
 	// Re-seed quand la signature change (nouvelle base).
 	useEffect(() => {
-		if (!persistLocal) {
-			setOverrides({});
-			return;
-		}
+		// Connecté, l'état appartient à la connexion : une table créée ou
+		// supprimée ne le vide pas (le canvas n'est plus remonté, ADR-039 D5).
+		if (!persistLocal) return;
 		if (typeof window === "undefined") return;
 		const raw = window.localStorage.getItem(key);
 		if (raw !== null) {

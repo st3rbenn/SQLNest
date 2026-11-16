@@ -121,9 +121,11 @@ export function useFrames(
 	// Re-seed quand la signature de schéma change (nouvelle base).
 	useEffect(() => {
 		if (loadedKey.current === key) return;
-		const loaded = persistLocal ? loadFrames(schema) : [];
 		loadedKey.current = key;
-		setFrames(loaded);
+		// Connecté, l'état appartient à la connexion : une table créée ou
+		// supprimée ne le vide pas (le canvas n'est plus remonté, ADR-039 D5).
+		if (!persistLocal) return;
+		setFrames(loadFrames(schema));
 	}, [key, schema, persistLocal]);
 
 	// Persist — seulement quand le key en état matche le key courant.

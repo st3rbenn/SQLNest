@@ -33,6 +33,10 @@ export function nodeHeight(collection: Collection): number {
 	return HEADER_H + shown * ROW_H + more + BODY_PAD;
 }
 
+export function tableAriaLabel(collection: Collection): string {
+	return `Table ${collection.name}, ${collection.fields.length} champs`;
+}
+
 /**
  * Combien de fields peuvent tenir dans une hauteur donnée. Pure → testable.
  * - Si tous les fields rentrent : `shown = total`, `hidden = 0` (pas de « +N »).

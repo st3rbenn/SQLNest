@@ -2,7 +2,7 @@ import { type NodeChange, useNodesState } from "@sqlnest/canvas";
 import { useCallback, useEffect, useRef } from "react";
 import type { LayoutResult } from "../layout";
 import type { SchemaModel } from "../schema-model";
-import { nodeHeight, type TableNodeType } from "../TableNode";
+import { nodeHeight, type TableNodeType, tableAriaLabel } from "../TableNode";
 import type { FramesApi } from "../useFrames";
 import type { PositionsApi, XY } from "../useTablePositions";
 import type { SizesApi } from "../useTableSizes";
@@ -116,6 +116,7 @@ export function useCanvasNodes(
 				const resized = tableSizesRef.current[n.id]?.height !== undefined;
 				return {
 					...n,
+					ariaLabel: tableAriaLabel(collection),
 					data: { ...n.data, collection },
 					...(resized ? {} : { height: nodeHeight(collection) })
 				};

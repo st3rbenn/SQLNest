@@ -183,4 +183,20 @@ describe("useTablePositions", () => {
 		rerender({ schema: SCHEMA_B });
 		expect(result.current.positions).toEqual({});
 	});
+
+	it("connecté : une table créée ou supprimée ne vide pas les positions", () => {
+		const withThird: SchemaModel = {
+			...SCHEMA_A,
+			collections: [...SCHEMA_A.collections, coll("visits")]
+		};
+		const { result, rerender } = renderHook(
+			({ schema }) => useTablePositions(schema, { persistLocal: false }),
+			{ initialProps: { schema: SCHEMA_A } }
+		);
+		act(() => result.current.setPosition("users", { x: 10, y: 20 }));
+		rerender({ schema: withThird });
+		expect(result.current.positions).toEqual({ users: { x: 10, y: 20 } });
+		rerender({ schema: SCHEMA_A });
+		expect(result.current.positions).toEqual({ users: { x: 10, y: 20 } });
+	});
 });

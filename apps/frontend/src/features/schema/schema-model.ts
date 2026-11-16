@@ -31,10 +31,20 @@ export interface Field {
 	readonly enumTypeName?: string;
 }
 
+/** Index secondaire ou contrainte d'unicité, clé primaire exclue. */
+export interface CollectionIndex {
+	readonly name: string;
+	/** Colonnes de la clé, dans l'ordre de l'index. */
+	readonly columns: readonly string[];
+	readonly unique: boolean;
+}
+
 export interface Collection {
 	readonly name: string;
 	readonly fields: readonly Field[];
 	readonly primaryKey?: readonly string[];
+	/** Absent : la table n'en a pas, ou l'introspection ne les lit pas. */
+	readonly indexes?: readonly CollectionIndex[];
 	readonly source: SchemaSource;
 }
 
