@@ -143,6 +143,8 @@ export type CanvasStore = {
 	setNodes: (nodes: Node[]) => void;
 	setEdges: (edges: Edge[]) => void;
 	updateNodeDimensions: (elements: Iterable<HTMLElement>) => void;
+	/** Re-mesure les handles d'un node déjà mesuré, à la prochaine microtâche. */
+	queueHandleMeasure: (nodeElement: HTMLElement) => void;
 	fitView: (options?: FitViewOptions) => Promise<boolean>;
 	triggerNodeChanges: (changes: NodeChange[]) => void;
 	/** Sélectionne `ids` (en plus de l'existant si la multi-sélection est active). */
@@ -399,6 +401,25 @@ export function createCanvasStore(init: {
 		triggerNodeChanges(changes);
 	};
 
+	// Un handle monté ou démonté sans que le node change de taille échappe au
+	// ResizeObserver. Regroupé : un changement de niveau de détail en monte des
+	// dizaines d'un coup. Un node pas encore mesuré attend sa première mesure.
+	const handleQueue = new Set<HTMLElement>();
+	const queueHandleMeasure = (nodeElement: HTMLElement) => {
+		if (handleQueue.size === 0) {
+			queueMicrotask(() => {
+				const elements = [...handleQueue].filter((el) => {
+					const id = el.getAttribute("data-id");
+					const node = id === null ? undefined : state.nodeLookup.get(id);
+					return el.isConnected && node?.internals.measuredOnce === true;
+				});
+				handleQueue.clear();
+				if (elements.length > 0) updateNodeDimensions(elements);
+			});
+		}
+		handleQueue.add(nodeElement);
+	};
+
 	// Différé à la frame suivante : les nodes posés dans le même tick sont
 	// adoptés d'abord. S'ils ne sont pas encore mesurés, la mesure déclenche
 	// le fit (cf. `updateNodeDimensions`).
@@ -565,6 +586,7 @@ export function createCanvasStore(init: {
 		setNodes,
 		setEdges,
 		updateNodeDimensions,
+		queueHandleMeasure,
 		fitView,
 		triggerNodeChanges,
 		addSelectedNodes,

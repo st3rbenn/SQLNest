@@ -1,8 +1,10 @@
-import type {
-	HTMLAttributes,
-	MouseEvent as ReactMouseEvent,
-	ReactNode,
-	TouchEvent as ReactTouchEvent
+import {
+	type HTMLAttributes,
+	type MouseEvent as ReactMouseEvent,
+	type ReactNode,
+	type TouchEvent as ReactTouchEvent,
+	useEffect,
+	useRef
 } from "react";
 import { clickConnect, startConnection } from "../connection";
 import { canvasClass } from "../constants";
@@ -84,6 +86,18 @@ export function Handle({
 		connectingSelector(nodeId, handleId, type),
 		shallow
 	);
+	const ref = useRef<HTMLDivElement>(null);
+
+	// Le node ne sait pas qu'un handle est apparu, a disparu ou a changé de
+	// côté tant que sa taille ne bouge pas.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: identité du handle = ce qui se mesure
+	useEffect(() => {
+		const nodeElement =
+			ref.current?.closest<HTMLElement>(`.${canvasClass.node}`) ?? null;
+		if (nodeElement === null) return;
+		store.queueHandleMeasure(nodeElement);
+		return () => store.queueHandleMeasure(nodeElement);
+	}, [store, handleId, type, position]);
 
 	const onPointerDown = (
 		event: ReactMouseEvent<HTMLDivElement> | ReactTouchEvent<HTMLDivElement>
@@ -142,6 +156,7 @@ export function Handle({
 	return (
 		// biome-ignore lint/a11y: point d'accroche, pas un contrôle clavier
 		<div
+			ref={ref}
 			data-handleid={handleId}
 			data-nodeid={nodeId}
 			data-handlepos={position}
