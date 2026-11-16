@@ -1,5 +1,5 @@
 import type { NativeQuery, ResultSet, SnqlType } from "@sqlnest/snql";
-import { type Collection, type Document, type ObjectId, UUID } from "mongodb";
+import { type Collection, type Document, UUID } from "mongodb";
 import { EngineExecutionError } from "../errors";
 import { hydrateBson, normalizeBson } from "./bson";
 import type { MongoContext } from "./context";
@@ -14,6 +14,7 @@ import {
 import { storeDefault } from "./defaults";
 import { describeMongoExecutionError } from "./execution-errors";
 import { loadPkAliases } from "./introspect";
+import { metadataCollection } from "./metadata";
 
 /**
  * DDL émulé — colonnes : ajouter, renommer, modifier, supprimer.
@@ -40,9 +41,7 @@ async function updateInBatches(
 			.limit(BATCH_SIZE)
 			.toArray();
 		if (batch.length === 0) return;
-		const ids = batch.map(
-			(d) => (d as { readonly _id: unknown })._id
-		) as unknown as ObjectId[];
+		const ids = batch.map((d) => d._id);
 		await col.updateMany({ _id: { $in: ids } }, update);
 		total += batch.length;
 		if (total >= MAX_ROWS) {
@@ -372,19 +371,19 @@ export async function executeDDLRenameColumn(
 			);
 		}
 
-		const defaults = db.collection("_snql_defaults");
-		const fromId = `${query.collection}.${from}` as unknown as ObjectId;
+		const defaults = metadataCollection(db, "_snql_defaults");
+		const fromId = `${query.collection}.${from}`;
 		const entry = await defaults.findOne({ _id: fromId });
 		if (entry !== null) {
 			const { _id: _old, ...rest } = entry;
 			await defaults.replaceOne(
-				{ _id: `${query.collection}.${to}` as unknown as ObjectId },
+				{ _id: `${query.collection}.${to}` },
 				{ ...rest, column: to },
 				{ upsert: true }
 			);
 			await defaults.deleteOne({ _id: fromId });
 		}
-		const refs = db.collection("_snql_refs");
+		const refs = metadataCollection(db, "_snql_refs");
 		await refs.updateMany(
 			{ fromCollection: query.collection, fromColumn: from },
 			{ $set: { fromColumn: to } }
@@ -396,14 +395,14 @@ export async function executeDDLRenameColumn(
 		// FK nommées par le profil ORM : `_id` = nom, réinséré sous le nouveau.
 		for (const r of renames) {
 			if (r.kind !== "foreign-key") continue;
-			const ref = await refs.findOne({ _id: r.from as unknown as ObjectId });
+			const ref = await refs.findOne({ _id: r.from });
 			if (ref === null) continue;
 			await refs.replaceOne(
-				{ _id: r.to as unknown as ObjectId },
+				{ _id: r.to },
 				{ ...ref, _id: r.to },
 				{ upsert: true }
 			);
-			await refs.deleteOne({ _id: r.from as unknown as ObjectId });
+			await refs.deleteOne({ _id: r.from });
 		}
 		return { columns: [], rows: [], rowCount: 0 };
 	} catch (cause) {
@@ -461,11 +460,9 @@ export async function executeDDLAlterColumn(
 						: { value: action.value })
 				});
 			} else {
-				await db
-					.collection("_snql_defaults")
-					.deleteOne({
-						_id: `${query.collection}.${field}` as unknown as ObjectId
-					});
+				await metadataCollection(db, "_snql_defaults").deleteOne({
+					_id: `${query.collection}.${field}`
+				});
 			}
 			return { columns: [], rows: [], rowCount: 0 };
 		}
@@ -612,7 +609,7 @@ export async function executeDDLDropColumn(
 
 		// Comme PG : une FK d'une autre collection qui la référence fait
 		// échouer ; ses index et les FK qu'elle porte partent avec elle.
-		const refs = db.collection<{ _id: string }>("_snql_refs");
+		const refs = metadataCollection(db, "_snql_refs");
 		const inbound = await refs
 			.find({ toCollection: query.collection, toColumn: fieldName })
 			.toArray();
@@ -651,11 +648,9 @@ export async function executeDDLDropColumn(
 			(max) =>
 				`drop column ${fieldName} sur '${query.collection}' : purge dépasse le cap ${max} docs — augmente mongo.ddl.backfill_max_rows ou purge offline`
 		);
-		await db
-			.collection("_snql_defaults")
-			.deleteOne({
-				_id: `${query.collection}.${fieldName}` as unknown as ObjectId
-			});
+		await metadataCollection(db, "_snql_defaults").deleteOne({
+			_id: `${query.collection}.${fieldName}`
+		});
 		await refs.deleteMany({
 			fromCollection: query.collection,
 			fromColumn: fieldName

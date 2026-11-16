@@ -484,14 +484,23 @@ export async function introspectMssql(
 	]);
 	return buildMssqlSchemaModel(
 		tables.rows.map((row) => String(row["table_name"])),
-		columns.rows as unknown as MssqlColumnRow[],
-		pks as unknown as MssqlPkRow[],
-		fks as unknown as MssqlFkRow[],
-		enums as unknown as MssqlEnumRow[],
-		indexes as unknown as RelationalIndexRow[],
-		enumChecks as unknown as MssqlEnumCheckRow[],
-		triggers as unknown as MssqlTriggerRow[]
+		rowsAs<MssqlColumnRow>(columns.rows),
+		rowsAs<MssqlPkRow>(pks),
+		rowsAs<MssqlFkRow>(fks),
+		rowsAs<MssqlEnumRow>(enums),
+		rowsAs<RelationalIndexRow>(indexes),
+		rowsAs<MssqlEnumCheckRow>(enumChecks),
+		rowsAs<MssqlTriggerRow>(triggers)
 	);
+}
+
+/**
+ * Lignes d'une requête d'introspection, lues sous la forme que sa requête
+ * SQL produit. Rien ne le vérifie à l'exécution : chaque forme tient à la
+ * liste `select` de la requête qui la remplit.
+ */
+function rowsAs<T>(rows: ResultSet["rows"]): T[] {
+	return rows as unknown as T[];
 }
 
 const DEADLOCK_VICTIM = 1205;

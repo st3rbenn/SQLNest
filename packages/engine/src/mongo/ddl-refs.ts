@@ -5,6 +5,7 @@ import type { MongoContext } from "./context";
 import { describeMongoExecutionError } from "./execution-errors";
 import { missingRefTargets, physicalRef } from "./fk";
 import { loadPkAliases } from "./introspect";
+import { metadataCollection } from "./metadata";
 
 /**
  * DDL émulé — clés étrangères déclarées.
@@ -26,10 +27,10 @@ export async function executeDDLDropRef(
 	query: Extract<NativeQuery, { kind: "mongo-ddl"; operation: "drop-ref" }>
 ): Promise<ResultSet> {
 	const db = cx.db();
-	const refsCol = db.collection("_snql_refs");
+	const refsCol = metadataCollection(db, "_snql_refs");
 	try {
 		const res = await refsCol.deleteOne({
-			_id: query.name as unknown as import("mongodb").ObjectId,
+			_id: query.name,
 			fromCollection: query.collection
 		});
 		if (res.deletedCount === 0 && !query.ifExists) {
@@ -93,8 +94,8 @@ export async function executeDDLAddRef(
 				`${unresolved.count} docs de '${query.collection}' ont '${ref.fromColumn}' sans correspondance dans ${ref.toCollection}.${ref.toColumn} (ex. ${sample}) — corrige-les d'abord, par exemple : update ${query.collection} where ${ref.fromColumn} = ${JSON.stringify(normalizeBson(unresolved.sample[0]))} set ${ref.fromColumn} = null, puis relance add ref`
 			);
 		}
-		await db.collection("_snql_refs").insertOne({
-			_id: ref.name as unknown as import("mongodb").ObjectId,
+		await metadataCollection(db, "_snql_refs").insertOne({
+			_id: ref.name,
 			fromCollection: ref.fromCollection,
 			fromColumn: ref.fromColumn,
 			toCollection: ref.toCollection,
@@ -181,10 +182,10 @@ export async function storeRefs(
 		onUpdate: string;
 	}[]
 ): Promise<void> {
-	const col = cx.db().collection("_snql_refs");
+	const col = metadataCollection(cx.db(), "_snql_refs");
 	for (const r of refs) {
 		await col.updateOne(
-			{ _id: r.name as unknown as import("mongodb").ObjectId },
+			{ _id: r.name },
 			{
 				$set: {
 					fromCollection: r.fromCollection,

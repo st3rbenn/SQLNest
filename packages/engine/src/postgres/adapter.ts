@@ -288,9 +288,7 @@ class PostgresConnection implements Connection {
 		// `pool.options` typé par @types/pg — host/port/database peuvent être
 		// undefined (config Unix socket / env vars). Fallback strings pour
 		// avoir toujours un fingerprint stable même si partiellement inconnu.
-		const opts = (pool as unknown as {
-			options: { host?: string; port?: number; database?: string };
-		}).options;
+		const opts = pool.options;
 		const material = `${opts.host ?? "?"}:${opts.port ?? "?"}/${opts.database ?? "?"}`;
 		const hash = createHash("sha256").update(material).digest("hex");
 		return `pg-fallback:${hash.slice(0, 32)}`;

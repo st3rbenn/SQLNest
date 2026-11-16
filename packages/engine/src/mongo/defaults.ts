@@ -1,11 +1,7 @@
-import {
-	type ClientSession,
-	type Document,
-	type ObjectId,
-	UUID
-} from "mongodb";
+import { type ClientSession, type Document, UUID } from "mongodb";
 import { hydrateBson } from "./bson";
 import type { MongoContext } from "./context";
+import { metadataCollection } from "./metadata";
 
 /**
  * Valeurs par défaut des colonnes, gardées dans le validateur de la collection.
@@ -64,14 +60,9 @@ export async function storeDefault(
 	const entry: Document = { collection, column: spec.column };
 	if (spec.fn !== undefined) entry.fn = spec.fn;
 	else entry.value = hydrateBson(spec.value ?? null, false);
-	await cx
-		.db()
-		.collection("_snql_defaults")
-		.replaceOne(
-			{ _id: `${collection}.${spec.column}` as unknown as ObjectId },
-			entry,
-			{
-				upsert: true
-			}
-		);
+	await metadataCollection(cx.db(), "_snql_defaults").replaceOne(
+		{ _id: `${collection}.${spec.column}` },
+		entry,
+		{ upsert: true }
+	);
 }

@@ -1,5 +1,4 @@
 import type { NativeQuery, ResultSet } from "@sqlnest/snql";
-import type { ObjectId } from "mongodb";
 import { EngineExecutionError } from "../errors";
 import type { MongoContext } from "./context";
 import {
@@ -17,6 +16,7 @@ import { executeDDLAddRef, executeDDLDropRef, storeRefs } from "./ddl-refs";
 import { storeDefault } from "./defaults";
 import { describeMongoExecutionError } from "./execution-errors";
 import { SNQL_PK } from "./introspect";
+import { metadataCollection } from "./metadata";
 
 /**
  * DDL émulé : MongoDB n'a ni colonnes ni contraintes, le validateur de la
@@ -99,9 +99,9 @@ async function executeDDLDropCollection(
 			await db.collection("_snql_defaults").deleteMany({
 				collection: query.collection
 			});
-			await db
-				.collection(SNQL_PK)
-				.deleteOne({ _id: query.collection as unknown as ObjectId });
+			await metadataCollection(db, SNQL_PK).deleteOne({
+				_id: query.collection
+			});
 		} catch {
 			// silence — métadonnées absentes
 		}
@@ -203,8 +203,8 @@ async function executeDDLCreateCollection(
 		// Alias `id` ↔ `_id` (ADR-036 E/1f), seulement à la création : une
 		// collection existante garde ses documents tels qu'ils sont.
 		if (created && query.primaryKeyAlias !== undefined) {
-			await db.collection(SNQL_PK).replaceOne(
-				{ _id: query.collection as unknown as ObjectId },
+			await metadataCollection(db, SNQL_PK).replaceOne(
+				{ _id: query.collection },
 				{
 					column: query.primaryKeyAlias,
 					...(query.primaryKeyType !== undefined

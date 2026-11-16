@@ -132,12 +132,10 @@ class MongoConnection implements Connection {
 		}
 		// Fallback : hash des hosts + dbname. `topology.s.description.setName`
 		// (souvent utilisé), sinon on prend le premier host connu.
-		const opts = client.options as unknown as {
-			hosts?: readonly { host: string; port: number }[];
-		};
+		const hosts = client.options.hosts;
 		const hostStr =
-			opts.hosts && opts.hosts.length > 0
-				? opts.hosts
+			hosts.length > 0
+				? hosts
 						.map((h) => `${h.host}:${h.port}`)
 						.sort()
 						.join(",")
