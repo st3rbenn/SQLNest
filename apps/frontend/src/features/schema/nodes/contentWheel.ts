@@ -7,7 +7,6 @@ const HOLD_MS = 250;
 const SCROLLING = new Set(["auto", "scroll", "overlay"]);
 
 function scrollsAlong(
-	el: Element,
 	overflow: string,
 	position: number,
 	extent: number,
@@ -35,7 +34,6 @@ export function contentScrolls(
 		const style = getComputedStyle(el);
 		if (
 			scrollsAlong(
-				el,
 				style.overflowY,
 				el.scrollTop,
 				el.scrollHeight,
@@ -43,7 +41,6 @@ export function contentScrolls(
 				deltaY
 			) ||
 			scrollsAlong(
-				el,
 				style.overflowX,
 				el.scrollLeft,
 				el.scrollWidth,
