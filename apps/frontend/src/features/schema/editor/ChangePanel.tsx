@@ -43,7 +43,11 @@ import {
 	fetchChangeNames,
 	typedNames
 } from "./applyChange";
-import { type ChangePreview, previewChange } from "./changePreview";
+import {
+	type ChangePreview,
+	defaultRefRules,
+	previewChange
+} from "./changePreview";
 import {
 	type AddRefGesture,
 	addColumnSnql,
@@ -140,8 +144,15 @@ function AddRefPanel({
 	readonly gesture: AddRefGesture;
 	readonly onClose: () => void;
 }) {
-	const [onDelete, setOnDelete] = useState<RefRule>("restrict");
-	const [onUpdate, setOnUpdate] = useState<RefRule>("restrict");
+	const { schema, editMode } = useCanvasData();
+	// Ce que le mode appliquerait sans rien écrire : le formulaire en part, et
+	// seule une règle différente entre dans le SNQL. Figé à l'ouverture : une
+	// fois la relation appliquée, le schéma relu la contient déjà.
+	const [defaults] = useState(() =>
+		defaultRefRules(gesture, schema as unknown as SnqlSchemaModel, editMode)
+	);
+	const [onDelete, setOnDelete] = useState<RefRule>(defaults.onDelete);
+	const [onUpdate, setOnUpdate] = useState<RefRule>(defaults.onUpdate);
 	return (
 		<ChangeFrame
 			icon={<IconLink {...ICON} />}
@@ -149,7 +160,7 @@ function AddRefPanel({
 			table={gesture.table}
 			column={gesture.column}
 			reference={`${gesture.targetTable}.${gesture.targetColumn}`}
-			source={addRefSnql({ ...gesture, onDelete, onUpdate })}
+			source={addRefSnql({ ...gesture, onDelete, onUpdate }, defaults)}
 			onClose={onClose}
 		>
 			{(locked) => (

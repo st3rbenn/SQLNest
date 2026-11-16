@@ -135,12 +135,27 @@ export interface AddRefDraft {
 	readonly onUpdate: RefRule;
 }
 
-/** `restrict` est la règle par défaut du langage : elle ne s'écrit pas. */
-export function addRefSnql(d: AddRefDraft): string {
+/** Règles qu'une relation reçoit quand le SNQL n'en écrit aucune. */
+export interface RefRuleDefaults {
+	readonly onDelete: RefRule;
+	readonly onUpdate: RefRule;
+}
+
+/** Défauts du langage. Un profil d'ORM peut en poser d'autres (`defaultRefRules`). */
+export const LANGUAGE_REF_RULES: RefRuleDefaults = {
+	onDelete: "restrict",
+	onUpdate: "restrict"
+};
+
+/** Une règle ne s'écrit que si elle diffère de celle que le mode appliquerait seul. */
+export function addRefSnql(
+	d: AddRefDraft,
+	defaults: RefRuleDefaults = LANGUAGE_REF_RULES
+): string {
 	return [
 		`add ref (${d.column}) references ${d.targetTable}.${d.targetColumn}`,
-		...(d.onDelete !== "restrict" ? [`on delete ${d.onDelete}`] : []),
-		...(d.onUpdate !== "restrict" ? [`on update ${d.onUpdate}`] : []),
+		...(d.onDelete !== defaults.onDelete ? [`on delete ${d.onDelete}`] : []),
+		...(d.onUpdate !== defaults.onUpdate ? [`on update ${d.onUpdate}`] : []),
 		`into ${d.table}`
 	].join(" ");
 }

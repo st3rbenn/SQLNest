@@ -18,6 +18,13 @@ import {
 import { ddlImpactHint } from "../../query/ddlImpactHints";
 import { collectUnfilteredWrites } from "../../query/unfilteredWrites";
 import { expectedFor } from "../../query/WriteConfirmBar";
+import {
+	type AddRefDraft,
+	addRefSnql,
+	LANGUAGE_REF_RULES,
+	type RefRule,
+	type RefRuleDefaults
+} from "./changeSnql";
 import type { EditMode } from "./editMode";
 
 export interface ChangePreview {
@@ -67,6 +74,33 @@ export function previewChange(
 			error: err instanceof Error ? err.message : String(err)
 		};
 	}
+}
+
+/**
+ * Règles qu'une relation reçoit dans ce mode quand le SNQL n'en écrit aucune,
+ * lues dans le plan compilé. Le profil Prisma met `cascade` à la mise à jour,
+ * là où le langage seul met `restrict`.
+ */
+export function defaultRefRules(
+	ref: Omit<AddRefDraft, "onDelete" | "onUpdate">,
+	schema: SchemaModel,
+	mode: EditMode
+): RefRuleDefaults {
+	const { plan } = previewChange(
+		addRefSnql({ ...ref, ...LANGUAGE_REF_RULES }),
+		schema,
+		mode
+	);
+	if (plan?.kind !== "add-ref") return LANGUAGE_REF_RULES;
+	return {
+		onDelete: snqlRule(plan.ref.onDelete),
+		onUpdate: snqlRule(plan.ref.onUpdate)
+	};
+}
+
+/** Le plan écrit `set-null`, le langage `set null`. */
+function snqlRule(rule: string): RefRule {
+	return rule === "set-null" ? "set null" : (rule as RefRule);
 }
 
 /** Instructions lisibles d'une requête native : le SQL, ou l'opération Mongo. */

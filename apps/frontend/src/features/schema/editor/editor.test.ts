@@ -2,7 +2,7 @@ import type { SchemaModel as SnqlSchemaModel } from "@sqlnest/snql";
 import { describe, expect, it } from "vitest";
 import type { SchemaModel } from "../schema-model";
 import { typedNames } from "./applyChange";
-import { previewChange } from "./changePreview";
+import { defaultRefRules, previewChange } from "./changePreview";
 import {
 	addColumnSnql,
 	addRefSnql,
@@ -216,6 +216,52 @@ describe("gestes de relation (ADR-039 D2)", () => {
 		expect(dropped.warnings).toEqual([
 			"Le code qui suit la relation 'pet_owner_id_fkey' échouera ; plus rien ne contrôlera les valeurs de sa colonne."
 		]);
+	});
+
+	it("règles d'une relation : le formulaire part de celles du mode, et écrit les autres", () => {
+		const schema = {
+			engine: "postgres",
+			collections: [
+				collection("owner"),
+				{
+					...collection("pet"),
+					fields: [
+						...collection("pet").fields,
+						{ name: "owner_id", type: "int", nullable: true, source: "declared" }
+					]
+				}
+			],
+			relations: [],
+			refs: []
+		} as unknown as SnqlSchemaModel;
+		const prisma = { kind: "migrations", orm: "prisma", apply: true } as const;
+
+		// Sans rien écrire, Prisma met `cascade` à la mise à jour ; le langage, `restrict`.
+		expect(defaultRefRules(ref, schema, { kind: "direct" })).toEqual({
+			onDelete: "restrict",
+			onUpdate: "restrict"
+		});
+		const defaults = defaultRefRules(ref, schema, prisma);
+		expect(defaults).toEqual({ onDelete: "restrict", onUpdate: "cascade" });
+
+		// Le défaut du mode ne s'écrit pas, et donne bien ce que le formulaire affiche.
+		const asShown = addRefSnql({ ...ref, ...defaults }, defaults);
+		expect(asShown).toBe("add ref (owner_id) references owner.id into pet");
+		expect(previewChange(asShown, schema, prisma).statements.join("\n")).toContain(
+			"ON DELETE RESTRICT ON UPDATE CASCADE"
+		);
+
+		// `restrict` à la mise à jour, choisi sous Prisma : écrit, et appliqué.
+		const restrict = addRefSnql(
+			{ ...ref, onDelete: "restrict", onUpdate: "restrict" },
+			defaults
+		);
+		expect(restrict).toBe(
+			"add ref (owner_id) references owner.id on update restrict into pet"
+		);
+		expect(previewChange(restrict, schema, prisma).statements.join("\n")).toContain(
+			"ON DELETE RESTRICT ON UPDATE RESTRICT"
+		);
 	});
 
 	it("noms saisis : seuls les champs remplis partent, la proposition du CLI garde les autres", () => {
