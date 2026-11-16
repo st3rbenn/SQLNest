@@ -1,7 +1,7 @@
 import {
 	canvasClass,
 	type EdgeProps,
-	getSmoothStepPath,
+	getBezierPath,
 	Position,
 	useNestCanvas
 } from "@sqlnest/canvas";
@@ -45,7 +45,7 @@ function toSide(p: Position): Side {
 	return "left";
 }
 
-/** Inverse : Side → `Position` (pour ré-injecter dans getSmoothStepPath). */
+/** Inverse : Side → `Position` (pour ré-injecter dans getBezierPath). */
 function toPosition(s: Side): Position {
 	if (s === "top") return Position.Top;
 	if (s === "right") return Position.Right;
@@ -105,7 +105,7 @@ function offsetAlongSide(
  * - Double-clic sur une poignée → `data.clearOverride` → retour à
  *   l'auto-routing (`bestHandles`).
  *
- * Le path lui-même reste rendu par `getSmoothStepPath` — pas de preview
+ * Le path lui-même reste rendu par `getBezierPath` — pas de preview
  * pendant le drag (seule la poignée se déplace), il se met à jour au
  * release quand `SchemaCanvas` réinjecte les nouveaux handles.
  */
@@ -207,9 +207,9 @@ export function InteractiveEdge(props: EdgeProps) {
 		dragEnd === "target" && snapped !== null && anchors !== null
 			? anchors[snapped]
 			: tgtOffsetXY;
-	// Position enum pour le routing du path pendant le drag — sans ça, le
-	// smoothstep partirait dans la direction de l'ancien côté (bézier orienté)
-	// depuis les nouvelles coords, résultat visuel bizarre.
+	// Position enum pour le routing du path pendant le drag — sans ça, la
+	// courbe partirait dans la direction de l'ancien côté depuis les nouvelles
+	// coords, résultat visuel bizarre.
 	const srcPos =
 		dragEnd === "source" && snapped !== null
 			? toPosition(snapped)
@@ -223,7 +223,7 @@ export function InteractiveEdge(props: EdgeProps) {
 	// la poignée pendant le drag. Au release, le SchemaCanvas réinjecte le
 	// vrai `sourceHandle`/`targetHandle` et le moteur recalcule sourceX/…
 	// → même path, transition invisible.
-	const [edgePath, labelX, labelY] = getSmoothStepPath({
+	const [edgePath, labelX, labelY] = getBezierPath({
 		sourceX: srcXY.x,
 		sourceY: srcXY.y,
 		targetX: tgtXY.x,
