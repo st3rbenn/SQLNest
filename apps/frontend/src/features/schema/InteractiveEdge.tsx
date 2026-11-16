@@ -12,6 +12,7 @@ import {
 	useRef,
 	useState
 } from "react";
+import { DECLARED_EDGE } from "./canvas/relationEdge";
 import { closestSide, type Side } from "./edgeRouting";
 import { EdgeHandles } from "./edges/EdgeHandles";
 import { EdgeTooltip } from "./edges/EdgeTooltip";
@@ -32,6 +33,8 @@ export interface InteractiveEdgeData {
 	/** Relation FK complète pour formatter le tooltip au hover (colonnes
 	 * reliées, kind/origine, preview SQL du join). */
 	readonly relation?: Relation;
+	/** Lien inféré (jamais confirmé par la base). */
+	readonly inferred?: boolean;
 	/** Clic droit sur l'arête : menu de la relation. */
 	readonly onMenu?: (at: { x: number; y: number }, relation: Relation) => void;
 	readonly [key: string]: unknown;
@@ -121,6 +124,7 @@ export function InteractiveEdge(props: EdgeProps) {
 		sourcePosition,
 		targetPosition,
 		style,
+		selected,
 		markerEnd,
 		data
 	} = props;
@@ -152,6 +156,10 @@ export function InteractiveEdge(props: EdgeProps) {
 	};
 
 	const showHandles = hovered || dragEnd !== null;
+	// Une FK désignée passe à l'accent ; un lien inféré garde son jaune.
+	const lit =
+		(selected === true || showHandles) && api?.inferred !== true;
+	const pathStyle = lit ? { ...style, stroke: DECLARED_EDGE } : style;
 
 	// Nœud dont on affiche les anchors pendant le drag. Le node interne du
 	// moteur porte la position absolue, même pour une table dans un frame :
@@ -305,7 +313,7 @@ export function InteractiveEdge(props: EdgeProps) {
 			<path
 				d={edgePath}
 				className={canvasClass.edgePath}
-				style={style}
+				style={pathStyle}
 				markerEnd={markerEnd}
 				fill="none"
 			/>

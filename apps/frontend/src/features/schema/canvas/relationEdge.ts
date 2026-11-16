@@ -1,8 +1,11 @@
 import { type Edge, MarkerType } from "@sqlnest/canvas";
 import type { SchemaModel } from "../schema-model";
 
-// Accent bleu pour les FK déclarées, jaune warning pour les liens inférés
-// (jamais confirmés par la base) : lisibles sur `#1E1E1E`.
+// Gris au repos pour les FK déclarées, accent bleu quand l'arête est
+// désignée (sélection, survol, table focalisée) : le bleu ne distingue une
+// arête que s'il n'est pas partout. Jaune warning pour les liens inférés
+// (jamais confirmés par la base). Tous lisibles sur `#1E1E1E`.
+export const REST_EDGE = "#8c8c8c";
 export const DECLARED_EDGE = "#0d99ff";
 export const INFERRED_EDGE = "#ffc933";
 
@@ -21,7 +24,7 @@ export function makeEdge(
 		type: "fk",
 		markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14 },
 		style: {
-			stroke: inferred ? INFERRED_EDGE : DECLARED_EDGE,
+			stroke: inferred ? INFERRED_EDGE : REST_EDGE,
 			strokeWidth: 1.5,
 			strokeDasharray: inferred ? "5 4" : undefined
 		},

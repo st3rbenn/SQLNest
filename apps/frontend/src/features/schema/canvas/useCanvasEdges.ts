@@ -7,7 +7,12 @@ import type { SchemaModel } from "../schema-model";
 import type { TableNodeType } from "../TableNode";
 import { NODE_WIDTH, nodeHeight } from "../TableNode";
 import type { AnchorMap } from "../useEdgeAnchors";
-import { DECLARED_EDGE, INFERRED_EDGE, relationEdges } from "./relationEdge";
+import {
+	DECLARED_EDGE,
+	INFERRED_EDGE,
+	REST_EDGE,
+	relationEdges
+} from "./relationEdge";
 
 const DIM = "#7a7a7a";
 
@@ -185,7 +190,13 @@ export function useCanvasEdges(
 				...(targetHandle !== undefined ? { targetHandle } : {}),
 				style: {
 					...e.style,
-					stroke: dim ? DIM : inferred ? INFERRED_EDGE : DECLARED_EDGE,
+					stroke: dim
+						? DIM
+						: inferred
+							? INFERRED_EDGE
+							: touchesFocus
+								? DECLARED_EDGE
+								: REST_EDGE,
 					strokeWidth: touchesFocus ? 2.5 : 1.5,
 					opacity: dim ? 0.5 : 1
 				},
