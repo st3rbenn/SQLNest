@@ -5,7 +5,7 @@ import type { SchemaModel } from "../schema-model";
 // désignée (sélection, survol, table focalisée) : le bleu ne distingue une
 // arête que s'il n'est pas partout. Jaune warning pour les liens inférés
 // (jamais confirmés par la base). Tous lisibles sur `#1E1E1E`.
-export const REST_EDGE = "#8c8c8c";
+export const REST_EDGE = "var(--sqlnest-text-tertiary)";
 export const DECLARED_EDGE = "#0d99ff";
 export const INFERRED_EDGE = "#ffc933";
 
