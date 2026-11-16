@@ -1,0 +1,47 @@
+SQLNest — Licence propriétaire
+
+Copyright (c) 2025-2026 Anthonin COLAS. Tous droits réservés.
+
+1. Propriété
+
+Ce logiciel, son code source, sa documentation et les éléments qui
+l'accompagnent (le « Logiciel ») sont la propriété exclusive d'Anthonin
+COLAS (le « Titulaire »), qui détient seul l'ensemble des droits de
+propriété intellectuelle et d'exploitation qui s'y rattachent.
+
+2. Droits réservés
+
+Aucun droit n'est concédé sur le Logiciel, en dehors de ce que prévoit
+l'article 3 et de ce que la loi impose. Sans l'autorisation écrite et
+préalable du Titulaire, il est interdit, en tout ou en partie :
+
+  - de copier ou de reproduire le Logiciel ;
+  - de le modifier, de l'adapter, de le traduire ou d'en créer des œuvres
+    dérivées ;
+  - de le distribuer, de le publier, de le concéder en sous-licence, de le
+    louer ou de le vendre ;
+  - de l'exploiter, à titre commercial ou non, y compris pour fournir un
+    service à des tiers.
+
+La mise à disposition du code source dans un dépôt public ne vaut ni
+licence ni renonciation à ces droits.
+
+3. Client en ligne de commande
+
+Le paquet « @sqlnest/cli » peut être installé et exécuté, sans
+modification, dans le seul but d'utiliser le service SQLNest. Cette
+autorisation est personnelle, non exclusive, non cessible et révocable.
+Elle ne s'étend à aucune autre partie du Logiciel.
+
+4. Absence de garantie
+
+Le Logiciel est fourni « en l'état », sans garantie d'aucune sorte,
+expresse ou implicite. Dans les limites permises par la loi, le Titulaire
+ne peut être tenu responsable d'aucun dommage résultant de son
+utilisation.
+
+5. Versions antérieures
+
+Les versions du paquet « @sqlnest/cli » publiées avant l'adoption de la
+présente licence restent régies par la licence sous laquelle elles ont
+été publiées.

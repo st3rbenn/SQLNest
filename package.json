@@ -21,6 +21,7 @@
 		"app:db:test:migrate": "DATABASE_URL=postgres://sqlnest_test:sqlnest_test_dev@localhost:5435/sqlnest_test pnpm --filter @sqlnest/db db:migrate"
 	},
 	"author": "Anthonin COLAS <anthonincolaspro@gmail.com>",
+	"license": "UNLICENSED",
 	"packageManager": "pnpm@10.17.1",
 	"devDependencies": {
 		"@biomejs/biome": "catalog:",

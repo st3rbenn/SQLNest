@@ -141,3 +141,7 @@ Les tests d'intégration de l'engine se lancent quand `SNQL_TEST_PG_URL` et `SNQ
 | `packages/tunnel-protocol` | Protocole du tunnel chiffré |
 | `packages/db` | Schéma et migrations de la base applicative |
 | `infra` | Docker Compose de développement et de production |
+
+## Licence
+
+Logiciel propriétaire — © Anthonin COLAS, tous droits réservés. Voir [LICENSE](LICENSE).

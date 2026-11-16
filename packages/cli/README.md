@@ -111,6 +111,8 @@ Pour dev local depuis les sources (jamais depuis le binaire publié) :
 
 En dev-from-source, `tsx` évalue `process.env.NODE_ENV === "development"` à `true` → les URLs deviennent `http://localhost:4000` / `http://localhost:3000`. Rien de baké, c'est le code source qui branche.
 
-## License
+## Licence
 
-ISC — © Anthonin COLAS
+Logiciel propriétaire — © Anthonin COLAS, tous droits réservés. Le CLI peut être installé et exécuté, sans modification, pour utiliser le service SQLNest. Voir [LICENSE](LICENSE).
+
+Les versions publiées avant ce changement restent sous licence ISC.
