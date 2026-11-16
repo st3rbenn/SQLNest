@@ -53,6 +53,8 @@ import { usePreviewSnapshotSync } from "./canvas/usePreviewSnapshotSync";
 import { useShallowMemo } from "./canvas/useShallowMemo";
 import { type SystemNodeType, useSystemNodes } from "./canvas/useSystemNodes";
 import { initialZoom, OVERVIEW_FIT } from "./canvas/viewport";
+import { ConsoleLinksContext } from "./console-links/ConsoleLinksContext";
+import { useConsoleLinks } from "./console-links/useConsoleLinks";
 import { useSchemaEditing } from "./editor/useSchemaEditing";
 import { FrameNode, type FrameNodeType } from "./FrameNode";
 import { InteractiveEdge } from "./InteractiveEdge";
@@ -105,7 +107,7 @@ function CanvasInner({
 	dbName,
 	teamSlug
 }: CanvasInnerProps) {
-	const { screenToFlowPosition, fitView } = useNestCanvas();
+	const { screenToFlowPosition } = useNestCanvas();
 	const containerRef = useRef<HTMLDivElement | null>(null);
 	/** Centre de la vue courante, en coordonnées du canvas. */
 	const viewCenter = useCallback((): XY | null => {
@@ -259,6 +261,13 @@ function CanvasInner({
 		traceRelation
 	} = useSchemaEditing({ schema, teamSlug, connectionId });
 	const consoles = useCanvasConsoles({ connectionId, teamSlug, viewCenter });
+	const consoleLinks = useConsoleLinks({
+		connectionId,
+		schema,
+		tableNodes: nodes,
+		consoles,
+		edges: displayEdges
+	});
 	const systemNodes = useSystemNodes({
 		schema,
 		connectionId,
@@ -284,14 +293,14 @@ function CanvasInner({
 		() => [
 			...frameNodes,
 			...withFrameParents(displayTables, framesApi.frames),
-			...consoles.nodes,
+			...consoleLinks.consoleNodes,
 			...systemNodes.nodes
 		],
 		[
 			frameNodes,
 			displayTables,
 			framesApi.frames,
-			consoles.nodes,
+			consoleLinks.consoleNodes,
 			systemNodes.nodes
 		]
 	);
@@ -362,7 +371,6 @@ function CanvasInner({
 		onFitView: applyOverview
 	});
 	const nodeEvents = useCanvasNodeEvents({
-		fitView,
 		setFocusId,
 		setFocusFrameKey,
 		focusNode,
@@ -451,65 +459,67 @@ function CanvasInner({
 		>
 			<CanvasVeil layoutPending={base === null} syncing={!canvasReady} />
 
-			<NestCanvas
-				nodes={displayNodes as unknown as TableNodeType[]}
-				edges={displayEdges}
-				// Le moteur émet les changes de tous les nodes affichés : chaque
-				// famille (tables et frames, consoles, nodes système) garde les
-				// siens.
-				onNodesChange={(changes) => {
-					handleNodesChange(changes);
-					consoles.onNodesChange(changes as never);
-					systemNodes.onNodesChange(changes as never);
-				}}
-				nodeTypes={nodeTypes}
-				edgeTypes={edgeTypes}
-				// Molette et trackpad déplacent la vue (Cmd/Ctrl + molette zoome),
-				// le clic milieu aussi. Glisser sur le vide trace un lasso, qui
-				// prend un node dès qu'il le touche.
-				panOnScroll
-				zoomOnScroll={false}
-				selectionOnDrag
-				selectionMode={SelectionMode.Partial}
-				panOnDrag={[1]}
-				onSelectionStart={handleSelectionStart}
-				onSelectionEnd={handleSelectionEnd}
-				// Sélection multiple au clic : Shift, ou le modificateur du
-				// système (Cmd sur Mac, Ctrl ailleurs).
-				multiSelectionKeyCode={["Shift", "Meta", "Control"]}
-				onPaneContextMenu={(event) => event.preventDefault()}
-				{...nodeEvents}
-				// Tables et frames changent de frame en suivant le pointeur.
-				canReparent={canReparentNode}
-				onConnect={traceRelation}
-				// Zoom de départ garanti même si le conteneur n'est pas encore
-				// mesuré ; le cadrage de `useCanvasViewport` prend ensuite le relais.
-				defaultViewport={{
-					x: 0,
-					y: 0,
-					zoom: initialZoom(schema.collections.length)
-				}}
-				fitViewOptions={OVERVIEW_FIT}
-				minZoom={0.02}
-				maxZoom={1.75}
-				onlyRenderVisibleElements
-			>
-				{/* Pas de 20 px : plus fin, la grille salit la vue large ; plus
-				 * large, elle ne se lit plus comme un papier millimétré. */}
-				<Background color="var(--sqlnest-canvas-dot)" gap={20} />
-				<CanvasZoomVariable />
-				<Panel position="top-right" style={{ top: 12, right: 12, margin: 0 }}>
-					<CanvasTopRightHUD />
-				</Panel>
-				{focusId ? (
-					<Panel
-						position="bottom-center"
-						style={{ marginBottom: ABOVE_TOOLBAR }}
-					>
-						<ShowAllButton onClick={clearFocus} />
+			<ConsoleLinksContext.Provider value={consoleLinks.context}>
+				<NestCanvas
+					nodes={displayNodes as unknown as TableNodeType[]}
+					edges={consoleLinks.edges}
+					// Le moteur émet les changes de tous les nodes affichés : chaque
+					// famille (tables et frames, consoles, nodes système) garde les
+					// siens.
+					onNodesChange={(changes) => {
+						handleNodesChange(changes);
+						consoles.onNodesChange(changes as never);
+						systemNodes.onNodesChange(changes as never);
+					}}
+					nodeTypes={nodeTypes}
+					edgeTypes={edgeTypes}
+					// Molette et trackpad déplacent la vue (Cmd/Ctrl + molette zoome),
+					// le clic milieu aussi. Glisser sur le vide trace un lasso, qui
+					// prend un node dès qu'il le touche.
+					panOnScroll
+					zoomOnScroll={false}
+					selectionOnDrag
+					selectionMode={SelectionMode.Partial}
+					panOnDrag={[1]}
+					onSelectionStart={handleSelectionStart}
+					onSelectionEnd={handleSelectionEnd}
+					// Sélection multiple au clic : Shift, ou le modificateur du
+					// système (Cmd sur Mac, Ctrl ailleurs).
+					multiSelectionKeyCode={["Shift", "Meta", "Control"]}
+					onPaneContextMenu={(event) => event.preventDefault()}
+					{...nodeEvents}
+					// Tables et frames changent de frame en suivant le pointeur.
+					canReparent={canReparentNode}
+					onConnect={traceRelation}
+					// Zoom de départ garanti même si le conteneur n'est pas encore
+					// mesuré ; le cadrage de `useCanvasViewport` prend ensuite le relais.
+					defaultViewport={{
+						x: 0,
+						y: 0,
+						zoom: initialZoom(schema.collections.length)
+					}}
+					fitViewOptions={OVERVIEW_FIT}
+					minZoom={0.02}
+					maxZoom={1.75}
+					onlyRenderVisibleElements
+				>
+					{/* Pas de 20 px : plus fin, la grille salit la vue large ; plus
+					 * large, elle ne se lit plus comme un papier millimétré. */}
+					<Background color="var(--sqlnest-canvas-dot)" gap={20} />
+					<CanvasZoomVariable />
+					<Panel position="top-right" style={{ top: 12, right: 12, margin: 0 }}>
+						<CanvasTopRightHUD />
 					</Panel>
-				) : null}
-			</NestCanvas>
+					{focusId ? (
+						<Panel
+							position="bottom-center"
+							style={{ marginBottom: ABOVE_TOOLBAR }}
+						>
+							<ShowAllButton onClick={clearFocus} />
+						</Panel>
+					) : null}
+				</NestCanvas>
+			</ConsoleLinksContext.Provider>
 
 			<CanvasProviders
 				data={dataCtx}

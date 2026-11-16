@@ -1,4 +1,4 @@
-import type { FitViewOptions, Node, NodeMouseHandler } from "@sqlnest/canvas";
+import type { Node, NodeMouseHandler } from "@sqlnest/canvas";
 import type { ChangeGesture } from "../editor/changeSnql";
 import type { TableNodeType } from "../TableNode";
 import type { XY } from "../useTablePositions";
@@ -24,7 +24,6 @@ const withModifier = (event: {
 }): boolean => event.shiftKey || event.metaKey || event.ctrlKey;
 
 export interface UseCanvasNodeEventsOptions {
-	readonly fitView: (options?: FitViewOptions) => unknown;
 	readonly setFocusId: (id: string | null) => void;
 	readonly setFocusFrameKey: (key: string | null) => void;
 	readonly focusNode: (id: string) => void;
@@ -51,7 +50,7 @@ export interface UseCanvasNodeEventsReturn {
 
 /**
  * Gestes sur les nodes du canvas, selon leur type :
- * - clic : focus (table), détails (frame), recadrage (console). Avec Shift,
+ * - clic : focus (table), détails (frame), sélection seule (console). Avec Shift,
  *   Cmd ou Ctrl c'est une sélection multiple : pas de focus, et celui en
  *   cours est levé, sinon son anneau côtoierait le contour de sélection ;
  * - double-clic : renommer la colonne visée, sinon recadrer sur la table ;
@@ -60,7 +59,6 @@ export interface UseCanvasNodeEventsReturn {
  * - fin de drag : chaque famille de node garde sa position.
  */
 export function useCanvasNodeEvents({
-	fitView,
 	setFocusId,
 	setFocusFrameKey,
 	focusNode,
@@ -77,11 +75,8 @@ export function useCanvasNodeEvents({
 	return {
 		onNodeClick: (event, node) => {
 			const type = typeOf(node);
-			if (type === "console") {
-				if (withModifier(event)) return;
-				fitView({ nodes: [{ id: node.id }], padding: 0.25, duration: 350 });
-				return;
-			}
+			// Une console se sélectionne sans que la vue bouge.
+			if (type === "console") return;
 			if (withModifier(event)) {
 				setFocusId(null);
 				setFocusFrameKey(null);

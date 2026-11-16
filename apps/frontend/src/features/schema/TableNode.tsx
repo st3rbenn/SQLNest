@@ -13,6 +13,7 @@ import { colorFor } from "./colors";
 import type { Side } from "./edgeRouting";
 import type { Collection } from "./schema-model";
 import { levelForZoom, type ZoomLevel } from "./zoomLevel";
+import { TableConsoleCounter } from "./console-links/TableConsoleCounter";
 
 /** Nombre de champs affichés dans la hauteur par défaut (avant que l'user
  * ne resize verticalement). Passé cette limite, la carte affiche `+N champs…`
@@ -313,7 +314,12 @@ function TableNodeComponent({
 				>
 					{collection.name}
 				</span>
-				<KindBadge kind={inferred ? "inferred" : "declared"} />
+				<span
+					style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+				>
+					<TableConsoleCounter table={collection.name} />
+					<KindBadge kind={inferred ? "inferred" : "declared"} />
+				</span>
 			</div>
 			<div style={{ padding: "4px 0" }}>
 				{shown.map((f) => (

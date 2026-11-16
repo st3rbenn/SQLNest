@@ -7,13 +7,12 @@
  * ─── Interactions ─────────────────────────────────────────────────────
  * - Drag : le user drag depuis le **cadre** autour du contenu (padding
  *   22 px top = bande de drag visible avec 4 dots, cursor "grab"). Le
- *   contenu porte `className="nodrag nowheel"` pour ne pas déclencher
- *   le drag depuis l'éditeur, ni le zoom canvas depuis la molette dans
- *   les résultats.
+ *   contenu porte `nodrag` pour ne pas déclencher le drag depuis
+ *   l'éditeur. La molette défile le contenu quand il a de quoi défiler
+ *   sous le pointeur, sinon elle déplace le canvas (`useContentWheel`).
  * - Resize : `NodeResizer` du moteur (4 côtés + 4 coins), visible au
  *   hover (même pattern que TableNode), lignes/handles bleus accent.
- * - Focus (single-click) : `focusAndZoom` — le canvas zoom modéré sur
- *   ce node (comme pour une table).
+ * - Clic : sélection seule, la vue ne bouge pas.
  * - Fullscreen (double-click ou bouton ⤢) : SchemaCanvas override la
  *   geom du node à `innerWidth × innerHeight` position `(0, 0)` +
  *   viewport à zoom 1. Le node lui-même passe en mode chrome-less (pas
@@ -33,15 +32,18 @@ import { type Node, type NodeProps, NodeResizer } from "@sqlnest/canvas";
 import {
 	IconArrowsMaximize,
 	IconArrowsMinimize,
+	IconChevronsUp,
 	IconX
 } from "@tabler/icons-react";
-import type { CSSProperties } from "react";
+import { type CSSProperties, useContext, useRef } from "react";
 import { createPortal } from "react-dom";
 import { ConsoleShellInner } from "../../query/ConsoleShellInner";
 import {
 	CONSOLE_NODE_MIN_HEIGHT,
 	CONSOLE_NODE_MIN_WIDTH
 } from "../canvas/useConsoleNodes";
+import { ConsoleLinksContext } from "../console-links/ConsoleLinksContext";
+import { useContentWheel } from "./contentWheel";
 
 export interface ConsoleNodeData {
 	readonly teamSlug: string;
@@ -132,6 +134,10 @@ export function ConsoleNode({
 	id,
 	data
 }: NodeProps<ConsoleNodeType>): React.ReactNode {
+	const links = useContext(ConsoleLinksContext);
+	const holderRef = useRef<HTMLDivElement | null>(null);
+	useContentWheel(holderRef);
+	const foldable = links?.attached.has(id) === true;
 	const {
 		teamSlug,
 		connId,
@@ -219,7 +225,7 @@ export function ConsoleNode({
 				}}
 			/>
 			<div style={outerNodeStyle}>
-				<div className="nodrag nowheel" style={innerHolderStyle}>
+				<div ref={holderRef} className="nodrag" style={innerHolderStyle}>
 					<ConsoleShellInner
 						teamSlug={teamSlug}
 						connId={connId}
@@ -227,6 +233,27 @@ export function ConsoleNode({
 						tabsScopeSuffix={id}
 						extraLeftActions={
 							<>
+								{foldable ? (
+									<Tooltip
+										label="Replier (Esc)"
+										openDelay={400}
+										styles={tooltipStyles}
+										withArrow
+										arrowSize={4}
+									>
+										<button
+											type="button"
+											style={focusButtonStyle}
+											aria-label="Replier"
+											onClick={(e) => {
+												e.stopPropagation();
+												links?.fold();
+											}}
+										>
+											<IconChevronsUp size={13} stroke={2} />
+										</button>
+									</Tooltip>
+								) : null}
 								<Tooltip
 									label="Passer en fullscreen"
 									openDelay={400}

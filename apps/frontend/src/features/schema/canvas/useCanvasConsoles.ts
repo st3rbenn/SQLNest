@@ -28,8 +28,12 @@ export interface UseCanvasConsolesReturn {
 	readonly createAtCenter: () => void;
 	/** Ouvre une console au centre, son premier onglet rempli de `source`. */
 	readonly openWithSource: (source: string) => void;
+	/** Crée une console à `position`, son premier onglet rempli de `source`. */
+	readonly createAt: (position: XY, source: string) => string;
 	/** Fin de drag d'une console : sa position est gardée. */
 	readonly persistPosition: (id: string, position: XY) => void;
+	/** Déplace une console et garde sa nouvelle position. */
+	readonly moveTo: (id: string, position: XY) => void;
 	readonly remove: (id: string) => void;
 }
 
@@ -158,17 +162,39 @@ export function useCanvasConsoles({
 	}, [createCentered]);
 	// Les onglets du node sont écrits juste après sa création :
 	// `useConsoleTabs` les lit au montage, la console s'ouvre remplie.
-	const openWithSource = useCallback(
-		(source: string) => {
-			const nodeId = createCentered();
-			if (nodeId === null) return;
+	const fillFirstTab = useCallback(
+		(nodeId: string, source: string) => {
 			const tabId = makeTabId();
 			writeJson(consoleTabsKey(connectionId, nodeId), {
 				tabs: [{ id: tabId, name: "Sans titre", source }],
 				activeTabId: tabId
 			});
 		},
-		[createCentered, connectionId]
+		[connectionId]
+	);
+	const openWithSource = useCallback(
+		(source: string) => {
+			const nodeId = createCentered();
+			if (nodeId !== null) fillFirstTab(nodeId, source);
+		},
+		[createCentered, fillFirstTab]
+	);
+	const createAt = useCallback(
+		(position: XY, source: string): string => {
+			const nodeId = create(position);
+			fillFirstTab(nodeId, source);
+			return nodeId;
+		},
+		[create, fillFirstTab]
+	);
+	const moveTo = useCallback(
+		(id: string, position: XY) => {
+			setCanvasNodes((prev) =>
+				prev.map((n) => (n.id === id ? { ...n, position } : n))
+			);
+			updatePosition(id, position);
+		},
+		[setCanvasNodes, updatePosition]
 	);
 
 	const persistPosition = useCallback(
@@ -186,7 +212,9 @@ export function useCanvasConsoles({
 		exitFocus,
 		createAtCenter,
 		openWithSource,
+		createAt,
 		persistPosition,
+		moveTo,
 		remove
 	};
 }
