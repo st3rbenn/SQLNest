@@ -4,6 +4,7 @@
 	"scripts": {
 		"preinstall": "npx only-allow pnpm",
 		"check": "biome check --write .",
+		"lint": "biome lint apps packages",
 		"type-check": "pnpm -r type-check",
 		"test": "pnpm -r test",
 		"db:up": "docker compose -f infra/docker-compose.yml up -d",

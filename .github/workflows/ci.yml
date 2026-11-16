@@ -10,7 +10,7 @@ concurrency:
 
 jobs:
   check:
-    name: Types et tests unitaires
+    name: Lint, types et tests unitaires
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,6 +20,8 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # Seules les erreurs font échouer ; les avertissements sont listés.
+      - run: pnpm lint
       - run: pnpm type-check
       # Le backend a son job : ses tests exigent une base Postgres.
       # Sans URL de base, les tests d'intégration de l'engine se désactivent seuls.
