@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
 	type ConsoleTabLastResult,
 	consoleTabsKey
@@ -68,12 +68,20 @@ function readEntry(
 
 export interface ConsoleIndex {
 	readonly entries: readonly ConsoleEntry[];
-	/** Faux tant que les onglets n'ont pas été lus une première fois : une
-	 * console absente de `entries` n'est alors pas encore « non rattachée ». */
+	/** Vrai quand `entries` a été lu pour les consoles demandées. Faux au
+	 * premier rendu, et le temps d'un rendu quand la liste des consoles
+	 * change : une console absente de `entries` n'est alors pas encore
+	 * « non rattachée », elle n'a simplement pas été lue. */
 	readonly ready: boolean;
 }
 
-const EMPTY: ConsoleIndex = { entries: [], ready: false };
+interface IndexState {
+	readonly entries: readonly ConsoleEntry[];
+	/** Consoles pour lesquelles `entries` a été lu ; `null` : rien de lu. */
+	readonly readFor: string | null;
+}
+
+const UNREAD: IndexState = { entries: [], readFor: null };
 
 /**
  * Consoles du canvas rattachées à une table. Les onglets vivent dans le
@@ -86,23 +94,26 @@ export function useConsoleIndex(
 	consoleIds: readonly string[],
 	tables: ReadonlySet<string>
 ): ConsoleIndex {
-	const [index, setIndex] = useState<ConsoleIndex>(EMPTY);
+	const [index, setIndex] = useState<IndexState>(UNREAD);
 	const idsKey = consoleIds.join(",");
+	const scope = `${connectionId}|${idsKey}`;
 	useEffect(() => {
 		if (!enabled) {
-			setIndex(EMPTY);
+			setIndex(UNREAD);
 			return;
 		}
 		const ids = idsKey === "" ? [] : idsKey.split(",");
+		const readFor = `${connectionId}|${idsKey}`;
 		const refresh = (): void => {
 			const next = ids.flatMap((id) => {
 				const entry = readEntry(connectionId, id, tables);
 				return entry === null ? [] : [entry];
 			});
 			setIndex((prev) =>
-				prev.ready && JSON.stringify(prev.entries) === JSON.stringify(next)
+				prev.readFor === readFor &&
+				JSON.stringify(prev.entries) === JSON.stringify(next)
 					? prev
-					: { entries: next, ready: true }
+					: { entries: next, readFor }
 			);
 		};
 		refresh();
@@ -113,5 +124,8 @@ export function useConsoleIndex(
 			window.removeEventListener("storage", refresh);
 		};
 	}, [enabled, connectionId, idsKey, tables]);
-	return index;
+	return useMemo(
+		() => ({ entries: index.entries, ready: index.readFor === scope }),
+		[index, scope]
+	);
 }

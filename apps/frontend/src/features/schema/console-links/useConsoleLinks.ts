@@ -2,10 +2,14 @@ import { type Edge, type NodeChange, useNodesState } from "@sqlnest/canvas";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DECLARED_EDGE } from "../canvas/relationEdge";
 import type { UseCanvasConsolesReturn } from "../canvas/useCanvasConsoles";
-import { CONSOLE_NODE_DEFAULT_HEIGHT } from "../canvas/useConsoleNodes";
+import {
+	CONSOLE_NODE_DEFAULT_HEIGHT,
+	CONSOLE_NODE_DEFAULT_WIDTH
+} from "../canvas/useConsoleNodes";
 import type { ConsoleNodeType } from "../nodes/ConsoleNode";
 import type { SchemaModel } from "../schema-model";
-import { NODE_WIDTH, type TableNodeType } from "../TableNode";
+import { getConsoleQueryState } from "../../query/consoleQueriesStore";
+import { NODE_WIDTH, nodeHeight, type TableNodeType } from "../TableNode";
 import {
 	type ConsoleLinksValue,
 	type ConsolePlacement,
@@ -18,17 +22,39 @@ import {
 	QUERY_LINK_EDGE,
 	RESULT_OWNER_HANDLE
 } from "./QueryLinkEdge";
-import type { ResultNodeType } from "./ResultNode";
+import { placeNear, type Rect } from "./placeNear";
+import { estimateResultSize, type ResultNodeType } from "./ResultNode";
 import { type ConsoleEntry, useConsoleIndex } from "./useConsoleIndex";
 import { resultKey, useResultRuns } from "./useResultRuns";
 
-/** Écart entre une table et la console qui se déplie à sa droite. */
+/** Écart entre une table et la console qui se déplie à côté d'elle. */
 const GAP = 80;
-/** Décalage entre deux consoles dépliées de la même table. */
-const CASCADE = 32;
-/** Écart entre une console et son résultat, posé dessous. */
+/** Écart entre une console et son résultat. */
 const RESULT_GAP = 24;
+/** Marge gardée entre un frame qu'on pose et ceux déjà là. */
+const CLEARANCE = 24;
 const RESULT_PREFIX = "result:";
+/** Taille d'un résultat pas encore mesuré, quand rien ne permet de l'estimer. */
+const RESULT_FALLBACK = { width: 480, height: 300 };
+
+const tableRect = (n: TableNodeType): Rect => ({
+	x: n.position.x,
+	y: n.position.y,
+	width: n.width ?? NODE_WIDTH,
+	height: n.height ?? nodeHeight(n.data.collection)
+});
+const consoleRect = (n: ConsoleNodeType): Rect => ({
+	x: n.position.x,
+	y: n.position.y,
+	width: n.width ?? CONSOLE_NODE_DEFAULT_WIDTH,
+	height: n.height ?? CONSOLE_NODE_DEFAULT_HEIGHT
+});
+const resultRect = (n: ResultNodeType): Rect => ({
+	x: n.position.x,
+	y: n.position.y,
+	width: n.measured?.width ?? n.width ?? RESULT_FALLBACK.width,
+	height: n.measured?.height ?? n.height ?? RESULT_FALLBACK.height
+});
 
 export interface UseConsoleLinksOptions {
 	readonly connectionId: string;
@@ -67,7 +93,8 @@ function litQueryPath(edges: Edge[], entry: ConsoleEntry): Edge[] {
 /**
  * Prototype « console rattachée à sa table » : une console dont la requête
  * part d'une table se replie dans l'en-tête de cette table (compteur +
- * liste). Dépliée, elle se pose à droite de sa table ; plusieurs peuvent
+ * liste). Dépliée, elle se pose à la place libre la plus proche de sa
+ * table ; plusieurs peuvent
  * l'être à la fois, chacune reliée à sa table. Ses lignes sortent dans un
  * frame au format table, relié à la console (ou à la table quand la console
  * est repliée). Le chemin de
@@ -100,38 +127,64 @@ export function useConsoleLinks({
 	const attached = useMemo(() => new Set(entries.map((e) => e.id)), [entries]);
 
 	const { moveTo, createAt, focusedId, onNodesChange } = consoles;
-	/** Place d'une console à droite de sa table, en cascade derrière les
-	 * `rank` déjà dépliées de la même table. */
-	const besideTable = useCallback(
-		(table: string, rank: number) => {
-			const node = tableNodes.find((n) => n.id === table);
-			if (node === undefined) return null;
-			return {
-				x: node.position.x + (node.width ?? NODE_WIDTH) + GAP + rank * CASCADE,
-				y: node.position.y + rank * CASCADE
-			};
-		},
-		[tableNodes]
+	// Frames posés sur le canvas, lus au moment d'en poser un nouveau : en
+	// refs, déplacer une table ne recalcule ni rappels ni résultats.
+	const tableNodesRef = useRef(tableNodes);
+	tableNodesRef.current = tableNodes;
+	const allConsolesRef = useRef(consoles.nodes);
+	allConsolesRef.current = consoles.nodes;
+	const shownConsolesRef = useRef<readonly ConsoleNodeType[]>([]);
+	const resultNodesRef = useRef<readonly ResultNodeType[]>([]);
+	/** Ce qu'un frame qu'on pose ne doit pas recouvrir (`except` : lui-même). */
+	const takenRects = useCallback(
+		(except?: string): Rect[] => [
+			...tableNodesRef.current.map(tableRect),
+			...shownConsolesRef.current
+				.filter((n) => n.id !== except)
+				.map(consoleRect),
+			...resultNodesRef.current.filter((n) => n.id !== except).map(resultRect)
+		],
+		[]
 	);
-	const openOf = useCallback(
-		(table: string, except?: string) =>
-			entries.filter(
-				(e) => e.root === table && e.id !== except && openIds.includes(e.id)
-			).length,
-		[entries, openIds]
+	/** Place libre la plus proche de la table pour une console, à sa droite
+	 * de préférence. */
+	const besideTable = useCallback(
+		(
+			table: string,
+			size: { readonly width: number; readonly height: number },
+			except?: string
+		) => {
+			const node = tableNodesRef.current.find((n) => n.id === table);
+			if (node === undefined) return null;
+			return placeNear(tableRect(node), size, takenRects(except), {
+				gap: GAP,
+				clearance: CLEARANCE,
+				prefer: ["right", "below", "left", "above"]
+			});
+		},
+		[takenRects]
 	);
 	const open = useCallback(
 		(id: string, placement: ConsolePlacement) => {
 			const entry = entries.find((e) => e.id === id);
+			const node = allConsolesRef.current.find((n) => n.id === id);
+			const size = {
+				width: node?.width ?? CONSOLE_NODE_DEFAULT_WIDTH,
+				height: node?.height ?? CONSOLE_NODE_DEFAULT_HEIGHT
+			};
 			if (typeof placement === "object") {
-				moveTo(id, placement);
+				// Point de dépôt : la console se pose juste au-dessus, centrée.
+				moveTo(id, {
+					x: placement.x - size.width / 2,
+					y: placement.y - size.height
+				});
 			} else if (placement === "beside" && entry !== undefined) {
-				const position = besideTable(entry.root, openOf(entry.root, id));
+				const position = besideTable(entry.root, size, id);
 				if (position !== null) moveTo(id, position);
 			}
 			setOpenIds((ids) => [...ids.filter((x) => x !== id), id]);
 		},
-		[entries, besideTable, openOf, moveTo]
+		[entries, besideTable, moveTo]
 	);
 	// Replier désélectionne aussi : une console sélectionnée se redéplierait.
 	const fold = useCallback(
@@ -143,12 +196,19 @@ export function useConsoleLinks({
 	);
 	const createFor = useCallback(
 		(table: string, at?: FlowPoint) => {
-			const position = at ?? besideTable(table, openOf(table));
+			const size = {
+				width: CONSOLE_NODE_DEFAULT_WIDTH,
+				height: CONSOLE_NODE_DEFAULT_HEIGHT
+			};
+			const position =
+				at !== undefined
+					? { x: at.x - size.width / 2, y: at.y - size.height }
+					: besideTable(table, size);
 			if (position === null) return;
 			const id = createAt(position, `find ${table}`);
 			setOpenIds((ids) => [...ids, id]);
 		},
-		[besideTable, openOf, createAt]
+		[besideTable, createAt]
 	);
 
 	// Une console libre dont la requête vient de la rattacher est en cours de
@@ -241,22 +301,22 @@ export function useConsoleLinks({
 	);
 	const [resultNodes, setResultNodes, onResultNodesChange] =
 		useNodesState<ResultNodeType>([]);
-	// Lues à la pose d'un résultat seulement : en refs, un drag de table ou
-	// de console ne repose pas les frames déjà placés.
-	const tableNodesRef = useRef(tableNodes);
-	tableNodesRef.current = tableNodes;
-	const allConsolesRef = useRef(consoles.nodes);
-	allConsolesRef.current = consoles.nodes;
+	shownConsolesRef.current = consoleNodes;
+	resultNodesRef.current = resultNodes;
 	useEffect(() => {
 		setResultNodes((prev) => {
 			const prevById = new Map(prev.map((n) => [n.id, n]));
+			// Résultats posés dans cette même passe : ils comptent aussi.
+			const placed: Rect[] = [];
 			return (enabled ? entries : []).flatMap((entry) => {
 				const runAt = runs.get(entry.id);
 				if (runAt === undefined || closedRuns.get(entry.id) === runAt) {
 					return [];
 				}
 				const id = `${RESULT_PREFIX}${entry.id}`;
+				const existing = prevById.get(id);
 				const data = {
+					resized: existing?.data.resized ?? false,
 					consoleId: entry.id,
 					queryKey: resultKey(connectionId, entry),
 					title: entry.title,
@@ -266,26 +326,36 @@ export function useConsoleLinks({
 							new Map(runsClosed).set(entry.id, runAt)
 						)
 				};
-				const existing = prevById.get(id);
 				if (existing !== undefined) return [{ ...existing, data }];
-				const owner = allConsolesRef.current.find((n) => n.id === entry.id);
+				// Un résultat apparaît à la place libre la plus proche de sa
+				// console (dessous de préférence), ou de sa table si elle est
+				// repliée.
+				const owner = shownConsolesRef.current.find((n) => n.id === entry.id);
 				const table = tableNodesRef.current.find((n) => n.id === entry.root);
-				const position =
+				const anchor =
 					owner !== undefined
-						? {
-								x: owner.position.x,
-								y:
-									owner.position.y +
-									(owner.height ?? CONSOLE_NODE_DEFAULT_HEIGHT) +
-									RESULT_GAP
-							}
+						? consoleRect(owner)
 						: table !== undefined
-							? {
-									x: table.position.x + (table.width ?? NODE_WIDTH) + GAP,
-									y: table.position.y
-								}
+							? tableRect(table)
 							: null;
+				const result = getConsoleQueryState(data.queryKey).data;
+				const size =
+					result === undefined ? RESULT_FALLBACK : estimateResultSize(result);
+				const position =
+					anchor === null
+						? null
+						: placeNear(anchor, size, [...takenRects(id), ...placed], {
+								gap: owner !== undefined ? RESULT_GAP : GAP,
+								clearance: CLEARANCE,
+								// Sous sa console, le résultat se centre sur elle.
+								align: owner !== undefined ? "center" : "start",
+								prefer:
+									owner !== undefined
+										? ["below", "right", "left", "above"]
+										: ["right", "below", "left", "above"]
+							});
 				if (position === null) return [];
+				placed.push({ ...position, ...size });
 				return [
 					{
 						id,
@@ -299,7 +369,15 @@ export function useConsoleLinks({
 				];
 			});
 		});
-	}, [enabled, entries, runs, closedRuns, connectionId, setResultNodes]);
+	}, [
+		enabled,
+		entries,
+		runs,
+		closedRuns,
+		connectionId,
+		setResultNodes,
+		takenRects
+	]);
 
 	// ─── Arêtes : chemin de la requête en cours, lien résultat → origine ──
 	const shownConsoles = useMemo(
@@ -357,10 +435,23 @@ export function useConsoleLinks({
 		return [...lit, ...attaches, ...links];
 	}, [enabled, edges, entries, activeId, resultNodes, shownConsoles]);
 
+	// Un frame redimensionné porte une largeur et une hauteur explicites
+	// (posées par le moteur au redimensionnement) : il le sait par `resized`.
+	const sizedResults = useMemo(
+		() =>
+			resultNodes.map((n) => {
+				const resized = n.width !== undefined && n.height !== undefined;
+				return n.data.resized === resized
+					? n
+					: { ...n, data: { ...n.data, resized } };
+			}),
+		[resultNodes]
+	);
+
 	return {
 		context,
 		consoleNodes,
-		resultNodes,
+		resultNodes: sizedResults,
 		onResultNodesChange,
 		edges: shownEdges
 	};

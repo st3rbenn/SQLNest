@@ -30,7 +30,8 @@ export interface UseCanvasConsolesReturn {
 	readonly createAtCenter: () => void;
 	/** Ouvre une console au centre, son premier onglet rempli de `source`. */
 	readonly openWithSource: (source: string) => void;
-	/** Crée une console à `position`, son premier onglet rempli de `source`. */
+	/** Crée une console à `position`, son premier onglet rempli de `source`.
+	 * Elle n'entre pas en édition : on la pose, on l'édite si on veut. */
 	readonly createAt: (position: XY, source: string) => string;
 	/** Fin de drag d'une console : sa position est gardée. */
 	readonly persistPosition: (id: string, position: XY) => void;
@@ -221,7 +222,6 @@ export function useCanvasConsoles({
 		(position: XY, source: string): string => {
 			const nodeId = create(position);
 			fillFirstTab(nodeId, source);
-			setEditingId(nodeId);
 			return nodeId;
 		},
 		[create, fillFirstTab]

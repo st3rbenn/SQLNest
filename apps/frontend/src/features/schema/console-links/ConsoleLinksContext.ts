@@ -8,8 +8,9 @@ export interface FlowPoint {
 	readonly y: number;
 }
 
-/** `beside` : à droite de sa table ; `inPlace` : là où elle était ; un
- * point : son coin haut-gauche à cet endroit (dépôt). */
+/** `beside` : à la place libre la plus proche de sa table ; `inPlace` : là
+ * où elle était ; un point : celui d'un dépôt, la console se pose juste
+ * au-dessus, centrée (le milieu de son bord bas sur le point). */
 export type ConsolePlacement = "beside" | "inPlace" | FlowPoint;
 
 export interface ConsoleLinksValue {
@@ -22,7 +23,7 @@ export interface ConsoleLinksValue {
 	readonly openIds: ReadonlySet<string>;
 	readonly open: (id: string, placement: ConsolePlacement) => void;
 	readonly fold: (id: string) => void;
-	/** Nouvelle console de la table : à côté d'elle, ou au point `at`. */
+	/** Nouvelle console de la table : à côté d'elle, ou déposée au point `at`. */
 	readonly createFor: (table: string, at?: FlowPoint) => void;
 }
 

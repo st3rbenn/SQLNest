@@ -13,10 +13,12 @@ let state: ConsoleQueryState = { isPending: false, error: null };
 vi.mock("../../query/consoleQueriesStore", () => ({
 	useConsoleQuery: () => state
 }));
-// Le handle du lien a besoin du moteur : hors canvas, il ne rend rien.
+// Le handle du lien et les poignées de redimensionnement ont besoin du
+// moteur : hors canvas, ils ne rendent rien.
 vi.mock("@sqlnest/canvas", async (original) => ({
 	...(await original<typeof import("@sqlnest/canvas")>()),
-	Handle: () => null
+	Handle: () => null,
+	NodeResizer: () => null
 }));
 
 const SOURCE = "find track where track_id < 4 pick name";
@@ -73,7 +75,7 @@ describe("ResultNode", () => {
 		expect(screen.getByText("null")).toBeTruthy();
 	});
 
-	it("s'arrête à 12 lignes et annonce le reste", () => {
+	it("rend toutes les lignes d'un résultat court, dans un corps défilant", () => {
 		state = ran(
 			Array.from({ length: 20 }, (_, i) => ({
 				name: `piste ${i + 1}`,
@@ -82,9 +84,63 @@ describe("ResultNode", () => {
 		);
 		mount();
 		expect(screen.getByText("20 lignes")).toBeTruthy();
-		expect(screen.getByText("piste 12")).toBeTruthy();
-		expect(screen.queryByText("piste 13")).toBeNull();
-		expect(screen.getByText("+8 lignes…")).toBeTruthy();
+		const last = screen.getByText("piste 20");
+		expect(last.closest(".nodrag")?.getAttribute("style")).toContain(
+			"overflow: auto"
+		);
+		expect(screen.queryByText(/^\+\d+ lignes?…$/)).toBeNull();
+	});
+
+	it("s'arrête à 200 lignes et annonce le reste", () => {
+		state = ran(
+			Array.from({ length: 250 }, (_, i) => ({
+				name: `piste ${i + 1}`,
+				composer: "x"
+			}))
+		);
+		mount();
+		expect(screen.getByText("piste 200")).toBeTruthy();
+		expect(screen.queryByText("piste 201")).toBeNull();
+		expect(screen.getByText("+50 lignes…")).toBeTruthy();
+	});
+
+	it("garde les noms de colonnes hors de la zone qui défile", () => {
+		state = ran([{ name: "a", composer: "b" }]);
+		mount();
+		const scroller = screen.getByText("a").closest(".nodrag");
+		const header = screen.getByText("composer");
+		expect(scroller?.contains(header)).toBe(false);
+	});
+
+	it("aligne l'en-tête et les lignes sur les mêmes largeurs de colonnes", () => {
+		state = ran([{ name: "Balls to the Wall", composer: null }]);
+		mount();
+		const grid = (el: HTMLElement) =>
+			(el.parentElement as HTMLElement).style.gridTemplateColumns;
+		const headerCell = screen.getByText("composer")
+			.parentElement as HTMLElement;
+		expect(grid(headerCell)).toBe(grid(screen.getByText("null")));
+		expect(grid(headerCell)).toMatch(/^\d+px \d+px$/);
+	});
+
+	it("borne sa hauteur tant qu'il n'a pas été redimensionné", () => {
+		state = ran([{ name: "a", composer: "b" }]);
+		const { unmount } = mount();
+		const body = () => screen.getByText("a").closest(".nodrag") as HTMLElement;
+		expect(body().style.maxHeight).not.toBe("");
+		unmount();
+		const props = {
+			data: {
+				consoleId: "console:a",
+				queryKey: "k",
+				title: "Pistes",
+				source: SOURCE,
+				resized: true,
+				onClose: () => {}
+			}
+		} as unknown as NodeProps<ResultNodeType>;
+		render(<ResultNode {...props} />);
+		expect(body().style.maxHeight).toBe("");
 	});
 
 	it("signale un résultat périmé quand la requête a changé", () => {

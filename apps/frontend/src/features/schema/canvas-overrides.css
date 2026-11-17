@@ -210,6 +210,25 @@
 	background: rgba(13, 153, 255, 0.18);
 }
 
+/* Frame de résultat : poignées de redimensionnement masquées au repos,
+ * révélées au survol ou à la sélection — comme une table. */
+.nest-node-result .nest-resize-control.handle,
+.nest-node-result .nest-resize-control.line {
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity 120ms ease-out;
+}
+.nest-node-result:hover .nest-resize-control.handle,
+.nest-node-result.selected .nest-resize-control.handle {
+	opacity: 1;
+	pointer-events: auto;
+}
+.nest-node-result:hover .nest-resize-control.line,
+.nest-node-result.selected .nest-resize-control.line {
+	opacity: 0.6;
+	pointer-events: auto;
+}
+
 /* Prototype « console rattachée à sa table ». Sur une table sans console,
  * le bouton d'ajout n'apparaît qu'au survol de la table. */
 .nest-node-table .sqlnest-console-add {

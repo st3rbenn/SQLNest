@@ -101,6 +101,24 @@ describe("useConsoleIndex", () => {
 		expect(result.current.ready).toBe(true);
 	});
 
+	it("n'est pas prêt pour des consoles qu'il n'a pas encore lues", () => {
+		writeTabs("console:a", "find track pick name");
+		const seen: boolean[] = [];
+		const { rerender } = renderHook(
+			({ ids }: { ids: string[] }) => {
+				const index = useConsoleIndex(true, CONN, ids, TABLES);
+				seen.push(index.ready);
+				return index;
+			},
+			{ initialProps: { ids: [] as string[] } }
+		);
+		seen.length = 0;
+		rerender({ ids: ["console:a"] });
+		// Le rendu qui reçoit la nouvelle liste ne l'a pas encore lue.
+		expect(seen[0]).toBe(false);
+		expect(seen.at(-1)).toBe(true);
+	});
+
 	it("reste vide quand le prototype est éteint", () => {
 		writeTabs("console:a", "find track pick name");
 		const { result } = renderHook(() =>
