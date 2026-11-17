@@ -1,5 +1,6 @@
 import { type Edge, type NodeChange, useNodesState } from "@sqlnest/canvas";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { getConsoleQueryState } from "../../query/consoleQueriesStore";
 import { DECLARED_EDGE } from "../canvas/relationEdge";
 import type { UseCanvasConsolesReturn } from "../canvas/useCanvasConsoles";
 import {
@@ -8,7 +9,6 @@ import {
 } from "../canvas/useConsoleNodes";
 import type { ConsoleNodeType } from "../nodes/ConsoleNode";
 import type { SchemaModel } from "../schema-model";
-import { getConsoleQueryState } from "../../query/consoleQueriesStore";
 import { NODE_WIDTH, nodeHeight, type TableNodeType } from "../TableNode";
 import {
 	type ConsoleLinksValue,
@@ -16,13 +16,13 @@ import {
 	type FlowPoint,
 	useConsoleLinksFlag
 } from "./ConsoleLinksContext";
+import { placeNear, type Rect } from "./placeNear";
 import {
 	CONSOLE_RESULT_HANDLE,
 	CONSOLE_TABLE_HANDLE,
 	QUERY_LINK_EDGE,
 	RESULT_OWNER_HANDLE
 } from "./QueryLinkEdge";
-import { placeNear, type Rect } from "./placeNear";
 import { estimateResultSize, type ResultNodeType } from "./ResultNode";
 import { type ConsoleEntry, useConsoleIndex } from "./useConsoleIndex";
 import { resultKey, useResultRuns } from "./useResultRuns";

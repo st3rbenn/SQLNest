@@ -9,8 +9,8 @@ import { IconTerminal2, IconX } from "@tabler/icons-react";
 import { type CSSProperties, useContext, useRef } from "react";
 import { useConsoleQuery } from "../../query/consoleQueriesStore";
 import type { QueryResult } from "../../query/useRunQuery";
-import { ConsoleLinksContext } from "./ConsoleLinksContext";
 import { useContentWheel } from "../nodes/contentWheel";
+import { ConsoleLinksContext } from "./ConsoleLinksContext";
 import { RESULT_OWNER_HANDLE } from "./QueryLinkEdge";
 
 export interface ResultNodeData {

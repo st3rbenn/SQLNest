@@ -5,7 +5,7 @@ import {
 	ConsoleLinksContext,
 	type ConsoleLinksValue
 } from "./ConsoleLinksContext";
-import { TableConsoleCounter } from "./TableConsoleCounter";
+import { menuAnchor, TableConsoleCounter } from "./TableConsoleCounter";
 import type { ConsoleEntry } from "./useConsoleIndex";
 
 // Le glisser convertit le point de l'écran en point du canvas : hors
@@ -18,7 +18,8 @@ vi.mock("@sqlnest/canvas", async (original) => ({
 			y: p.y + 2000
 		}),
 		getZoom: () => 1
-	})
+	}),
+	useViewport: () => ({ x: 0, y: 0, zoom: 1 })
 }));
 
 /** Appui sur `button`, déplacement jusqu'à `to`, relâchement. */
@@ -168,5 +169,47 @@ describe("TableConsoleCounter", () => {
 		expect(
 			screen.getByRole("button", { name: "2 consoles" }).className
 		).not.toContain("sqlnest-console-flash");
+	});
+
+	it("ouvre la liste des consoles au clic sur le compteur", async () => {
+		render(tree(links([entry("a")], [])));
+		fireEvent.click(screen.getByRole("button", { name: "1 console" }));
+		expect(await screen.findByText("Nouvelle console")).toBeTruthy();
+		expect(screen.getByText("Pistes")).toBeTruthy();
+	});
+});
+
+describe("menuAnchor", () => {
+	// Table de 100 à 300 px, son compteur de 250 à 280 px, 6 px sous son haut.
+	const table = { left: 100, right: 300, top: 50 };
+	const button = { left: 250, right: 280, top: 56 };
+
+	it("pose la liste contre le bord droit de la table, haut aligné", () => {
+		expect(menuAnchor(button, table, 1, 1200)).toEqual({
+			position: "right-start",
+			offset: { mainAxis: 28, crossAxis: -6 },
+			scale: 1
+		});
+	});
+
+	it("passe à gauche quand la droite sort de l'écran", () => {
+		const far = { left: 900, right: 1100, top: 50 };
+		const farButton = { left: 1050, right: 1080, top: 56 };
+		expect(menuAnchor(farButton, far, 1, 1200)).toEqual({
+			position: "left-start",
+			offset: { mainAxis: 158, crossAxis: -6 },
+			scale: 1
+		});
+	});
+
+	it("reste à droite quand aucun côté n'a la place", () => {
+		const wide = { left: 50, right: 1150, top: 50 };
+		expect(menuAnchor(button, wide, 1, 1200).position).toBe("right-start");
+	});
+
+	it("rétrécit avec le zoom, jusqu'à un plancher", () => {
+		expect(menuAnchor(button, table, 0.9, 1200).scale).toBe(0.9);
+		expect(menuAnchor(button, table, 0.55, 1200).scale).toBe(0.75);
+		expect(menuAnchor(button, table, 2, 1200).scale).toBe(1);
 	});
 });

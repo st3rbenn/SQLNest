@@ -9,6 +9,7 @@ import {
 import { IconCheck, IconPlus, IconTerminal2 } from "@tabler/icons-react";
 import {
 	type CSSProperties,
+	useCallback,
 	useContext,
 	useEffect,
 	useRef,
@@ -46,6 +47,77 @@ const denseStyle = (active: boolean): CSSProperties => ({
 });
 
 const menuClassNames = { item: "sqlnest-menu-item" } as const;
+
+const MENU_WIDTH = 260;
+/** Écart entre la table et sa liste de consoles. */
+const MENU_GAP = 8;
+/** La liste rétrécit avec le canvas, sans passer sous une taille lisible. */
+const MENU_MIN_SCALE = 0.75;
+
+interface Edges {
+	readonly left: number;
+	readonly right: number;
+	readonly top: number;
+}
+
+export interface MenuAnchor {
+	readonly position: "right-start" | "left-start";
+	readonly offset: { readonly mainAxis: number; readonly crossAxis: number };
+	readonly scale: number;
+}
+
+/**
+ * Où ouvrir la liste des consoles : contre le bord droit de la table, haut
+ * aligné sur le sien, et non sous le compteur où elle la recouvrirait. À
+ * gauche quand la droite sort de l'écran. Les décalages sont comptés depuis
+ * le bouton, auquel le menu reste accroché.
+ */
+export function menuAnchor(
+	button: Edges,
+	table: Edges,
+	zoom: number,
+	viewportWidth: number
+): MenuAnchor {
+	const scale = Math.min(1, Math.max(MENU_MIN_SCALE, zoom));
+	const room = MENU_GAP + MENU_WIDTH * scale;
+	const crossAxis = table.top - button.top;
+	if (table.right + room > viewportWidth && table.left - room >= 0) {
+		return {
+			position: "left-start",
+			offset: { mainAxis: button.left - table.left + MENU_GAP, crossAxis },
+			scale
+		};
+	}
+	return {
+		position: "right-start",
+		offset: { mainAxis: table.right - button.right + MENU_GAP, crossAxis },
+		scale
+	};
+}
+
+const REST_ANCHOR: MenuAnchor = {
+	position: "right-start",
+	offset: { mainAxis: MENU_GAP, crossAxis: 0 },
+	scale: 1
+};
+
+/** La liste est posée à l'écran : elle se ferme dès que le canvas bouge. */
+function CloseOnViewportChange({
+	onMove
+}: {
+	readonly onMove: () => void;
+}): null {
+	const viewport = useViewport();
+	const start = useRef(viewport);
+	const moved =
+		viewport.x !== start.current.x ||
+		viewport.y !== start.current.y ||
+		viewport.zoom !== start.current.zoom;
+	useEffect(() => {
+		if (moved) onMove();
+	}, [moved, onMove]);
+	return null;
+}
 
 function rows(count: number): string {
 	return `${count} ligne${count > 1 ? "s" : ""}`;
@@ -199,6 +271,24 @@ export function TableConsoleCounter({
 	const foldedEntries = entries.filter((e) => !links?.openIds.has(e.id));
 	const folded = foldedEntries.length;
 	const [menuOpen, setMenuOpen] = useState(false);
+	const [anchor, setAnchor] = useState(REST_ANCHOR);
+	const buttonRef = useRef<HTMLButtonElement>(null);
+	const { getZoom } = useNestCanvas();
+	const closeMenu = useCallback(() => setMenuOpen(false), []);
+	function openMenu(): void {
+		const button = buttonRef.current;
+		if (button === null) return;
+		const node = button.closest(".nest-node") ?? button;
+		setAnchor(
+			menuAnchor(
+				button.getBoundingClientRect(),
+				node.getBoundingClientRect(),
+				getZoom(),
+				window.innerWidth
+			)
+		);
+		setMenuOpen(true);
+	}
 	// Lâcher le bouton ailleurs pose une console à cet endroit : la première
 	// repliée de la table, sinon une nouvelle.
 	const drag = useDragOut((at) => {
@@ -243,17 +333,23 @@ export function TableConsoleCounter({
 	return (
 		<Menu
 			shadow="md"
-			width={260}
-			position="bottom-start"
-			offset={6}
+			width={MENU_WIDTH * anchor.scale}
+			position={anchor.position}
+			offset={anchor.offset}
+			// Le côté est déjà choisi : un retournement repartirait du bouton.
+			middlewares={{ flip: false, shift: true }}
 			radius="var(--sqlnest-radius-8)"
 			classNames={menuClassNames}
 			opened={menuOpen}
 			// Un glisser depuis le compteur n'ouvre pas la liste.
-			onChange={(next) => setMenuOpen(next && !drag.wasDragged())}
+			onChange={(next) => {
+				if (next && !drag.wasDragged()) openMenu();
+				else closeMenu();
+			}}
 		>
 			<Menu.Target>
 				<button
+					ref={buttonRef}
 					type="button"
 					className={
 						flash ? "nodrag nopan sqlnest-console-flash" : "nodrag nopan"
@@ -276,47 +372,50 @@ export function TableConsoleCounter({
 				onClick={(e) => e.stopPropagation()}
 				onDoubleClick={(e) => e.stopPropagation()}
 			>
-				{entries.map((entry) => {
-					const isOpen = links.openIds.has(entry.id);
-					const Icon = isOpen ? IconCheck : IconTerminal2;
-					return (
-						<Menu.Item
-							key={entry.id}
-							leftSection={<Icon size={14} stroke={2} aria-hidden />}
-							rightSection={
-								entry.lastResult !== undefined ? (
-									<span style={{ whiteSpace: "nowrap" }}>
-										{rows(entry.lastResult.rowCount)}
-									</span>
-								) : undefined
-							}
-							// Une console dépliée se replie par la même entrée.
-							onClick={() =>
-								isOpen ? links.fold(entry.id) : links.open(entry.id, "beside")
-							}
-						>
-							<span
-								style={{
-									display: "block",
-									maxWidth: 150,
-									overflow: "hidden",
-									textOverflow: "ellipsis",
-									whiteSpace: "nowrap"
-								}}
+				<div style={{ zoom: anchor.scale }}>
+					{entries.map((entry) => {
+						const isOpen = links.openIds.has(entry.id);
+						const Icon = isOpen ? IconCheck : IconTerminal2;
+						return (
+							<Menu.Item
+								key={entry.id}
+								leftSection={<Icon size={14} stroke={2} aria-hidden />}
+								rightSection={
+									entry.lastResult !== undefined ? (
+										<span style={{ whiteSpace: "nowrap" }}>
+											{rows(entry.lastResult.rowCount)}
+										</span>
+									) : undefined
+								}
+								// Une console dépliée se replie par la même entrée.
+								onClick={() =>
+									isOpen ? links.fold(entry.id) : links.open(entry.id, "beside")
+								}
 							>
-								{entry.title}
-							</span>
-						</Menu.Item>
-					);
-				})}
-				<Menu.Divider />
-				<Menu.Item
-					leftSection={<IconPlus size={14} stroke={2} aria-hidden />}
-					onClick={() => links.createFor(table)}
-				>
-					Nouvelle console
-				</Menu.Item>
+								<span
+									style={{
+										display: "block",
+										maxWidth: 150,
+										overflow: "hidden",
+										textOverflow: "ellipsis",
+										whiteSpace: "nowrap"
+									}}
+								>
+									{entry.title}
+								</span>
+							</Menu.Item>
+						);
+					})}
+					<Menu.Divider />
+					<Menu.Item
+						leftSection={<IconPlus size={14} stroke={2} aria-hidden />}
+						onClick={() => links.createFor(table)}
+					>
+						Nouvelle console
+					</Menu.Item>
+				</div>
 			</Menu.Dropdown>
+			{menuOpen ? <CloseOnViewportChange onMove={closeMenu} /> : null}
 			{drag.ghost}
 		</Menu>
 	);
