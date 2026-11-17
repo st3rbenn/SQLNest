@@ -89,7 +89,6 @@ const UNREAD: IndexState = { entries: [], readFor: null };
  * leurs écritures.
  */
 export function useConsoleIndex(
-	enabled: boolean,
 	connectionId: string,
 	consoleIds: readonly string[],
 	tables: ReadonlySet<string>
@@ -98,10 +97,6 @@ export function useConsoleIndex(
 	const idsKey = consoleIds.join(",");
 	const scope = `${connectionId}|${idsKey}`;
 	useEffect(() => {
-		if (!enabled) {
-			setIndex(UNREAD);
-			return;
-		}
 		const ids = idsKey === "" ? [] : idsKey.split(",");
 		const readFor = `${connectionId}|${idsKey}`;
 		const refresh = (): void => {
@@ -123,7 +118,7 @@ export function useConsoleIndex(
 			window.removeEventListener("mantine-local-storage", refresh);
 			window.removeEventListener("storage", refresh);
 		};
-	}, [enabled, connectionId, idsKey, tables]);
+	}, [connectionId, idsKey, tables]);
 	return useMemo(
 		() => ({ entries: index.entries, ready: index.readFor === scope }),
 		[index, scope]

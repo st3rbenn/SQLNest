@@ -1,4 +1,3 @@
-import { useLocalStorage } from "@mantine/hooks";
 import { createContext } from "react";
 import type { ConsoleEntry } from "./useConsoleIndex";
 
@@ -27,20 +26,7 @@ export interface ConsoleLinksValue {
 	readonly createFor: (table: string, at?: FlowPoint) => void;
 }
 
-/** `null` : prototype éteint, le canvas garde ses consoles en frames libres. */
+/** `null` hors d'un canvas : une table n'y montre pas de consoles. */
 export const ConsoleLinksContext = createContext<ConsoleLinksValue | null>(
 	null
 );
-
-/** Interrupteur du prototype « console rattachée à sa table », éteint par défaut. */
-export function useConsoleLinksFlag(): readonly [
-	boolean,
-	(value: boolean) => void
-] {
-	const [enabled, setEnabled] = useLocalStorage<boolean>({
-		key: "sqlnest:proto:console-links",
-		defaultValue: false,
-		getInitialValueInEffect: false
-	});
-	return [enabled, setEnabled];
-}

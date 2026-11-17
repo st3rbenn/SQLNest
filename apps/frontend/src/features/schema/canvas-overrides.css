@@ -229,7 +229,7 @@
 	pointer-events: auto;
 }
 
-/* Prototype « console rattachée à sa table ». Sur une table sans console,
+/* Console rattachée à sa table. Sur une table sans console,
  * le bouton d'ajout n'apparaît qu'au survol de la table. */
 .nest-node-table .sqlnest-console-add {
 	opacity: 0;

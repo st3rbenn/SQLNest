@@ -1,9 +1,8 @@
 import { Avatar, Menu, UnstyledButton } from "@mantine/core";
 import { useNestCanvas, useViewport } from "@sqlnest/canvas";
-import { IconCheck, IconChevronDown } from "@tabler/icons-react";
+import { IconChevronDown } from "@tabler/icons-react";
 import type { CSSProperties } from "react";
 import { useCurrentUser } from "../../../auth/sessionQuery";
-import { useConsoleLinksFlag } from "../../console-links/ConsoleLinksContext";
 
 /**
  * HUD flottant top-right du canvas — regroupe l'accès compte (avatar +
@@ -131,7 +130,6 @@ function ZoomControl(): React.ReactNode {
 	const { zoom } = useViewport();
 	const { zoomIn, zoomOut, zoomTo, fitView } = useNestCanvas();
 	const percent = Math.round(zoom * 100);
-	const [consoleLinks, setConsoleLinks] = useConsoleLinksFlag();
 	return (
 		<Menu
 			shadow="md"
@@ -170,15 +168,6 @@ function ZoomControl(): React.ReactNode {
 						Zoom à {Math.round(preset * 100)}%
 					</Menu.Item>
 				))}
-				<Menu.Divider />
-				<Menu.Item
-					onClick={() => setConsoleLinks(!consoleLinks)}
-					rightSection={
-						consoleLinks ? <IconCheck size={13} stroke={2} aria-hidden /> : null
-					}
-				>
-					Prototype console
-				</Menu.Item>
 			</Menu.Dropdown>
 		</Menu>
 	);

@@ -10,11 +10,10 @@ import {
 import type { ConsoleNodeType } from "../nodes/ConsoleNode";
 import type { SchemaModel } from "../schema-model";
 import { NODE_WIDTH, nodeHeight, type TableNodeType } from "../TableNode";
-import {
-	type ConsoleLinksValue,
-	type ConsolePlacement,
-	type FlowPoint,
-	useConsoleLinksFlag
+import type {
+	ConsoleLinksValue,
+	ConsolePlacement,
+	FlowPoint
 } from "./ConsoleLinksContext";
 import { placeNear, type Rect } from "./placeNear";
 import {
@@ -25,6 +24,7 @@ import {
 } from "./QueryLinkEdge";
 import { estimateResultSize, type ResultNodeType } from "./ResultNode";
 import { type ConsoleEntry, useConsoleIndex } from "./useConsoleIndex";
+import { useOpenConsoles } from "./useOpenConsoles";
 import { resultKey, useResultRuns } from "./useResultRuns";
 
 /** Écart entre une table et la console qui se déplie à côté d'elle. */
@@ -65,8 +65,7 @@ export interface UseConsoleLinksOptions {
 }
 
 export interface UseConsoleLinksReturn {
-	/** `null` quand le prototype est éteint. */
-	readonly context: ConsoleLinksValue | null;
+	readonly context: ConsoleLinksValue;
 	readonly consoleNodes: readonly ConsoleNodeType[];
 	/** Résultats sortis des consoles, au format table. */
 	readonly resultNodes: readonly ResultNodeType[];
@@ -91,14 +90,13 @@ function litQueryPath(edges: Edge[], entry: ConsoleEntry): Edge[] {
 }
 
 /**
- * Prototype « console rattachée à sa table » : une console dont la requête
- * part d'une table se replie dans l'en-tête de cette table (compteur +
- * liste). Dépliée, elle se pose à la place libre la plus proche de sa
- * table ; plusieurs peuvent
- * l'être à la fois, chacune reliée à sa table. Ses lignes sortent dans un
- * frame au format table, relié à la console (ou à la table quand la console
- * est repliée). Le chemin de
- * jointures de la console en cours s'allume. Éteint, le canvas ne change pas.
+ * Console rattachée à sa table : une console dont la requête part d'une
+ * table se replie dans l'en-tête de cette table (compteur + liste). Dépliée,
+ * elle se pose à la place libre la plus proche de sa table ; plusieurs
+ * peuvent l'être à la fois, chacune reliée à sa table. Ses lignes sortent
+ * dans un frame au format table, relié à la console (ou à la table quand la
+ * console est repliée). Le chemin de jointures de la console en cours
+ * s'allume. Une console sans table de départ reste un frame libre.
  */
 export function useConsoleLinks({
 	connectionId,
@@ -107,9 +105,8 @@ export function useConsoleLinks({
 	consoles,
 	edges
 }: UseConsoleLinksOptions): UseConsoleLinksReturn {
-	const [enabled] = useConsoleLinksFlag();
 	// Consoles dépliées, la plus récente en dernier.
-	const [openIds, setOpenIds] = useState<readonly string[]>([]);
+	const [openIds, setOpenIds] = useOpenConsoles(connectionId);
 	const tables = useMemo(
 		() => new Set(schema.collections.map((c) => c.name)),
 		[schema]
@@ -118,12 +115,7 @@ export function useConsoleLinks({
 		() => consoles.nodes.map((n) => n.id),
 		[consoles.nodes]
 	);
-	const { entries, ready } = useConsoleIndex(
-		enabled,
-		connectionId,
-		consoleIds,
-		tables
-	);
+	const { entries, ready } = useConsoleIndex(connectionId, consoleIds, tables);
 	const attached = useMemo(() => new Set(entries.map((e) => e.id)), [entries]);
 
 	const { moveTo, createAt, focusedId, onNodesChange } = consoles;
@@ -184,7 +176,7 @@ export function useConsoleLinks({
 			}
 			setOpenIds((ids) => [...ids.filter((x) => x !== id), id]);
 		},
-		[entries, besideTable, moveTo]
+		[entries, besideTable, moveTo, setOpenIds]
 	);
 	// Replier désélectionne aussi : une console sélectionnée se redéplierait.
 	const fold = useCallback(
@@ -192,7 +184,7 @@ export function useConsoleLinks({
 			onNodesChange([{ id, type: "select", selected: false }]);
 			setOpenIds((ids) => ids.filter((x) => x !== id));
 		},
-		[onNodesChange]
+		[onNodesChange, setOpenIds]
 	);
 	const createFor = useCallback(
 		(table: string, at?: FlowPoint) => {
@@ -208,7 +200,7 @@ export function useConsoleLinks({
 			const id = createAt(position, `find ${table}`);
 			setOpenIds((ids) => [...ids, id]);
 		},
-		[besideTable, createAt]
+		[besideTable, createAt, setOpenIds]
 	);
 
 	// Une console libre dont la requête vient de la rattacher est en cours de
@@ -225,13 +217,13 @@ export function useConsoleLinks({
 		if (typed.length > 0) {
 			setOpenIds((ids) => [...ids.filter((x) => !typed.includes(x)), ...typed]);
 		}
-	}, [ready, entries, consoleIds, attached]);
+	}, [ready, entries, consoleIds, attached, setOpenIds]);
 
 	// Une console rattachée et sélectionnée est celle qu'on travaille : elle
 	// se déplie, et le reste une fois désélectionnée.
-	const working = enabled
-		? consoles.nodes.find((n) => n.selected === true && attached.has(n.id))?.id
-		: undefined;
+	const working = consoles.nodes.find(
+		(n) => n.selected === true && attached.has(n.id)
+	)?.id;
 	useEffect(() => {
 		if (working === undefined) return;
 		setOpenIds((ids) =>
@@ -239,13 +231,13 @@ export function useConsoleLinks({
 				? ids
 				: [...ids.filter((x) => x !== working), working]
 		);
-	}, [working]);
+	}, [working, setOpenIds]);
 
 	// Échap replie la console sélectionnée, hors d'un champ de saisie : dans
 	// l'éditeur la touche a d'autres usages. En capture : le raccourci Échap
 	// du canvas consomme l'événement avant la phase de remontée.
 	useEffect(() => {
-		if (!enabled || working === undefined || focusedId !== null) return;
+		if (working === undefined || focusedId !== null) return;
 		const selected = working;
 		function onKey(e: KeyboardEvent): void {
 			if (e.key !== "Escape") return;
@@ -259,11 +251,10 @@ export function useConsoleLinks({
 		window.addEventListener("keydown", onKey, { capture: true });
 		return () =>
 			window.removeEventListener("keydown", onKey, { capture: true });
-	}, [enabled, working, focusedId, fold]);
+	}, [working, focusedId, fold]);
 
 	const openSet = useMemo(() => new Set(openIds), [openIds]);
-	const context = useMemo<ConsoleLinksValue | null>(() => {
-		if (!enabled) return null;
+	const context = useMemo<ConsoleLinksValue>(() => {
 		const byTable = new Map<string, ConsoleEntry[]>();
 		for (const entry of entries) {
 			byTable.set(entry.root, [...(byTable.get(entry.root) ?? []), entry]);
@@ -277,20 +268,18 @@ export function useConsoleLinks({
 			fold,
 			createFor
 		};
-	}, [enabled, entries, attached, openSet, open, fold, createFor]);
+	}, [entries, attached, openSet, open, fold, createFor]);
 
 	const consoleNodes = useMemo(
 		() =>
-			enabled
-				? consoles.nodes.filter(
-						(n) =>
-							!attached.has(n.id) ||
-							openSet.has(n.id) ||
-							n.selected === true ||
-							loose.current.has(n.id)
-					)
-				: consoles.nodes,
-		[enabled, consoles.nodes, attached, openSet]
+			consoles.nodes.filter(
+				(n) =>
+					!attached.has(n.id) ||
+					openSet.has(n.id) ||
+					n.selected === true ||
+					loose.current.has(n.id)
+			),
+		[consoles.nodes, attached, openSet]
 	);
 
 	// ─── Résultats en frames ──────────────────────────────────────────────
@@ -308,7 +297,7 @@ export function useConsoleLinks({
 			const prevById = new Map(prev.map((n) => [n.id, n]));
 			// Résultats posés dans cette même passe : ils comptent aussi.
 			const placed: Rect[] = [];
-			return (enabled ? entries : []).flatMap((entry) => {
+			return entries.flatMap((entry) => {
 				const runAt = runs.get(entry.id);
 				if (runAt === undefined || closedRuns.get(entry.id) === runAt) {
 					return [];
@@ -369,15 +358,7 @@ export function useConsoleLinks({
 				];
 			});
 		});
-	}, [
-		enabled,
-		entries,
-		runs,
-		closedRuns,
-		connectionId,
-		setResultNodes,
-		takenRects
-	]);
+	}, [entries, runs, closedRuns, connectionId, setResultNodes, takenRects]);
 
 	// ─── Arêtes : chemin de la requête en cours, lien résultat → origine ──
 	const shownConsoles = useMemo(
@@ -389,7 +370,6 @@ export function useConsoleLinks({
 	// résultat sélectionné, sinon de la dernière console dépliée.
 	const activeId = working ?? selectedResult?.data.consoleId ?? openIds.at(-1);
 	const shownEdges = useMemo(() => {
-		if (!enabled) return edges;
 		const active = entries.find((e) => e.id === activeId);
 		const lit = active === undefined ? edges : litQueryPath(edges, active);
 		const links = resultNodes.flatMap((node): Edge[] => {
@@ -433,7 +413,7 @@ export function useConsoleLinks({
 				: []
 		);
 		return [...lit, ...attaches, ...links];
-	}, [enabled, edges, entries, activeId, resultNodes, shownConsoles]);
+	}, [edges, entries, activeId, resultNodes, shownConsoles]);
 
 	// Un frame redimensionné porte une largeur et une hauteur explicites
 	// (posées par le moteur au redimensionnement) : il le sait par `resized`.

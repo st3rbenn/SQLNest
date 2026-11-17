@@ -29,7 +29,7 @@ describe("useConsoleIndex", () => {
 			"find track with one album on album_id = album.album_id pick name"
 		);
 		const { result } = renderHook(() =>
-			useConsoleIndex(true, CONN, ["console:a"], TABLES)
+			useConsoleIndex(CONN, ["console:a"], TABLES)
 		);
 		expect(result.current.entries).toEqual([
 			{
@@ -49,7 +49,7 @@ describe("useConsoleIndex", () => {
 	it("prend le nom de l'onglet comme titre quand il en a un", () => {
 		writeTabs("console:a", "find track pick name", "Pistes");
 		const { result } = renderHook(() =>
-			useConsoleIndex(true, CONN, ["console:a"], TABLES)
+			useConsoleIndex(CONN, ["console:a"], TABLES)
 		);
 		expect(result.current.entries[0]?.title).toBe("Pistes");
 	});
@@ -59,12 +59,7 @@ describe("useConsoleIndex", () => {
 		writeTabs("console:b", "find inconnue pick x");
 		writeTabs("console:c", "drop table track");
 		const { result } = renderHook(() =>
-			useConsoleIndex(
-				true,
-				CONN,
-				["console:a", "console:b", "console:c"],
-				TABLES
-			)
+			useConsoleIndex(CONN, ["console:a", "console:b", "console:c"], TABLES)
 		);
 		expect(result.current.entries).toEqual([]);
 	});
@@ -75,7 +70,7 @@ describe("useConsoleIndex", () => {
 			"find track with one fantome on x = fantome.x pick name"
 		);
 		const { result } = renderHook(() =>
-			useConsoleIndex(true, CONN, ["console:a"], TABLES)
+			useConsoleIndex(CONN, ["console:a"], TABLES)
 		);
 		expect(result.current.entries[0]?.joined).toEqual([]);
 	});
@@ -83,7 +78,7 @@ describe("useConsoleIndex", () => {
 	it("se relit quand une console écrit ses onglets", () => {
 		writeTabs("console:a", "");
 		const { result } = renderHook(() =>
-			useConsoleIndex(true, CONN, ["console:a"], TABLES)
+			useConsoleIndex(CONN, ["console:a"], TABLES)
 		);
 		expect(result.current.entries).toEqual([]);
 		act(() => {
@@ -96,7 +91,7 @@ describe("useConsoleIndex", () => {
 	it("se dit prêt après la première lecture", () => {
 		writeTabs("console:a", "");
 		const { result } = renderHook(() =>
-			useConsoleIndex(true, CONN, ["console:a"], TABLES)
+			useConsoleIndex(CONN, ["console:a"], TABLES)
 		);
 		expect(result.current.ready).toBe(true);
 	});
@@ -106,7 +101,7 @@ describe("useConsoleIndex", () => {
 		const seen: boolean[] = [];
 		const { rerender } = renderHook(
 			({ ids }: { ids: string[] }) => {
-				const index = useConsoleIndex(true, CONN, ids, TABLES);
+				const index = useConsoleIndex(CONN, ids, TABLES);
 				seen.push(index.ready);
 				return index;
 			},
@@ -117,13 +112,5 @@ describe("useConsoleIndex", () => {
 		// Le rendu qui reçoit la nouvelle liste ne l'a pas encore lue.
 		expect(seen[0]).toBe(false);
 		expect(seen.at(-1)).toBe(true);
-	});
-
-	it("reste vide quand le prototype est éteint", () => {
-		writeTabs("console:a", "find track pick name");
-		const { result } = renderHook(() =>
-			useConsoleIndex(false, CONN, ["console:a"], TABLES)
-		);
-		expect(result.current.entries).toEqual([]);
 	});
 });

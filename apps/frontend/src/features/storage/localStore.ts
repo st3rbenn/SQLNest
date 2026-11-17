@@ -28,6 +28,7 @@ export const storageKeys = {
 
 const CONNECTION_SLICES = [
 	"console-nodes",
+	"console-open",
 	"console-tabs",
 	"canvas-console:history",
 	"schemaEvents:lastSeenAt",

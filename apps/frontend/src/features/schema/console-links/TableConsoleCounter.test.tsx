@@ -66,7 +66,7 @@ function tree(value: ConsoleLinksValue | null, table = "track") {
 }
 
 describe("TableConsoleCounter", () => {
-	it("n'affiche rien quand le prototype est éteint", () => {
+	it("n'affiche rien hors d'un canvas", () => {
 		render(tree(null));
 		expect(screen.queryByRole("button")).toBeNull();
 	});
