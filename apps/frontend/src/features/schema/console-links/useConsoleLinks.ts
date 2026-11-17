@@ -25,7 +25,7 @@ import {
 import { estimateResultSize, type ResultNodeType } from "./ResultNode";
 import { type ConsoleEntry, useConsoleIndex } from "./useConsoleIndex";
 import { useOpenConsoles } from "./useOpenConsoles";
-import { resultKey, useResultRuns } from "./useResultRuns";
+import { resultKey, useResultRuns, useRunStatuses } from "./useResultRuns";
 
 /** Écart entre une table et la console qui se déplie à côté d'elle. */
 const GAP = 80;
@@ -62,6 +62,9 @@ export interface UseConsoleLinksOptions {
 	readonly tableNodes: readonly TableNodeType[];
 	readonly consoles: UseCanvasConsolesReturn;
 	readonly edges: Edge[];
+	/** Ce qu'un frame posé ne doit pas recouvrir, en plus des tables, des
+	 * consoles et des résultats : les nodes système. */
+	readonly obstacles: readonly Rect[];
 	/** Amène à l'écran un frame qui vient d'être posé. */
 	readonly reveal: (rect: Rect) => void;
 }
@@ -106,6 +109,7 @@ export function useConsoleLinks({
 	tableNodes,
 	consoles,
 	edges,
+	obstacles,
 	reveal
 }: UseConsoleLinksOptions): UseConsoleLinksReturn {
 	// Consoles dépliées, la plus récente en dernier.
@@ -121,19 +125,22 @@ export function useConsoleLinks({
 	const { entries, ready } = useConsoleIndex(connectionId, consoleIds, tables);
 	const attached = useMemo(() => new Set(entries.map((e) => e.id)), [entries]);
 
-	const { moveTo, createAt, focusedId, onNodesChange } = consoles;
+	const { moveTo, createAt, focusedId, onNodesChange, exitEdit } = consoles;
 	// Frames posés sur le canvas, lus au moment d'en poser un nouveau : en
 	// refs, déplacer une table ne recalcule ni rappels ni résultats.
 	const tableNodesRef = useRef(tableNodes);
 	tableNodesRef.current = tableNodes;
 	const allConsolesRef = useRef(consoles.nodes);
 	allConsolesRef.current = consoles.nodes;
+	const obstaclesRef = useRef(obstacles);
+	obstaclesRef.current = obstacles;
 	const shownConsolesRef = useRef<readonly ConsoleNodeType[]>([]);
 	const resultNodesRef = useRef<readonly ResultNodeType[]>([]);
 	/** Ce qu'un frame qu'on pose ne doit pas recouvrir (`except` : lui-même). */
 	const takenRects = useCallback(
 		(except?: string): Rect[] => [
 			...tableNodesRef.current.map(tableRect),
+			...obstaclesRef.current,
 			...shownConsolesRef.current
 				.filter((n) => n.id !== except)
 				.map(consoleRect),
@@ -183,12 +190,15 @@ export function useConsoleLinks({
 		[entries, besideTable, moveTo, setOpenIds, reveal]
 	);
 	// Replier désélectionne aussi : une console sélectionnée se redéplierait.
+	// Et la sort de l'édition : repliée depuis son propre bouton, aucun clic
+	// extérieur ne l'en a sortie, elle se redéplierait figée.
 	const fold = useCallback(
 		(id: string) => {
+			exitEdit(id);
 			onNodesChange([{ id, type: "select", selected: false }]);
 			setOpenIds((ids) => ids.filter((x) => x !== id));
 		},
-		[onNodesChange, setOpenIds]
+		[onNodesChange, setOpenIds, exitEdit]
 	);
 	const createFor = useCallback(
 		(table: string, at?: FlowPoint) => {
@@ -259,6 +269,7 @@ export function useConsoleLinks({
 	}, [working, focusedId, fold]);
 
 	const openSet = useMemo(() => new Set(openIds), [openIds]);
+	const statusOf = useRunStatuses(connectionId, entries);
 	const context = useMemo<ConsoleLinksValue>(() => {
 		const byTable = new Map<string, ConsoleEntry[]>();
 		for (const entry of entries) {
@@ -269,11 +280,12 @@ export function useConsoleLinks({
 			attached,
 			rootOf: new Map(entries.map((e) => [e.id, e.root])),
 			openIds: openSet,
+			statusOf,
 			open,
 			fold,
 			createFor
 		};
-	}, [entries, attached, openSet, open, fold, createFor]);
+	}, [entries, attached, openSet, statusOf, open, fold, createFor]);
 
 	const consoleNodes = useMemo(
 		() =>

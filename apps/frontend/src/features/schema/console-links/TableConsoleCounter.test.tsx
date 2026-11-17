@@ -49,6 +49,7 @@ function links(
 		attached: new Set(entries.map((e) => e.id)),
 		rootOf: new Map(entries.map((e) => [e.id, e.root])),
 		openIds: new Set(open),
+		statusOf: new Map(),
 		open: openConsole,
 		fold: vi.fn(),
 		createFor
@@ -176,6 +177,73 @@ describe("TableConsoleCounter", () => {
 		fireEvent.click(screen.getByRole("button", { name: "1 console" }));
 		expect(await screen.findByText("Nouvelle console")).toBeTruthy();
 		expect(screen.getByText("Pistes")).toBeTruthy();
+	});
+});
+
+describe("TableConsoleCounter — état des consoles repliées", () => {
+	const both = [entry("a"), entry("b")];
+	const withStatus = (
+		open: string[],
+		statuses: [string, "running" | "error"][]
+	): ConsoleLinksValue => ({
+		...links(both, open),
+		statusOf: new Map(statuses)
+	});
+
+	it("signale une requête en échec dans une console repliée", () => {
+		render(tree(withStatus([], [["b", "error"]])));
+		const counter = screen.getByRole("button", {
+			name: "2 consoles, erreur"
+		});
+		expect(counter.style.background).toBe("var(--sqlnest-danger)");
+	});
+
+	it("bat tant qu'une requête tourne dans une console repliée", () => {
+		render(tree(withStatus([], [["a", "running"]])));
+		const counter = screen.getByRole("button", {
+			name: "2 consoles, en cours"
+		});
+		expect(counter.className).toContain("sqlnest-console-running");
+	});
+
+	it("fait passer l'échec avant la requête en cours", () => {
+		render(
+			tree(
+				withStatus(
+					[],
+					[
+						["a", "running"],
+						["b", "error"]
+					]
+				)
+			)
+		);
+		expect(
+			screen.getByRole("button", { name: "2 consoles, erreur" })
+		).toBeTruthy();
+	});
+
+	it("laisse une console dépliée dire elle-même son état", () => {
+		render(tree(withStatus(["b"], [["b", "error"]])));
+		const counter = screen.getByRole("button", { name: "2 consoles" });
+		expect(counter.style.background).toBe("var(--sqlnest-accent)");
+	});
+
+	it("écrit l'état de chaque console dans la liste", async () => {
+		render(
+			tree(
+				withStatus(
+					[],
+					[
+						["a", "running"],
+						["b", "error"]
+					]
+				)
+			)
+		);
+		fireEvent.click(screen.getByRole("button", { name: "2 consoles, erreur" }));
+		expect(await screen.findByText("Erreur")).toBeTruthy();
+		expect(screen.getByText("En cours")).toBeTruthy();
 	});
 });
 

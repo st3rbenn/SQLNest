@@ -267,14 +267,23 @@ function CanvasInner({
 		setInferencePanelOpen,
 		traceRelation
 	} = useSchemaEditing({ schema, teamSlug, connectionId });
-	const consoles = useCanvasConsoles({ connectionId, teamSlug, viewCenter });
-	const consoleLinks = useConsoleLinks({
+	// La position d'une console déplacée rejoint celles des tables (elle sert
+	// l'annulation) : supprimée, la console n'y laisse rien.
+	const positionsRef = useRef(tablePositions.positions);
+	positionsRef.current = tablePositions.positions;
+	const replacePositions = tablePositions.replaceAll;
+	const forgetPosition = useCallback(
+		(id: string) => {
+			const { [id]: gone, ...rest } = positionsRef.current;
+			if (gone !== undefined) replacePositions(rest);
+		},
+		[replacePositions]
+	);
+	const consoles = useCanvasConsoles({
 		connectionId,
-		schema,
-		tableNodes: nodes,
-		consoles,
-		edges: displayEdges,
-		reveal
+		teamSlug,
+		viewCenter,
+		onRemoved: forgetPosition
 	});
 	const systemNodes = useSystemNodes({
 		schema,
@@ -286,6 +295,24 @@ function CanvasInner({
 		tableNodes: nodes,
 		frames: framesApi.frames,
 		ready: canvasReady
+	});
+	const systemRects = useMemo(
+		() =>
+			systemNodes.nodes.map((n) => ({
+				...n.position,
+				width: n.measured?.width ?? n.width ?? 0,
+				height: n.measured?.height ?? n.height ?? 0
+			})),
+		[systemNodes.nodes]
+	);
+	const consoleLinks = useConsoleLinks({
+		connectionId,
+		schema,
+		tableNodes: nodes,
+		consoles,
+		edges: displayEdges,
+		obstacles: systemRects,
+		reveal
 	});
 
 	// ─── Nodes affichés ───────────────────────────────────────────────────

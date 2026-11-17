@@ -15,6 +15,8 @@ export interface UseCanvasConsolesOptions {
 	readonly teamSlug: string;
 	/** Centre de la vue courante : là où s'ouvre une nouvelle console. */
 	readonly viewCenter: () => XY | null;
+	/** Une console vient d'être supprimée. */
+	readonly onRemoved?: (id: string) => void;
 }
 
 export interface UseCanvasConsolesReturn {
@@ -27,6 +29,8 @@ export interface UseCanvasConsolesReturn {
 	readonly exitFocus: () => void;
 	/** Passe une console en édition : éditeur actif, frame figé. */
 	readonly enterEdit: (id: string) => void;
+	/** Sort `id` de l'édition, si c'est elle qui y est. */
+	readonly exitEdit: (id: string) => void;
 	readonly createAtCenter: () => void;
 	/** Ouvre une console au centre, son premier onglet rempli de `source`. */
 	readonly openWithSource: (source: string) => void;
@@ -65,7 +69,8 @@ function makeTabId(): string {
 export function useCanvasConsoles({
 	connectionId,
 	teamSlug,
-	viewCenter
+	viewCenter,
+	onRemoved
 }: UseCanvasConsolesOptions): UseCanvasConsolesReturn {
 	const consoleNodes = useConsoleNodes(connectionId);
 	const [focusedId, setFocusedId] = useState<string | null>(null);
@@ -126,7 +131,15 @@ export function useCanvasConsoles({
 			window.removeEventListener("keydown", onKey, { capture: true });
 	}, [focusedId]);
 
-	const { updateGeom, updatePosition, remove, create } = consoleNodes;
+	const { updateGeom, updatePosition, create } = consoleNodes;
+	const removeNode = consoleNodes.remove;
+	const remove = useCallback(
+		(id: string) => {
+			removeNode(id);
+			onRemoved?.(id);
+		},
+		[removeNode, onRemoved]
+	);
 	const nodes = useMemo<ConsoleNodeType[]>(
 		() =>
 			canvasNodes.map((n) => {
@@ -247,6 +260,7 @@ export function useCanvasConsoles({
 		enterFocus,
 		exitFocus,
 		enterEdit,
+		exitEdit,
 		createAtCenter,
 		openWithSource,
 		createAt,

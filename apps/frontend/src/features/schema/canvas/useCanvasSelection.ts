@@ -19,8 +19,8 @@ export interface UseCanvasSelectionReturn {
 }
 
 /**
- * Sélection multi-tables tenue à jour par le moteur. Filtre les frame-nodes
- * (non sélectionnables, mais robuste face à un futur changement). Le callback
+ * Sélection multi-tables tenue à jour par le moteur. Ne retient que les
+ * tables parmi les nodes sélectionnés. Le callback
  * `onMultiSelect` est stocké en ref → l'inscription à `useOnSelectionChange`
  * reste stable même si le parent passe une closure recréée à chaque render.
  */
@@ -34,8 +34,10 @@ export function useCanvasSelection<N extends Node>({
 
 	useOnSelectionChange({
 		onChange: useCallback(({ nodes: sel }) => {
+			// Les actions de la sélection (masquer, encadrer) portent sur des
+			// tables : une console ou un résultat sélectionné n'en est pas une.
 			const ids = sel
-				.filter((n) => (n as { type?: string }).type !== "frame")
+				.filter((n) => (n as { type?: string }).type === "table")
 				.map((n) => n.id);
 			setSelectedTables(ids);
 			if (ids.length >= 2) onMultiSelectRef.current();

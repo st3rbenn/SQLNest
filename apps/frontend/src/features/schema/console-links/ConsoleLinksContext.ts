@@ -1,5 +1,6 @@
 import { createContext } from "react";
 import type { ConsoleEntry } from "./useConsoleIndex";
+import type { ConsoleRunStatus } from "./useResultRuns";
 
 /** Point du canvas, en coordonnées flow. */
 export interface FlowPoint {
@@ -20,6 +21,8 @@ export interface ConsoleLinksValue {
 	readonly rootOf: ReadonlyMap<string, string>;
 	/** Consoles dépliées : plusieurs peuvent l'être à la fois. */
 	readonly openIds: ReadonlySet<string>;
+	/** Requête en cours ou en échec, par console. */
+	readonly statusOf: ReadonlyMap<string, ConsoleRunStatus>;
 	readonly open: (id: string, placement: ConsolePlacement) => void;
 	readonly fold: (id: string) => void;
 	/** Nouvelle console de la table : à côté d'elle, ou déposée au point `at`. */

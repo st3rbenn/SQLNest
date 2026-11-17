@@ -1,6 +1,7 @@
 import type { Node, NodeProps } from "@sqlnest/canvas";
 import { IconChevronDown, IconChevronRight, IconClockHour3, IconServer } from "@tabler/icons-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useContentWheel } from "../schema/nodes/contentWheel";
 import {
 	SYSTEM_BORDER,
 	SystemNodeShell
@@ -184,9 +185,14 @@ function EventsPreview({
 	readonly loadingMore: boolean;
 	readonly onLoadMore: () => void;
 }) {
+	// La molette défile la liste tant qu'il lui reste des lignes, puis
+	// déplace le canvas.
+	const listRef = useRef<HTMLDivElement>(null);
+	useContentWheel(listRef);
 	return (
 		<div
-			className="nowheel nodrag"
+			ref={listRef}
+			className="nodrag"
 			style={{
 				borderTop: "1px solid var(--sqlnest-border-subtle)",
 				flex: "1 1 auto",

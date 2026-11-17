@@ -18,14 +18,22 @@ import {
 import { createPortal } from "react-dom";
 import { ConsoleLinksContext, type FlowPoint } from "./ConsoleLinksContext";
 
-const counterStyle = (active: boolean): CSSProperties => ({
+/** Fond du compteur : une requête en échec prime sur une console dépliée. */
+type CounterTone = "rest" | "active" | "error";
+const TONE_BACKGROUND: Record<CounterTone, string> = {
+	rest: "var(--sqlnest-surface-hover)",
+	active: "var(--sqlnest-accent)",
+	error: "var(--sqlnest-danger)"
+};
+
+const counterStyle = (tone: CounterTone): CSSProperties => ({
 	display: "inline-flex",
 	alignItems: "center",
 	gap: 3,
 	padding: "1px 5px",
 	border: 0,
 	borderRadius: "var(--sqlnest-radius-4)",
-	background: active ? "var(--sqlnest-accent)" : "var(--sqlnest-surface-hover)",
+	background: TONE_BACKGROUND[tone],
 	color: "var(--sqlnest-text-primary)",
 	fontFamily: "'Inter', ui-sans-serif, system-ui, sans-serif",
 	fontSize: "var(--sqlnest-font-size-10)",
@@ -36,8 +44,8 @@ const counterStyle = (active: boolean): CSSProperties => ({
 });
 
 /** Forme réduite, sur une table devenue un bloc : un rond, le nombre seul. */
-const denseStyle = (active: boolean): CSSProperties => ({
-	...counterStyle(active),
+const denseStyle = (tone: CounterTone): CSSProperties => ({
+	...counterStyle(tone),
 	justifyContent: "center",
 	minWidth: 16,
 	height: 16,
@@ -312,7 +320,7 @@ export function TableConsoleCounter({
 				<button
 					type="button"
 					className="nodrag nopan sqlnest-console-add"
-					style={counterStyle(false)}
+					style={counterStyle("rest")}
 					aria-label="Nouvelle console"
 					{...quiet}
 					onPointerDown={drag.onPointerDown}
@@ -330,6 +338,17 @@ export function TableConsoleCounter({
 		);
 	}
 	const active = entries.some((e) => links.openIds.has(e.id));
+	// Une console dépliée dit elle-même où en est sa requête : le compteur
+	// ne parle que pour les repliées.
+	const foldedStatuses = foldedEntries.map((e) => links.statusOf.get(e.id));
+	const failed = foldedStatuses.includes("error");
+	const running = foldedStatuses.includes("running");
+	const tone: CounterTone = failed
+		? "error"
+		: active || running
+			? "active"
+			: "rest";
+	const count = `${entries.length} console${entries.length > 1 ? "s" : ""}`;
 	return (
 		<Menu
 			shadow="md"
@@ -351,11 +370,17 @@ export function TableConsoleCounter({
 				<button
 					ref={buttonRef}
 					type="button"
-					className={
-						flash ? "nodrag nopan sqlnest-console-flash" : "nodrag nopan"
+					className={[
+						"nodrag nopan",
+						flash ? "sqlnest-console-flash" : "",
+						running ? "sqlnest-console-running" : ""
+					]
+						.join(" ")
+						.trim()}
+					style={dense ? denseStyle(tone) : counterStyle(tone)}
+					aria-label={
+						failed ? `${count}, erreur` : running ? `${count}, en cours` : count
 					}
-					style={dense ? denseStyle(active) : counterStyle(active)}
-					aria-label={`${entries.length} console${entries.length > 1 ? "s" : ""}`}
 					{...quiet}
 					onPointerDown={drag.onPointerDown}
 					onClick={(e) => e.stopPropagation()}
@@ -376,12 +401,19 @@ export function TableConsoleCounter({
 					{entries.map((entry) => {
 						const isOpen = links.openIds.has(entry.id);
 						const Icon = isOpen ? IconCheck : IconTerminal2;
+						const status = links.statusOf.get(entry.id);
 						return (
 							<Menu.Item
 								key={entry.id}
 								leftSection={<Icon size={14} stroke={2} aria-hidden />}
 								rightSection={
-									entry.lastResult !== undefined ? (
+									status === "error" ? (
+										<span style={{ color: "var(--sqlnest-danger)" }}>
+											Erreur
+										</span>
+									) : status === "running" ? (
+										<span className="sqlnest-console-running">En cours</span>
+									) : entry.lastResult !== undefined ? (
 										<span style={{ whiteSpace: "nowrap" }}>
 											{rows(entry.lastResult.rowCount)}
 										</span>

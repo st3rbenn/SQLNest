@@ -251,3 +251,12 @@
 .sqlnest-console-flash {
 	animation: sqlnest-console-flash 500ms ease-out 2;
 }
+/* Requête en cours dans une console repliée : son compteur bat. */
+@keyframes sqlnest-console-running {
+	50% {
+		opacity: 0.45;
+	}
+}
+.sqlnest-console-running {
+	animation: sqlnest-console-running 1.1s ease-in-out infinite;
+}

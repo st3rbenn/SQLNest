@@ -163,6 +163,7 @@ describe("ResultNode", () => {
 			attached: new Set(["console:a"]),
 			rootOf: new Map([["console:a", "track"]]),
 			openIds: new Set(openIds),
+			statusOf: new Map(),
 			open,
 			fold: () => {},
 			createFor: () => {}
