@@ -62,6 +62,8 @@ export interface UseConsoleLinksOptions {
 	readonly tableNodes: readonly TableNodeType[];
 	readonly consoles: UseCanvasConsolesReturn;
 	readonly edges: Edge[];
+	/** Amène à l'écran un frame qui vient d'être posé. */
+	readonly reveal: (rect: Rect) => void;
 }
 
 export interface UseConsoleLinksReturn {
@@ -103,7 +105,8 @@ export function useConsoleLinks({
 	schema,
 	tableNodes,
 	consoles,
-	edges
+	edges,
+	reveal
 }: UseConsoleLinksOptions): UseConsoleLinksReturn {
 	// Consoles dépliées, la plus récente en dernier.
 	const [openIds, setOpenIds] = useOpenConsoles(connectionId);
@@ -164,19 +167,20 @@ export function useConsoleLinks({
 				width: node?.width ?? CONSOLE_NODE_DEFAULT_WIDTH,
 				height: node?.height ?? CONSOLE_NODE_DEFAULT_HEIGHT
 			};
-			if (typeof placement === "object") {
-				// Point de dépôt : la console se pose juste au-dessus, centrée.
-				moveTo(id, {
-					x: placement.x - size.width / 2,
-					y: placement.y - size.height
-				});
-			} else if (placement === "beside" && entry !== undefined) {
-				const position = besideTable(entry.root, size, id);
-				if (position !== null) moveTo(id, position);
+			// Point de dépôt : la console se pose juste au-dessus, centrée.
+			const position =
+				typeof placement === "object"
+					? { x: placement.x - size.width / 2, y: placement.y - size.height }
+					: placement === "beside" && entry !== undefined
+						? besideTable(entry.root, size, id)
+						: null;
+			if (position !== null) {
+				moveTo(id, position);
+				reveal({ ...position, ...size });
 			}
 			setOpenIds((ids) => [...ids.filter((x) => x !== id), id]);
 		},
-		[entries, besideTable, moveTo, setOpenIds]
+		[entries, besideTable, moveTo, setOpenIds, reveal]
 	);
 	// Replier désélectionne aussi : une console sélectionnée se redéplierait.
 	const fold = useCallback(
@@ -198,9 +202,10 @@ export function useConsoleLinks({
 					: besideTable(table, size);
 			if (position === null) return;
 			const id = createAt(position, `find ${table}`);
+			reveal({ ...position, ...size });
 			setOpenIds((ids) => [...ids, id]);
 		},
-		[besideTable, createAt, setOpenIds]
+		[besideTable, createAt, setOpenIds, reveal]
 	);
 
 	// Une console libre dont la requête vient de la rattacher est en cours de
@@ -359,6 +364,21 @@ export function useConsoleLinks({
 			});
 		});
 	}, [entries, runs, closedRuns, connectionId, setResultNodes, takenRects]);
+
+	// Un résultat qui apparaît vient à l'écran, une fois sa taille mesurée.
+	// Une nouvelle exécution le garde où il est : il n'est montré qu'une fois.
+	const revealed = useRef<ReadonlySet<string>>(new Set());
+	useEffect(() => {
+		const seen = new Set<string>();
+		for (const node of resultNodes) {
+			if (revealed.current.has(node.id)) seen.add(node.id);
+			else if (node.measured?.width !== undefined) {
+				seen.add(node.id);
+				reveal(resultRect(node));
+			}
+		}
+		revealed.current = seen;
+	}, [resultNodes, reveal]);
 
 	// ─── Arêtes : chemin de la requête en cours, lien résultat → origine ──
 	const shownConsoles = useMemo(

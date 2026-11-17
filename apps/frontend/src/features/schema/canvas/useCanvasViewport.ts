@@ -7,6 +7,7 @@ import {
 	useRef
 } from "react";
 import type { LayoutResult } from "../layout";
+import { type FlowRect, revealViewport } from "./revealViewport";
 import type { TableNodeType } from "../TableNode";
 import { NODE_WIDTH, nodeHeight } from "../TableNode";
 import {
@@ -51,6 +52,9 @@ export interface UseCanvasViewportReturn {
 	readonly focusAndZoom: (id: string) => void;
 	/** Retour à la vue aérienne (fit du bounding-box de toutes les tables). */
 	readonly applyOverview: () => void;
+	/** Amène un frame qui vient d'être posé dans la zone libre, par le plus
+	 * petit déplacement et sans zoom. Sans effet s'il y est déjà. */
+	readonly reveal: (rect: FlowRect) => void;
 }
 
 /**
@@ -209,5 +213,22 @@ export function useCanvasViewport(
 		);
 	};
 
-	return { safeArea, focusAndZoom, applyOverview };
+	const reveal = (rect: FlowRect) => {
+		if (containerRef.current === null) return;
+		const from = getViewport();
+		const to = revealViewport(
+			from,
+			rect,
+			containerRef.current.getBoundingClientRect(),
+			safeAreaRef.current
+		);
+		if (to === null) return;
+		// Comme `focusAndZoom` : sans ce drapeau, le cadrage automatique
+		// reprendrait la vue au prochain redimensionnement.
+		userTouchedViewportRef.current = true;
+		tweenRef.current?.cancel();
+		tweenRef.current = animateViewport(from, to, FOCUS_TWEEN_MS, setViewport);
+	};
+
+	return { safeArea, focusAndZoom, applyOverview, reveal };
 }

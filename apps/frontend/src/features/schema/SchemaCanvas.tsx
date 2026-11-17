@@ -45,6 +45,7 @@ import { useCanvasSelection } from "./canvas/useCanvasSelection";
 import { useCanvasSelectionLasso } from "./canvas/useCanvasSelectionLasso";
 import { useCanvasSyncBridge } from "./canvas/useCanvasSyncBridge";
 import { useCanvasUndo } from "./canvas/useCanvasUndo";
+import type { FlowRect } from "./canvas/revealViewport";
 import { useCanvasViewport } from "./canvas/useCanvasViewport";
 import { useDisplayTables } from "./canvas/useDisplayTables";
 import { useLeftDrawer } from "./canvas/useLeftDrawer";
@@ -142,6 +143,8 @@ function CanvasInner({
 	// ─── Focus : une table ou un frame, jamais les deux ───────────────────
 	// `applyOverview` naît plus bas (`useCanvasViewport`) : lu par ref.
 	const applyOverviewRef = useRef<() => void>(() => {});
+	const revealRef = useRef<(rect: FlowRect) => void>(() => {});
+	const reveal = useCallback((rect: FlowRect) => revealRef.current(rect), []);
 	const {
 		focusId,
 		focusFrameKey,
@@ -270,7 +273,8 @@ function CanvasInner({
 		schema,
 		tableNodes: nodes,
 		consoles,
-		edges: displayEdges
+		edges: displayEdges,
+		reveal
 	});
 	const systemNodes = useSystemNodes({
 		schema,
@@ -312,7 +316,11 @@ function CanvasInner({
 	);
 
 	// ─── Vue : cadrage initial, recadrage sur une table, vue d'ensemble ───
-	const { focusAndZoom, applyOverview } = useCanvasViewport({
+	const {
+		focusAndZoom,
+		applyOverview,
+		reveal: revealInView
+	} = useCanvasViewport({
 		base,
 		nodes,
 		containerRef,
@@ -322,6 +330,7 @@ function CanvasInner({
 		setFocusId
 	});
 	applyOverviewRef.current = applyOverview;
+	revealRef.current = revealInView;
 	const focusedFrame = useFocusedFrame(
 		framesApi.frames,
 		focusFrameKey,
