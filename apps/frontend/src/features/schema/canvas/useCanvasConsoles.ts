@@ -191,10 +191,7 @@ export function useCanvasConsoles({
 			position.x += CASCADE;
 			position.y += CASCADE;
 		}
-		const nodeId = create(position);
-		// Une console qu'on vient de créer attend sa requête.
-		setEditingId(nodeId);
-		return nodeId;
+		return create(position);
 	}, [viewCenter, create, consoleNodes.geoms]);
 	const createAtCenter = useCallback(() => {
 		createCentered();
