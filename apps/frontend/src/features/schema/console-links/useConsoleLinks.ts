@@ -1,7 +1,6 @@
 import { type Edge, type NodeChange, useNodesState } from "@sqlnest/canvas";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getConsoleQueryState } from "../../query/consoleQueriesStore";
-import { DECLARED_EDGE } from "../canvas/relationEdge";
 import type { UseCanvasConsolesReturn } from "../canvas/useCanvasConsoles";
 import {
 	CONSOLE_NODE_DEFAULT_HEIGHT,
@@ -22,6 +21,7 @@ import {
 	QUERY_LINK_EDGE,
 	RESULT_OWNER_HANDLE
 } from "./QueryLinkEdge";
+import { litQueryPaths } from "./queryPath";
 import { estimateResultSize, type ResultNodeType } from "./ResultNode";
 import { type ConsoleEntry, useConsoleIndex } from "./useConsoleIndex";
 import { useOpenConsoles } from "./useOpenConsoles";
@@ -78,30 +78,15 @@ export interface UseConsoleLinksReturn {
 	readonly edges: Edge[];
 }
 
-/** Arêtes du chemin d'une requête : entre sa table de départ et ses tables jointes. */
-function litQueryPath(edges: Edge[], entry: ConsoleEntry): Edge[] {
-	const onPath = new Set([entry.root, ...entry.joined]);
-	if (onPath.size < 2) return edges;
-	return edges.map((e) =>
-		onPath.has(e.source) && onPath.has(e.target)
-			? {
-					...e,
-					style: { ...e.style, stroke: DECLARED_EDGE, strokeWidth: 3 },
-					// Au-dessus des autres arêtes, sous la console dépliée.
-					zIndex: 1
-				}
-			: e
-	);
-}
-
 /**
  * Console rattachée à sa table : une console dont la requête part d'une
  * table se replie dans l'en-tête de cette table (compteur + liste). Dépliée,
  * elle se pose à la place libre la plus proche de sa table ; plusieurs
  * peuvent l'être à la fois, chacune reliée à sa table. Ses lignes sortent
  * dans un frame au format table, relié à la console (ou à la table quand la
- * console est repliée). Le chemin de jointures de la console en cours
- * s'allume. Une console sans table de départ reste un frame libre.
+ * console est repliée). Le chemin de jointures de chaque console dépliée
+ * s'allume, celui de la console en cours en plus épais. Une console sans
+ * table de départ reste un frame libre.
  */
 export function useConsoleLinks({
 	connectionId,
@@ -392,7 +377,7 @@ export function useConsoleLinks({
 		revealed.current = seen;
 	}, [resultNodes, reveal]);
 
-	// ─── Arêtes : chemin de la requête en cours, lien résultat → origine ──
+	// ─── Arêtes : chemins des requêtes dépliées, lien résultat → origine ──
 	const shownConsoles = useMemo(
 		() => new Set(consoleNodes.map((n) => n.id)),
 		[consoleNodes]
@@ -402,8 +387,11 @@ export function useConsoleLinks({
 	// résultat sélectionné, sinon de la dernière console dépliée.
 	const activeId = working ?? selectedResult?.data.consoleId ?? openIds.at(-1);
 	const shownEdges = useMemo(() => {
-		const active = entries.find((e) => e.id === activeId);
-		const lit = active === undefined ? edges : litQueryPath(edges, active);
+		const lit = litQueryPaths(
+			edges,
+			entries.filter((e) => shownConsoles.has(e.id)),
+			entries.find((e) => e.id === activeId)
+		);
 		const links = resultNodes.flatMap((node): Edge[] => {
 			const { consoleId } = node.data;
 			const fromConsole = shownConsoles.has(consoleId);
