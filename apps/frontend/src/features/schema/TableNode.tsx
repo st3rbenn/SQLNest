@@ -13,7 +13,10 @@ import { colorFor } from "./colors";
 import type { Side } from "./edgeRouting";
 import type { Collection } from "./schema-model";
 import { levelForZoom, type ZoomLevel } from "./zoomLevel";
-import { TableConsoleCounter } from "./console-links/TableConsoleCounter";
+import {
+	TableConsoleBadge,
+	TableHeaderConsoles
+} from "./console-links/TableConsoleCounter";
 
 /** Nombre de champs affichés dans la hauteur par défaut (avant que l'user
  * ne resize verticalement). Passé cette limite, la carte affiche `+N champs…`
@@ -239,6 +242,7 @@ function TableNodeComponent({
 			>
 				<div style={{ ...shellStyle, background: color.border }}>
 					<AllHandles />
+					<TableConsoleBadge table={collection.name} dense />
 				</div>
 			</Tooltip>
 		);
@@ -257,6 +261,9 @@ function TableNodeComponent({
 	return (
 		<div style={shellStyle}>
 			<AllHandles />
+			{/* En zoom arrière l'en-tête devient illisible : le compteur de
+			 * consoles passe en pastille à taille d'écran constante. */}
+			<TableConsoleBadge table={collection.name} onlyZoomedOut />
 			{/* NodeResizer complet : 4 sides + 4 corners. Handles invisibles
 			 * par défaut (opacité 0 via `.nest-node-table` override CSS
 			 * dans canvas-overrides.css), apparaissent au hover du node — évite
@@ -314,10 +321,8 @@ function TableNodeComponent({
 				>
 					{collection.name}
 				</span>
-				<span
-					style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
-				>
-					<TableConsoleCounter table={collection.name} />
+				<span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+					<TableHeaderConsoles table={collection.name} />
 					<KindBadge kind={inferred ? "inferred" : "declared"} />
 				</span>
 			</div>

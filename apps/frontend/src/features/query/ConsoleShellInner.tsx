@@ -142,6 +142,14 @@ export interface ConsoleShellInnerProps {
 	/** Les lignes du résultat sont affichées hors de la console : elle ne
 	 * garde que l'éditeur et la ligne de statut. */
 	readonly resultsOutside?: boolean;
+	/** Slot à droite du bouton d'exécution (contrôles de fenêtre du node). */
+	readonly extraRightActions?: React.ReactNode;
+	/** En-tête allégé — voir `ConsoleHeader`. */
+	readonly compactHeader?: boolean;
+	/** Console posée sur le canvas. `false` : l'éditeur est inerte, un geste
+	 * dessus déplace le frame. `true` : il prend le clavier. Absent : éditeur
+	 * toujours actif (page console, plein écran). */
+	readonly editing?: boolean;
 }
 
 export function ConsoleShellInner({
@@ -154,7 +162,10 @@ export function ConsoleShellInner({
 	isPopout = false,
 	extraLeftActions,
 	tabsScopeSuffix,
-	resultsOutside = false
+	resultsOutside = false,
+	extraRightActions,
+	compactHeader = false,
+	editing
 }: ConsoleShellInnerProps): React.ReactNode {
 	const queryClient = useQueryClient();
 	const { data: connections } = useDbConnections(teamSlug);
@@ -466,6 +477,24 @@ export function ConsoleShellInner({
 		runNow(src);
 	}, [tabs, runNow]);
 
+	// Entrée en édition : le clavier va à l'éditeur. Sortie : il le rend,
+	// sinon la frappe continuerait dans un éditeur devenu inerte.
+	const editorWrapRef = useRef<HTMLDivElement>(null);
+	useEffect(() => {
+		if (editing === true) {
+			editorRef.current?.focusEnd();
+			return;
+		}
+		const active = document.activeElement;
+		if (
+			editing === false &&
+			active instanceof HTMLElement &&
+			editorWrapRef.current?.contains(active)
+		) {
+			active.blur();
+		}
+	}, [editing]);
+
 	const cancelPending = useCallback(() => {
 		setPending(null);
 		setPreviewResult(null);
@@ -689,6 +718,8 @@ export function ConsoleShellInner({
 				onReorderTabs={tabs.reorderTabs}
 				variant={variant}
 				extraLeftActions={extraLeftActions}
+				extraRightActions={extraRightActions}
+				compact={compactHeader}
 			/>
 
 			<div ref={bodyRef} style={bodyStyle}>
@@ -705,8 +736,10 @@ export function ConsoleShellInner({
 				    respirer tout seul. Apparaît dès qu'un run est pending / OK /
 				    en erreur. */}
 				<div
+					ref={editorWrapRef}
 					style={{
 						...editorWrapperStyle,
+						...(editing === false ? { pointerEvents: "none" } : {}),
 						...(hasRun && !resultsOutside
 							? { height: shownEditorHeight }
 							: { flex: 1, minHeight: 0 })
@@ -761,7 +794,7 @@ export function ConsoleShellInner({
 							onKeyDown={resizeWithKeyboard}
 							role="separator"
 							tabIndex={0}
-							className="mantine-focus-auto"
+							className="mantine-focus-auto nodrag"
 							aria-orientation="horizontal"
 							aria-label="Redimensionner l'éditeur"
 							aria-valuenow={Math.round(shownEditorHeight)}

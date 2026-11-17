@@ -25,6 +25,8 @@ export interface UseCanvasConsolesReturn {
 	readonly focusedId: string | null;
 	readonly enterFocus: (id: string) => void;
 	readonly exitFocus: () => void;
+	/** Passe une console en édition : éditeur actif, frame figé. */
+	readonly enterEdit: (id: string) => void;
 	readonly createAtCenter: () => void;
 	/** Ouvre une console au centre, son premier onglet rempli de `source`. */
 	readonly openWithSource: (source: string) => void;
@@ -66,6 +68,9 @@ export function useCanvasConsoles({
 }: UseCanvasConsolesOptions): UseCanvasConsolesReturn {
 	const consoleNodes = useConsoleNodes(connectionId);
 	const [focusedId, setFocusedId] = useState<string | null>(null);
+	// Console en édition : son éditeur a le clavier, elle ne se déplace plus.
+	// Les autres se manipulent comme des frames.
+	const [editingId, setEditingId] = useState<string | null>(null);
 	const [canvasNodes, setCanvasNodes, onNodesChange] =
 		useNodesState<ConsoleNodeType>([]);
 
@@ -85,7 +90,12 @@ export function useCanvasConsoles({
 					width: g.width,
 					height: g.height,
 					// Complété (props + data) dans `nodes`, plus bas.
-					data: { teamSlug, connId: connectionId, isFocused: false }
+					data: {
+						teamSlug,
+						connId: connectionId,
+						isFocused: false,
+						isEditing: false
+					}
 				};
 			});
 		});
@@ -93,6 +103,12 @@ export function useCanvasConsoles({
 
 	const enterFocus = useCallback((id: string) => setFocusedId(id), []);
 	const exitFocus = useCallback(() => setFocusedId(null), []);
+	const enterEdit = useCallback((id: string) => setEditingId(id), []);
+	const exitEdit = useCallback(
+		(id: string) =>
+			setEditingId((current) => (current === id ? null : current)),
+		[]
+	);
 
 	// Échap sort du plein écran. Écoute en capture : CodeMirror consommerait
 	// la touche avant qu'elle n'arrive ici.
@@ -119,7 +135,7 @@ export function useCanvasConsoles({
 					// Sélectionnable : le CSS `.selected` garde les poignées de
 					// resize visibles sans survol.
 					selectable: !isFocused,
-					draggable: !isFocused,
+					draggable: !isFocused && n.id !== editingId,
 					// Le Backspace natif retirerait le node sans nettoyer ses
 					// onglets : la suppression passe par le `×` de l'en-tête.
 					deletable: false,
@@ -128,6 +144,8 @@ export function useCanvasConsoles({
 						teamSlug,
 						connId: connectionId,
 						isFocused,
+						isEditing: n.id === editingId,
+						onExitEdit: exitEdit,
 						onResizeEnd: (nodeId, size) =>
 							updateGeom(nodeId, {
 								position: { x: size.x, y: size.y },
@@ -147,8 +165,10 @@ export function useCanvasConsoles({
 			teamSlug,
 			connectionId,
 			focusedId,
+			editingId,
 			enterFocus,
-			exitFocus
+			exitFocus,
+			exitEdit
 		]
 	);
 
@@ -170,7 +190,10 @@ export function useCanvasConsoles({
 			position.x += CASCADE;
 			position.y += CASCADE;
 		}
-		return create(position);
+		const nodeId = create(position);
+		// Une console qu'on vient de créer attend sa requête.
+		setEditingId(nodeId);
+		return nodeId;
 	}, [viewCenter, create, consoleNodes.geoms]);
 	const createAtCenter = useCallback(() => {
 		createCentered();
@@ -198,6 +221,7 @@ export function useCanvasConsoles({
 		(position: XY, source: string): string => {
 			const nodeId = create(position);
 			fillFirstTab(nodeId, source);
+			setEditingId(nodeId);
 			return nodeId;
 		},
 		[create, fillFirstTab]
@@ -225,6 +249,7 @@ export function useCanvasConsoles({
 		focusedId,
 		enterFocus,
 		exitFocus,
+		enterEdit,
 		createAtCenter,
 		openWithSource,
 		createAt,

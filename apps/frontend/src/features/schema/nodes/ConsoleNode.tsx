@@ -5,15 +5,19 @@
  * inchangés) ; seul le châssis change.
  *
  * ─── Interactions ─────────────────────────────────────────────────────
- * - Drag : le user drag depuis le **cadre** autour du contenu (padding
- *   22 px top = bande de drag visible avec 4 dots, cursor "grab"). Le
- *   contenu porte `nodrag` pour ne pas déclencher le drag depuis
- *   l'éditeur. La molette défile le contenu quand il a de quoi défiler
- *   sous le pointeur, sinon elle déplace le canvas (`useContentWheel`).
+ * - Deux états. Au repos, la console est un frame : on la déplace en la
+ *   glissant depuis n'importe où (en-tête, éditeur), l'éditeur est inerte.
+ *   En édition (double-clic, ou console qu'on vient de créer), l'éditeur a
+ *   le clavier et le frame est figé (`nodrag`, node non déplaçable) ; un
+ *   clic hors de la console rend la main. Les onglets et le panneau de
+ *   résultats restent `nodrag` dans les deux états : on y trie, on y
+ *   sélectionne.
+ * - La molette défile le contenu quand il a de quoi défiler sous le
+ *   pointeur, sinon elle déplace le canvas (`useContentWheel`).
  * - Resize : `NodeResizer` du moteur (4 côtés + 4 coins), visible au
  *   hover (même pattern que TableNode), lignes/handles bleus accent.
  * - Clic : sélection seule, la vue ne bouge pas.
- * - Fullscreen (double-click ou bouton ⤢) : SchemaCanvas override la
+ * - Fullscreen (bouton ⤢) : SchemaCanvas override la
  *   geom du node à `innerWidth × innerHeight` position `(0, 0)` +
  *   viewport à zoom 1. Le node lui-même passe en mode chrome-less (pas
  *   de padding drag / border / shadow / NodeResizer) → visuellement
@@ -41,21 +45,28 @@ import {
 	IconChevronsUp,
 	IconX
 } from "@tabler/icons-react";
-import { type CSSProperties, useContext, useRef } from "react";
+import { type CSSProperties, useContext, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { ConsoleShellInner } from "../../query/ConsoleShellInner";
 import {
 	CONSOLE_NODE_MIN_HEIGHT,
 	CONSOLE_NODE_MIN_WIDTH
 } from "../canvas/useConsoleNodes";
+import { colorFor } from "../colors";
 import { ConsoleLinksContext } from "../console-links/ConsoleLinksContext";
-import { CONSOLE_RESULT_HANDLE } from "../console-links/QueryLinkEdge";
+import {
+	CONSOLE_RESULT_HANDLE,
+	CONSOLE_TABLE_HANDLE
+} from "../console-links/QueryLinkEdge";
 import { useContentWheel } from "./contentWheel";
 
 export interface ConsoleNodeData {
 	readonly teamSlug: string;
 	readonly connId: string;
 	readonly isFocused: boolean;
+	/** Éditeur actif et frame figé ; sinon la console se déplace comme un frame. */
+	readonly isEditing: boolean;
+	readonly onExitEdit?: (id: string) => void;
 	readonly onResizeEnd?: (
 		id: string,
 		size: { width: number; height: number; x: number; y: number }
@@ -71,11 +82,8 @@ export type ConsoleNodeType = Node<ConsoleNodeData, "console">;
 const outerNodeStyle: CSSProperties = {
 	width: "100%",
 	height: "100%",
-	// TOP 22px = bande de drag visible, LEFT/RIGHT/BOTTOM 6px = accès aux
-	// handles NodeResizer sans écraser le contenu. Le user drag depuis la
-	// bande supérieure — le contenu porte `nodrag` donc pas de conflit
-	// avec l'éditeur / tabs / boutons du header.
-	padding: "22px 6px 6px 6px",
+	// 6px de cadre : accès aux handles NodeResizer sans écraser le contenu.
+	padding: 6,
 	boxSizing: "border-box",
 	background: "var(--sqlnest-surface)",
 	border: "1px solid var(--sqlnest-border)",
@@ -86,15 +94,15 @@ const outerNodeStyle: CSSProperties = {
 	overflow: "hidden",
 	display: "flex",
 	flexDirection: "column",
-	cursor: "grab",
-	// 4 points centrés en haut de la bande drag pour signaler visuellement
-	// la zone. ViewBox width 27 = 4 cercles cx=3/10/17/24 r=1.5 espacés
-	// de 7 px avec 3 px de marge de chaque côté — sans ça le dernier
-	// cercle (cx=23, r=1.5) déborderait sur x=24.5 et se ferait clipper.
-	backgroundImage:
-		"url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='27' height='4' viewBox='0 0 27 4'><g fill='%23ffffff' fill-opacity='0.28'><circle cx='3' cy='2' r='1.5'/><circle cx='10' cy='2' r='1.5'/><circle cx='17' cy='2' r='1.5'/><circle cx='24' cy='2' r='1.5'/></g></svg>\")",
-	backgroundRepeat: "no-repeat",
-	backgroundPosition: "center 9px"
+	cursor: "grab"
+};
+
+/** En édition : le frame est figé, un anneau accent le dit. */
+const editingNodeStyle: CSSProperties = {
+	...outerNodeStyle,
+	border: "1px solid var(--sqlnest-accent)",
+	boxShadow: "0 0 0 3px var(--sqlnest-accent-soft)",
+	cursor: "default"
 };
 
 // Overlay fullscreen — le shell est rendu ici via React Portal quand
@@ -132,6 +140,30 @@ const focusButtonStyle: CSSProperties = {
 	padding: 0
 };
 
+/** Table de départ d'une console rattachée : c'est le titre de son en-tête. */
+const rootTitleStyle: CSSProperties = {
+	display: "inline-flex",
+	alignItems: "center",
+	gap: 8,
+	color: "var(--sqlnest-text-primary)",
+	fontSize: "var(--sqlnest-font-size-13)",
+	fontWeight: 600,
+	whiteSpace: "nowrap"
+};
+
+/** Contrôles de fenêtre d'une console rattachée : sans cadre, à droite. */
+const plainButtonStyle: CSSProperties = {
+	...focusButtonStyle,
+	border: "1px solid transparent"
+};
+
+const dividerStyle: CSSProperties = {
+	width: 1,
+	height: 16,
+	margin: "0 2px",
+	background: "var(--sqlnest-border)"
+};
+
 const tooltipStyles = {
 	tooltip: {
 		fontSize: "var(--sqlnest-font-size-11)",
@@ -148,15 +180,34 @@ export function ConsoleNode({
 	const holderRef = useRef<HTMLDivElement | null>(null);
 	useContentWheel(holderRef);
 	const foldable = links?.attached.has(id) === true;
+	const root = links?.rootOf.get(id);
 	const {
 		teamSlug,
 		connId,
 		isFocused,
+		isEditing,
+		onExitEdit,
 		onResizeEnd,
 		onEnterFocus,
 		onExitFocus,
 		onDelete
 	} = data;
+
+	// Un clic hors de la console termine l'édition. Les menus de la console
+	// vivent dans un portail Mantine : ils en font partie.
+	useEffect(() => {
+		if (!isEditing) return;
+		function onPointerDown(e: PointerEvent): void {
+			const target = e.target;
+			if (!(target instanceof Element)) return;
+			if (holderRef.current?.contains(target)) return;
+			if (target.closest("[data-portal]") !== null) return;
+			onExitEdit?.(id);
+		}
+		document.addEventListener("pointerdown", onPointerDown, true);
+		return () =>
+			document.removeEventListener("pointerdown", onPointerDown, true);
+	}, [isEditing, onExitEdit, id]);
 
 	// En fullscreen : le shell est rendu via React Portal vers document.body
 	// → hors du transform du viewport (pas de scale zoom qui shrink le
@@ -202,6 +253,71 @@ export function ConsoleNode({
 			: null;
 	}
 
+	const buttonStyle = root !== undefined ? plainButtonStyle : focusButtonStyle;
+	const windowButtons = (
+		<>
+			{foldable ? (
+				<Tooltip
+					label="Replier"
+					openDelay={400}
+					styles={tooltipStyles}
+					withArrow
+					arrowSize={4}
+				>
+					<button
+						type="button"
+						style={buttonStyle}
+						aria-label="Replier"
+						onClick={(e) => {
+							e.stopPropagation();
+							links?.fold(id);
+						}}
+					>
+						<IconChevronsUp size={13} stroke={2} />
+					</button>
+				</Tooltip>
+			) : null}
+			<Tooltip
+				label="Passer en fullscreen"
+				openDelay={400}
+				styles={tooltipStyles}
+				withArrow
+				arrowSize={4}
+			>
+				<button
+					type="button"
+					style={buttonStyle}
+					aria-label="Passer en fullscreen"
+					onClick={(e) => {
+						e.stopPropagation();
+						onEnterFocus?.(id);
+					}}
+				>
+					<IconArrowsMaximize size={13} stroke={2} />
+				</button>
+			</Tooltip>
+			<Tooltip
+				label="Fermer cette console"
+				openDelay={400}
+				styles={tooltipStyles}
+				withArrow
+				arrowSize={4}
+			>
+				<button
+					type="button"
+					style={buttonStyle}
+					aria-label="Fermer cette console"
+					onClick={(e) => {
+						e.stopPropagation();
+						onDelete?.(id);
+					}}
+				>
+					<IconX size={13} stroke={2} />
+				</button>
+			</Tooltip>
+		</>
+	);
+
 	return (
 		<>
 			<NodeResizer
@@ -234,7 +350,15 @@ export function ConsoleNode({
 					});
 				}}
 			/>
-			{/* Point d'ancrage du lien vers le frame de résultat. */}
+			{/* Points d'ancrage des liens vers la table de départ et vers le
+			    frame de résultat. */}
+			<Handle
+				id={CONSOLE_TABLE_HANDLE}
+				type="target"
+				position={Position.Left}
+				isConnectable={false}
+				style={{ opacity: 0, border: "none" }}
+			/>
 			<Handle
 				id={CONSOLE_RESULT_HANDLE}
 				type="source"
@@ -242,77 +366,47 @@ export function ConsoleNode({
 				isConnectable={false}
 				style={{ opacity: 0, border: "none" }}
 			/>
-			<div style={outerNodeStyle}>
-				<div ref={holderRef} className="nodrag" style={innerHolderStyle}>
+			<div style={isEditing ? editingNodeStyle : outerNodeStyle}>
+				<div
+					ref={holderRef}
+					className={isEditing ? "nodrag" : undefined}
+					style={innerHolderStyle}
+				>
 					<ConsoleShellInner
 						teamSlug={teamSlug}
 						connId={connId}
 						variant="node"
 						tabsScopeSuffix={id}
-						// Rattachée à une table, ses lignes sortent dans un frame.
+						// Rattachée à une table : ses lignes sortent dans un frame,
+						// et l'en-tête se réduit à la table, aux actions de requête
+						// et aux contrôles de fenêtre.
 						resultsOutside={foldable}
+						compactHeader={foldable}
+						editing={isEditing}
 						extraLeftActions={
-							<>
-								{foldable ? (
-									<Tooltip
-										label="Replier (Esc)"
-										openDelay={400}
-										styles={tooltipStyles}
-										withArrow
-										arrowSize={4}
-									>
-										<button
-											type="button"
-											style={focusButtonStyle}
-											aria-label="Replier"
-											onClick={(e) => {
-												e.stopPropagation();
-												links?.fold(id);
-											}}
-										>
-											<IconChevronsUp size={13} stroke={2} />
-										</button>
-									</Tooltip>
-								) : null}
-								<Tooltip
-									label="Passer en fullscreen"
-									openDelay={400}
-									styles={tooltipStyles}
-									withArrow
-									arrowSize={4}
-								>
-									<button
-										type="button"
-										style={focusButtonStyle}
-										aria-label="Passer en fullscreen"
-										onClick={(e) => {
-											e.stopPropagation();
-											onEnterFocus?.(id);
+							root !== undefined ? (
+								<span style={rootTitleStyle}>
+									<span
+										style={{
+											width: 8,
+											height: 8,
+											borderRadius: "var(--sqlnest-radius-2)",
+											background: colorFor(root).border
 										}}
-									>
-										<IconArrowsMaximize size={13} stroke={2} />
-									</button>
-								</Tooltip>
-								<Tooltip
-									label="Fermer cette console"
-									openDelay={400}
-									styles={tooltipStyles}
-									withArrow
-									arrowSize={4}
-								>
-									<button
-										type="button"
-										style={focusButtonStyle}
-										aria-label="Fermer cette console"
-										onClick={(e) => {
-											e.stopPropagation();
-											onDelete?.(id);
-										}}
-									>
-										<IconX size={13} stroke={2} />
-									</button>
-								</Tooltip>
-							</>
+									/>
+									{root}
+								</span>
+							) : (
+								windowButtons
+							)
+						}
+						extraRightActions={
+							root !== undefined ? (
+								<>
+									<span style={dividerStyle} />
+									{windowButtons}
+								</>
+							) : undefined
 						}
 					/>
 				</div>

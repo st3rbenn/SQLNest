@@ -270,6 +270,9 @@ export function ConsoleResultsPanel({
 
 	return (
 		<div
+			// Sur le canvas, la console se déplace comme un frame ; ici on
+			// sélectionne du texte, on filtre, on défile.
+			className="nodrag"
 			style={statusOnly ? { ...containerStyle, flex: "none" } : containerStyle}
 		>
 			{showPartialWritesHeader ? (

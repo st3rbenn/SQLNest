@@ -209,3 +209,26 @@
 .nest-handle.sqlnest-field-target.connectingto {
 	background: rgba(13, 153, 255, 0.18);
 }
+
+/* Prototype « console rattachée à sa table ». Sur une table sans console,
+ * le bouton d'ajout n'apparaît qu'au survol de la table. */
+.nest-node-table .sqlnest-console-add {
+	opacity: 0;
+	transition: opacity 80ms ease-out;
+}
+.nest-node-table:hover .sqlnest-console-add,
+.sqlnest-console-add:focus-visible {
+	opacity: 1;
+}
+/* Une console repliée rejoint le compteur de sa table : il pulse deux fois. */
+@keyframes sqlnest-console-flash {
+	from {
+		box-shadow: 0 0 0 0 var(--sqlnest-accent);
+	}
+	to {
+		box-shadow: 0 0 0 10px transparent;
+	}
+}
+.sqlnest-console-flash {
+	animation: sqlnest-console-flash 500ms ease-out 2;
+}

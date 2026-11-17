@@ -105,6 +105,7 @@ describe("ResultNode", () => {
 		const links = (openIds: string[]): ConsoleLinksValue => ({
 			byTable: new Map(),
 			attached: new Set(["console:a"]),
+			rootOf: new Map([["console:a", "track"]]),
 			openIds: new Set(openIds),
 			open,
 			fold: () => {},

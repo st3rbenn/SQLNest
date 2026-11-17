@@ -27,8 +27,10 @@ import {
 	IconTransform
 } from "@tabler/icons-react";
 import { useNavigate } from "@tanstack/react-router";
+import { useContext } from "react";
 import { useCanvasData, useCanvasUI } from "./canvas/CanvasContext";
 import { colorFor } from "./colors";
+import { ConsoleLinksContext } from "./console-links/ConsoleLinksContext";
 import type { Frame } from "./frames";
 import type { SchemaModel } from "./schema-model";
 
@@ -90,6 +92,7 @@ export function CanvasContextMenu({
 	onRemoveFromFrame
 }: Props) {
 	const navigate = useNavigate();
+	const consoleLinks = useContext(ConsoleLinksContext);
 	const { connectionId } = useCanvasData();
 	const { setGesture } = useCanvasUI();
 	const collection = schema.collections.find((c) => c.name === tableName);
@@ -352,6 +355,17 @@ export function CanvasContextMenu({
 	// ─── Items ───────────────────────────────────────────────────────────
 	const items: ContextMenuItem[] = [
 		...columnItems,
+		...(consoleLinks !== null
+			? [
+					{
+						kind: "action" as const,
+						id: "console",
+						label: "Nouvelle console",
+						icon: <IconTerminal2 {...ICON} />,
+						onClick: () => consoleLinks.createFor(tableName)
+					}
+				]
+			: []),
 		{
 			kind: "action",
 			id: "open",

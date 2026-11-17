@@ -92,6 +92,11 @@ export interface SnqlEditorHandle {
 	 * directement dans le flow CodeMirror sans re-cliquer.
 	 */
 	focus(): void;
+	/**
+	 * Donne le focus à l'éditeur, curseur en fin de texte : on reprend une
+	 * requête là où elle s'arrête (console du canvas qui entre en édition).
+	 */
+	focusEnd(): void;
 }
 
 /**
@@ -484,6 +489,14 @@ export const SnqlEditor = forwardRef<SnqlEditorHandle, SnqlEditorProps>(
 				},
 				focus() {
 					view.current?.focus();
+				},
+				focusEnd() {
+					const editor = view.current;
+					if (editor === null) return;
+					editor.dispatch({
+						selection: EditorSelection.cursor(editor.state.doc.length)
+					});
+					editor.focus();
 				}
 			}),
 			[]

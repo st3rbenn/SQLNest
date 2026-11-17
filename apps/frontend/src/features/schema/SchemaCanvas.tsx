@@ -54,10 +54,7 @@ import { useShallowMemo } from "./canvas/useShallowMemo";
 import { type SystemNodeType, useSystemNodes } from "./canvas/useSystemNodes";
 import { initialZoom, OVERVIEW_FIT } from "./canvas/viewport";
 import { ConsoleLinksContext } from "./console-links/ConsoleLinksContext";
-import {
-	QUERY_LINK_EDGE,
-	QueryLinkEdge
-} from "./console-links/QueryLinkEdge";
+import { QUERY_LINK_EDGE, QueryLinkEdge } from "./console-links/QueryLinkEdge";
 import { ResultNode, type ResultNodeType } from "./console-links/ResultNode";
 import { useConsoleLinks } from "./console-links/useConsoleLinks";
 import { useSchemaEditing } from "./editor/useSchemaEditing";
@@ -387,7 +384,7 @@ function CanvasInner({
 		focusAndZoom,
 		setMenu,
 		setGesture,
-		enterConsoleFocus: consoles.enterFocus,
+		enterConsoleEdit: consoles.enterEdit,
 		removeConsole: consoles.remove,
 		persistConsolePosition: consoles.persistPosition,
 		persistSystemNodePosition: systemNodes.persistPosition,
@@ -529,18 +526,18 @@ function CanvasInner({
 						</Panel>
 					) : null}
 				</NestCanvas>
-			</ConsoleLinksContext.Provider>
 
-			<CanvasProviders
-				data={dataCtx}
-				focus={focusCtx}
-				ui={uiCtx}
-				actions={actionsCtx}
-			>
-				<CanvasBottomBar />
-				<CanvasLeftPanel />
-				<CanvasOverlays />
-			</CanvasProviders>
+				<CanvasProviders
+					data={dataCtx}
+					focus={focusCtx}
+					ui={uiCtx}
+					actions={actionsCtx}
+				>
+					<CanvasBottomBar />
+					<CanvasLeftPanel />
+					<CanvasOverlays />
+				</CanvasProviders>
+			</ConsoleLinksContext.Provider>
 		</div>
 	);
 }

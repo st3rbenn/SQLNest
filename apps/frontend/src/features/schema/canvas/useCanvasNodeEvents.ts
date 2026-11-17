@@ -31,7 +31,7 @@ export interface UseCanvasNodeEventsOptions {
 	readonly focusAndZoom: (id: string) => void;
 	readonly setMenu: (menu: CanvasContextMenuState | null) => void;
 	readonly setGesture: (gesture: ChangeGesture | null) => void;
-	readonly enterConsoleFocus: (id: string) => void;
+	readonly enterConsoleEdit: (id: string) => void;
 	readonly removeConsole: (id: string) => void;
 	readonly persistConsolePosition: (id: string, position: XY) => void;
 	readonly persistSystemNodePosition: (id: string, position: XY) => void;
@@ -54,7 +54,7 @@ export interface UseCanvasNodeEventsReturn {
  *   Cmd ou Ctrl c'est une sélection multiple : pas de focus, et celui en
  *   cours est levé, sinon son anneau côtoierait le contour de sélection ;
  * - double-clic : renommer la colonne visée, sinon recadrer sur la table ;
- *   plein écran pour une console ;
+ *   édition pour une console ;
  * - clic droit : menu de la table ou de la colonne visée ;
  * - fin de drag : chaque famille de node garde sa position.
  */
@@ -66,7 +66,7 @@ export function useCanvasNodeEvents({
 	focusAndZoom,
 	setMenu,
 	setGesture,
-	enterConsoleFocus,
+	enterConsoleEdit,
 	removeConsole,
 	persistConsolePosition,
 	persistSystemNodePosition,
@@ -92,7 +92,7 @@ export function useCanvasNodeEvents({
 			const type = typeOf(node);
 			if (type === "frame" || type === "result") return;
 			if (type === "console") {
-				enterConsoleFocus(node.id);
+				enterConsoleEdit(node.id);
 				return;
 			}
 			const field = fieldAt(event);

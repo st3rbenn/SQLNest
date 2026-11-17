@@ -9,10 +9,12 @@ import { NODE_WIDTH, type TableNodeType } from "../TableNode";
 import {
 	type ConsoleLinksValue,
 	type ConsolePlacement,
+	type FlowPoint,
 	useConsoleLinksFlag
 } from "./ConsoleLinksContext";
 import {
 	CONSOLE_RESULT_HANDLE,
+	CONSOLE_TABLE_HANDLE,
 	QUERY_LINK_EDGE,
 	RESULT_OWNER_HANDLE
 } from "./QueryLinkEdge";
@@ -66,8 +68,9 @@ function litQueryPath(edges: Edge[], entry: ConsoleEntry): Edge[] {
  * Prototype « console rattachée à sa table » : une console dont la requête
  * part d'une table se replie dans l'en-tête de cette table (compteur +
  * liste). Dépliée, elle se pose à droite de sa table ; plusieurs peuvent
- * l'être à la fois. Ses lignes sortent dans un frame au format table, relié
- * à la console (ou à la table quand la console est repliée). Le chemin de
+ * l'être à la fois, chacune reliée à sa table. Ses lignes sortent dans un
+ * frame au format table, relié à la console (ou à la table quand la console
+ * est repliée). Le chemin de
  * jointures de la console en cours s'allume. Éteint, le canvas ne change pas.
  */
 export function useConsoleLinks({
@@ -120,7 +123,9 @@ export function useConsoleLinks({
 	const open = useCallback(
 		(id: string, placement: ConsolePlacement) => {
 			const entry = entries.find((e) => e.id === id);
-			if (placement === "beside" && entry !== undefined) {
+			if (typeof placement === "object") {
+				moveTo(id, placement);
+			} else if (placement === "beside" && entry !== undefined) {
 				const position = besideTable(entry.root, openOf(entry.root, id));
 				if (position !== null) moveTo(id, position);
 			}
@@ -137,8 +142,8 @@ export function useConsoleLinks({
 		[onNodesChange]
 	);
 	const createFor = useCallback(
-		(table: string) => {
-			const position = besideTable(table, openOf(table));
+		(table: string, at?: FlowPoint) => {
+			const position = at ?? besideTable(table, openOf(table));
 			if (position === null) return;
 			const id = createAt(position, `find ${table}`);
 			setOpenIds((ids) => [...ids, id]);
@@ -203,7 +208,15 @@ export function useConsoleLinks({
 		for (const entry of entries) {
 			byTable.set(entry.root, [...(byTable.get(entry.root) ?? []), entry]);
 		}
-		return { byTable, attached, openIds: openSet, open, fold, createFor };
+		return {
+			byTable,
+			attached,
+			rootOf: new Map(entries.map((e) => [e.id, e.root])),
+			openIds: openSet,
+			open,
+			fold,
+			createFor
+		};
 	}, [enabled, entries, attached, openSet, open, fold, createFor]);
 
 	const consoleNodes = useMemo(
@@ -322,7 +335,26 @@ export function useConsoleLinks({
 				}
 			];
 		});
-		return [...lit, ...links];
+		// Une console dépliée reste attachée à sa table de départ.
+		const attaches = entries.flatMap((entry): Edge[] =>
+			shownConsoles.has(entry.id)
+				? [
+						{
+							id: `attach:${entry.id}`,
+							type: QUERY_LINK_EDGE,
+							source: entry.root,
+							sourceHandle: "right",
+							target: entry.id,
+							targetHandle: CONSOLE_TABLE_HANDLE,
+							selectable: false,
+							focusable: false,
+							deletable: false,
+							zIndex: 8
+						}
+					]
+				: []
+		);
+		return [...lit, ...attaches, ...links];
 	}, [enabled, edges, entries, activeId, resultNodes, shownConsoles]);
 
 	return {

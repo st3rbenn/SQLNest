@@ -13,6 +13,8 @@ export const QUERY_LINK_EDGE = "queryLink";
 export const CONSOLE_RESULT_HANDLE = "result";
 /** Handle cible d'un résultat, vers la console ou la table d'où il vient. */
 export const RESULT_OWNER_HANDLE = "owner";
+/** Handle cible d'une console, vers sa table de départ. */
+export const CONSOLE_TABLE_HANDLE = "table";
 
 interface Box {
 	readonly x: number;
@@ -47,8 +49,8 @@ const POSITION: Record<Side, Position> = {
 };
 
 /**
- * Lien d'un résultat vers la console (ou la table) d'où il vient. Il part
- * des côtés qui se font face, où que soient posés les deux frames : les
+ * Lien d'une console vers sa table de départ, ou d'un résultat vers la
+ * console (ou la table) d'où il vient. Il part des côtés qui se font face, où que soient posés les deux frames : les
  * handles ne servent qu'à faire exister l'arête pour le moteur.
  */
 export function QueryLinkEdge({

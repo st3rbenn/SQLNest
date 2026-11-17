@@ -299,6 +299,11 @@ export interface ConsoleHeaderProps {
 	/** Slot pour actions insérées à gauche du titre — utilisé en mode
 	 * `"node"` pour le bouton Focus/Collapse. Ignoré si absent. */
 	readonly extraLeftActions?: React.ReactNode;
+	/** Slot à droite du bouton d'exécution (contrôles de fenêtre du node). */
+	readonly extraRightActions?: React.ReactNode;
+	/** En-tête allégé : sans libellé « Console » ni connexion — le canvas
+	 * les dit déjà — et sans barre d'onglets tant qu'il n'y en a qu'un. */
+	readonly compact?: boolean;
 }
 
 export function ConsoleHeader({
@@ -323,7 +328,9 @@ export function ConsoleHeader({
 	onRenameTab,
 	onReorderTabs,
 	variant = "route",
-	extraLeftActions
+	extraLeftActions,
+	extraRightActions,
+	compact = false
 }: ConsoleHeaderProps): React.ReactNode {
 	const modKey = useModKeyLabel();
 	// Filter local 'writes only' du history dropdown — state éphémère
@@ -376,16 +383,30 @@ export function ConsoleHeader({
 					</>
 				) : null}
 				{extraLeftActions}
-				<span style={titleGroupStyle}>
-					<IconTerminal2 size={14} stroke={2} />
-					<span>Console</span>
-				</span>
-				<span style={connChipStyle} title={connectionName}>
-					{connectionName}
-				</span>
+				{compact ? null : (
+					<>
+						<span style={titleGroupStyle}>
+							<IconTerminal2 size={14} stroke={2} />
+							<span>Console</span>
+						</span>
+						<span style={connChipStyle} title={connectionName}>
+							{connectionName}
+						</span>
+					</>
+				)}
 			</div>
 
-			<div style={tabsRailStyle}>
+			{/* Un seul onglet en mode allégé : la barre garde sa place (elle
+			    pousse les actions à droite) mais ne montre rien. */}
+			<div
+				// Les onglets se réordonnent au glisser : pas le frame du canvas.
+				className="nodrag"
+				style={
+					compact && tabs.length === 1
+						? { ...tabsRailStyle, visibility: "hidden" }
+						: tabsRailStyle
+				}
+			>
 				<DndContext
 					sensors={sensors}
 					collisionDetection={closestCenter}
@@ -594,6 +615,7 @@ export function ConsoleHeader({
 						</Button>
 					</div>
 				</Tooltip>
+				{extraRightActions}
 			</div>
 		</div>
 	);
