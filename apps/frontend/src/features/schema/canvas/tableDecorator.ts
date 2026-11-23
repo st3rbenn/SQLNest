@@ -19,7 +19,10 @@ export type TableResizeHandler = (
  * ne re-rend que les tables touchées. Une table seulement déplacée (drag,
  * frame qui l'emmène) garde aussi le même `data`, ce qui épargne son rendu.
  */
-export function createTableDecorator(onResize: TableResizeHandler) {
+export function createTableDecorator(
+	onResize: TableResizeHandler,
+	onShowAllFields: (id: string) => void
+) {
 	const datas = new WeakMap<Data, { flags: TableFlags; data: Data }>();
 	const nodes = new WeakMap<TableNodeType, TableNodeType>();
 
@@ -38,7 +41,8 @@ export function createTableDecorator(onResize: TableResizeHandler) {
 					...node.data,
 					...flags,
 					matched: false,
-					onResizeEnd: (size) => onResize(id, size)
+					onResizeEnd: (size) => onResize(id, size),
+					onShowAllFields: () => onShowAllFields(id)
 				}
 			};
 			datas.set(node.data, entry);

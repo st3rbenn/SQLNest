@@ -89,7 +89,7 @@ export function useCanvasViewport(
 		consoleGap,
 		setFocusId
 	} = opts;
-	const { getViewport, setViewport } = useNestCanvas();
+	const { getViewport, setViewport, getInternalNode } = useNestCanvas();
 
 	const safeArea = useMemo<SafeArea>(
 		() => ({
@@ -167,14 +167,29 @@ export function useCanvasViewport(
 	}, [containerRef]);
 
 	const focusAndZoom = (id: string) => {
-		const node = nodes.find((n) => n.id === id);
-		if (!node || containerRef.current === null) {
+		const table = nodes.find((n) => n.id === id);
+		// Node système (Enums, événements) : même recadrage, sans focus de table.
+		const other = table === undefined ? getInternalNode(id) : undefined;
+		const box =
+			table !== undefined
+				? {
+						...table.position,
+						width: table.width ?? NODE_WIDTH,
+						height: table.height ?? nodeHeight(table.data.collection)
+					}
+				: other !== undefined
+					? {
+							...other.internals.positionAbsolute,
+							width: other.measured?.width ?? other.width ?? 0,
+							height: other.measured?.height ?? other.height ?? 0
+						}
+					: null;
+		if (box === null || containerRef.current === null) {
 			setFocusId(id);
 			return;
 		}
-		const cx = node.position.x + (node.width ?? NODE_WIDTH) / 2;
-		const cy =
-			node.position.y + (node.height ?? nodeHeight(node.data.collection)) / 2;
+		const cx = box.x + box.width / 2;
+		const cy = box.y + box.height / 2;
 		const from = getViewport();
 		const zoom = focusZoom(from.zoom, { min: FOCUS_ZOOM_MIN });
 		const rect = containerRef.current.getBoundingClientRect();
@@ -193,7 +208,7 @@ export function useCanvasViewport(
 		userTouchedViewportRef.current = true;
 		tweenRef.current?.cancel();
 		tweenRef.current = animateViewport(from, to, FOCUS_TWEEN_MS, setViewport);
-		startTransition(() => setFocusId(id));
+		if (table !== undefined) startTransition(() => setFocusId(id));
 	};
 
 	const applyOverview = () => {

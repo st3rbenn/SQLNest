@@ -28,6 +28,11 @@ const ROW_H = 20;
 /** Padding vertical dans le body (`padding: "4px 0"` = 8 px total). */
 const BODY_PAD = 8;
 
+/** Hauteur qui montre tous les champs, sans la limite de `MAX_FIELDS`. */
+export function fullNodeHeight(collection: Collection): number {
+	return HEADER_H + collection.fields.length * ROW_H + BODY_PAD;
+}
+
 /** Hauteur d'un nœud table, dérivée du nombre de champs (stable → layout stable).
  * Sert de valeur par défaut au mount ELK — user peut resize après (voir
  * `visibleFieldCount`). */
@@ -81,6 +86,8 @@ export interface TableNodeData {
 		x: number;
 		y: number;
 	}) => void;
+	/** Clic sur « +N champs… » : la carte s'agrandit pour tout montrer. */
+	readonly onShowAllFields?: () => void;
 	readonly [key: string]: unknown;
 }
 
@@ -139,8 +146,9 @@ export function fieldOfHandle(handleId: string | null): string | undefined {
 }
 
 /**
- * Tracé d'une relation (ADR-039 D2) : le point à droite du champ est le
- * départ, la ligne entière d'un autre champ est l'arrivée.
+ * Tracé d'une relation (ADR-039 D2) : la ligne d'un champ est le départ, celle
+ * d'un autre champ l'arrivée ; le trait s'accroche au bord de chacune. Les
+ * deux handles couvrent la ligne : une table se déplace par son en-tête.
  */
 function FieldHandles({ field }: { readonly field: string }) {
 	return (
@@ -149,18 +157,20 @@ function FieldHandles({ field }: { readonly field: string }) {
 				id={`${FIELD_HANDLE}${field}`}
 				type="source"
 				position={Position.Right}
+				anchor="side"
 				isConnectableEnd={false}
-				className="sqlnest-field-source"
-				// Remplace la connexion « au clic » du moteur : un clic sur le
-				// point armerait un tracé que le prochain clic sur un champ finirait.
-				onClick={(e) => e.stopPropagation()}
+				// Un clic sur un champ focalise la table ; il n'arme pas un tracé
+				// que le clic suivant finirait.
+				connectOnClick={false}
+				className="sqlnest-field-handle"
 			/>
 			<Handle
 				id={`${FIELD_HANDLE}${field}`}
 				type="target"
 				position={Position.Left}
+				anchor="side"
 				isConnectableStart={false}
-				className="sqlnest-field-target"
+				className="sqlnest-field-handle"
 			/>
 		</>
 	);
@@ -183,8 +193,15 @@ function TableNodeComponent({
 	width,
 	height: heightProp
 }: NodeProps<TableNodeType>) {
-	const { collection, dimmed, focused, matched, hoverHighlight, onResizeEnd } =
-		data;
+	const {
+		collection,
+		dimmed,
+		focused,
+		matched,
+		hoverHighlight,
+		onResizeEnd,
+		onShowAllFields
+	} = data;
 	const level = useNestStore(levelSelector);
 	const inferred = collection.source === "inferred";
 	const color = colorFor(collection.name);
@@ -361,18 +378,18 @@ function TableNodeComponent({
 					</div>
 				))}
 				{hidden > 0 ? (
-					<div
-						style={{
-							height: ROW_H,
-							padding: "0 12px",
-							fontSize: "var(--sqlnest-font-size-11)",
-							color: "var(--sqlnest-text-tertiary)",
-							display: "flex",
-							alignItems: "center"
+					<button
+						type="button"
+						className="nodrag sqlnest-more-fields"
+						disabled={onShowAllFields === undefined}
+						onClick={(e) => {
+							e.stopPropagation();
+							onShowAllFields?.();
 						}}
+						style={{ height: ROW_H }}
 					>
 						+{hidden} champ{hidden > 1 ? "s" : ""}…
-					</div>
+					</button>
 				) : null}
 			</div>
 		</div>

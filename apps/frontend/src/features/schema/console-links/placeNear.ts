@@ -50,6 +50,51 @@ function beside(
 }
 
 /**
+ * Glisse un frame de `start` vers `side`, en sautant par-dessus ce qui le
+ * gêne ; `null` quand tout est pris jusqu'au bout de la recherche.
+ */
+function slide(
+	start: { readonly x: number; readonly y: number },
+	size: { readonly width: number; readonly height: number },
+	taken: readonly Rect[],
+	side: Side,
+	clearance: number
+): { x: number; y: number } | null {
+	const at = { ...start };
+	for (let hop = 0; hop < MAX_HOPS; hop++) {
+		const rect = { ...at, ...size };
+		const blocker = taken.find((t) => overlaps(rect, t, clearance));
+		if (blocker === undefined) return at;
+		if (side === "right") at.x = blocker.x + blocker.width + clearance;
+		else if (side === "left") at.x = blocker.x - clearance - size.width;
+		else if (side === "below") at.y = blocker.y + blocker.height + clearance;
+		else at.y = blocker.y - clearance - size.height;
+	}
+	return null;
+}
+
+/** Le glissement le plus court parmi `starts` ; à distance égale, le premier. */
+function shortest(
+	starts: readonly (readonly [Side, { x: number; y: number }])[],
+	size: { readonly width: number; readonly height: number },
+	taken: readonly Rect[],
+	clearance: number
+): { x: number; y: number } | null {
+	let best: { x: number; y: number } | null = null;
+	let bestCost = Number.POSITIVE_INFINITY;
+	for (const [side, start] of starts) {
+		const at = slide(start, size, taken, side, clearance);
+		if (at === null) continue;
+		const cost = Math.abs(at.x - start.x) + Math.abs(at.y - start.y);
+		if (cost < bestCost) {
+			best = at;
+			bestCost = cost;
+		}
+	}
+	return best;
+}
+
+/**
  * Place libre la plus proche de `anchor` pour un frame de taille `size`,
  * sans recouvrir aucun des frames de `taken`. De chaque côté de l'ancre, le
  * frame part collé à elle et saute par-dessus ce qui le gêne, en s'éloignant ;
@@ -61,31 +106,35 @@ export function placeNear(
 	taken: readonly Rect[],
 	{ gap, clearance, prefer, align = "start" }: PlaceNearOptions
 ): { x: number; y: number } {
-	let best: { x: number; y: number } | null = null;
-	let bestCost = Number.POSITIVE_INFINITY;
-	for (const side of prefer) {
-		const start = beside(anchor, size, side, gap, align);
-		const at = { ...start };
-		let free = false;
-		for (let hop = 0; hop < MAX_HOPS; hop++) {
-			const rect = { ...at, ...size };
-			const blocker = taken.find((t) => overlaps(rect, t, clearance));
-			if (blocker === undefined) {
-				free = true;
-				break;
-			}
-			if (side === "right") at.x = blocker.x + blocker.width + clearance;
-			else if (side === "left") at.x = blocker.x - clearance - size.width;
-			else if (side === "below") at.y = blocker.y + blocker.height + clearance;
-			else at.y = blocker.y - clearance - size.height;
-		}
-		if (!free) continue;
-		const cost = Math.abs(at.x - start.x) + Math.abs(at.y - start.y);
-		if (cost < bestCost) {
-			best = at;
-			bestCost = cost;
-		}
-	}
-	// Tout est pris jusqu'au bout de la recherche : collé au côté préféré.
-	return best ?? beside(anchor, size, prefer[0] ?? "right", gap, align);
+	return (
+		shortest(
+			prefer.map((side) => [side, beside(anchor, size, side, gap, align)]),
+			size,
+			taken,
+			clearance
+		) ??
+		// Tout est pris jusqu'au bout de la recherche : collé au côté préféré.
+		beside(anchor, size, prefer[0] ?? "right", gap, align)
+	);
+}
+
+/**
+ * Place libre la plus proche de `wanted` pour un frame de taille `size` : sur
+ * place si rien ne le gêne, sinon glissé du côté qui demande le moins de
+ * chemin.
+ */
+export function placeAt(
+	wanted: { readonly x: number; readonly y: number },
+	size: { readonly width: number; readonly height: number },
+	taken: readonly Rect[],
+	{ clearance, prefer }: Pick<PlaceNearOptions, "clearance" | "prefer">
+): { x: number; y: number } {
+	return (
+		shortest(
+			prefer.map((side) => [side, wanted]),
+			size,
+			taken,
+			clearance
+		) ?? { ...wanted }
+	);
 }

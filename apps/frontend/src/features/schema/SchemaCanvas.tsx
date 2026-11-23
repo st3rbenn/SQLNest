@@ -26,7 +26,11 @@ import { CanvasLeftPanel } from "./canvas/floating/CanvasLeftPanel";
 import { CanvasOverlays } from "./canvas/floating/CanvasOverlays";
 import { CanvasTopRightHUD } from "./canvas/floating/CanvasTopRightHUD";
 import { CanvasVeil, ShowAllButton } from "./canvas/floating/CanvasVeil";
-import { canReparentNode, withFrameParents } from "./canvas/frameTree";
+import {
+	canReparentNode,
+	tableRect,
+	withFrameParents
+} from "./canvas/frameTree";
 import { useCanvasActions } from "./canvas/useCanvasActions";
 import { useCanvasCommands } from "./canvas/useCanvasCommands";
 import { useCanvasConsoles } from "./canvas/useCanvasConsoles";
@@ -55,6 +59,7 @@ import { useShallowMemo } from "./canvas/useShallowMemo";
 import { type SystemNodeType, useSystemNodes } from "./canvas/useSystemNodes";
 import { initialZoom, OVERVIEW_FIT } from "./canvas/viewport";
 import { ConsoleLinksContext } from "./console-links/ConsoleLinksContext";
+import type { Rect } from "./console-links/placeNear";
 import { QUERY_LINK_EDGE, QueryLinkEdge } from "./console-links/QueryLinkEdge";
 import { ResultNode, type ResultNodeType } from "./console-links/ResultNode";
 import { useConsoleLinks } from "./console-links/useConsoleLinks";
@@ -128,10 +133,15 @@ function CanvasInner({
 	const persistence = useLocalPersistence();
 	const tablePositions = useTablePositions(schema, persistence);
 	const tableSizes = useTableSizes(schema, persistence);
+	// Tables et nodes système posés, lus quand une table apparaît : elle
+	// prend la place libre la plus proche du centre de la vue.
+	const occupiedRef = useRef<readonly Rect[]>([]);
+	const occupied = useCallback(() => occupiedRef.current, []);
 	const { base, baseRef } = useCanvasLayout({
 		schema,
 		connectionId,
 		viewCenter,
+		occupied,
 		setManyPositions: tablePositions.setManyPositions
 	});
 	const framesApi = useFrames(schema, persistence);
@@ -180,7 +190,8 @@ function CanvasInner({
 		setNodes,
 		handleNodesChange,
 		persistMovedTables,
-		handleTableResize
+		handleTableResize,
+		showAllFields
 	} = useCanvasNodes({
 		base,
 		schema,
@@ -305,6 +316,7 @@ function CanvasInner({
 			})),
 		[systemNodes.nodes]
 	);
+	occupiedRef.current = [...nodes.map(tableRect), ...systemRects];
 	const consoleLinks = useConsoleLinks({
 		connectionId,
 		schema,
@@ -322,7 +334,8 @@ function CanvasInner({
 		neighbors,
 		focusId,
 		hoveredTableName,
-		onResize: handleTableResize
+		onResize: handleTableResize,
+		onShowAllFields: showAllFields
 	});
 	const displayNodes = useMemo<SchemaNode[]>(
 		() => [

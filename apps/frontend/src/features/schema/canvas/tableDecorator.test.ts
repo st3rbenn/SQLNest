@@ -19,13 +19,19 @@ const idle = { dimmed: false, focused: false, hoverHighlight: false };
 
 describe("habillage des tables", () => {
 	it("table et drapeaux inchangés : même objet", () => {
-		const decorate = createTableDecorator(() => {});
+		const decorate = createTableDecorator(
+			() => {},
+			() => {}
+		);
 		const t = table("a");
 		expect(decorate(t, idle)).toBe(decorate(t, { ...idle }));
 	});
 
 	it("table seulement déplacée : nouvel objet, même data", () => {
-		const decorate = createTableDecorator(() => {});
+		const decorate = createTableDecorator(
+			() => {},
+			() => {}
+		);
 		const t = table("a");
 		const before = decorate(t, idle);
 		const after = decorate({ ...t, position: { x: 50, y: 0 } }, idle);
@@ -35,7 +41,10 @@ describe("habillage des tables", () => {
 	});
 
 	it("drapeau changé : nouvelle data", () => {
-		const decorate = createTableDecorator(() => {});
+		const decorate = createTableDecorator(
+			() => {},
+			() => {}
+		);
 		const t = table("a");
 		const before = decorate(t, idle);
 		const after = decorate(t, { ...idle, focused: true });
@@ -49,7 +58,7 @@ describe("habillage des tables", () => {
 
 	it("resize : rappelle le handler avec l'id de la table", () => {
 		const onResize = vi.fn();
-		const decorate = createTableDecorator(onResize);
+		const decorate = createTableDecorator(onResize, () => {});
 		const size = { width: 300, height: 200, x: 10, y: 20 };
 		decorate(table("a"), idle).data.onResizeEnd?.(size);
 		expect(onResize).toHaveBeenCalledWith("a", size);

@@ -2,7 +2,13 @@ import { type NodeChange, useNodesState } from "@sqlnest/canvas";
 import { useCallback, useEffect, useRef } from "react";
 import type { LayoutResult } from "../layout";
 import type { SchemaModel } from "../schema-model";
-import { nodeHeight, type TableNodeType, tableAriaLabel } from "../TableNode";
+import {
+	fullNodeHeight,
+	NODE_WIDTH,
+	nodeHeight,
+	type TableNodeType,
+	tableAriaLabel
+} from "../TableNode";
 import type { FramesApi } from "../useFrames";
 import type { PositionsApi, XY } from "../useTablePositions";
 import type { SizesApi } from "../useTableSizes";
@@ -45,6 +51,8 @@ export interface UseCanvasNodesReturn {
 		name: string,
 		size: { width: number; height: number; x: number; y: number }
 	) => void;
+	/** Agrandit une table pour montrer tous ses champs (« +N champs… »). */
+	readonly showAllFields: (name: string) => void;
 }
 
 /**
@@ -173,12 +181,30 @@ export function useCanvasNodes(
 		[tableSizes, tablePositions, history]
 	);
 
+	const showAllFields = useCallback(
+		(name: string) => {
+			const node = nodesRef.current.find((n) => n.id === name);
+			if (node === undefined) return;
+			const size = {
+				width: node.width ?? NODE_WIDTH,
+				height: fullNodeHeight(node.data.collection)
+			};
+			setNodes((current) =>
+				current.map((n) => (n.id === name ? { ...n, ...size } : n))
+			);
+			// Gardée comme un redimensionnement à la main.
+			handleTableResize(name, { ...size, ...node.position });
+		},
+		[setNodes, handleTableResize]
+	);
+
 	return {
 		nodes,
 		setNodes,
 		nodesRef,
 		handleNodesChange,
 		persistMovedTables,
-		handleTableResize
+		handleTableResize,
+		showAllFields
 	};
 }

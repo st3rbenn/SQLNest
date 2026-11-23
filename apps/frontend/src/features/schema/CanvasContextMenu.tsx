@@ -94,7 +94,17 @@ export function CanvasContextMenu({
 	const navigate = useNavigate();
 	const consoleLinks = useContext(ConsoleLinksContext);
 	const { connectionId } = useCanvasData();
-	const { setGesture } = useCanvasUI();
+	const { setGesture, leftDrawerVisible, setLeftDrawerVisible } = useCanvasUI();
+	// Les détails vivent dans le tiroir de gauche : il s'ouvre, et le recadrage
+	// attend qu'il ait pris sa place pour centrer la table dans ce qui reste.
+	const showDetails = () => {
+		if (leftDrawerVisible) {
+			onFocus(tableName);
+			return;
+		}
+		setLeftDrawerVisible(true);
+		requestAnimationFrame(() => onFocus(tableName));
+	};
 	const collection = schema.collections.find((c) => c.name === tableName);
 	const column =
 		field !== undefined
@@ -389,7 +399,7 @@ export function CanvasContextMenu({
 			label: "Détails",
 			icon: <IconInfoCircle {...ICON} />,
 			hint: <Kbd size="xs">I</Kbd>,
-			onClick: () => onFocus(tableName)
+			onClick: showDetails
 		},
 		{ kind: "divider" },
 		{ kind: "section-label", label: "STRUCTURE" },
@@ -417,7 +427,7 @@ export function CanvasContextMenu({
 			hint: fkCount > 0 ? String(fkCount) : undefined,
 			// Même comportement que Détails pour l'instant — future itération :
 			// scroll le drawer TableDetails à la section Relations directement.
-			onClick: () => onFocus(tableName)
+			onClick: showDetails
 		},
 		{ kind: "divider" },
 		{

@@ -14,6 +14,8 @@ export interface UseDisplayTablesOptions {
 	/** Table survolée dans l'arbre du drawer. */
 	readonly hoveredTableName: string | null;
 	readonly onResize: TableResizeHandler;
+	/** Clic sur « +N champs… » d'une table. */
+	readonly onShowAllFields: (id: string) => void;
 }
 
 /**
@@ -27,12 +29,18 @@ export function useDisplayTables({
 	neighbors,
 	focusId,
 	hoveredTableName,
-	onResize
+	onResize,
+	onShowAllFields
 }: UseDisplayTablesOptions): TableNodeType[] {
 	const onResizeRef = useRef(onResize);
 	onResizeRef.current = onResize;
+	const onShowAllFieldsRef = useRef(onShowAllFields);
+	onShowAllFieldsRef.current = onShowAllFields;
 	const [decorate] = useState(() =>
-		createTableDecorator((id, size) => onResizeRef.current(id, size))
+		createTableDecorator(
+			(id, size) => onResizeRef.current(id, size),
+			(id) => onShowAllFieldsRef.current(id)
+		)
 	);
 	return useMemo(
 		() =>

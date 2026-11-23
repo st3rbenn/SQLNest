@@ -66,6 +66,37 @@ describe("syncLayoutTables", () => {
 		]);
 	});
 
+	it("table créée sur une place prise : à la place libre la plus proche", () => {
+		const after = schemaOf(collection("a"), collection("b"), collection("c"));
+		// Une carte occupe le centre de la vue ; la nouvelle (240 × 100) se
+		// pose juste dessous, à 24 de marge, plutôt que plus loin sur le côté.
+		const synced = syncLayoutTables(
+			layout,
+			after,
+			makeNode(after),
+			{ x: 500, y: 400 },
+			[{ x: 380, y: 350, width: 240, height: 100 }]
+		);
+		expect(synced?.placed).toEqual({ c: { x: 380, y: 474 } });
+	});
+
+	it("deux tables créées d'un coup : côte à côte, sans se recouvrir", () => {
+		const after = schemaOf(
+			collection("a"),
+			collection("b"),
+			collection("c"),
+			collection("d")
+		);
+		const synced = syncLayoutTables(layout, after, makeNode(after), {
+			x: 500,
+			y: 400
+		});
+		expect(synced?.placed).toEqual({
+			c: { x: 380, y: 350 },
+			d: { x: 380, y: 474 }
+		});
+	});
+
 	it("table supprimée : son node et ses arêtes sortent du layout", () => {
 		const after = schemaOf(collection("a"));
 		const synced = syncLayoutTables(layout, after, makeNode(after), null);

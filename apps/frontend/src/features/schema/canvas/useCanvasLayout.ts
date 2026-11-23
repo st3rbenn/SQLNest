@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
+import type { Rect } from "../console-links/placeNear";
 import { buildLayout, type LayoutResult } from "../layout";
 import type { SchemaModel } from "../schema-model";
 import {
@@ -54,6 +55,8 @@ export interface UseCanvasLayoutOptions {
 	readonly connectionId: string;
 	/** Centre de la vue courante : là où se pose une table apparue. */
 	readonly viewCenter: () => XY | null;
+	/** Ce qui est posé sur le canvas : une table apparue ne le recouvre pas. */
+	readonly occupied: () => readonly Rect[];
 	readonly setManyPositions: (entries: Readonly<Record<string, XY>>) => void;
 }
 
@@ -75,6 +78,7 @@ export function useCanvasLayout({
 	schema,
 	connectionId,
 	viewCenter,
+	occupied,
 	setManyPositions
 }: UseCanvasLayoutOptions): UseCanvasLayoutReturn {
 	const layoutQuery = useQuery({
@@ -97,12 +101,21 @@ export function useCanvasLayout({
 			base,
 			schema,
 			makeNode(schema),
-			viewCenter()
+			viewCenter(),
+			occupied()
 		);
 		if (synced === null) return;
 		setManyPositions(synced.placed);
 		queryClient.setQueryData(canvasLayoutQueryKey(connectionId), synced.layout);
-	}, [base, schema, viewCenter, setManyPositions, queryClient, connectionId]);
+	}, [
+		base,
+		schema,
+		viewCenter,
+		occupied,
+		setManyPositions,
+		queryClient,
+		connectionId
+	]);
 
 	return { base, baseRef };
 }

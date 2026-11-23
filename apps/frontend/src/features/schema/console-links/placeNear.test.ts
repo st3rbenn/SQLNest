@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { placeNear, type Rect } from "./placeNear";
+import { placeAt, placeNear, type Rect } from "./placeNear";
 
 const anchor: Rect = { x: 100, y: 100, width: 200, height: 100 };
 const size = { width: 300, height: 150 };
@@ -68,5 +68,25 @@ describe("placeNear", () => {
 		// Un mur infini se franchit d'un saut : la place trouvée est au-delà.
 		const placed = placeNear(anchor, size, [everything], options);
 		expect(placed.x === 100 || placed.y === 100).toBe(true);
+	});
+});
+
+describe("placeAt", () => {
+	const wanted = { x: 380, y: 350 };
+	const card = { width: 240, height: 100 };
+	const sides = {
+		clearance: 24,
+		prefer: ["right", "below", "left", "above"] as const
+	};
+
+	it("sur place quand rien ne gêne", () => {
+		expect(placeAt(wanted, card, [], sides)).toEqual(wanted);
+	});
+
+	it("place prise : glissé du côté le plus court, pas du premier essayé", () => {
+		expect(placeAt(wanted, card, [{ ...wanted, ...card }], sides)).toEqual({
+			x: 380,
+			y: 474
+		});
 	});
 });

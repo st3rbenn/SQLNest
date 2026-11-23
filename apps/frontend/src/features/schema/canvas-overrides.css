@@ -174,30 +174,11 @@
 }
 
 /*
- * Poignée d'un champ : le point d'où part le tracé d'une relation. Visible
- * et saisissable au survol de sa ligne seulement — invisible, elle prendrait
- * les clics du bord droit, où se saisit le redimensionnement.
+ * Ligne d'un champ : départ et arrivée du tracé d'une relation. Les deux
+ * handles couvrent la ligne ; le trait s'accroche à son bord. Sous les bords
+ * de la carte, le redimensionnement garde la main.
  */
-.nest-handle.sqlnest-field-source {
-	top: 50%;
-	right: 2px;
-	width: 8px;
-	height: 8px;
-	transform: translateY(-50%);
-	background: var(--sqlnest-accent);
-	border: 1.5px solid var(--sqlnest-surface);
-	opacity: 0;
-	pointer-events: none;
-	z-index: 5;
-	transition: opacity 80ms ease-out;
-}
-[data-field]:hover > .nest-handle.sqlnest-field-source,
-.nest-handle.sqlnest-field-source.connectingfrom {
-	opacity: 1;
-	pointer-events: all;
-}
-/* Arrivée du tracé : toute la ligne du champ. */
-.nest-handle.sqlnest-field-target {
+.nest-handle.sqlnest-field-handle {
 	inset: 0;
 	width: 100%;
 	height: 100%;
@@ -205,9 +186,42 @@
 	border: none;
 	border-radius: 0;
 	background: transparent;
+	cursor: inherit;
 }
-.nest-handle.sqlnest-field-target.connectingto {
-	background: rgba(13, 153, 255, 0.18);
+[data-field]:hover > .nest-handle.sqlnest-field-handle.source {
+	background: rgba(255, 255, 255, 0.05);
+}
+.nest-handle.sqlnest-field-handle.connectingfrom,
+.nest-handle.sqlnest-field-handle.connectingto {
+	background: var(--sqlnest-accent-soft);
+}
+.nest-node-table .nest-resize-control {
+	z-index: 1;
+}
+.nest-connection-end {
+	fill: var(--sqlnest-accent);
+}
+
+/* « +N champs… » : un clic agrandit la carte pour tout montrer. */
+.sqlnest-more-fields {
+	display: flex;
+	align-items: center;
+	width: 100%;
+	padding: 0 12px;
+	border: none;
+	background: transparent;
+	font: inherit;
+	font-size: var(--sqlnest-font-size-11);
+	color: var(--sqlnest-text-tertiary);
+	text-align: left;
+	cursor: pointer;
+}
+.sqlnest-more-fields:hover:not(:disabled) {
+	color: var(--sqlnest-text-secondary);
+	background: rgba(255, 255, 255, 0.05);
+}
+.sqlnest-more-fields:disabled {
+	cursor: default;
 }
 
 /* Frame de résultat : poignées de redimensionnement masquées au repos,
