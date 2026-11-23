@@ -188,8 +188,37 @@
 	background: transparent;
 	cursor: inherit;
 }
-[data-field]:hover > .nest-handle.sqlnest-field-handle.source {
-	background: rgba(255, 255, 255, 0.05);
+/*
+ * Au survol, hors tracé en cours : la ligne se teinte et un point marque
+ * chacun de ses bords, là où le trait d'une relation s'accroche.
+ */
+.nest-node-table
+[data-field]:hover:has(
+	> .nest-handle.sqlnest-field-handle.source.connectionindicator
+) {
+	background: var(--sqlnest-surface-hover);
+}
+[data-field]:hover
+	> .nest-handle.sqlnest-field-handle.source.connectionindicator::before,
+[data-field]:hover
+	> .nest-handle.sqlnest-field-handle.source.connectionindicator::after {
+	content: "";
+	position: absolute;
+	top: 50%;
+	width: 7px;
+	height: 7px;
+	border-radius: var(--sqlnest-radius-full);
+	transform: translateY(-50%);
+	background: var(--sqlnest-accent);
+	box-shadow: 0 0 0 1.5px var(--sqlnest-surface);
+}
+[data-field]:hover
+	> .nest-handle.sqlnest-field-handle.source.connectionindicator::before {
+	left: 2px;
+}
+[data-field]:hover
+	> .nest-handle.sqlnest-field-handle.source.connectionindicator::after {
+	right: 2px;
 }
 .nest-handle.sqlnest-field-handle.connectingfrom,
 .nest-handle.sqlnest-field-handle.connectingto {
@@ -218,7 +247,7 @@
 }
 .sqlnest-more-fields:hover:not(:disabled) {
 	color: var(--sqlnest-text-secondary);
-	background: rgba(255, 255, 255, 0.05);
+	background: var(--sqlnest-surface-hover);
 }
 .sqlnest-more-fields:disabled {
 	cursor: default;
