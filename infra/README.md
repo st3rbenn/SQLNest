@@ -9,7 +9,11 @@ Setup serveur :
 ```bash
 # Base + Docker
 sudo apt install -y ca-certificates curl gnupg ufw fail2ban
-sudo ufw allow 22,80,443/tcp && sudo ufw enable
+# Le port 80 reçoit du HTTP en clair du proxy amont : ouvert à lui seul.
+# (`IPV6=yes` dans /etc/default/ufw pour que la règle vaille en IPv6.)
+sudo ufw allow 22/tcp
+sudo ufw allow from <adresse du proxy amont> to any port 80 proto tcp
+sudo ufw enable
 curl -fsSL https://get.docker.com | sudo sh
 sudo usermod -aG docker $USER && newgrp docker
 
@@ -19,11 +23,20 @@ sudo chown $USER:$USER /opt/sqlnest /var/backups/sqlnest /var/log/sqlnest
 git clone <repo> /opt/sqlnest && cd /opt/sqlnest
 cp infra/.env.prod.example infra/.env.prod && chmod 600 infra/.env.prod
 # Éditer infra/.env.prod avec AUTH_SECRET (openssl rand -hex 32) etc.
+# Sur une VM qui en remplace une autre : reprendre le même AUTH_SECRET (il
+# fonde l'identité du backend, les appairages des CLI en dépendent).
+# TRUSTED_PROXIES : l'adresse du proxy amont, si elle n'est pas privée.
 
 # Deploy
 cp infra/scripts/deploy.sh.example deploy.sh && chmod +x deploy.sh
 ./deploy.sh
 ```
+
+VM en IPv6 seul : les conteneurs n'ont de sortie réseau que si le démon
+Docker leur donne de l'IPv6 (`/etc/docker/daemon.json` : `"ipv6": true`,
+`"fixed-cidr-v6": "fd00:d0c::/64"`, `"ip6tables": true`). Le build en a
+besoin (npm, images de base) ; une fois construits, les conteneurs tournent
+sans accès à internet, sauf le backend vers les fournisseurs OAuth.
 
 Backups quotidiens (cron) :
 

@@ -28,9 +28,9 @@ echo "── migrate logs ──────────────────
 docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" logs migrate
 
 echo "── ready ─────────────────────────────────────────────────────────"
-sleep 2
-curl -sf -o /dev/null -w "backend /health → %{http_code}\n" \
-    "http://127.0.0.1:$(docker compose -f "$COMPOSE_FILE" port backend 4000 2>/dev/null | cut -d: -f2 || echo 4000)/health" \
-    || echo "(backend pas encore prêt — retry dans quelques secondes)"
+# Par Caddy, comme le proxy amont : le port du backend n'est pas publié.
+sleep 5
+curl -sf -w "\n/health → %{http_code}\n" "http://127.0.0.1/health" \
+    || echo "(backend pas encore prêt — relancer dans quelques secondes : curl http://127.0.0.1/health)"
 
 echo "OK."

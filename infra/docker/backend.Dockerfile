@@ -28,22 +28,24 @@ RUN pnpm install --frozen-lockfile --ignore-scripts
 FROM base AS runtime
 ENV NODE_ENV=production
 
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/apps/backend/node_modules ./apps/backend/node_modules
-COPY --from=deps /app/packages ./packages
-COPY --from=deps /app/pnpm-workspace.yaml ./pnpm-workspace.yaml
-COPY --from=deps /app/package.json ./package.json
+# User non-root (`node` fourni par l'image officielle). `--chown` à la copie :
+# un `chown -R` après coup réécrit chaque fichier dans une couche de plus et
+# double la taille de l'image.
+RUN chown node:node /app
+COPY --chown=node:node --from=deps /app/node_modules ./node_modules
+COPY --chown=node:node --from=deps /app/apps/backend/node_modules ./apps/backend/node_modules
+COPY --chown=node:node --from=deps /app/packages ./packages
+COPY --chown=node:node --from=deps /app/pnpm-workspace.yaml ./pnpm-workspace.yaml
+COPY --chown=node:node --from=deps /app/package.json ./package.json
 
 # Sources — copiées après node_modules pour que les changements de code
 # n'invalident pas le cache d'install.
-COPY apps/backend ./apps/backend
-COPY packages/db ./packages/db
-COPY packages/engine ./packages/engine
-COPY packages/snql ./packages/snql
-COPY packages/tunnel-protocol ./packages/tunnel-protocol
+COPY --chown=node:node apps/backend ./apps/backend
+COPY --chown=node:node packages/db ./packages/db
+COPY --chown=node:node packages/engine ./packages/engine
+COPY --chown=node:node packages/snql ./packages/snql
+COPY --chown=node:node packages/tunnel-protocol ./packages/tunnel-protocol
 
-# User non-root (`node` fourni par l'image officielle).
-RUN chown -R node:node /app
 USER node
 
 EXPOSE 4000
@@ -53,5 +55,8 @@ EXPOSE 4000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 \
   CMD wget --quiet --tries=1 --spider http://127.0.0.1:${PORT:-4000}/health || exit 1
 
+# `tsx` appelé directement, sans passer par pnpm : corepack le téléchargerait
+# à chaque démarrage, et le conteneur ne partirait pas sans accès à npm.
+WORKDIR /app/apps/backend
 ENTRYPOINT ["/sbin/tini", "--"]
-CMD ["pnpm", "--filter", "@sqlnest/backend", "exec", "tsx", "src/index.ts"]
+CMD ["./node_modules/.bin/tsx", "src/index.ts"]

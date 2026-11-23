@@ -15,6 +15,9 @@ services:
     restart: unless-stopped
     ports:
       - "80:80"
+    environment:
+      # Adresses du proxy amont, séparées par des espaces (voir Caddyfile).
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-private_ranges}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
     depends_on:

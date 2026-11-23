@@ -7,12 +7,26 @@
     # Auto-HTTPS off : l'upstream gère TLS, on ne veut ni ACME ni redirect
     # 80→443 côté Caddy.
     auto_https off
+
+    # Proxys dont Caddy croit le `X-Forwarded-For` : sans eux, il le remplace
+    # par l'adresse du proxy amont, et le backend range tous les visiteurs
+    # sous la même IP (limites de débit partagées). `private_ranges` par
+    # défaut ; `TRUSTED_PROXIES` dans `.env.prod` pour l'adresse de l'amont.
+    servers {
+        trusted_proxies static {$TRUSTED_PROXIES:private_ranges}
+    }
 }
 
 :80 {
     encode zstd gzip
 
     handle /api/* {
+        reverse_proxy backend:4000
+    }
+
+    # Santé du backend : sans cette route, `/health` tombait sur le front,
+    # qui répond 200 même backend arrêté.
+    handle /health {
         reverse_proxy backend:4000
     }
 
