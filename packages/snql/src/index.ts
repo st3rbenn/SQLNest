@@ -301,4 +301,9 @@ export type {
 export { applyDdlToSchema } from "./schema/apply-ddl";
 export type { SchemaDiff, SchemaScope } from "./schema/compare";
 export { compareSchemas, ddlScope } from "./schema/compare";
-export { getEnum, getIncomingRefs, getOutgoingRefs } from "./schema/model";
+export {
+	getEnum,
+	getIncomingRefs,
+	getOutgoingRefs,
+	relationOfRef
+} from "./schema/model";

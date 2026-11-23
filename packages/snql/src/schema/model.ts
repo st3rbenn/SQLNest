@@ -206,6 +206,17 @@ export function getEnum(
 	return schema.enums?.find((e) => e.name === name);
 }
 
+/** Relation que porte une FK déclarée : certaine, du côté `many` vers le côté `one`. */
+export function relationOfRef(ref: RefDef): Relation {
+	return {
+		from: { collection: ref.fromCollection, fields: [ref.fromColumn] },
+		to: { collection: ref.toCollection, fields: [ref.toColumn] },
+		kind: "many-to-one",
+		origin: "foreign-key",
+		confidence: 1
+	};
+}
+
 /** FK sortantes d'une collection (le côté référençant `many`). */
 export function getOutgoingRefs(
 	schema: SchemaModel,

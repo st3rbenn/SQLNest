@@ -6,13 +6,14 @@ import {
 	MONGO_TEXT_PATTERN,
 	type RefDef,
 	type Relation,
+	relationOfRef,
 	type SchemaModel,
 	type SnqlType,
 	type StoredAs
 } from "@sqlnest/snql";
 import type { Db, Document } from "mongodb";
 import { EngineIntrospectionError } from "../errors";
-import { inferNamingRelations } from "../naming-relations";
+import { inferNamingRelations, relationPairKey } from "../naming-relations";
 
 /**
  * bsonType du validator `$jsonSchema` → `SnqlType`. Inverse de `MONGO_BSON_TYPE`
@@ -176,12 +177,50 @@ export function inferCollection(
  * cross-engine dans `naming-relations` (2e consommateur : MSSQL sans FK
  * déclarées) — la clé cible Mongo est toujours `_id`.
  */
-export function inferRelations(collections: readonly Collection[]): Relation[] {
+export function inferRelations(
+	collections: readonly Collection[],
+	declaredPairs?: ReadonlySet<string>
+): Relation[] {
 	return inferNamingRelations(collections, {
+		...(declaredPairs !== undefined ? { declaredPairs } : {}),
 		// `_id`, ou son alias SNQL (ADR-036 E/1f).
 		targetKeyFor: (target) =>
 			target.fields.find((f) => f.nativeName === "_id")?.name ?? "_id"
 	});
+}
+
+/**
+ * Relations d'une base Mongo : les FK déclarées (`_snql_refs`), certaines,
+ * puis les liens que le nommage suggère entre collections qu'aucune FK ne
+ * relie. Sans les premières, une FK posée resterait présentée comme un lien
+ * à confirmer, ou n'apparaîtrait pas du tout hors convention `<x>_id`.
+ */
+export function relationsOf(
+	collections: readonly Collection[],
+	refs: readonly RefDef[]
+): Relation[] {
+	const byName = new Map(collections.map((c) => [c.name, c]));
+	// `_snql_refs` porte les noms stockés ; la relation, ceux que SNQL expose.
+	const exposed = (collection: string, column: string): string =>
+		byName
+			.get(collection)
+			?.fields.find((f) => (f.nativeName ?? f.name) === column)?.name ?? column;
+	const declared = refs.map((ref) =>
+		relationOfRef({
+			...ref,
+			fromColumn: exposed(ref.fromCollection, ref.fromColumn),
+			toColumn: exposed(ref.toCollection, ref.toColumn)
+		})
+	);
+	return [
+		...declared,
+		...inferRelations(
+			collections,
+			new Set(
+				refs.map((r) => relationPairKey(r.fromCollection, r.toCollection))
+			)
+		)
+	];
 }
 
 /** Alias de clé primaire (ADR-036 E/1f) : `_id` = la collection. */
@@ -389,7 +428,7 @@ export async function introspectMongo(
 		return {
 			engine: "mongodb",
 			collections: withEnums,
-			relations: inferRelations(withEnums),
+			relations: relationsOf(withEnums, refsList),
 			...(enumsList.length > 0 ? { enums: enumsList } : {}),
 			...(refsList.length > 0 ? { refs: refsList } : {})
 		};

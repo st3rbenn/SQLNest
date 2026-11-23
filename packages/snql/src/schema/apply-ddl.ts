@@ -22,6 +22,7 @@ import {
 	getFkPartners,
 	type RefDef,
 	type Relation,
+	relationOfRef,
 	type SchemaModel
 } from "./model";
 
@@ -227,16 +228,6 @@ function refOf(table: string, ref: FieldRefPlan): RefDef {
 	};
 }
 
-function relationOf(ref: RefDef): Relation {
-	return {
-		from: { collection: ref.fromCollection, fields: [ref.fromColumn] },
-		to: { collection: ref.toCollection, fields: [ref.toColumn] },
-		kind: "many-to-one",
-		origin: "foreign-key",
-		confidence: 1
-	};
-}
-
 function relationMatches(relation: Relation, ref: RefDef): boolean {
 	return (
 		relation.origin === "foreign-key" &&
@@ -255,7 +246,7 @@ function withRefs(schema: SchemaModel, refs: readonly RefDef[]): SchemaModel {
 		{
 			...schema,
 			refs: [...(schema.refs ?? []), ...refs],
-			relations: [...schema.relations, ...refs.map(relationOf)]
+			relations: [...schema.relations, ...refs.map(relationOfRef)]
 		},
 		refs
 	);

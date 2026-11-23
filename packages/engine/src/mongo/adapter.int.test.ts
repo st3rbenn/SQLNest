@@ -1241,13 +1241,14 @@ describe.skipIf(!hasMongo)(
 				await expect(q("add {id: 12, num_id: 9} into e1f_kid")).rejects.toThrow(
 					/ne référence aucune ligne de e1f_num\.id/
 				);
+				// La FK est une relation many-to-one : la ligne jointe, pas un tableau.
 				expect(
 					(await q("find e1f_kid with e1f_num as n on num_id = id sort id"))
 						.rows[0]
 				).toEqual({
 					id: 10,
 					num_id: 1,
-					n: [{ id: 1, name: "un" }]
+					n: { id: 1, name: "un" }
 				});
 				await q("remove from e1f_num where id = 1");
 				expect((await q("find e1f_kid")).rows).toEqual([{ id: 11, num_id: 2 }]);

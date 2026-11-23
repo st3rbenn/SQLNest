@@ -7,6 +7,7 @@ import {
 	inferRelations,
 	linkEnumColumns,
 	mergeValidatorFields,
+	relationsOf,
 	snqlTypeOf
 } from "./introspect";
 
@@ -100,6 +101,72 @@ describe("inferRelations (heuristique de nommage)", () => {
 	it("ignore le champ _id lui-même", () => {
 		const items = inferCollection("items", [{ _id: 1 }]);
 		expect(inferRelations([items])).toEqual([]);
+	});
+});
+
+describe("relationsOf (FK déclarées, puis nommage)", () => {
+	const ref = (
+		fromCollection: string,
+		fromColumn: string,
+		toCollection: string
+	) => ({
+		name: `fk_${fromCollection}_${fromColumn}_${toCollection}`,
+		fromCollection,
+		fromColumn,
+		toCollection,
+		toColumn: "_id",
+		onDelete: "restrict" as const,
+		onUpdate: "restrict" as const,
+		source: "declared" as const
+	});
+
+	it("FK déclarée : relation certaine, le lien de nommage ne la double pas", () => {
+		const owner = inferCollection("owner", [{ _id: 1 }]);
+		const pet = inferCollection("pet", [{ _id: 1, owner_id: 1 }]);
+		expect(
+			relationsOf([owner, pet], [ref("pet", "owner_id", "owner")])
+		).toEqual([
+			{
+				from: { collection: "pet", fields: ["owner_id"] },
+				to: { collection: "owner", fields: ["_id"] },
+				kind: "many-to-one",
+				origin: "foreign-key",
+				confidence: 1
+			}
+		]);
+	});
+
+	it("FK hors convention de nommage : présente quand même ; sans FK : le nommage seul", () => {
+		const owner = inferCollection("owner", [{ _id: 1 }]);
+		const pet = inferCollection("pet", [{ _id: 1, master: 1, owner_id: 1 }]);
+		const vet = inferCollection("vet", [{ _id: 1 }]);
+		const visit = inferCollection("visit", [{ _id: 1, vet_id: 1 }]);
+		const relations = relationsOf(
+			[owner, pet, vet, visit],
+			[ref("pet", "master", "owner")]
+		);
+		expect(
+			relations.map((r) => `${r.from.collection}.${r.from.fields} ${r.origin}`)
+		).toEqual(["pet.master foreign-key", "visit.vet_id naming-heuristic"]);
+	});
+
+	it("clé aliasée (`id` ↔ `_id`) : la relation porte le nom que SNQL expose", () => {
+		const owner = {
+			...inferCollection("owner", [{ _id: 1 }]),
+			fields: [
+				{
+					name: "id",
+					nativeName: "_id",
+					type: "int" as const,
+					nullable: false,
+					source: "declared" as const
+				}
+			]
+		};
+		const pet = inferCollection("pet", [{ _id: 1, owner_id: 1 }]);
+		expect(
+			relationsOf([owner, pet], [ref("pet", "owner_id", "owner")])[0]?.to
+		).toEqual({ collection: "owner", fields: ["id"] });
 	});
 });
 
