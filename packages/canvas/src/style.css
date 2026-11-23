@@ -275,6 +275,12 @@ svg.nest-connectionline {
 	);
 	fill: none;
 }
+.nest-connection-end {
+	fill: var(
+		--nest-connectionline-stroke,
+		var(--nest-connectionline-stroke-default)
+	);
+}
 
 .nest-resize-control {
 	position: absolute;

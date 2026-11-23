@@ -21,6 +21,13 @@ export type HandleProps = Omit<HTMLAttributes<HTMLDivElement>, "id"> & {
 	isConnectable?: boolean;
 	isConnectableStart?: boolean;
 	isConnectableEnd?: boolean;
+	/** `side` : la connexion s'accroche au bord gauche ou droit, face à son autre bout. */
+	anchor?: "side";
+	/**
+	 * `false` : pas de connexion « au clic » depuis ce handle (un clic qui
+	 * l'arme, le suivant qui la termine) — seul le drag la trace.
+	 */
+	connectOnClick?: boolean;
 	children?: ReactNode;
 };
 
@@ -72,6 +79,8 @@ export function Handle({
 	isConnectable = true,
 	isConnectableStart = true,
 	isConnectableEnd = true,
+	anchor,
+	connectOnClick = true,
 	className,
 	children,
 	onMouseDown,
@@ -120,7 +129,7 @@ export function Handle({
 		else onTouchStart?.(event as ReactTouchEvent<HTMLDivElement>);
 	};
 	const onClick = (event: ReactMouseEvent<HTMLDivElement>) => {
-		if (nodeId === null) return;
+		if (nodeId === null || !connectOnClick) return;
 		clickConnect(
 			event.nativeEvent,
 			store,
@@ -160,6 +169,7 @@ export function Handle({
 			data-handleid={handleId}
 			data-nodeid={nodeId}
 			data-handlepos={position}
+			data-anchor={anchor}
 			data-id={`${instanceId}-${nodeId}-${handleId}-${type}`}
 			className={classes.join(" ")}
 			onMouseDown={onPointerDown}

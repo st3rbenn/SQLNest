@@ -22,5 +22,6 @@ export const canvasClass = {
 	resizeControl: "nest-resize-control",
 	connectionLine: "nest-connectionline",
 	connection: "nest-connection",
-	connectionPath: "nest-connection-path"
+	connectionPath: "nest-connection-path",
+	connectionEnd: "nest-connection-end"
 } as const;

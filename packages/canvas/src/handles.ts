@@ -34,7 +34,10 @@ function measure(
 			x: (r.left - nodeRect.left) / zoom,
 			y: (r.top - nodeRect.top) / zoom,
 			width: el.offsetWidth,
-			height: el.offsetHeight
+			height: el.offsetHeight,
+			...(el.getAttribute("data-anchor") === "side"
+				? { anchor: "side" as const }
+				: {})
 		};
 	});
 }
@@ -76,6 +79,27 @@ export function handlePosition(
 		default:
 			return { x, y: y + height / 2 };
 	}
+}
+
+/**
+ * Accroche d'une connexion sur un handle, face à `toward` (coordonnées
+ * flow) : son centre, et pour un handle ancré par le côté, le milieu du bord
+ * gauche ou droit le plus proche de `toward`.
+ */
+export function connectionAnchor(
+	node: InternalNode,
+	handle: HandleBound,
+	toward: XYPosition
+): { point: XYPosition; position: Position } {
+	const center = handlePosition(node, handle, handle.position, true);
+	if (handle.anchor !== "side") {
+		return { point: center, position: handle.position };
+	}
+	const position = toward.x < center.x ? Position.Left : Position.Right;
+	return {
+		point: handlePosition(node, { ...handle, position }, position),
+		position
+	};
 }
 
 /** Handle `handleId` (ou le premier) d'un type donné, position absolue en option. */

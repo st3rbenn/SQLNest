@@ -39,6 +39,15 @@ export function ConnectionLine() {
 		>
 			<g className={[canvasClass.connection, status].filter(Boolean).join(" ")}>
 				<path d={path} fill="none" className={canvasClass.connectionPath} />
+				{isValid === true ? (
+					// Repère du point d'accroche, tant que la ligne tient un handle valide.
+					<circle
+						cx={target.x}
+						cy={target.y}
+						r={3}
+						className={canvasClass.connectionEnd}
+					/>
+				) : null}
 			</g>
 		</svg>
 	);

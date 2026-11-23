@@ -109,6 +109,12 @@ export type HandleBound = {
 	y: number;
 	width: number;
 	height: number;
+	/**
+	 * `side` : une connexion s'accroche au milieu du bord gauche ou droit qui
+	 * fait face à son autre bout, pas au centre (handle large, une ligne de
+	 * tableau par exemple).
+	 */
+	anchor?: "side";
 };
 
 export type HandleBounds = {

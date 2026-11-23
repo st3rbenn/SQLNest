@@ -6,7 +6,12 @@ import {
 	overlappingArea,
 	pointToFlow
 } from "./geometry";
-import { findHandle, handlePosition, oppositePosition } from "./handles";
+import {
+	connectionAnchor,
+	findHandle,
+	handlePosition,
+	oppositePosition
+} from "./handles";
 import type { CanvasStore } from "./store";
 import type {
 	ConnectionState,
@@ -200,16 +205,21 @@ export function startConnection(
 	let pending: Connection | null = null;
 	let autoPanStarted = false;
 	let autoPanId = 0;
+	const origin = connectionAnchor(
+		fromNode,
+		fromHandle,
+		pointToFlow(position, store.getState().transform)
+	);
 	let previous: ConnectionState = {
 		inProgress: true,
 		isValid: null,
-		from: handlePosition(fromNode, fromHandle, fromHandle.position, true),
+		from: origin.point,
 		fromHandle,
-		fromPosition: fromHandle.position,
+		fromPosition: origin.position,
 		fromNode,
 		to: position,
 		toHandle: null,
-		toPosition: oppositePosition[fromHandle.position],
+		toPosition: oppositePosition[origin.position],
 		toNode: null,
 		pointer: position
 	};
@@ -235,11 +245,8 @@ export function startConnection(
 		}
 		const { transform, nodeLookup: lookup } = store.getState();
 		position = eventPos(e);
-		const closest = closestHandle(
-			pointToFlow(position, transform),
-			lookup,
-			fromHandle
-		);
+		const pointer = pointToFlow(position, transform);
+		const closest = closestHandle(pointer, lookup, fromHandle);
 		if (!autoPanStarted) {
 			panLoop();
 			autoPanStarted = true;
@@ -247,28 +254,34 @@ export function startConnection(
 		const result = checkHandle(e, store, closest, { nodeId, handleId, type });
 		const isValid = result.isValid ? true : closest ? false : null;
 		pending = result.isValid ? result.connection : null;
-		const node = lookup.get(nodeId);
+		const node = lookup.get(nodeId) ?? fromNode;
+		const toNode = result.toHandle
+			? (lookup.get(result.toHandle.nodeId) ?? null)
+			: null;
+		// Bornes relatives du handle d'arrivée : `result.toHandle` porte déjà
+		// son centre absolu, l'accroche se calcule depuis son rectangle.
+		const toBound =
+			isValid && result.toHandle && toNode
+				? findHandle(toNode, result.toHandle.type, result.toHandle.id)
+				: null;
+		const to =
+			toBound && toNode
+				? connectionAnchor(
+						toNode,
+						toBound,
+						handlePosition(node, fromHandle, fromHandle.position, true)
+					)
+				: null;
+		const from = connectionAnchor(node, fromHandle, to?.point ?? pointer);
 		const next: ConnectionState = {
 			...previous,
-			from: node
-				? handlePosition(node, fromHandle, fromHandle.position, true)
-				: previous.from,
+			from: from.point,
+			fromPosition: from.position,
 			isValid,
-			to:
-				result.toHandle && isValid
-					? flowToPoint(
-							{ x: result.toHandle.x, y: result.toHandle.y },
-							transform
-						)
-					: position,
+			to: to ? flowToPoint(to.point, transform) : position,
 			toHandle: result.toHandle,
-			toPosition:
-				isValid && result.toHandle
-					? result.toHandle.position
-					: oppositePosition[fromHandle.position],
-			toNode: result.toHandle
-				? (lookup.get(result.toHandle.nodeId) ?? null)
-				: null,
+			toPosition: to ? to.position : oppositePosition[from.position],
+			toNode,
 			pointer: position
 		};
 		store.updateConnection(next);
